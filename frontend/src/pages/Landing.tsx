@@ -77,9 +77,11 @@ export function Landing() {
               transition={{ duration: 0.5 }}
             >
               <div className="relative">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center shadow-lg shadow-brand-500/25">
-                  <Shield className="w-5 h-5 text-white" />
-                </div>
+                <img
+                  src="/logo.png"
+                  alt="Veiled Markets"
+                  className="w-10 h-10 rounded-xl shadow-lg shadow-brand-500/25"
+                />
               </div>
               <div className="hidden sm:block">
                 <h1 className="font-display text-xl font-bold" style={{ letterSpacing: '0.02em' }}>

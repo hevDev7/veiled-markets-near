@@ -37,10 +37,25 @@ const socialLinks = [
 export function Footer() {
   return (
     <footer className="relative border-t border-surface-800/30 py-12">
-      <div className="max-w-7xl mx-auto px-4 text-center">
-        <p className="text-sm text-surface-500 font-mono">
-          © 2026 Veiled Markets • Built on Aleo • Open Source
-        </p>
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo.png"
+              alt="Veiled Markets"
+              className="w-8 h-8 rounded-lg"
+            />
+            <div>
+              <h3 className="font-display text-lg font-bold" style={{ letterSpacing: '0.02em' }}>
+                <span className="gradient-text">Veiled</span>
+                <span className="text-white"> Markets</span>
+              </h3>
+            </div>
+          </div>
+          <p className="text-sm text-surface-500 font-mono">
+            © 2026 Veiled Markets • Built on Aleo • Open Source
+          </p>
+        </div>
       </div>
     </footer>
   )
@@ -64,9 +79,11 @@ export function FooterDetailed() {
               viewport={{ once: true }}
               className="flex items-center gap-3 mb-4"
             >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-white" />
-              </div>
+              <img
+                src="/logo.png"
+                alt="Veiled Markets"
+                className="w-10 h-10 rounded-xl"
+              />
               <div>
                 <h3 className="font-display text-xl font-bold" style={{ letterSpacing: '0.02em' }}>
                   <span className="gradient-text">Veiled</span>
