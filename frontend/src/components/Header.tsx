@@ -21,7 +21,7 @@ export function Header() {
   const handleConnect = async () => {
     setIsConnecting(true)
     try {
-      await connect()
+      await connect('puzzle')
     } finally {
       setIsConnecting(false)
     }

@@ -428,38 +428,3 @@ function BentoCard({
     </motion.div>
   )
 }
-
-function FeatureCard({
-  icon,
-  title,
-  description,
-  gradient
-}: {
-  icon: React.ReactNode
-  title: string
-  description: string
-  gradient: string
-}) {
-  return (
-    <div className="glass-card p-6 text-left group hover:border-brand-500/30 transition-all duration-300">
-      <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center mb-4 shadow-lg`}>
-        {icon}
-      </div>
-      <h3 className="text-lg font-semibold text-white mb-2 group-hover:text-brand-300 transition-colors">
-        {title}
-      </h3>
-      <p className="text-sm text-surface-400">
-        {description}
-      </p>
-    </div>
-  )
-}
-
-function StatItem({ value, label }: { value: string; label: string }) {
-  return (
-    <div>
-      <div className="stat-value gradient-text">{value}</div>
-      <div className="stat-label">{label}</div>
-    </div>
-  )
-}

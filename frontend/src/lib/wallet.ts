@@ -274,7 +274,7 @@ export class PuzzleWalletAdapter {
     // Check account periodically as SDK may not have event subscription
     const interval = setInterval(async () => {
       try {
-        const account = await getAccount({}) as any;
+        const account = await getAccount() as any;
         if (account && account.address) {
           const newAccount: WalletAccount = {
             address: account.address,
@@ -300,7 +300,7 @@ export class PuzzleWalletAdapter {
     // Check network periodically
     const interval = setInterval(async () => {
       try {
-        const account = await getAccount({}) as any;
+        const account = await getAccount() as any;
         if (account && account.network) {
           const network: NetworkType = account.network.includes('Mainnet') ? 'mainnet' : 'testnet';
           if (this.account && this.account.network !== network) {

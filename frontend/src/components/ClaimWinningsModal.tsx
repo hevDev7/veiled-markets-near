@@ -11,7 +11,7 @@ import {
   ExternalLink
 } from 'lucide-react'
 import { useState } from 'react'
-import { useWalletStore, type Bet, type Market } from '@/lib/store'
+import { type Bet, type Market } from '@/lib/store'
 import { cn, formatCredits } from '@/lib/utils'
 
 interface WinningBet extends Bet {
