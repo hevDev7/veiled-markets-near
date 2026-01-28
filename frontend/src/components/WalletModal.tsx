@@ -188,19 +188,23 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
                     <AlertCircle className="w-5 h-5 text-no-400 flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-no-400">Connection Failed</p>
-                      <p className="text-sm text-surface-400 mt-1">{localError || error}</p>
+                      {/* Handle multiline error messages */}
+                      <div className="text-sm text-surface-400 mt-1 whitespace-pre-line">
+                        {localError || error}
+                      </div>
                       {/* Show install link if wallet not found */}
                       {((localError || error || '').toLowerCase().includes('not installed') ||
                         (localError || error || '').toLowerCase().includes('not responding') ||
                         (localError || error || '').toLowerCase().includes('timed out') ||
-                        (localError || error || '').toLowerCase().includes('not found')) && (
-                          <div className="flex flex-wrap gap-2 mt-2">
+                        (localError || error || '').toLowerCase().includes('not found') ||
+                        (localError || error || '').toLowerCase().includes('please check')) && (
+                          <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-surface-700/50">
                             {(localError || error || '').toLowerCase().includes('leo') ? (
                               <a
                                 href={WALLET_INFO.leo.downloadUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-brand-400 hover:text-brand-300"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500/10 text-sm text-brand-400 hover:text-brand-300 hover:bg-brand-500/20 transition-colors"
                               >
                                 <span>Install Leo Wallet</span>
                                 <ExternalLink className="w-3 h-3" />
@@ -210,12 +214,21 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
                                 href={WALLET_INFO.puzzle.downloadUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-brand-400 hover:text-brand-300"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500/10 text-sm text-brand-400 hover:text-brand-300 hover:bg-brand-500/20 transition-colors"
                               >
                                 <span>Install Puzzle Wallet</span>
                                 <ExternalLink className="w-3 h-3" />
                               </a>
                             )}
+                            <button
+                              onClick={() => {
+                                setLocalError(null)
+                                clearError()
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700/50 text-sm text-surface-300 hover:text-white hover:bg-surface-700 transition-colors"
+                            >
+                              Try Again
+                            </button>
                           </div>
                         )}
                     </div>

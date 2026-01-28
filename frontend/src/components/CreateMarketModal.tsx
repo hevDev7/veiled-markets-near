@@ -21,7 +21,11 @@ import {
   hashToField,
   getCurrentBlockHeight,
   CONTRACT_INFO,
-  getTransactionUrl
+  getTransactionUrl,
+  registerQuestionText,
+  registerMarketTransaction,
+  addKnownMarketId,
+  waitForMarketCreation
 } from '@/lib/aleo-client'
 
 interface CreateMarketModalProps {
@@ -200,10 +204,38 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
       console.log('Market creation transaction submitted:', transactionId)
 
-      // Use transaction ID as market ID reference
+      // Register the question text with the question hash for future lookup
+      registerQuestionText(questionHash, formData.question)
+
+      // Register the transaction ID temporarily with question hash
+      registerMarketTransaction(questionHash, transactionId)
+
+      // Add the question hash to known market IDs temporarily
+      addKnownMarketId(questionHash)
+
+      console.log('Registered market:', { questionHash, question: formData.question, transactionId })
+
+      // Use transaction ID as market ID reference for UI
       setMarketId(transactionId)
       setStep('success')
-      onSuccess?.(transactionId)
+
+      // Start polling for the actual market ID in the background
+      // This will update localStorage with the real market ID once confirmed
+      waitForMarketCreation(transactionId, questionHash, formData.question)
+        .then((actualMarketId) => {
+          if (actualMarketId) {
+            console.log('✅ Actual market ID retrieved:', actualMarketId)
+            // Call onSuccess with the actual market ID
+            onSuccess?.(actualMarketId)
+          } else {
+            console.warn('Could not retrieve actual market ID, using question hash as fallback')
+            onSuccess?.(questionHash)
+          }
+        })
+        .catch((err) => {
+          console.error('Error waiting for market creation:', err)
+          onSuccess?.(questionHash)
+        })
     } catch (err: unknown) {
       console.error('Failed to create market:', err)
       setError(err instanceof Error ? err.message : 'Failed to create market')
@@ -631,7 +663,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           Your prediction market is now live.
                         </p>
 
-                        <div className="p-4 rounded-xl bg-surface-800/50 mb-6 text-left">
+                        <div className="p-4 rounded-xl bg-surface-800/50 mb-4 text-left">
                           <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Transaction ID</p>
                           <p className="text-sm text-white font-mono break-all">{marketId}</p>
                           {marketId && (
@@ -644,6 +676,21 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                               View on Explorer <ExternalLink className="w-3 h-3" />
                             </a>
                           )}
+                        </div>
+
+                        {/* Important Note about Market ID */}
+                        <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-6 text-left">
+                          <div className="flex items-start gap-3">
+                            <Loader2 className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
+                            <div>
+                              <p className="text-sm font-medium text-brand-300">Retrieving Market ID...</p>
+                              <p className="text-xs text-surface-400 mt-1">
+                                The system is polling for the actual on-chain market ID. This happens automatically
+                                in the background. Once confirmed, you'll be able to place bets on this market.
+                                You can close this dialog - the process will continue.
+                              </p>
+                            </div>
+                          </div>
                         </div>
 
                         <div className="flex items-center justify-center gap-2 text-sm text-brand-400 mb-6">

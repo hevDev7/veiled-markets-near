@@ -141,18 +141,38 @@ export function MarketDetail() {
   const potentialWin = betAmountNum * potentialPayout
 
   const handlePlaceBet = async () => {
-    if (!selectedOutcome || betAmountMicro <= 0n) return
+    if (!selectedOutcome || betAmountMicro <= 0n || !market) return
 
     setStep('processing')
     setError(null)
 
     try {
+      // Validate market ID format - must be a field type for on-chain betting
+      if (!market.id.endsWith('field')) {
+        throw new Error(
+          'This market cannot accept bets yet. The market ID must be in blockchain field format. ' +
+          'Only markets created via the "Create Market" button with confirmed transactions can accept bets.'
+        )
+      }
+
       const transactionId = await placeBet(market.id, betAmountMicro, selectedOutcome)
       setTxId(transactionId)
       setStep('success')
     } catch (err: unknown) {
       console.error('Bet failed:', err)
-      setError(err instanceof Error ? err.message : 'Failed to place bet')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to place bet'
+
+      // Check for "unknown error" which usually means the market doesn't exist on-chain
+      if (errorMessage.toLowerCase().includes('unknown error')) {
+        setError(
+          'Transaction failed. This usually means the market does not exist on the blockchain yet. ' +
+          'If you just created this market, please wait for the transaction to be confirmed and ' +
+          'the actual market ID to be indexed. The contract generates a unique market ID that differs ' +
+          'from the question hash used for display.'
+        )
+      } else {
+        setError(errorMessage)
+      }
       setStep('error')
     }
   }

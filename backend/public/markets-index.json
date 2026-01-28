@@ -1,6 +1,6 @@
 {
-  "lastUpdated": "2026-01-28T14:35:39.436Z",
-  "totalMarkets": 8,
+  "lastUpdated": "2026-01-28T15:44:15.835Z",
+  "totalMarkets": 9,
   "markets": [
     {
       "marketId": "2226266059345959235903805886443078929600424190236962232761580543397941034862field",
@@ -10,7 +10,7 @@
       "category": 3,
       "deadline": "14165851u64",
       "resolutionDeadline": "14183131u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067000
     },
     {
@@ -21,7 +21,7 @@
       "category": 1,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067123
     },
     {
@@ -32,7 +32,7 @@
       "category": 2,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067200
     },
     {
@@ -43,7 +43,7 @@
       "category": 3,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067300
     },
     {
@@ -54,7 +54,7 @@
       "category": 4,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067400
     },
     {
@@ -65,7 +65,7 @@
       "category": 5,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067500
     },
     {
@@ -76,7 +76,7 @@
       "category": 6,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067600
     },
     {
@@ -87,8 +87,19 @@
       "category": 7,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769610939434,
+      "createdAt": 1769615055834,
       "blockHeight": 14067700
+    },
+    {
+      "marketId": "3582024152336217571382682973364798990155453514672503623063651091171230848724field",
+      "transactionId": "at1crl3gd6ukawwrslf3r5vqttg7a8hll84fj2klqtmtwdafntspg9sgcgw2a",
+      "creator": "aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8",
+      "questionHash": "350929565016816493992297964402345071115472527106339097957348390879136520853field",
+      "category": 3,
+      "deadline": "14107320u64",
+      "resolutionDeadline": "14124600u64",
+      "createdAt": 1769615055834,
+      "blockHeight": 14067000
     }
   ],
   "marketIds": [
@@ -99,6 +110,7 @@
     "6497398114847519923379901992833643876462593069120645523569600191102874822191field",
     "2782540397887243983750241685138602830175258821940489779581095376798172768978field",
     "7660559822229647474965631916495293995705931900965070950237377789460326943999field",
-    "425299171484137372110091327826787897441058548811928022547541653437849039243field"
+    "425299171484137372110091327826787897441058548811928022547541653437849039243field",
+    "3582024152336217571382682973364798990155453514672503623063651091171230848724field"
   ]
 }

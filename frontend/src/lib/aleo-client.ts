@@ -58,6 +58,166 @@ const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/test
 const PROGRAM_ID = config.programId || 'veiled_markets.aleo';
 
 /**
+ * Transaction status and details
+ */
+export interface TransactionDetails {
+  id: string;
+  status: 'pending' | 'confirmed' | 'failed';
+  outputs?: TransactionOutput[];
+  error?: string;
+}
+
+export interface TransactionOutput {
+  type: string;
+  id: string;
+  value: string;
+}
+
+/**
+ * Fetch transaction details from the blockchain
+ */
+export async function getTransactionDetails(transactionId: string): Promise<TransactionDetails | null> {
+  try {
+    const url = `${API_BASE_URL}/transaction/${transactionId}`;
+    console.log('Fetching transaction details:', url);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      if (response.status === 404) {
+        // Transaction not yet confirmed
+        return { id: transactionId, status: 'pending' };
+      }
+      throw new Error(`Failed to fetch transaction: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('Transaction data:', data);
+
+    // Extract outputs from the transaction
+    const outputs: TransactionOutput[] = [];
+
+    // Parse execution outputs if available
+    if (data.execution?.transitions) {
+      for (const transition of data.execution.transitions) {
+        if (transition.outputs) {
+          for (const output of transition.outputs) {
+            outputs.push({
+              type: output.type || 'unknown',
+              id: output.id || '',
+              value: output.value || '',
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      id: transactionId,
+      status: 'confirmed',
+      outputs,
+    };
+  } catch (error) {
+    console.error('Failed to fetch transaction details:', error);
+    return null;
+  }
+}
+
+/**
+ * Extract market ID from create_market transaction outputs
+ * The contract returns the market_id as the first output
+ */
+export function extractMarketIdFromTransaction(txDetails: TransactionDetails): string | null {
+  if (!txDetails.outputs || txDetails.outputs.length === 0) {
+    return null;
+  }
+
+  // Look for a field value in the outputs
+  for (const output of txDetails.outputs) {
+    const value = output.value;
+    // The market_id should be a field type
+    if (value && value.includes('field')) {
+      // Extract the field value
+      const match = value.match(/(\d+field)/);
+      if (match) {
+        console.log('Extracted market ID from transaction:', match[1]);
+        return match[1];
+      }
+    }
+  }
+
+  // Also try parsing the raw output value
+  for (const output of txDetails.outputs) {
+    try {
+      // Some outputs might be JSON or have nested structure
+      const parsed = typeof output.value === 'string' ? output.value : JSON.stringify(output.value);
+      const fieldMatch = parsed.match(/(\d+)field/);
+      if (fieldMatch) {
+        const marketId = `${fieldMatch[1]}field`;
+        console.log('Extracted market ID from parsed output:', marketId);
+        return marketId;
+      }
+    } catch {
+      // Continue to next output
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Poll for transaction confirmation and extract market ID
+ * Returns the actual market ID once the transaction is confirmed
+ */
+export async function waitForMarketCreation(
+  transactionId: string,
+  questionHash: string,
+  questionText: string,
+  maxAttempts: number = 40, // ~10 minutes at 15 second intervals
+  intervalMs: number = 15000
+): Promise<string | null> {
+  console.log('Waiting for market creation transaction:', transactionId);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    console.log(`Polling attempt ${attempt + 1}/${maxAttempts}...`);
+
+    const txDetails = await getTransactionDetails(transactionId);
+
+    if (txDetails?.status === 'confirmed') {
+      const marketId = extractMarketIdFromTransaction(txDetails);
+
+      if (marketId) {
+        console.log('Market created successfully! Market ID:', marketId);
+
+        // Register the market ID and question text
+        addKnownMarketId(marketId);
+        registerQuestionText(marketId, questionText);
+        registerMarketTransaction(marketId, transactionId);
+
+        // Also keep the question hash mapping for backwards compatibility
+        registerQuestionText(questionHash, questionText);
+
+        return marketId;
+      } else {
+        console.warn('Transaction confirmed but could not extract market ID from outputs');
+        // Still return null to indicate we couldn't get the market ID
+        return null;
+      }
+    }
+
+    if (txDetails?.status === 'failed') {
+      console.error('Transaction failed:', txDetails.error);
+      return null;
+    }
+
+    // Wait before next attempt
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  console.warn('Timed out waiting for transaction confirmation');
+  return null;
+}
+
+/**
  * Parse Aleo struct value from API response
  */
 function parseAleoStruct(value: string): Record<string, string> {
@@ -404,59 +564,126 @@ export async function hashToField(input: string): Promise<string> {
 }
 
 /**
- * Known market IDs - Loaded dynamically from indexer
- * Fallback to hardcoded IDs if indexer data not available
+ * Known market IDs - Loaded dynamically from indexer or localStorage
+ * Start with empty array - markets will be added when created via the UI
+ * These are persisted in localStorage to survive page reloads
  */
-let KNOWN_MARKET_IDS = [
-  '2226266059345959235903805886443078929600424190236962232761580543397941034862field', // First test market
-  '1343955940696835063665090431790223713510436410586241525974362313497380512445field', // Politics
-  '810523019777616412177748759438416240921384383441959113104962406712429357311field',  // Sports
-  '2561705300444654139615408172203999477019238232931615365990277976260492916308field', // Crypto
-  '6497398114847519923379901992833643876462593069120645523569600191102874822191field', // Entertainment
-  '2782540397887243983750241685138602830175258821940489779581095376798172768978field', // Tech
-  '7660559822229647474965631916495293995705931900965070950237377789460326943999field', // Economics
-  '425299171484137372110091327826787897441058548811928022547541653437849039243field',  // Science
-];
+let KNOWN_MARKET_IDS: string[] = [];
+
+// Load saved market IDs from localStorage on module load
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('veiled_markets_ids');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        KNOWN_MARKET_IDS = parsed;
+        console.log('Loaded', KNOWN_MARKET_IDS.length, 'market IDs from localStorage');
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load market IDs from localStorage:', e);
+  }
+}
+
+/**
+ * Add a new market ID to the known list and persist to localStorage
+ */
+export function addKnownMarketId(marketId: string): void {
+  if (!KNOWN_MARKET_IDS.includes(marketId)) {
+    KNOWN_MARKET_IDS.push(marketId);
+    // Persist to localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('veiled_markets_ids', JSON.stringify(KNOWN_MARKET_IDS));
+        console.log('Saved market ID to localStorage:', marketId);
+      } catch (e) {
+        console.warn('Failed to save market IDs to localStorage:', e);
+      }
+    }
+  }
+}
 
 /**
  * Question text mapping (temporary - in production would use IPFS/storage)
- * Maps question_hash to actual question text
+ * Maps question_hash OR market_id to actual question text
+ * Loaded from localStorage
  */
-const QUESTION_TEXT_MAP: Record<string, string> = {
-  '12345field': 'Will Bitcoin reach $150,000 by end of Q1 2026?',
-  '10001field': 'Will Trump complete his full presidential term through 2028?',
-  '20002field': 'Will Lionel Messi win the 2026 FIFA World Cup with Argentina?',
-  '30003field': 'Will Bitcoin reach $150,000 by end of Q1 2026?',
-  '40004field': 'Will Avatar 3 gross over $2 billion worldwide in 2026?',
-  '50005field': 'Will Apple release AR glasses (Apple Vision Pro 2) in 2026?',
-  '60006field': 'Will global inflation drop below 3% average by end of 2026?',
-  '70007field': 'Will NASA Artemis III successfully land humans on Moon in 2026?',
-};
+let QUESTION_TEXT_MAP: Record<string, string> = {};
+
+// Load saved question texts from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('veiled_markets_questions');
+    if (saved) {
+      QUESTION_TEXT_MAP = JSON.parse(saved);
+      console.log('Loaded question texts from localStorage');
+    }
+  } catch (e) {
+    console.warn('Failed to load question texts from localStorage:', e);
+  }
+}
+
+/**
+ * Register question text for a market ID or question hash
+ */
+export function registerQuestionText(key: string, questionText: string): void {
+  QUESTION_TEXT_MAP[key] = questionText;
+  // Persist to localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
+    } catch (e) {
+      console.warn('Failed to save question texts to localStorage:', e);
+    }
+  }
+}
 
 /**
  * Transaction ID mapping (for verification links)
  * Maps market_id to creation transaction ID
+ * Loaded from localStorage
  */
-const MARKET_TX_MAP: Record<string, string> = {
-  '2226266059345959235903805886443078929600424190236962232761580543397941034862field': 'at1suyzwzd3zkymsewnpjqjs6h0x0k0u03yd8azv452ra36qjtzyvrsnjq902',
-  '1343955940696835063665090431790223713510436410586241525974362313497380512445field': 'at1j8xalgyfw7thg2zmpy9zlt82cpegse3vqsm9g3z2l3a59wj3ry8qg9n9u7',
-  '810523019777616412177748759438416240921384383441959113104962406712429357311field': 'at1q5rvkyexgwnvrwlw587s7qzl2tegn6524we96gyhuc0hz7zs55rqfm00r4',
-  '2561705300444654139615408172203999477019238232931615365990277976260492916308field': 'at1fvk3t9494tp56a7gykna7djgnurf25yphxg9ystprcjxhach0qxsn8e5wx',
-  '6497398114847519923379901992833643876462593069120645523569600191102874822191field': 'at1fnyzg2j7n4ep2l6p0qvlfnfqsufh7jxerfpe7chzymgsl0ukeyqqhrceej',
-  '2782540397887243983750241685138602830175258821940489779581095376798172768978field': 'at12f9uvhadvppk3kqqe8y6s4mwsnn37fnv2lkzd3s8pdvy9yz8h5zqyzwrwa',
-  '7660559822229647474965631916495293995705931900965070950237377789460326943999field': 'at14agvnhed7rfh9pvxfmm64kw50jt4aea0y40r0u2vc46znsvk3vgsdxglv4',
-  '425299171484137372110091327826787897441058548811928022547541653437849039243field': 'at1eqvc2jzfnmuc7c9fzuny0uu34tqfjd2mv4xpqnknd9hnvz8l2qrsd8yyez',
-};
+let MARKET_TX_MAP: Record<string, string> = {};
+
+// Load saved transaction IDs from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('veiled_markets_txs');
+    if (saved) {
+      MARKET_TX_MAP = JSON.parse(saved);
+      console.log('Loaded transaction IDs from localStorage');
+    }
+  } catch (e) {
+    console.warn('Failed to load transaction IDs from localStorage:', e);
+  }
+}
+
+/**
+ * Register transaction ID for a market
+ */
+export function registerMarketTransaction(marketId: string, transactionId: string): void {
+  MARKET_TX_MAP[marketId] = transactionId;
+  // Persist to localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('veiled_markets_txs', JSON.stringify(MARKET_TX_MAP));
+    } catch (e) {
+      console.warn('Failed to save transaction IDs to localStorage:', e);
+    }
+  }
+}
 
 /**
  * Load market IDs from indexer service
+ * Returns empty array if indexer not available (user will create markets via UI)
  */
 async function loadMarketIdsFromIndexer(): Promise<string[]> {
   try {
     const response = await fetch('/markets-index.json');
     if (!response.ok) {
-      console.warn('Indexer data not found, using fallback market IDs');
-      return KNOWN_MARKET_IDS;
+      console.log('Indexer data not found - markets will be added when created via UI');
+      return KNOWN_MARKET_IDS; // Return current list (from localStorage)
     }
 
     const data = await response.json();
@@ -464,12 +691,14 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
 
     if (marketIds.length > 0) {
       console.log(`✅ Loaded ${marketIds.length} markets from indexer`);
-      return marketIds;
+      // Merge with existing IDs (in case some were created locally)
+      const allIds = new Set([...KNOWN_MARKET_IDS, ...marketIds]);
+      return Array.from(allIds);
     }
 
     return KNOWN_MARKET_IDS;
   } catch (error) {
-    console.error('Failed to load indexer data:', error);
+    console.log('Indexer not available - using locally stored market IDs');
     return KNOWN_MARKET_IDS;
   }
 }
@@ -549,6 +778,6 @@ export const CONTRACT_INFO = {
   deploymentTxId: 'at1j2f9r4mdls0n6k55nnscdckhuz7uyqfkuhj9kmer2v2hs6z0u5zsm8xf90',
   network: 'testnet',
   explorerUrl: config.explorerUrl,
-  // Note: Mock data is used until indexer is available
-  useMockData: true,
+  // Real on-chain data - markets are stored in localStorage and fetched from blockchain
+  useMockData: false,
 };

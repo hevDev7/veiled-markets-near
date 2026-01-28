@@ -52,11 +52,40 @@ export interface WalletEvents {
 
 /**
  * Check if Puzzle Wallet extension is installed
- * Note: Puzzle SDK works via browser extension messaging, not window object
+ * Puzzle SDK uses Chrome extension messaging, but we can check for some indicators
  */
 export function isPuzzleWalletInstalled(): boolean {
-  // Puzzle SDK connects via extension messaging, always return true to allow attempt
-  return true;
+  if (typeof window === 'undefined') return false;
+
+  // Check for potential Puzzle Wallet indicators
+  // The extension may inject objects or listen for specific events
+  const hasPuzzle = !!(window as any).puzzle || !!(window as any).puzzleWallet;
+
+  // Also check if Chrome extension messaging is available (general indicator)
+  const chromeObj = (window as any).chrome;
+  const hasExtensionSupport = chromeObj?.runtime?.sendMessage !== undefined;
+
+  // Return true if we find puzzle, or if extensions are supported (we'll try to connect)
+  return hasPuzzle || hasExtensionSupport;
+}
+
+/**
+ * Helper: Create a timeout promise
+ */
+function createTimeoutPromise<T>(ms: number, message: string): Promise<T> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
+}
+
+/**
+ * Helper: Race a promise against a timeout
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
+  return Promise.race([
+    promise,
+    createTimeoutPromise<T>(ms, timeoutMessage)
+  ]);
 }
 
 /**
@@ -101,11 +130,10 @@ export class PuzzleWalletAdapter {
   async connect(): Promise<WalletAccount> {
     try {
       console.log('Puzzle Wallet: Attempting to connect...');
+      console.log('Puzzle Wallet: Extension detected:', isPuzzleWalletInstalled());
 
-      // Use the Puzzle SDK connect function
-      // IMPORTANT: Puzzle SDK only accepts 'AleoTestnet' and 'AleoMainnet' as network names
-      // Using other names like 'testnetbeta' or 'testnet' will cause "Internal server error"
-      const response = await puzzleConnect({
+      // Create the connect promise
+      const connectPromise = puzzleConnect({
         dAppInfo: {
           name: 'Veiled Markets',
           description: 'Privacy-Preserving Prediction Markets on Aleo',
@@ -118,6 +146,13 @@ export class PuzzleWalletAdapter {
           }
         }
       });
+
+      // Use timeout wrapper - 10 seconds should be enough for extension communication
+      const response = await withTimeout(
+        connectPromise,
+        10000,
+        'Connection timed out. Puzzle Wallet extension may not be installed or is not responding.'
+      );
 
       console.log('Puzzle Wallet: Connect response:', response);
 
@@ -139,8 +174,24 @@ export class PuzzleWalletAdapter {
       throw new Error('Connection rejected or no account returned');
     } catch (error: any) {
       console.error('Puzzle Wallet connection error:', error);
+      console.error('Error details:', {
+        message: error?.message,
+        name: error?.name,
+        code: error?.code,
+        stack: error?.stack?.substring(0, 500)
+      });
 
       const errorMessage = error?.message || String(error);
+
+      // Timeout from our wrapper
+      if (errorMessage.includes('timed out') || errorMessage.includes('timeout')) {
+        throw new Error(
+          'Puzzle Wallet is not responding. Please check:\n' +
+          '1. Extension is installed from puzzle.online/wallet\n' +
+          '2. Extension is enabled in your browser\n' +
+          '3. Wallet is unlocked'
+        );
+      }
 
       // Check for specific error types and provide user-friendly messages
       if (errorMessage.includes('Extension not found') ||
@@ -152,12 +203,12 @@ export class PuzzleWalletAdapter {
       // TRPC Internal server error usually means extension not responding
       if (errorMessage.includes('Internal server error') ||
         errorMessage.includes('TRPCClientError')) {
-        throw new Error('Puzzle Wallet not responding. Please ensure the extension is installed and unlocked.');
-      }
-
-      // Timeout errors
-      if (errorMessage.includes('timeout') || errorMessage.includes('5 seconds')) {
-        throw new Error('Connection timed out. Please ensure Puzzle Wallet extension is installed and active.');
+        throw new Error(
+          'Puzzle Wallet is not responding. Please check:\n' +
+          '1. Extension is installed from puzzle.online/wallet\n' +
+          '2. Extension is enabled in your browser\n' +
+          '3. Wallet is unlocked'
+        );
       }
 
       // User rejected

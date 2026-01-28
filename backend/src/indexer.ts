@@ -113,6 +113,18 @@ const KNOWN_MARKETS: IndexedMarket[] = [
         createdAt: Date.now(),
         blockHeight: 14067700,
     },
+    // NEW MARKET - Ethereum $10k (Created via Leo CLI)
+    {
+        marketId: '3582024152336217571382682973364798990155453514672503623063651091171230848724field',
+        transactionId: 'at1crl3gd6ukawwrslf3r5vqttg7a8hll84fj2klqtmtwdafntspg9sgcgw2a',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '350929565016816493992297964402345071115472527106339097957348390879136520853field', // Hash of "Will Ethereum reach $10,000 by end of Q2 2026?"
+        category: 3,
+        deadline: '14107320u64',
+        resolutionDeadline: '14124600u64',
+        createdAt: Date.now(),
+        blockHeight: 14067000,
+    },
 ];
 
 /**

@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Shield, Lock, TrendingUp, Check, Loader2, ExternalLink } from 'lucide-react'
+import { X, Shield, Lock, TrendingUp, Check, Loader2, ExternalLink, AlertCircle } from 'lucide-react'
 import { useState } from 'react'
 import { type Market, useWalletStore, useBetsStore } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
@@ -23,17 +23,31 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const [step, setStep] = useState<BetStep>('select')
   const [isPlacing, setIsPlacing] = useState(false)
   const [transactionId, setTransactionId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const handlePlaceBet = async () => {
     if (!market || !selectedOutcome || !betAmount) return
 
     setIsPlacing(true)
+    setError(null)
+
     try {
+      // Validate market ID format - must be a field type for on-chain betting
+      if (!market.id.endsWith('field')) {
+        throw new Error(
+          'This is a demo market for UI preview only. ' +
+          'To place real bets, use markets created via the "Create Market" button ' +
+          'which are stored on the Aleo blockchain.'
+        )
+      }
+
       const txId = await placeBet(market.id, BigInt(parseFloat(betAmount) * 1_000_000), selectedOutcome)
       setTransactionId(txId)
       setStep('success')
-    } catch (error) {
-      console.error('Failed to place bet:', error)
+    } catch (err: unknown) {
+      console.error('Failed to place bet:', err)
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred. Please try again.'
+      setError(errorMessage)
     } finally {
       setIsPlacing(false)
     }
@@ -44,6 +58,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     setBetAmount('')
     setStep('select')
     setTransactionId(null)
+    setError(null)
     onClose()
   }
 
@@ -267,9 +282,23 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         </div>
                       </div>
 
+                      {/* Error Display */}
+                      {error && (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-no-500/10 border border-no-500/20 mb-6">
+                          <AlertCircle className="w-5 h-5 text-no-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-no-400">Bet Failed</p>
+                            <p className="text-sm text-surface-400 mt-1">{error}</p>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="flex gap-3">
                         <button
-                          onClick={() => setStep('select')}
+                          onClick={() => {
+                            setStep('select')
+                            setError(null)
+                          }}
                           className="btn-secondary flex-1"
                         >
                           Back
