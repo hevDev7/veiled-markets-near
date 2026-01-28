@@ -43,12 +43,12 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
     if (isOpen) {
       // Check immediately
       checkWalletStatus()
-      
+
       // Check again after a short delay (extensions may inject late)
       const timer1 = setTimeout(checkWalletStatus, 100)
       const timer2 = setTimeout(checkWalletStatus, 500)
       const timer3 = setTimeout(checkWalletStatus, 1000)
-      
+
       return () => {
         clearTimeout(timer1)
         clearTimeout(timer2)
@@ -76,13 +76,6 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
       installed: walletStatus.leo, // Show actual status but still allow clicking
       downloadUrl: WALLET_INFO.leo.downloadUrl,
     },
-    {
-      type: 'demo',
-      name: 'Demo Mode',
-      description: 'Try the app without a real wallet',
-      icon: '🎮',
-      installed: true,
-    },
   ]
 
   const handleConnect = async (walletType: WalletType) => {
@@ -96,10 +89,10 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
       onClose()
     } catch (err: unknown) {
       console.error('Wallet connection error:', err)
-      
+
       // Extract error message from various error formats
       let errorMessage = 'Failed to connect wallet'
-      
+
       if (err instanceof Error) {
         errorMessage = err.message
       } else if (typeof err === 'string') {
@@ -120,7 +113,7 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
           }
         }
       }
-      
+
       setLocalError(errorMessage)
     } finally {
       setConnecting(null)
@@ -197,34 +190,34 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
                       <p className="text-sm font-medium text-no-400">Connection Failed</p>
                       <p className="text-sm text-surface-400 mt-1">{localError || error}</p>
                       {/* Show install link if wallet not found */}
-                      {((localError || error || '').toLowerCase().includes('not installed') || 
+                      {((localError || error || '').toLowerCase().includes('not installed') ||
                         (localError || error || '').toLowerCase().includes('not responding') ||
                         (localError || error || '').toLowerCase().includes('timed out') ||
                         (localError || error || '').toLowerCase().includes('not found')) && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {(localError || error || '').toLowerCase().includes('leo') ? (
-                            <a
-                              href={WALLET_INFO.leo.downloadUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-sm text-brand-400 hover:text-brand-300"
-                            >
-                              <span>Install Leo Wallet</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : (
-                            <a
-                              href={WALLET_INFO.puzzle.downloadUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-sm text-brand-400 hover:text-brand-300"
-                            >
-                              <span>Install Puzzle Wallet</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          )}
-                        </div>
-                      )}
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {(localError || error || '').toLowerCase().includes('leo') ? (
+                              <a
+                                href={WALLET_INFO.leo.downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-sm text-brand-400 hover:text-brand-300"
+                              >
+                                <span>Install Leo Wallet</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            ) : (
+                              <a
+                                href={WALLET_INFO.puzzle.downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-sm text-brand-400 hover:text-brand-300"
+                              >
+                                <span>Install Puzzle Wallet</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                        )}
                     </div>
                   </div>
                 </motion.div>
@@ -258,7 +251,6 @@ function WalletOptionButton({
   disabled: boolean
   onClick: () => void
 }) {
-  const isDemo = wallet.type === 'demo'
   const isLeo = wallet.type === 'leo'
 
   // Always show as clickable button - let the connect function handle detection
@@ -269,9 +261,7 @@ function WalletOptionButton({
       disabled={disabled}
       className={cn(
         'flex items-center gap-4 w-full p-4 rounded-xl border transition-all duration-200',
-        isDemo
-          ? 'border-accent-500/30 bg-accent-500/5 hover:bg-accent-500/10 hover:border-accent-500/50'
-          : 'border-surface-700/50 bg-surface-800/30 hover:bg-surface-800/50 hover:border-brand-500/30',
+        'border-surface-700/50 bg-surface-800/30 hover:bg-surface-800/50 hover:border-brand-500/30',
         disabled && !isConnecting && 'opacity-50 cursor-not-allowed',
         isConnecting && 'border-brand-500/50 bg-brand-500/10'
       )}
@@ -285,19 +275,14 @@ function WalletOptionButton({
               Recommended
             </span>
           )}
-          {isDemo && (
-            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-accent-500/20 text-accent-400">
-              No wallet needed
-            </span>
-          )}
-          {!wallet.installed && !isDemo && (
+          {!wallet.installed && (
             <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-surface-700/50 text-surface-400">
               Click to connect
             </span>
           )}
         </div>
         <p className="text-sm text-surface-400 mt-0.5">
-          {!wallet.installed && !isDemo 
+          {!wallet.installed
             ? `${wallet.description} (extension may need to be enabled)`
             : wallet.description
           }
