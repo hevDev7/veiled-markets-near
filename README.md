@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Veiled Markets Banner](./docs/assets/banner.png)
+<img src="./logo-veiled-markets.png" alt="Veiled Markets Logo" width="200"/>
 
 ### **Predict Freely. Bet Privately.**
 
