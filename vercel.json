@@ -1,6 +1,6 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "pnpm --filter @veiled-markets/frontend build && ls -la && ls -la dist || echo 'dist not found'",
-    "installCommand": "pnpm install",
-    "outputDirectory": "dist"
+    "buildCommand": "cd frontend && pnpm install && pnpm build",
+    "installCommand": "echo 'Skip root install'",
+    "outputDirectory": "frontend/dist"
 }
