@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-01-28T13:44:09.763Z",
+  "lastUpdated": "2026-01-28T13:47:10.981Z",
   "totalMarkets": 8,
   "markets": [
     {
@@ -10,7 +10,7 @@
       "category": 3,
       "deadline": "14165851u64",
       "resolutionDeadline": "14183131u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067000
     },
     {
@@ -21,7 +21,7 @@
       "category": 1,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067123
     },
     {
@@ -32,7 +32,7 @@
       "category": 2,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067200
     },
     {
@@ -43,7 +43,7 @@
       "category": 3,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067300
     },
     {
@@ -54,7 +54,7 @@
       "category": 4,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067400
     },
     {
@@ -65,7 +65,7 @@
       "category": 5,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067500
     },
     {
@@ -76,7 +76,7 @@
       "category": 6,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067600
     },
     {
@@ -87,7 +87,7 @@
       "category": 7,
       "deadline": "14107191u64",
       "resolutionDeadline": "14124471u64",
-      "createdAt": 1769607849762,
+      "createdAt": 1769608030979,
       "blockHeight": 14067700
     }
   ],
