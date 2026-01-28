@@ -1,5 +1,5 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "pnpm install && pnpm --filter @veiled-markets/frontend build",
-    "outputDirectory": "frontend/dist"
+    "buildCommand": "pnpm install && pnpm --filter @veiled-markets/frontend build && ln -s frontend/dist dist",
+    "outputDirectory": "dist"
 }
