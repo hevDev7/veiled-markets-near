@@ -410,7 +410,7 @@ VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 ## 📚 Documentation
 
 - [Architecture Overview](./docs/ARCHITECTURE.md)
-- [Parimutuel Implementation](./docs/AMM_IMPLEMENTATION.md)
+- [Parimutuel System](./docs/PARIMUTUEL_SYSTEM.md)
 - [Privacy Analysis](./docs/PRIVACY_ANALYSIS.md)
 - [On-Chain Verification](./docs/ON_CHAIN_VERIFICATION.md)
 - [Copyable Market ID](./docs/COPYABLE_MARKET_ID.md)
