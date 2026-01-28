@@ -114,9 +114,9 @@ export function Landing() {
       </header>
 
       {/* Hero Section - Terminal Style */}
-      <section className="relative min-h-[85vh] flex items-center justify-center pt-20 pb-12 z-10">
+      <section className="relative min-h-[70vh] flex items-center justify-center pt-16 pb-8 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-          <div className="grid lg:grid-cols-2 gap-8 items-center">
+          <div className="grid lg:grid-cols-2 gap-6 items-center">
 
             {/* Left: Terminal Window */}
             <motion.div
@@ -162,7 +162,7 @@ export function Landing() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 1.8 }}
-                className="mt-4 grid grid-cols-3 gap-3"
+                className="mt-3 grid grid-cols-3 gap-2"
               >
                 <StatCard value="$2.4M+" label="Volume" icon={<Zap className="w-4 h-4" />} />
                 <StatCard value="1,234" label="Markets" icon={<Eye className="w-4 h-4" />} />
@@ -182,7 +182,7 @@ export function Landing() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6 }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-brand-500/10 border border-brand-500/20 mb-4"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-brand-500/10 border border-brand-500/20 mb-3"
               >
                 <Code className="w-4 h-4 text-brand-400" />
                 <span className="text-sm font-medium text-brand-300">
@@ -190,7 +190,7 @@ export function Landing() {
                 </span>
               </motion.div>
 
-              <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight mb-4 leading-tight">
+              <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight mb-3 leading-tight">
                 <span className="text-white">Predict.</span>
                 <br />
                 <span className="text-white">Bet.</span>
@@ -198,13 +198,13 @@ export function Landing() {
                 <span className="gradient-text">Stay Hidden.</span>
               </h1>
 
-              <p className="text-lg sm:text-xl text-surface-400 mb-6 leading-relaxed">
+              <p className="text-base sm:text-lg text-surface-400 mb-4 leading-relaxed">
                 The first prediction market where your bets are <span className="text-brand-400 font-semibold">cryptographically private</span>.
                 No tracking. No manipulation. Pure market intelligence.
               </p>
 
               {/* Feature Pills */}
-              <div className="flex flex-wrap gap-3 mb-6">
+              <div className="flex flex-wrap gap-2 mb-5">
                 <FeaturePill icon={<Shield />} text="MEV Protected" />
                 <FeaturePill icon={<Eye />} text="Hidden Positions" />
                 <FeaturePill icon={<Lock />} text="Anonymous" />
@@ -221,7 +221,7 @@ export function Landing() {
               </button>
 
               {/* Supported Wallets */}
-              <div className="mt-4 flex items-center gap-3 text-surface-500 text-sm">
+              <div className="mt-3 flex items-center gap-3 text-surface-500 text-sm">
                 <span>Supports:</span>
                 <span className="text-surface-400">Puzzle</span>
                 <span className="text-surface-600">•</span>
@@ -235,15 +235,15 @@ export function Landing() {
       </section>
 
       {/* Features Section - Bento Grid */}
-      <section className="relative py-12 z-10">
+      <section className="relative py-8 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="text-center mb-8"
+            className="text-center mb-6"
           >
-            <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">
+            <h2 className="text-3xl md:text-4xl font-bold text-white mb-2">
               Privacy-First Architecture
             </h2>
             <p className="text-surface-400 max-w-2xl mx-auto">
@@ -251,7 +251,7 @@ export function Landing() {
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <BentoCard
               title="Hidden Positions"
               description="Your bet amount and side stay encrypted on-chain. Only you can decrypt your position."
@@ -278,9 +278,9 @@ export function Landing() {
       </section>
 
       {/* How It Works - Minimal */}
-      <section className="relative py-12 border-t border-surface-800/30 z-10">
+      <section className="relative py-8 border-t border-surface-800/30 z-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="space-y-8">
+          <div className="space-y-6">
             {[
               { num: '01', title: 'Connect', desc: 'Link your Aleo wallet' },
               { num: '02', title: 'Browse', desc: 'Explore prediction markets' },
@@ -295,12 +295,12 @@ export function Landing() {
                 transition={{ delay: i * 0.1 }}
                 className="flex items-center gap-8 group"
               >
-                <div className="text-6xl font-bold text-brand-500/20 group-hover:text-brand-500/40 transition-colors font-mono">
+                <div className="text-5xl font-bold text-brand-500/20 group-hover:text-brand-500/40 transition-colors font-mono">
                   {step.num}
                 </div>
-                <div className="flex-1 border-l-2 border-brand-500/20 pl-8 py-4">
-                  <h3 className="text-2xl font-bold text-white mb-2">{step.title}</h3>
-                  <p className="text-surface-400">{step.desc}</p>
+                <div className="flex-1 border-l-2 border-brand-500/20 pl-6 py-3">
+                  <h3 className="text-xl font-bold text-white mb-1">{step.title}</h3>
+                  <p className="text-surface-400 text-sm">{step.desc}</p>
                 </div>
               </motion.div>
             ))}
@@ -309,7 +309,7 @@ export function Landing() {
       </section>
 
       {/* Footer */}
-      <footer className="relative border-t border-surface-800/30 py-8 z-10">
+      <footer className="relative border-t border-surface-800/30 py-6 z-10">
         <div className="max-w-7xl mx-auto px-4 text-center">
           <p className="text-sm text-surface-500 font-mono">
             © 2026 Veiled Markets • Built on Aleo • Open Source
@@ -411,14 +411,14 @@ function BentoCard({
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ delay }}
-      className="group relative bg-surface-900/50 backdrop-blur-sm rounded-2xl p-6 border border-surface-800/50 hover:border-brand-500/30 transition-all duration-300"
+      className="group relative bg-surface-900/50 backdrop-blur-sm rounded-xl p-5 border border-surface-800/50 hover:border-brand-500/30 transition-all duration-300"
     >
-      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+      <div className={`absolute inset-0 bg-gradient-to-br ${gradient} rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
       <div className="relative">
-        <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-brand-500/20 to-accent-500/20 flex items-center justify-center mb-4 text-brand-400 group-hover:scale-110 transition-transform">
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500/20 to-accent-500/20 flex items-center justify-center mb-3 text-brand-400 group-hover:scale-110 transition-transform">
           {icon}
         </div>
-        <h3 className="text-xl font-bold text-white mb-2 group-hover:text-brand-300 transition-colors">
+        <h3 className="text-lg font-bold text-white mb-2 group-hover:text-brand-300 transition-colors">
           {title}
         </h3>
         <p className="text-sm text-surface-400 leading-relaxed">
