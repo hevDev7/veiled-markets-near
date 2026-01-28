@@ -194,7 +194,7 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                         <span className="text-white font-medium">
                             {tradeType === 'buy'
                                 ? `${(Number(tradeDetails.sharesOut) / 1_000_000).toFixed(2)} shares`
-                                : `${formatCredits(tradeDetails.creditsOut)} ALEO`
+                                : `${formatCredits(tradeDetails.creditsOut || 0n)} ALEO`
                             }
                         </span>
                     </div>

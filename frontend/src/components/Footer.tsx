@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Shield, Github, Twitter, MessageCircle, ExternalLink } from 'lucide-react'
+import { Github, Twitter, MessageCircle, ExternalLink } from 'lucide-react'
 
 const footerLinks = {
   Protocol: [

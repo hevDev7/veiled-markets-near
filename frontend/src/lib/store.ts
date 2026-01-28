@@ -237,6 +237,29 @@ interface MarketsStore {
 }
 
 // Categories: 1=Politics, 2=Sports, 3=Crypto, 4=Entertainment, 5=Tech, 6=Economics, 7=Science
+
+// Helper to calculate AMM fields from percentages
+const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
+  const yesPrice = yesPercentage / 100
+  const noPrice = 1 - yesPrice
+
+  // Calculate reserves based on constant product formula
+  // For simplicity: yesReserve * noReserve = k
+  // yesPrice = noReserve / (yesReserve + noReserve)
+  const totalLiquidity = Number(totalVolume) * 2 // Approximate total liquidity
+  const yesReserve = BigInt(Math.floor(totalLiquidity * noPrice))
+  const noReserve = BigInt(Math.floor(totalLiquidity * yesPrice))
+
+  return {
+    yesReserve,
+    noReserve,
+    yesPrice,
+    noPrice,
+    totalYesIssued: BigInt(Math.floor(Number(totalVolume) * yesPrice)),
+    totalNoIssued: BigInt(Math.floor(Number(totalVolume) * noPrice)),
+  }
+}
+
 const mockMarkets: Market[] = [
   // === CRYPTO MARKETS ===
   {
@@ -251,6 +274,7 @@ const mockMarkets: Market[] = [
     noPercentage: 37.5,
     totalVolume: 2500000000n, // 2500 ALEO
     totalBets: 342,
+    ...calculateAMMFields(62.5, 2500000000n),
     potentialYesPayout: 1.60,
     potentialNoPayout: 2.67,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -270,6 +294,7 @@ const mockMarkets: Market[] = [
     noPercentage: 81.8,
     totalVolume: 1800000000n,
     totalBets: 567,
+    ...calculateAMMFields(18.2, 1800000000n),
     potentialYesPayout: 5.49,
     potentialNoPayout: 1.22,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -289,6 +314,7 @@ const mockMarkets: Market[] = [
     noPercentage: 54.7,
     totalVolume: 980000000n,
     totalBets: 234,
+    ...calculateAMMFields(45.3, 980000000n),
     potentialYesPayout: 2.21,
     potentialNoPayout: 1.83,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -308,6 +334,7 @@ const mockMarkets: Market[] = [
     noPercentage: 28.2,
     totalVolume: 3200000000n,
     totalBets: 892,
+    ...calculateAMMFields(71.8, 3200000000n),
     potentialYesPayout: 1.39,
     potentialNoPayout: 3.55,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -328,6 +355,7 @@ const mockMarkets: Market[] = [
     noPercentage: 63.7,
     totalVolume: 1450000000n,
     totalBets: 423,
+    ...calculateAMMFields(36.3, 1450000000n),
     potentialYesPayout: 2.75,
     potentialNoPayout: 1.57,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -347,6 +375,7 @@ const mockMarkets: Market[] = [
     noPercentage: 57.9,
     totalVolume: 890000000n,
     totalBets: 312,
+    ...calculateAMMFields(42.1, 890000000n),
     potentialYesPayout: 2.38,
     potentialNoPayout: 1.73,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -367,6 +396,7 @@ const mockMarkets: Market[] = [
     noPercentage: 27.6,
     totalVolume: 1230000000n,
     totalBets: 456,
+    ...calculateAMMFields(72.4, 1230000000n),
     potentialYesPayout: 1.38,
     potentialNoPayout: 3.62,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -386,6 +416,7 @@ const mockMarkets: Market[] = [
     noPercentage: 41.1,
     totalVolume: 2100000000n,
     totalBets: 678,
+    ...calculateAMMFields(58.9, 2100000000n),
     potentialYesPayout: 1.70,
     potentialNoPayout: 2.43,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -406,6 +437,7 @@ const mockMarkets: Market[] = [
     noPercentage: 71.5,
     totalVolume: 1560000000n,
     totalBets: 534,
+    ...calculateAMMFields(28.5, 1560000000n),
     potentialYesPayout: 3.51,
     potentialNoPayout: 1.40,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -425,6 +457,7 @@ const mockMarkets: Market[] = [
     noPercentage: 32.8,
     totalVolume: 780000000n,
     totalBets: 289,
+    ...calculateAMMFields(67.2, 780000000n),
     potentialYesPayout: 1.49,
     potentialNoPayout: 3.05,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -445,6 +478,7 @@ const mockMarkets: Market[] = [
     noPercentage: 54.2,
     totalVolume: 920000000n,
     totalBets: 367,
+    ...calculateAMMFields(45.8, 920000000n),
     potentialYesPayout: 2.18,
     potentialNoPayout: 1.85,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -465,6 +499,7 @@ const mockMarkets: Market[] = [
     noPercentage: 47.7,
     totalVolume: 650000000n,
     totalBets: 198,
+    ...calculateAMMFields(52.3, 650000000n),
     potentialYesPayout: 1.91,
     potentialNoPayout: 2.10,
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
