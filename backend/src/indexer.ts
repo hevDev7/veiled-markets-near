@@ -4,9 +4,10 @@
 // Scans blockchain for market creation events and maintains market registry
 // ============================================================================
 
-import { config } from './config';
+import * as fs from 'fs';
+import * as path from 'path';
 
-interface IndexedMarket {
+export interface IndexedMarket {
     marketId: string;
     transactionId: string;
     creator: string;
@@ -18,128 +19,110 @@ interface IndexedMarket {
     blockHeight: number;
 }
 
-interface Transaction {
-    id: string;
-    execution?: {
-        transitions?: Array<{
-            program: string;
-            function: string;
-            inputs?: Array<{ type: string; value: string }>;
-            outputs?: Array<{ type: string; value: string }>;
-        }>;
-    };
-    block_height?: number;
-    timestamp?: number;
-}
-
-const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const PROGRAM_ID = config.programId || 'veiled_markets.aleo';
-
 /**
- * Fetch transactions for a specific program
+ * Known markets from contract deployment
+ * In production, this would be fetched from an indexer service or custom node
  */
-async function fetchProgramTransactions(
-    programId: string,
-    page: number = 1,
-    limit: number = 50
-): Promise<Transaction[]> {
-    try {
-        const url = `${API_BASE_URL}/program/${programId}/transactions?page=${page}&limit=${limit}`;
-        const response = await fetch(url);
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch transactions: ${response.status}`);
-        }
-
-        const data = await response.json();
-        return Array.isArray(data) ? data : [];
-    } catch (error) {
-        console.error('Failed to fetch program transactions:', error);
-        return [];
-    }
-}
-
-/**
- * Parse create_market transaction to extract market data
- */
-function parseCreateMarketTransaction(tx: Transaction): IndexedMarket | null {
-    try {
-        const transitions = tx.execution?.transitions || [];
-
-        for (const transition of transitions) {
-            if (transition.program === PROGRAM_ID && transition.function === 'create_market') {
-                const outputs = transition.outputs || [];
-                const inputs = transition.inputs || [];
-
-                // First output is the market_id
-                const marketId = outputs[0]?.value;
-                if (!marketId) continue;
-
-                // Parse inputs: question_hash, category, deadline, resolution_deadline
-                const questionHash = inputs[0]?.value || '';
-                const category = parseInt(inputs[1]?.value?.replace('u8', '') || '0');
-                const deadline = inputs[2]?.value || '0u64';
-                const resolutionDeadline = inputs[3]?.value || '0u64';
-
-                return {
-                    marketId,
-                    transactionId: tx.id,
-                    creator: '', // Would need to parse from transaction
-                    questionHash,
-                    category,
-                    deadline,
-                    resolutionDeadline,
-                    createdAt: tx.timestamp || Date.now(),
-                    blockHeight: tx.block_height || 0,
-                };
-            }
-        }
-
-        return null;
-    } catch (error) {
-        console.error('Failed to parse transaction:', error);
-        return null;
-    }
-}
+const KNOWN_MARKETS: IndexedMarket[] = [
+    {
+        marketId: '2226266059345959235903805886443078929600424190236962232761580543397941034862field',
+        transactionId: 'at1suyzwzd3zkymsewnpjqjs6h0x0k0u03yd8azv452ra36qjtzyvrsnjq902',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '12345field',
+        category: 3,
+        deadline: '14165851u64',
+        resolutionDeadline: '14183131u64',
+        createdAt: Date.now(),
+        blockHeight: 14067000,
+    },
+    {
+        marketId: '1343955940696835063665090431790223713510436410586241525974362313497380512445field',
+        transactionId: 'at1j8xalgyfw7thg2zmpy9zlt82cpegse3vqsm9g3z2l3a59wj3ry8qg9n9u7',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '10001field',
+        category: 1,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067123,
+    },
+    {
+        marketId: '810523019777616412177748759438416240921384383441959113104962406712429357311field',
+        transactionId: 'at1q5rvkyexgwnvrwlw587s7qzl2tegn6524we96gyhuc0hz7zs55rqfm00r4',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '20002field',
+        category: 2,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067200,
+    },
+    {
+        marketId: '2561705300444654139615408172203999477019238232931615365990277976260492916308field',
+        transactionId: 'at1fvk3t9494tp56a7gykna7djgnurf25yphxg9ystprcjxhach0qxsn8e5wx',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '30003field',
+        category: 3,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067300,
+    },
+    {
+        marketId: '6497398114847519923379901992833643876462593069120645523569600191102874822191field',
+        transactionId: 'at1fnyzg2j7n4ep2l6p0qvlfnfqsufh7jxerfpe7chzymgsl0ukeyqqhrceej',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '40004field',
+        category: 4,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067400,
+    },
+    {
+        marketId: '2782540397887243983750241685138602830175258821940489779581095376798172768978field',
+        transactionId: 'at12f9uvhadvppk3kqqe8y6s4mwsnn37fnv2lkzd3s8pdvy9yz8h5zqyzwrwa',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '50005field',
+        category: 5,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067500,
+    },
+    {
+        marketId: '7660559822229647474965631916495293995705931900965070950237377789460326943999field',
+        transactionId: 'at14agvnhed7rfh9pvxfmm64kw50jt4aea0y40r0u2vc46znsvk3vgsdxglv4',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '60006field',
+        category: 6,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067600,
+    },
+    {
+        marketId: '425299171484137372110091327826787897441058548811928022547541653437849039243field',
+        transactionId: 'at1eqvc2jzfnmuc7c9fzuny0uu34tqfjd2mv4xpqnknd9hnvz8l2qrsd8yyez',
+        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
+        questionHash: '70007field',
+        category: 7,
+        deadline: '14107191u64',
+        resolutionDeadline: '14124471u64',
+        createdAt: Date.now(),
+        blockHeight: 14067700,
+    },
+];
 
 /**
  * Index all markets from blockchain
+ * Currently uses known markets. In production, would scan blockchain.
  */
 export async function indexAllMarkets(): Promise<IndexedMarket[]> {
     console.log('🔍 Starting market indexing...');
-
-    const allMarkets: IndexedMarket[] = [];
-    let page = 1;
-    let hasMore = true;
-
-    while (hasMore) {
-        console.log(`📄 Fetching page ${page}...`);
-        const transactions = await fetchProgramTransactions(PROGRAM_ID, page, 50);
-
-        if (transactions.length === 0) {
-            hasMore = false;
-            break;
-        }
-
-        for (const tx of transactions) {
-            const market = parseCreateMarketTransaction(tx);
-            if (market) {
-                allMarkets.push(market);
-                console.log(`✅ Found market: ${market.marketId.slice(0, 20)}...`);
-            }
-        }
-
-        page++;
-
-        // Safety limit to prevent infinite loops
-        if (page > 100) {
-            console.warn('⚠️ Reached page limit, stopping indexing');
-            break;
-        }
-    }
-
-    console.log(`✅ Indexing complete. Found ${allMarkets.length} markets.`);
-    return allMarkets;
+    console.log('📋 Using known market IDs (Aleo explorer API limitations)');
+    console.log(`✅ Found ${KNOWN_MARKETS.length} markets.`);
+    return KNOWN_MARKETS;
 }
 
 /**
@@ -174,15 +157,16 @@ export async function saveIndexedMarkets(markets: IndexedMarket[]): Promise<void
         marketIds: getMarketIds(markets),
     };
 
-    // In Node.js environment
-    if (typeof window === 'undefined') {
-        const fs = await import('fs');
-        const path = await import('path');
-
-        const outputPath = path.join(process.cwd(), 'public', 'markets-index.json');
-        fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
-        console.log(`💾 Saved indexed markets to ${outputPath}`);
+    // Create public directory if it doesn't exist
+    const publicDir = path.join(process.cwd(), 'public');
+    if (!fs.existsSync(publicDir)) {
+        fs.mkdirSync(publicDir, { recursive: true });
+        console.log(`📁 Created directory: ${publicDir}`);
     }
+
+    const outputPath = path.join(publicDir, 'markets-index.json');
+    fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
+    console.log(`💾 Saved indexed markets to ${outputPath}`);
 }
 
 /**
