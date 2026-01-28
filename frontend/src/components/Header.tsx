@@ -55,9 +55,8 @@ export function Header() {
               <img
                 src="/logo.png"
                 alt="Veiled Markets"
-                className="h-10 w-auto"
+                className="h-10 w-10 object-cover rounded-xl"
               />
-              <div className="absolute -inset-1 bg-gradient-to-br from-brand-500 to-accent-500 rounded-xl blur-lg opacity-20 group-hover:opacity-40 transition-opacity" />
             </div>
 
             {/* Logo Text */}

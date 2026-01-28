@@ -43,7 +43,7 @@ export function Footer() {
             <img
               src="/logo.png"
               alt="Veiled Markets"
-              className="w-8 h-8 rounded-lg"
+              className="h-10 w-10 object-cover rounded-xl"
             />
             <div>
               <h3 className="font-display text-lg font-bold" style={{ letterSpacing: '0.02em' }}>
@@ -82,7 +82,7 @@ export function FooterDetailed() {
               <img
                 src="/logo.png"
                 alt="Veiled Markets"
-                className="w-10 h-10 rounded-xl"
+                className="h-10 w-10 object-cover rounded-xl"
               />
               <div>
                 <h3 className="font-display text-xl font-bold" style={{ letterSpacing: '0.02em' }}>

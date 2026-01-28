@@ -80,7 +80,7 @@ export function Landing() {
                 <img
                   src="/logo.png"
                   alt="Veiled Markets"
-                  className="w-10 h-10 rounded-xl shadow-lg shadow-brand-500/25"
+                  className="h-10 w-10 object-cover rounded-xl"
                 />
               </div>
               <div className="hidden sm:block">
