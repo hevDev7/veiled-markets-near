@@ -6,26 +6,19 @@ import {
   LogOut,
   ExternalLink,
   Copy,
-  Check
+  Check,
+  ArrowRight
 } from 'lucide-react'
 import { useState } from 'react'
 import { useWalletStore } from '@/lib/store'
 import { cn, shortenAddress, formatCredits } from '@/lib/utils'
+import { WalletModal } from './WalletModal'
 
 export function Header() {
-  const { wallet, connect, disconnect } = useWalletStore()
-  const [isConnecting, setIsConnecting] = useState(false)
+  const { wallet, disconnect } = useWalletStore()
   const [showDropdown, setShowDropdown] = useState(false)
   const [copied, setCopied] = useState(false)
-
-  const handleConnect = async () => {
-    setIsConnecting(true)
-    try {
-      await connect('puzzle')
-    } finally {
-      setIsConnecting(false)
-    }
-  }
+  const [showWalletModal, setShowWalletModal] = useState(false)
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -187,33 +180,30 @@ export function Header() {
               </div>
             ) : (
               <button
-                onClick={handleConnect}
-                disabled={isConnecting}
+                onClick={() => setShowWalletModal(true)}
                 className={cn(
                   'flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm',
                   'bg-gradient-to-r from-brand-600 to-brand-500',
                   'hover:from-brand-500 hover:to-brand-400',
                   'shadow-lg shadow-brand-500/25 hover:shadow-xl hover:shadow-brand-500/30',
-                  'transition-all duration-200',
-                  isConnecting && 'opacity-80 cursor-wait'
+                  'transition-all duration-200 group'
                 )}
               >
-                {isConnecting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>Connecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Wallet className="w-4 h-4" />
-                    <span>Connect Wallet</span>
-                  </>
-                )}
+                <Wallet className="w-4 h-4" />
+                <span>Launch App</span>
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </button>
             )}
           </motion.div>
         </div>
       </div>
+
+      {/* Wallet Modal */}
+      <WalletModal
+        isOpen={showWalletModal}
+        onClose={() => setShowWalletModal(false)}
+        onConnect={() => setShowWalletModal(false)}
+      />
     </header>
   )
 }
