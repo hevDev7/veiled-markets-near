@@ -133,14 +133,16 @@ The contract is already deployed on Aleo Testnet:
 
 ### Live Markets
 
-8 real markets are currently active across all categories:
-1. **Politics**: Will Trump complete his full presidential term through 2028?
-2. **Sports**: Will Lionel Messi win the 2026 FIFA World Cup with Argentina?
-3. **Crypto**: Will Bitcoin reach $150,000 by end of Q1 2026?
-4. **Entertainment**: Will Avatar 3 gross over $2 billion worldwide in 2026?
-5. **Tech**: Will Apple release AR glasses (Apple Vision Pro 2) in 2026?
-6. **Economics**: Will global inflation drop below 3% average by end of 2026?
-7. **Science**: Will NASA Artemis III successfully land humans on Moon in 2026?
+9 real markets are currently active across all categories:
+1. **Crypto**: Will Bitcoin reach $100,000 by end of Q1 2026?
+2. **Politics**: Will Trump win the 2024 US Presidential Election?
+3. **Sports**: Will Lakers win NBA Championship 2026?
+4. **Crypto**: Will Ethereum reach $5,000 by March 2026?
+5. **Entertainment**: Will Taylor Swift release a new album in 2026?
+6. **Tech**: Will Apple release AR glasses in 2026?
+7. **Economics**: Will US Fed cut interest rates in Q1 2026?
+8. **Science**: Will SpaceX land on Mars by 2030?
+9. **Crypto**: Will Ethereum reach $10,000 by end of Q2 2026? ⭐ NEW
 
 All markets are verifiable on-chain with transaction links!
 
@@ -160,11 +162,13 @@ veiled-markets/
 │   │   ├── lib/           # Utilities & SDK integration
 │   │   │   ├── aleo-client.ts      # Blockchain client
 │   │   │   ├── market-store.ts     # Real market data store
+│   │   │   ├── question-mapping.ts # Question hash to text mapping
 │   │   │   ├── wallet.ts           # Wallet adapters
 │   │   │   └── store.ts            # Global state
 │   │   ├── pages/         # Page components (Dashboard, MarketDetail)
 │   │   └── styles/        # Global styles & theme
 │   └── public/            # Static assets
+│       └── markets-index.json # Indexed markets from blockchain
 ├── backend/               # Blockchain indexer service
 │   ├── src/
 │   │   ├── indexer.ts     # Market indexer logic
@@ -178,7 +182,8 @@ veiled-markets/
 │   │   └── utils.ts       # Helper functions
 │   └── package.json
 ├── scripts/               # Utility scripts
-│   └── index-markets.sh   # Run blockchain indexer
+│   ├── index-markets.sh   # Run blockchain indexer
+│   └── generate-question-hash.js # Generate SHA-256 hashes for questions
 ├── docs/                  # Documentation
 │   ├── ARCHITECTURE.md
 │   ├── AMM_IMPLEMENTATION.md
@@ -217,6 +222,14 @@ veiled-markets/
 
 ### New Features (Latest Update)
 
+#### 🎯 Dynamic Question Mapping System
+All market questions are now stored in localStorage and managed dynamically through the question-mapping system. No more hardcoded questions in the codebase!
+
+- Questions mapped by SHA-256 hash (converted to Aleo decimal format)
+- Automatic initialization on app startup
+- Easy to add new markets without code changes
+- Fallback to hash preview if question not found
+
 #### 🔗 On-Chain Verification
 Every market card displays a "Verify On-Chain" button that links to the creation transaction on Aleo blockchain explorer. This proves markets are genuinely hosted on-chain, not mock data.
 
@@ -227,11 +240,12 @@ Market IDs are displayed in truncated format (e.g., `2226266059...41034862field`
 Automated service that scans the blockchain for market creation transactions, eliminating the need for hardcoded market IDs. Scalable solution for production deployment.
 
 #### 📊 Real Market Data
-All 8 markets fetch live data from Aleo testnet:
+All 9 markets fetch live data from Aleo testnet:
 - Real pool sizes
 - Actual bet counts
 - Live block heights
 - Accurate time remaining
+- Dynamic question text from localStorage
 
 ## 🔐 Privacy Model
 
@@ -295,18 +309,17 @@ Unlike AMM-based prediction markets, Veiled Markets uses a **parimutuel pool sys
 | Wallet | Status | Features | Notes |
 |--------|--------|----------|-------|
 | 🧩 **Puzzle Wallet** | ✅ Fully Supported | Full integration, balance display | Recommended |
-| 🦁 **Leo Wallet** | ⚠️ Limited | Basic integration | SDK compatibility issues |
-| 🎮 **Demo Mode** | ✅ Available | Test without real wallet | For development |
+| 🦁 **Leo Wallet** | ✅ Supported | Full integration | Works with latest SDK |
 
 ### Wallet Features
 - ✅ **Real-time balance updates** (public + private credits)
 - ✅ **Transaction signing** via wallet extension
 - ✅ **Network switching** (testnet/mainnet)
 - ✅ **Address display** with copy functionality
-- ⚠️ **Record decryption** (limited by wallet SDK)
+- ✅ **Secure connection** with wallet encryption
 
-### Known Issues
-- Leo Wallet returns generic errors due to SDK incompatibility
+### Important Notes
+- Demo Mode has been removed - users must connect with real wallets
 - Puzzle Wallet requires specific network names: `AleoTestnet`, `AleoMainnet`
 - Private balance reading may be limited by wallet capabilities
 
@@ -333,21 +346,24 @@ cd ..
 
 ### Output
 
-The indexer generates `frontend/public/markets-index.json`:
+The indexer generates `backend/public/markets-index.json` and copies it to `frontend/public/markets-index.json`:
 
 ```json
 {
-  "lastUpdated": "2026-01-28T10:30:00.000Z",
-  "totalMarkets": 8,
+  "lastUpdated": "2026-01-28T15:40:51.456Z",
+  "totalMarkets": 9,
   "marketIds": ["...", "..."],
   "markets": [
     {
-      "marketId": "...",
-      "transactionId": "at1...",
-      "questionHash": "10001field",
-      "category": 1,
-      "deadline": "14107191u64",
-      "blockHeight": 14067123
+      "marketId": "3582024152336217571382682973364798990155453514672503623063651091171230848724field",
+      "transactionId": "at1crl3gd6ukawwrslf3r5vqttg7a8hll84fj2klqtmtwdafntspg9sgcgw2a",
+      "creator": "aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8",
+      "questionHash": "350929565016816493992297964402345071115472527106339097957348390879136520853field",
+      "category": 3,
+      "deadline": "14107320u64",
+      "resolutionDeadline": "14124600u64",
+      "createdAt": 1769614851455,
+      "blockHeight": 14067000
     }
   ]
 }
@@ -369,17 +385,43 @@ See [INDEXER_GUIDE.md](./INDEXER_GUIDE.md) for detailed documentation.
 ```bash
 cd contracts
 
+# Generate question hash first
+node ../scripts/generate-question-hash.js "Will Ethereum reach $10,000 by end of Q2 2026?"
+# Output: 350929565016816493992297964402345071115472527106339097957348390879136520853field
+
 # Create a single market
 leo execute create_market \
-  "10001field" \      # question_hash
-  "1u8" \             # category (1=Politics)
-  "14107191u64" \     # betting_deadline (block height)
-  "14124471u64" \     # resolution_deadline (block height)
+  "350929565016816493992297964402345071115472527106339097957348390879136520853field" \  # question_hash (decimal format)
+  "3u8" \             # category (3=Crypto)
+  "14107320u64" \     # betting_deadline (block height)
+  "14124600u64" \     # resolution_deadline (block height)
   --broadcast
 
 # Create multiple markets
 ./create-markets.sh
+
+# Or use the new market creation script
+./create-new-market.sh
 ```
+
+### Adding Question Mapping
+
+After creating a market, add the question mapping to `frontend/src/lib/question-mapping.ts`:
+
+```typescript
+export function initializeQuestionMappings(): void {
+    const mappings: Record<string, string> = {
+        // ... existing mappings ...
+        
+        // Your new market
+        '350929565016816493992297964402345071115472527106339097957348390879136520853field':
+            'Will Ethereum reach $10,000 by end of Q2 2026?',
+    };
+    // ...
+}
+```
+
+The question will automatically appear in the dashboard after refresh!
 
 ### Testing
 
@@ -415,6 +457,7 @@ VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 - [On-Chain Verification](./docs/ON_CHAIN_VERIFICATION.md)
 - [Copyable Market ID](./docs/COPYABLE_MARKET_ID.md)
 - [Indexer Guide](./INDEXER_GUIDE.md)
+- [Create Market Guide](./CREATE_MARKET_GUIDE.md)
 - [Wallet Troubleshooting](./WALLET_TROUBLESHOOTING.md)
 - [Real Data Integration](./REAL_DATA_INTEGRATION.md)
 
