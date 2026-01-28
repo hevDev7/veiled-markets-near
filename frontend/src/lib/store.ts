@@ -7,6 +7,14 @@ import {
   type WalletAccount,
   type WalletBalance,
 } from './wallet'
+import {
+  buildPlaceBetInputs,
+  CONTRACT_INFO,
+} from './aleo-client'
+import { config } from './config'
+
+// Re-export for use in components
+export { CONTRACT_INFO } from './aleo-client'
 
 // ============================================================================
 // Types
@@ -585,21 +593,34 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       throw new Error('Wallet not connected')
     }
 
+    if (!walletState.address) {
+      throw new Error('Wallet address not available')
+    }
+
     set({ isPlacingBet: true })
 
     try {
+      // Build inputs for the deployed veiled_markets.aleo contract
+      // place_bet(market_id: field, amount: u64, outcome: u8, bettor: address)
+      const inputs = buildPlaceBetInputs(
+        marketId,
+        amount,
+        outcome,
+        walletState.address
+      )
+
+      console.log('Placing bet with inputs:', inputs)
+      console.log('Program ID:', CONTRACT_INFO.programId)
+
       // Request transaction through wallet
       const transactionId = await walletManager.requestTransaction({
-        programId: 'veiled_markets.aleo',
+        programId: CONTRACT_INFO.programId,
         functionName: 'place_bet',
-        inputs: [
-          marketId,
-          `${amount}u64`,
-          outcome === 'yes' ? '1u8' : '2u8',
-          // Credits record would be provided by wallet
-        ],
-        fee: 100000, // 0.1 credits fee
+        inputs,
+        fee: 500000, // 0.5 credits fee for testnet
       })
+
+      console.log('Bet transaction submitted:', transactionId)
 
       // Add to pending bets
       const newBet: Bet = {
@@ -616,17 +637,43 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         isPlacingBet: false,
       })
 
-      // In real app, we'd poll for transaction confirmation
-      // and move from pending to active when confirmed
+      // Poll for transaction confirmation
+      // In production, use WebSocket or more sophisticated polling
+      const pollInterval = setInterval(async () => {
+        try {
+          const response = await fetch(
+            `${config.rpcUrl}/transaction/${transactionId}`
+          )
+          if (response.ok) {
+            clearInterval(pollInterval)
+            set({
+              pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
+              userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
+            })
+            // Refresh balance after successful bet
+            useWalletStore.getState().refreshBalance()
+          }
+        } catch {
+          // Transaction not confirmed yet, continue polling
+        }
+      }, 5000)
+
+      // Timeout after 2 minutes
       setTimeout(() => {
-        set({
-          pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
-          userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
-        })
-      }, 3000)
+        clearInterval(pollInterval)
+        // If still pending after timeout, mark as active (optimistic)
+        const stillPending = get().pendingBets.find(b => b.id === transactionId)
+        if (stillPending) {
+          set({
+            pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
+            userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
+          })
+        }
+      }, 120000)
 
       return transactionId
     } catch (error: any) {
+      console.error('Place bet error:', error)
       set({ isPlacingBet: false })
       throw error
     }

@@ -1,8 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Shield, Lock, TrendingUp, Check, Loader2 } from 'lucide-react'
+import { X, Shield, Lock, TrendingUp, Check, Loader2, ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 import { type Market, useWalletStore, useBetsStore } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
+import { getTransactionUrl } from '@/lib/aleo-client'
 
 interface BettingModalProps {
   market: Market | null
@@ -21,13 +22,15 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const [betAmount, setBetAmount] = useState('')
   const [step, setStep] = useState<BetStep>('select')
   const [isPlacing, setIsPlacing] = useState(false)
+  const [transactionId, setTransactionId] = useState<string | null>(null)
 
   const handlePlaceBet = async () => {
     if (!market || !selectedOutcome || !betAmount) return
 
     setIsPlacing(true)
     try {
-      await placeBet(market.id, BigInt(parseFloat(betAmount) * 1_000_000), selectedOutcome)
+      const txId = await placeBet(market.id, BigInt(parseFloat(betAmount) * 1_000_000), selectedOutcome)
+      setTransactionId(txId)
       setStep('success')
     } catch (error) {
       console.error('Failed to place bet:', error)
@@ -40,6 +43,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     setSelectedOutcome(null)
     setBetAmount('')
     setStep('select')
+    setTransactionId(null)
     onClose()
   }
 
@@ -345,6 +349,21 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           <span className="font-medium text-white">{potentialPayout.toFixed(2)} ALEO</span>
                         </div>
                       </div>
+
+                      {transactionId && (
+                        <div className="p-3 rounded-lg bg-surface-800/30 mb-4">
+                          <p className="text-xs text-surface-500 mb-1">Transaction ID</p>
+                          <p className="text-xs text-white font-mono break-all">{transactionId}</p>
+                          <a
+                            href={getTransactionUrl(transactionId)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 mt-2"
+                          >
+                            View on Explorer <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      )}
 
                       <div className="flex items-center justify-center gap-2 text-sm text-brand-400 mb-6">
                         <Shield className="w-4 h-4" />

@@ -163,7 +163,16 @@ program veiled_markets.aleo {
     // ========================================================================
     // Using async transitions for on-chain state mutations.
     // Each async transition returns a Future that executes on-chain.
-    
+
+    // ------------------------------------------------------------------------
+    // CONSTRUCTOR (Required since Leo v3.1.0)
+    // Locks program to prevent future upgrades
+    // ------------------------------------------------------------------------
+    @noupgrade
+    async constructor() {
+        // Leo compiler auto-generates upgrade prevention logic
+    }
+
     // ------------------------------------------------------------------------
     // CREATE MARKET
     // Creates a new prediction market with specified parameters
@@ -249,6 +258,7 @@ program veiled_markets.aleo {
         public market_id: field,
         public amount: u64,
         public outcome: u8,
+        private bettor: address,  // Explicit bettor address to avoid self.caller issues
     ) -> (Bet, Future) {
         // Validate outcome (must be YES or NO)
         assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
@@ -256,9 +266,12 @@ program veiled_markets.aleo {
         // Validate amount (must meet minimum)
         assert(amount >= MIN_BET_AMOUNT);
         
+        // Security: Ensure bettor is the caller (prevent bet on behalf of others)
+        assert(bettor == self.caller);
+        
         // Create private bet record (stays with user)
         let bet: Bet = Bet {
-            owner: self.caller,
+            owner: bettor,  // Use explicit bettor address, not self.caller
             market_id: market_id,
             amount: amount,
             outcome: outcome,
@@ -648,4 +661,3 @@ program veiled_markets.aleo {
         return (total_pool * 10000u64) / winning_pool;
     }
 }
-

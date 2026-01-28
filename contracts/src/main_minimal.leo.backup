@@ -1,0 +1,130 @@
+program veiled_markets.aleo {
+    // Veiled Markets - Minimal Version for Testing Deployment
+    
+    // Market status constants
+    const MARKET_STATUS_ACTIVE: u8 = 1u8;
+    const MARKET_STATUS_CLOSED: u8 = 2u8;
+    const OUTCOME_YES: u8 = 1u8;
+    const OUTCOME_NO: u8 = 2u8;
+    const MIN_BET_AMOUNT: u64 = 1000u64;
+    
+    // Private bet record
+    record Bet {
+        owner: address,
+        market_id: field,
+        amount: u64,
+        outcome: u8,
+        placed_at: u64,
+    }
+    
+    // Public market information
+    struct Market {
+        id: field,
+        creator: address,
+        question_hash: field,
+        deadline: u64,
+        status: u8,
+        created_at: u64,
+    }
+    
+    // Market pool data
+    struct MarketPool {
+        market_id: field,
+        total_yes_pool: u64,
+        total_no_pool: u64,
+        total_bets: u64,
+    }
+    
+    // Public state
+    mapping markets: field => Market;
+    mapping market_pools: field => MarketPool;
+    
+    // Create a new market
+    async transition create_market(
+        public question_hash: field,
+        public deadline: u64,
+    ) -> (field, Future) {
+        let market_id: field = BHP256::hash_to_field(question_hash);
+        return (market_id, create_market_onchain(market_id, self.caller, question_hash, deadline));
+    }
+    
+    async function create_market_onchain(
+        market_id: field,
+        creator: address,
+        question_hash: field,
+        deadline: u64,
+    ) {
+        let market_exists: bool = markets.contains(market_id);
+        assert(!market_exists);
+        
+        let current_height: u64 = block.height as u64;
+        assert(deadline > current_height);
+        
+        let new_market: Market = Market {
+            id: market_id,
+            creator: creator,
+            question_hash: question_hash,
+            deadline: deadline,
+            status: MARKET_STATUS_ACTIVE,
+            created_at: current_height,
+        };
+        
+        let initial_pool: MarketPool = MarketPool {
+            market_id: market_id,
+            total_yes_pool: 0u64,
+            total_no_pool: 0u64,
+            total_bets: 0u64,
+        };
+        
+        markets.set(market_id, new_market);
+        market_pools.set(market_id, initial_pool);
+    }
+    
+    // Place a bet
+    async transition place_bet(
+        public market_id: field,
+        public amount: u64,
+        public outcome: u8,
+        private bettor: address,
+    ) -> (Bet, Future) {
+        assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
+        assert(amount >= MIN_BET_AMOUNT);
+        assert(bettor == self.caller);
+        
+        let bet: Bet = Bet {
+            owner: bettor,
+            market_id: market_id,
+            amount: amount,
+            outcome: outcome,
+            placed_at: 0u64,
+        };
+        
+        return (bet, place_bet_onchain(market_id, amount, outcome));
+    }
+    
+    async function place_bet_onchain(
+        market_id: field,
+        amount: u64,
+        outcome: u8,
+    ) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
+        
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= market.deadline);
+        
+        let pool: MarketPool = market_pools.get(market_id);
+        
+        let yes_add: u64 = outcome == OUTCOME_YES ? amount : 0u64;
+        let no_add: u64 = outcome == OUTCOME_NO ? amount : 0u64;
+        
+        let updated_pool: MarketPool = MarketPool {
+            market_id: market_id,
+            total_yes_pool: pool.total_yes_pool + yes_add,
+            total_no_pool: pool.total_no_pool + no_add,
+            total_bets: pool.total_bets + 1u64,
+        };
+        
+        market_pools.set(market_id, updated_pool);
+    }
+}
