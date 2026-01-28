@@ -63,14 +63,23 @@ const PROGRAM_ID = config.programId || 'veiled_markets.aleo';
 function parseAleoStruct(value: string): Record<string, string> {
   if (!value) return {};
 
-  // Remove outer braces and split by comma
+  // Value is already a clean string with actual newlines (not \n)
+  // Remove outer braces
   const inner = value.replace(/^\{|\}$/g, '').trim();
   const result: Record<string, string> = {};
 
-  // Parse key: value pairs
-  const parts = inner.split(',');
-  for (const part of parts) {
-    const [key, val] = part.split(':').map(s => s.trim());
+  // Split by actual newlines
+  const lines = inner.split('\n').map(l => l.trim()).filter(l => l);
+
+  for (const line of lines) {
+    // Remove trailing comma if present
+    const cleanLine = line.replace(/,$/, '').trim();
+    const colonIndex = cleanLine.indexOf(':');
+    if (colonIndex === -1) continue;
+
+    const key = cleanLine.substring(0, colonIndex).trim();
+    const val = cleanLine.substring(colonIndex + 1).trim().replace(/,$/, '');
+
     if (key && val) {
       result[key] = val;
     }
@@ -87,18 +96,29 @@ function parseAleoValue(value: string): string | number | bigint | boolean {
 
   const trimmed = value.trim().replace(/"/g, '');
 
+  // Handle field type
   if (trimmed.endsWith('field')) {
     return trimmed;
   }
+
+  // Handle u8
   if (trimmed.endsWith('u8')) {
-    return parseInt(trimmed.replace('u8', ''));
+    const num = trimmed.replace('u8', '');
+    return parseInt(num);
   }
+
+  // Handle u64
   if (trimmed.endsWith('u64')) {
-    return BigInt(trimmed.replace('u64', ''));
+    const num = trimmed.replace('u64', '');
+    return BigInt(num);
   }
+
+  // Handle addresses
   if (trimmed.startsWith('aleo1')) {
     return trimmed;
   }
+
+  // Handle booleans
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
 
@@ -141,14 +161,15 @@ export async function getMappingValue<T>(
     const data = await response.text();
     console.log('Mapping response:', data);
 
-    // Parse the response
-    const cleanData = data.replace(/"/g, '').trim();
+    // Parse the JSON string first (API returns JSON-encoded string)
+    const cleanData = JSON.parse(data);
 
-    // If it's a struct, parse it
-    if (cleanData.startsWith('{')) {
+    // If it's a struct (starts with {), parse it
+    if (typeof cleanData === 'string' && cleanData.trim().startsWith('{')) {
       return parseAleoStruct(cleanData) as T;
     }
 
+    // Otherwise parse as simple value
     return parseAleoValue(cleanData) as T;
   } catch (error) {
     console.error(`Failed to fetch mapping ${mappingName}[${key}]:`, error);
@@ -163,16 +184,36 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
   const data = await getMappingValue<Record<string, string>>('markets', marketId);
   if (!data) return null;
 
-  return {
-    id: String(data.id || marketId),
-    creator: String(data.creator || ''),
-    question_hash: String(data.question_hash || ''),
-    category: Number(parseAleoValue(data.category || '0u8')),
-    deadline: BigInt(parseAleoValue(data.deadline || '0u64') as bigint),
-    resolution_deadline: BigInt(parseAleoValue(data.resolution_deadline || '0u64') as bigint),
-    status: Number(parseAleoValue(data.status || '1u8')),
-    created_at: BigInt(parseAleoValue(data.created_at || '0u64') as bigint),
+  console.log('getMarket parsed data:', data);
+
+  // Parse each field explicitly
+  const parsedCategory = parseAleoValue(data.category || '0u8');
+  const parsedDeadline = parseAleoValue(data.deadline || '0u64');
+  const parsedResolutionDeadline = parseAleoValue(data.resolution_deadline || '0u64');
+  const parsedStatus = parseAleoValue(data.status || '1u8');
+  const parsedCreatedAt = parseAleoValue(data.created_at || '0u64');
+
+  console.log('Parsed values:', {
+    category: parsedCategory,
+    deadline: parsedDeadline,
+    resolution_deadline: parsedResolutionDeadline,
+    status: parsedStatus,
+    created_at: parsedCreatedAt,
+  });
+
+  const result = {
+    id: data.id || marketId,
+    creator: data.creator || '',
+    question_hash: data.question_hash || '',
+    category: typeof parsedCategory === 'number' ? parsedCategory : 0,
+    deadline: typeof parsedDeadline === 'bigint' ? parsedDeadline : 0n,
+    resolution_deadline: typeof parsedResolutionDeadline === 'bigint' ? parsedResolutionDeadline : 0n,
+    status: typeof parsedStatus === 'number' ? parsedStatus : 1,
+    created_at: typeof parsedCreatedAt === 'bigint' ? parsedCreatedAt : 0n,
   };
+
+  console.log('getMarket result:', result);
+  return result;
 }
 
 /**
@@ -362,10 +403,152 @@ export async function hashToField(input: string): Promise<string> {
   return `${hashHex.substring(0, 62)}field`;
 }
 
+/**
+ * Known market IDs - Loaded dynamically from indexer
+ * Fallback to hardcoded IDs if indexer data not available
+ */
+let KNOWN_MARKET_IDS = [
+  '2226266059345959235903805886443078929600424190236962232761580543397941034862field', // First test market
+  '1343955940696835063665090431790223713510436410586241525974362313497380512445field', // Politics
+  '810523019777616412177748759438416240921384383441959113104962406712429357311field',  // Sports
+  '2561705300444654139615408172203999477019238232931615365990277976260492916308field', // Crypto
+  '6497398114847519923379901992833643876462593069120645523569600191102874822191field', // Entertainment
+  '2782540397887243983750241685138602830175258821940489779581095376798172768978field', // Tech
+  '7660559822229647474965631916495293995705931900965070950237377789460326943999field', // Economics
+  '425299171484137372110091327826787897441058548811928022547541653437849039243field',  // Science
+];
+
+/**
+ * Question text mapping (temporary - in production would use IPFS/storage)
+ * Maps question_hash to actual question text
+ */
+const QUESTION_TEXT_MAP: Record<string, string> = {
+  '12345field': 'Will Bitcoin reach $150,000 by end of Q1 2026?',
+  '10001field': 'Will Trump complete his full presidential term through 2028?',
+  '20002field': 'Will Lionel Messi win the 2026 FIFA World Cup with Argentina?',
+  '30003field': 'Will Bitcoin reach $150,000 by end of Q1 2026?',
+  '40004field': 'Will Avatar 3 gross over $2 billion worldwide in 2026?',
+  '50005field': 'Will Apple release AR glasses (Apple Vision Pro 2) in 2026?',
+  '60006field': 'Will global inflation drop below 3% average by end of 2026?',
+  '70007field': 'Will NASA Artemis III successfully land humans on Moon in 2026?',
+};
+
+/**
+ * Transaction ID mapping (for verification links)
+ * Maps market_id to creation transaction ID
+ */
+const MARKET_TX_MAP: Record<string, string> = {
+  '2226266059345959235903805886443078929600424190236962232761580543397941034862field': 'at1suyzwzd3zkymsewnpjqjs6h0x0k0u03yd8azv452ra36qjtzyvrsnjq902',
+  '1343955940696835063665090431790223713510436410586241525974362313497380512445field': 'at1j8xalgyfw7thg2zmpy9zlt82cpegse3vqsm9g3z2l3a59wj3ry8qg9n9u7',
+  '810523019777616412177748759438416240921384383441959113104962406712429357311field': 'at1q5rvkyexgwnvrwlw587s7qzl2tegn6524we96gyhuc0hz7zs55rqfm00r4',
+  '2561705300444654139615408172203999477019238232931615365990277976260492916308field': 'at1fvk3t9494tp56a7gykna7djgnurf25yphxg9ystprcjxhach0qxsn8e5wx',
+  '6497398114847519923379901992833643876462593069120645523569600191102874822191field': 'at1fnyzg2j7n4ep2l6p0qvlfnfqsufh7jxerfpe7chzymgsl0ukeyqqhrceej',
+  '2782540397887243983750241685138602830175258821940489779581095376798172768978field': 'at12f9uvhadvppk3kqqe8y6s4mwsnn37fnv2lkzd3s8pdvy9yz8h5zqyzwrwa',
+  '7660559822229647474965631916495293995705931900965070950237377789460326943999field': 'at14agvnhed7rfh9pvxfmm64kw50jt4aea0y40r0u2vc46znsvk3vgsdxglv4',
+  '425299171484137372110091327826787897441058548811928022547541653437849039243field': 'at1eqvc2jzfnmuc7c9fzuny0uu34tqfjd2mv4xpqnknd9hnvz8l2qrsd8yyez',
+};
+
+/**
+ * Load market IDs from indexer service
+ */
+async function loadMarketIdsFromIndexer(): Promise<string[]> {
+  try {
+    const response = await fetch('/markets-index.json');
+    if (!response.ok) {
+      console.warn('Indexer data not found, using fallback market IDs');
+      return KNOWN_MARKET_IDS;
+    }
+
+    const data = await response.json();
+    const marketIds = data.marketIds || [];
+
+    if (marketIds.length > 0) {
+      console.log(`✅ Loaded ${marketIds.length} markets from indexer`);
+      return marketIds;
+    }
+
+    return KNOWN_MARKET_IDS;
+  } catch (error) {
+    console.error('Failed to load indexer data:', error);
+    return KNOWN_MARKET_IDS;
+  }
+}
+
+/**
+ * Initialize market IDs (call this on app startup)
+ */
+export async function initializeMarketIds(): Promise<void> {
+  const indexedIds = await loadMarketIdsFromIndexer();
+  if (indexedIds.length > 0) {
+    KNOWN_MARKET_IDS = indexedIds;
+  }
+}
+
+/**
+ * Get question text from hash
+ */
+export function getQuestionText(questionHash: string): string {
+  return QUESTION_TEXT_MAP[questionHash] || `Market with hash ${questionHash.slice(0, 12)}...`;
+}
+
+/**
+ * Get transaction ID for market (for verification)
+ */
+export function getMarketTransactionId(marketId: string): string | null {
+  return MARKET_TX_MAP[marketId] || null;
+}
+
+/**
+ * Fetch all markets from blockchain (requires indexer in production)
+ * For now, fetches known market IDs manually
+ */
+export async function fetchAllMarkets(): Promise<Array<{
+  market: MarketData;
+  pool: MarketPoolData;
+  resolution?: MarketResolutionData;
+}>> {
+  console.log('fetchAllMarkets: Fetching known markets...');
+
+  const results = await Promise.all(
+    KNOWN_MARKET_IDS.map(id => fetchMarketById(id))
+  );
+
+  // Filter out nulls and return valid markets
+  return results.filter((r): r is NonNullable<typeof r> => r !== null);
+}
+
+/**
+ * Fetch complete market data by ID
+ */
+export async function fetchMarketById(marketId: string) {
+  try {
+    const [market, pool, resolution] = await Promise.all([
+      getMarket(marketId),
+      getMarketPool(marketId),
+      getMarketResolution(marketId),
+    ]);
+
+    if (!market || !pool) {
+      return null;
+    }
+
+    return {
+      market,
+      pool,
+      resolution: resolution || undefined,
+    };
+  } catch (error) {
+    console.error(`Failed to fetch market ${marketId}:`, error);
+    return null;
+  }
+}
+
 // Export a singleton instance info
 export const CONTRACT_INFO = {
   programId: PROGRAM_ID,
   deploymentTxId: 'at1j2f9r4mdls0n6k55nnscdckhuz7uyqfkuhj9kmer2v2hs6z0u5zsm8xf90',
   network: 'testnet',
   explorerUrl: config.explorerUrl,
+  // Note: Mock data is used until indexer is available
+  useMockData: true,
 };

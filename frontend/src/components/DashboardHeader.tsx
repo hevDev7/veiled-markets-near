@@ -59,6 +59,16 @@ export function DashboardHeader() {
   // Get total balance (public + private)
   const totalBalance = wallet.balance.public + wallet.balance.private
 
+  // Debug logging
+  console.log('Dashboard Header Balance:', {
+    public: wallet.balance.public.toString(),
+    private: wallet.balance.private.toString(),
+    total: totalBalance.toString(),
+    publicCredits: Number(wallet.balance.public) / 1_000_000,
+    privateCredits: Number(wallet.balance.private) / 1_000_000,
+    totalCredits: Number(totalBalance) / 1_000_000,
+  })
+
   return (
     <header className="fixed top-0 left-0 right-0 z-50">
       {/* Backdrop blur */}

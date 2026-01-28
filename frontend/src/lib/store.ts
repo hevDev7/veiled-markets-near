@@ -53,6 +53,7 @@ export interface Market {
   timeRemaining?: string
   resolutionSource?: string
   tags?: string[]
+  transactionId?: string // Creation transaction ID for verification
 }
 
 export interface SharePosition {
@@ -267,6 +268,18 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
     totalNoIssued: BigInt(Math.floor(Number(totalVolume) * noPrice)),
   }
 }
+
+// ============================================================================
+// MOCK DATA FOR DEMONSTRATION
+// ============================================================================
+// These markets are for UI demonstration only and are NOT on-chain.
+// Real markets created via the "Create Market" modal will be stored on-chain
+// in the veiled_markets.aleo program.
+//
+// TODO: Replace with real blockchain data once indexer is available
+// An indexer service will track market creation events and provide a list
+// of all market IDs that can be queried from the blockchain.
+// ============================================================================
 
 const mockMarkets: Market[] = [
   // === CRYPTO MARKETS ===
@@ -527,9 +540,22 @@ export const useMarketsStore = create<MarketsStore>((set, get) => ({
 
   fetchMarkets: async () => {
     set({ isLoading: true })
-    // Simulate API call - in production, this would fetch from Aleo network
-    await new Promise(resolve => setTimeout(resolve, 800))
-    set({ markets: mockMarkets, isLoading: false })
+    try {
+      // TODO: Implement real blockchain data fetching
+      // For now, we'll use mock data until we have an indexer or can query the chain
+      // In production, this would:
+      // 1. Query all market IDs from an indexer
+      // 2. Fetch each market's data from the blockchain
+      // 3. Fetch pool data for each market
+      // 4. Transform to Market format
+
+      // Temporary: Use mock data for demo
+      await new Promise(resolve => setTimeout(resolve, 800))
+      set({ markets: mockMarkets, isLoading: false })
+    } catch (error) {
+      console.error('Failed to fetch markets:', error)
+      set({ markets: [], isLoading: false })
+    }
   },
 
   selectMarket: (market) => {

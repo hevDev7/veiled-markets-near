@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion'
-import { Clock, Users, TrendingUp, Shield, Zap } from 'lucide-react'
+import { Clock, Users, TrendingUp, Shield, Zap, ExternalLink } from 'lucide-react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
+import { config } from '@/lib/config'
 
 interface MarketCardProps {
   market: Market
@@ -10,8 +11,13 @@ interface MarketCardProps {
 }
 
 export function MarketCard({ market, index, onClick }: MarketCardProps) {
-  const timeRemaining = getTimeRemaining(market.deadline)
-  
+  console.log('MarketCard market:', {
+    id: market.id.slice(0, 20),
+    deadline: market.deadline,
+    timeRemaining: market.timeRemaining,
+  });
+  const timeRemaining = getTimeRemaining(market.deadline, market.timeRemaining)
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 30 }}
@@ -27,7 +33,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           <span className="text-lg">{getCategoryEmoji(market.category)}</span>
           <span className="category-badge">{getCategoryName(market.category)}</span>
           {market.tags?.slice(0, 2).map(tag => (
-            <span 
+            <span
               key={tag}
               className={cn(
                 "px-2 py-0.5 text-[10px] font-medium rounded-full",
@@ -42,7 +48,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
             </span>
           ))}
         </div>
-        
+
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <Shield className="w-3.5 h-3.5 text-brand-400" />
           <span className="text-xs text-brand-400 font-medium">Private</span>
@@ -66,11 +72,11 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
             <span className="text-no-400 font-semibold">No</span>
           </div>
         </div>
-        
+
         <div className="odds-bar">
-          <div 
-            className="odds-bar-yes" 
-            style={{ width: `${market.yesPercentage}%` }} 
+          <div
+            className="odds-bar-yes"
+            style={{ width: `${market.yesPercentage}%` }}
           />
         </div>
       </div>
@@ -86,7 +92,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           </p>
           <p className="text-[10px] text-surface-500 uppercase">Volume</p>
         </div>
-        
+
         <div className="text-center p-2 rounded-lg bg-surface-800/50">
           <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
             <Users className="w-3.5 h-3.5" />
@@ -94,7 +100,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           <p className="text-sm font-semibold text-white">{market.totalBets}</p>
           <p className="text-[10px] text-surface-500 uppercase">Bets</p>
         </div>
-        
+
         <div className="text-center p-2 rounded-lg bg-surface-800/50">
           <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
             <Clock className="w-3.5 h-3.5" />
@@ -115,7 +121,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           <Zap className="w-4 h-4" />
           <span>Yes {market.potentialYesPayout.toFixed(2)}x</span>
         </button>
-        
+
         <button className={cn(
           'flex-1 py-2.5 rounded-lg font-medium text-sm',
           'bg-no-500/10 text-no-400 border border-no-500/20',
@@ -126,11 +132,35 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           <span>No {market.potentialNoPayout.toFixed(2)}x</span>
         </button>
       </div>
+
+      {/* On-chain Verification Link */}
+      {market.transactionId && (
+        <a
+          href={`${config.explorerUrl}/transaction/${market.transactionId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            'mt-3 flex items-center justify-center gap-2 py-2 px-3 rounded-lg',
+            'bg-brand-500/10 border border-brand-500/20 text-brand-400',
+            'hover:bg-brand-500/20 hover:border-brand-500/40 transition-all',
+            'text-xs font-medium'
+          )}
+        >
+          <Shield className="w-3.5 h-3.5" />
+          <span>Verify On-Chain</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      )}
     </motion.div>
   )
 }
 
-function getTimeRemaining(deadline: bigint): string {
+function getTimeRemaining(deadline: bigint, timeRemaining?: string): string {
+  // If timeRemaining is already calculated (from block height), use it
+  if (timeRemaining) return timeRemaining;
+
+  // Fallback: treat deadline as Unix timestamp
   const now = Date.now() / 1000
   const target = Number(deadline)
   const diff = target - now

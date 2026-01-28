@@ -16,11 +16,13 @@ import {
     Bitcoin,
     DollarSign,
     Cpu,
-    Vote
+    Vote,
+    RefreshCw
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMarketsStore, useWalletStore, type Market } from '@/lib/store'
+import { useWalletStore, type Market } from '@/lib/store'
+import { useRealMarketsStore } from '@/lib/market-store'
 import { MarketRow } from '@/components/MarketRow'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
@@ -45,7 +47,7 @@ const sortOptions = [
 export function Dashboard() {
     const navigate = useNavigate()
     const { wallet } = useWalletStore()
-    const { markets, isLoading, fetchMarkets } = useMarketsStore()
+    const { markets, isLoading, fetchMarkets, addMarket } = useRealMarketsStore()
 
     const [selectedCategory, setSelectedCategory] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
@@ -60,6 +62,9 @@ export function Dashboard() {
 
     useEffect(() => {
         fetchMarkets()
+        // Refresh markets every 30 seconds
+        const interval = setInterval(fetchMarkets, 30000)
+        return () => clearInterval(interval)
     }, [fetchMarkets])
 
     const filteredMarkets = markets
@@ -112,6 +117,28 @@ export function Dashboard() {
             <DashboardHeader />
 
             <main className="pt-20 relative z-10">
+                {/* On-Chain Data Notice Banner */}
+                <div className="border-b border-brand-500/20 bg-brand-500/5 backdrop-blur-xl">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+                        <div className="flex items-center gap-3 text-sm">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-yes-400 animate-pulse" />
+                                <span className="text-brand-400 font-mono font-bold">ON_CHAIN_DATA</span>
+                            </div>
+                            <span className="text-brand-300/80 font-mono">
+                                Showing real markets from veiled_markets.aleo contract. Create your first market to get started!
+                            </span>
+                            <button
+                                onClick={() => fetchMarkets()}
+                                className="ml-auto flex items-center gap-2 text-brand-400 hover:text-brand-300 font-mono text-xs"
+                            >
+                                <RefreshCw className="w-3 h-3" />
+                                REFRESH
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Command Center Header */}
                 <div className="border-b border-brand-500/10 bg-surface-900/30 backdrop-blur-xl">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -358,7 +385,10 @@ export function Dashboard() {
                 onClose={() => setIsCreateMarketOpen(false)}
                 onSuccess={(marketId) => {
                     console.log('Market created:', marketId)
-                    fetchMarkets()
+                    // Add the new market to the list
+                    addMarket(marketId)
+                    // Refresh all markets after a short delay to ensure blockchain state is updated
+                    setTimeout(() => fetchMarkets(), 3000)
                 }}
             />
         </div>

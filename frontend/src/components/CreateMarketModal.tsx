@@ -170,6 +170,24 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
       console.log('Creating market with inputs:', inputs)
       console.log('Program ID:', CONTRACT_INFO.programId)
+      console.log('Deployment TX:', CONTRACT_INFO.deploymentTxId)
+
+      // Validate inputs before sending
+      if (!questionHash || !questionHash.endsWith('field')) {
+        throw new Error('Invalid question hash format')
+      }
+
+      if (formData.category < 1 || formData.category > 7) {
+        throw new Error('Invalid category')
+      }
+
+      if (deadlineBlockHeight <= currentBlock) {
+        throw new Error('Deadline must be in the future')
+      }
+
+      if (resolutionBlockHeight <= deadlineBlockHeight) {
+        throw new Error('Resolution deadline must be after betting deadline')
+      }
 
       // Request transaction through wallet
       const transactionId = await walletManager.requestTransaction({
@@ -177,6 +195,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         functionName: 'create_market',
         inputs,
         fee: 1000000, // 1 credit fee for market creation
+        // Don't specify network, let wallet use its current network
       })
 
       console.log('Market creation transaction submitted:', transactionId)

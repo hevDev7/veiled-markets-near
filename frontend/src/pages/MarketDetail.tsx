@@ -11,15 +11,17 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Info
+  Info,
+  Copy,
+  Check
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useWalletStore, useMarketsStore, useBetsStore, type Market } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
+import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { OddsChart } from '@/components/OddsChart'
-import { PrivacyNotice } from '@/components/PrivacyNotice'
 import { cn, formatCredits } from '@/lib/utils'
 
 const categoryNames: Record<number, string> = {
@@ -44,11 +46,45 @@ const categoryColors: Record<number, string> = {
 
 type BetStep = 'select' | 'amount' | 'confirm' | 'processing' | 'success' | 'error'
 
+// Copyable Text Component
+function CopyableText({ text, displayText }: { text: string; displayText?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-white font-mono text-sm">
+        {displayText || text}
+      </span>
+      <button
+        onClick={handleCopy}
+        className="p-1.5 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
+        title="Copy to clipboard"
+      >
+        {copied ? (
+          <Check className="w-3.5 h-3.5 text-yes-400" />
+        ) : (
+          <Copy className="w-3.5 h-3.5 text-surface-400" />
+        )}
+      </button>
+    </div>
+  )
+}
+
 export function MarketDetail() {
   const navigate = useNavigate()
   const { marketId } = useParams<{ marketId: string }>()
   const { wallet } = useWalletStore()
-  const { markets } = useMarketsStore()
+  const { markets } = useRealMarketsStore()
   const { placeBet, isPlacingBet } = useBetsStore()
 
   const [market, setMarket] = useState<Market | null>(null)
@@ -151,9 +187,6 @@ export function MarketDetail() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Main Content */}
             <div className="lg:col-span-2 space-y-6">
-              {/* Privacy Notice */}
-              <PrivacyNotice variant="info" />
-
               {/* Market Header */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -329,23 +362,28 @@ export function MarketDetail() {
               >
                 <h2 className="text-lg font-semibold text-white mb-4">Market Information</h2>
                 <div className="space-y-4">
-                  <div className="flex justify-between py-3 border-b border-surface-800/50">
+                  <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Market ID</span>
-                    <span className="text-white font-mono text-sm">{market.id}</span>
+                    <CopyableText
+                      text={market.id}
+                      displayText={`${market.id.slice(0, 10)}...${market.id.slice(-8)}`}
+                    />
                   </div>
-                  <div className="flex justify-between py-3 border-b border-surface-800/50">
+                  <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Creator</span>
-                    <a
-                      href={`https://testnet.explorer.provable.com/address/${market.creator}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
-                    >
-                      <span className="font-mono text-sm">
-                        {market.creator?.slice(0, 10)}...{market.creator?.slice(-6)}
-                      </span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={`https://testnet.explorer.provable.com/address/${market.creator}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                      >
+                        <span className="font-mono text-sm">
+                          {market.creator?.slice(0, 10)}...{market.creator?.slice(-6)}
+                        </span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
                   </div>
                   <div className="flex justify-between py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Resolution Source</span>

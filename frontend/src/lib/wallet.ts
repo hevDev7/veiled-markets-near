@@ -16,6 +16,9 @@ import {
 import { LeoWalletAdapter as OfficialLeoWalletAdapter } from '@demox-labs/aleo-wallet-adapter-leo';
 import { WalletAdapterNetwork, DecryptPermission } from '@demox-labs/aleo-wallet-adapter-base';
 
+// Import config for API URLs
+import { config } from './config';
+
 export type NetworkType = 'mainnet' | 'testnet';
 
 export interface WalletAccount {
@@ -33,6 +36,7 @@ export interface TransactionRequest {
   functionName: string;
   inputs: string[];
   fee: number;
+  network?: string; // Add network parameter
 }
 
 export interface WalletEvents {
@@ -96,7 +100,11 @@ export class PuzzleWalletAdapter {
    */
   async connect(): Promise<WalletAccount> {
     try {
+      console.log('Puzzle Wallet: Attempting to connect...');
+
       // Use the Puzzle SDK connect function
+      // IMPORTANT: Puzzle SDK only accepts 'AleoTestnet' and 'AleoMainnet' as network names
+      // Using other names like 'testnetbeta' or 'testnet' will cause "Internal server error"
       const response = await puzzleConnect({
         dAppInfo: {
           name: 'Veiled Markets',
@@ -111,6 +119,8 @@ export class PuzzleWalletAdapter {
         }
       });
 
+      console.log('Puzzle Wallet: Connect response:', response);
+
       if (response && response.connection && response.connection.address) {
         this.connected = true;
         const networkStr = response.connection.network || 'AleoTestnet';
@@ -118,6 +128,11 @@ export class PuzzleWalletAdapter {
           address: response.connection.address,
           network: networkStr.includes('Mainnet') ? 'mainnet' : 'testnet',
         };
+
+        console.log('Puzzle Wallet: Connected successfully');
+        console.log('Puzzle Wallet: Address:', this.account.address);
+        console.log('Puzzle Wallet: Network:', networkStr);
+
         return this.account;
       }
 
@@ -178,21 +193,81 @@ export class PuzzleWalletAdapter {
     }
 
     try {
+      console.log('Puzzle Wallet: Fetching balance...');
       const balance = await puzzleGetBalance({});
+      console.log('Puzzle Wallet balance response:', JSON.stringify(balance, null, 2));
+
       // Balance response has balances array with public and private amounts
       let publicBalance = 0n;
       let privateBalance = 0n;
 
       if (balance && (balance as any).balances) {
         for (const b of (balance as any).balances) {
-          if ((b as any).public) publicBalance += BigInt((b as any).public);
-          if ((b as any).private) privateBalance += BigInt((b as any).private);
+          console.log('Balance entry:', JSON.stringify(b, null, 2));
+          // Handle different possible formats
+          if ((b as any).public !== undefined) {
+            const pubVal = String((b as any).public).replace(/[^\d]/g, '');
+            if (pubVal) publicBalance += BigInt(pubVal);
+          }
+          if ((b as any).private !== undefined) {
+            const privVal = String((b as any).private).replace(/[^\d]/g, '');
+            if (privVal) privateBalance += BigInt(privVal);
+          }
+          // Some versions might use 'amount' field
+          if ((b as any).amount !== undefined) {
+            const amtVal = String((b as any).amount).replace(/[^\d]/g, '');
+            if (amtVal) {
+              // Assume private if not specified
+              privateBalance += BigInt(amtVal);
+            }
+          }
         }
       }
 
+      // Fallback: Also try to fetch from blockchain API if SDK returns 0
+      if (publicBalance === 0n && this.account?.address) {
+        try {
+          const apiUrl = `https://api.explorer.provable.com/v1/testnet/program/credits.aleo/mapping/account/${this.account.address}`;
+          console.log('Puzzle Wallet: Fetching public balance from API:', apiUrl);
+          const response = await fetch(apiUrl);
+          if (response.ok) {
+            const data = await response.text();
+            console.log('Puzzle Wallet API response:', data);
+            const cleanData = data.replace(/"/g, '').trim();
+            const match = cleanData.match(/(\d+)/);
+            if (match) {
+              publicBalance = BigInt(match[1]);
+              console.log('Puzzle Wallet: Parsed public balance from API:', publicBalance.toString());
+            }
+          }
+        } catch (apiErr) {
+          console.log('Puzzle Wallet: API fallback failed:', apiErr);
+        }
+      }
+
+      console.log('Puzzle Wallet final balance:', { public: publicBalance.toString(), private: privateBalance.toString() });
       return { public: publicBalance, private: privateBalance };
     } catch (error) {
-      console.error('Failed to get balance:', error);
+      console.error('Failed to get Puzzle Wallet balance:', error);
+
+      // Fallback to API only
+      if (this.account?.address) {
+        try {
+          const apiUrl = `https://api.explorer.provable.com/v1/testnet/program/credits.aleo/mapping/account/${this.account.address}`;
+          const response = await fetch(apiUrl);
+          if (response.ok) {
+            const data = await response.text();
+            const cleanData = data.replace(/"/g, '').trim();
+            const match = cleanData.match(/(\d+)/);
+            if (match) {
+              return { public: BigInt(match[1]), private: 0n };
+            }
+          }
+        } catch {
+          // Ignore
+        }
+      }
+
       return { public: 0n, private: 0n };
     }
   }
@@ -206,13 +281,29 @@ export class PuzzleWalletAdapter {
     }
 
     try {
-      const response = await requestCreateEvent({
+      console.log('Puzzle Wallet: Requesting transaction with:', {
+        type: 'Execute',
+        programId: request.programId,
+        functionId: request.functionName,
+        fee: request.fee,
+        inputs: request.inputs,
+      });
+
+      // Puzzle SDK requestCreateEvent format
+      // Note: network parameter might not be supported
+      const eventParams: any = {
         type: 'Execute' as EventType,
         programId: request.programId,
         functionId: request.functionName,
         fee: request.fee,
-        inputs: request.inputs.map(input => ({ type: 'raw' as const, value: input })) as any,
-      });
+        inputs: request.inputs.map(input => ({ type: 'raw' as const, value: input })),
+      };
+
+      console.log('Puzzle Wallet: Event params:', JSON.stringify(eventParams, null, 2));
+
+      const response = await requestCreateEvent(eventParams);
+
+      console.log('Puzzle Wallet: Transaction response:', response);
 
       if (response && response.eventId) {
         return response.eventId;
@@ -220,7 +311,10 @@ export class PuzzleWalletAdapter {
 
       throw new Error('Transaction rejected');
     } catch (error: any) {
-      console.error('Transaction error:', error);
+      console.error('Puzzle Wallet: Transaction error details:', error);
+      console.error('Puzzle Wallet: Error message:', error.message);
+      console.error('Puzzle Wallet: Error code:', error.code);
+      console.error('Puzzle Wallet: Error data:', error.data);
       throw new Error(error.message || 'Transaction failed');
     }
   }
@@ -464,14 +558,18 @@ export class LeoWalletAdapter {
     try {
       // Fetch public balance from Aleo network API
       const address = this.adapter.publicKey;
-      console.log('Fetching balance for address:', address);
+      console.log('\n=== FETCHING PUBLIC BALANCE ===');
+      console.log('Leo Wallet: Address:', address);
+      console.log('Leo Wallet: Adapter connected:', this.adapter.connected);
 
+      // Use config RPC URL or fallback to default
       // Correct API format: /program/{id}/mapping/{name}/{key}
       // For credits.aleo, the mapping is "account" and key is the address
-      const baseUrl = 'https://api.explorer.provable.com/v1/testnet';
+      const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
       const url = `${baseUrl}/program/credits.aleo/mapping/account/${address}`;
 
-      console.log('Fetching public balance from:', url);
+      console.log('Leo Wallet: Fetching public balance from:', url);
+      console.log('Leo Wallet: Base URL:', baseUrl);
 
       let publicBalanceResponse: Response | null = null;
 
@@ -489,27 +587,47 @@ export class LeoWalletAdapter {
 
         // Parse the response - format could be:
         // - "123456u64" 
+        // - "123456"
         // - just a number
         // - JSON with value field
         try {
-          // Try parsing as JSON first
-          const jsonData = JSON.parse(data);
-          if (typeof jsonData === 'number') {
-            publicBalance = BigInt(jsonData);
-          } else if (jsonData.value) {
-            const match = String(jsonData.value).match(/(\d+)/);
-            if (match) publicBalance = BigInt(match[1]);
-          }
-        } catch {
-          // Not JSON, try parsing as string
+          // Remove quotes and whitespace
           const cleanData = data.replace(/"/g, '').trim();
-          const match = cleanData.match(/(\d+)/);
-          if (match) {
-            publicBalance = BigInt(match[1]);
+          console.log('Cleaned public balance data:', cleanData);
+
+          // Try to extract number from various formats
+          // Format 1: "5691241u64"
+          // Format 2: "5691241"
+          // Format 3: {"value": "5691241u64"}
+
+          // Try parsing as JSON first
+          try {
+            const jsonData = JSON.parse(data);
+            console.log('Parsed as JSON:', jsonData);
+
+            if (typeof jsonData === 'number') {
+              publicBalance = BigInt(jsonData);
+            } else if (typeof jsonData === 'string') {
+              const match = jsonData.match(/(\d+)/);
+              if (match) publicBalance = BigInt(match[1]);
+            } else if (jsonData.value) {
+              const match = String(jsonData.value).match(/(\d+)/);
+              if (match) publicBalance = BigInt(match[1]);
+            }
+          } catch {
+            // Not JSON, parse as plain text
+            const match = cleanData.match(/(\d+)/);
+            if (match) {
+              publicBalance = BigInt(match[1]);
+              console.log('Extracted public balance from text:', publicBalance.toString());
+            }
           }
+        } catch (parseError) {
+          console.error('Failed to parse public balance:', parseError);
         }
 
-        console.log('Parsed public balance:', publicBalance.toString());
+        console.log('Parsed public balance:', publicBalance.toString(), 'microcredits');
+        console.log('Public balance in ALEO:', Number(publicBalance) / 1_000_000);
       } else if (publicBalanceResponse) {
         // API returned but not OK - might be 404 (no public balance) or other error
         const errorText = await publicBalanceResponse.text().catch(() => 'Unknown error');
@@ -531,55 +649,82 @@ export class LeoWalletAdapter {
         const records = await this.adapter.requestRecords('credits.aleo');
         console.log('Private records response:', records);
         console.log('Records type:', typeof records);
+        console.log('Records is array:', Array.isArray(records));
 
         if (records && Array.isArray(records)) {
           console.log('Number of records:', records.length);
           for (let i = 0; i < records.length; i++) {
             const record = records[i];
-            console.log(`Record ${i}:`, JSON.stringify(record, null, 2));
+            console.log(`\n=== Record ${i} ===`);
+            console.log('Full record:', JSON.stringify(record, null, 2));
+            console.log('Record keys:', Object.keys(record));
 
             // Try multiple possible field names and structures
             let amount = 0n;
 
-            // Direct microcredits field
-            if (record.microcredits) {
-              const cleanAmount = String(record.microcredits)
-                .replace('u64.private', '')
-                .replace('u64', '')
-                .replace(/[^\d]/g, '');
-              if (cleanAmount) amount = BigInt(cleanAmount);
-              console.log(`Record ${i} microcredits:`, amount.toString());
-            }
-            // Nested in data object
-            else if (record.data?.microcredits) {
-              const cleanAmount = String(record.data.microcredits)
-                .replace('u64.private', '')
-                .replace('u64', '')
-                .replace(/[^\d]/g, '');
-              if (cleanAmount) amount = BigInt(cleanAmount);
-              console.log(`Record ${i} data.microcredits:`, amount.toString());
-            }
-            // Plaintext field (some wallets return this format)
-            else if (record.plaintext) {
-              const match = String(record.plaintext).match(/microcredits:\s*(\d+)u64/);
-              if (match) {
-                amount = BigInt(match[1]);
-                console.log(`Record ${i} from plaintext:`, amount.toString());
+            // Try different possible structures
+            const possiblePaths = [
+              () => record.microcredits,
+              () => record.data?.microcredits,
+              () => record.amount,
+              () => record.data?.amount,
+              () => {
+                const match = String(record.plaintext || '').match(/microcredits:\s*(\d+)u64/);
+                return match ? match[1] : null;
+              },
+              () => {
+                const match = String(record).match(/microcredits:\s*(\d+)u64/);
+                return match ? match[1] : null;
+              },
+            ];
+
+            for (const pathFn of possiblePaths) {
+              try {
+                const value = pathFn();
+                if (value !== null && value !== undefined) {
+                  const cleanAmount = String(value)
+                    .replace('u64.private', '')
+                    .replace('u64.public', '')
+                    .replace('u64', '')
+                    .replace(/[^\d]/g, '');
+
+                  if (cleanAmount && cleanAmount !== '0') {
+                    amount = BigInt(cleanAmount);
+                    console.log(`Record ${i} found amount:`, amount.toString(), 'microcredits');
+                    break;
+                  }
+                }
+              } catch (e) {
+                // Continue to next path
               }
             }
-            // Amount field (alternative naming)
-            else if (record.amount) {
-              const cleanAmount = String(record.amount).replace(/[^\d]/g, '');
-              if (cleanAmount) amount = BigInt(cleanAmount);
-              console.log(`Record ${i} amount:`, amount.toString());
-            }
 
-            privateBalance += amount;
+            if (amount > 0n) {
+              privateBalance += amount;
+              console.log(`Record ${i} added ${amount} microcredits. Total private: ${privateBalance}`);
+            } else {
+              console.log(`Record ${i} has no valid amount`);
+            }
           }
         } else if (records && typeof records === 'object') {
           // Maybe it's not an array but a single record or object with records
           console.log('Records is object, keys:', Object.keys(records));
+
+          // Try to extract from object format
+          if ((records as any).records && Array.isArray((records as any).records)) {
+            console.log('Found nested records array');
+            const nestedRecords = (records as any).records;
+            // Process nested records (recursive call to same logic above)
+            for (let i = 0; i < nestedRecords.length; i++) {
+              const record = nestedRecords[i];
+              console.log(`Nested record ${i}:`, record);
+              // Add similar parsing logic here if needed
+            }
+          }
         }
+
+        console.log('Final private balance:', privateBalance.toString(), 'microcredits');
+        console.log('Final private balance in credits:', Number(privateBalance) / 1_000_000);
       } catch (err) {
         console.log('Could not fetch private records:', err);
         console.log('Error details:', JSON.stringify(err, null, 2));
@@ -587,8 +732,17 @@ export class LeoWalletAdapter {
         // if user didn't grant AutoDecrypt permission
       }
 
-      console.log('Leo Wallet balance:', { public: publicBalance, private: privateBalance });
-      return { public: publicBalance, private: privateBalance };
+      const finalBalance = {
+        public: publicBalance,
+        private: privateBalance
+      };
+
+      console.log('\n=== FINAL BALANCE ===');
+      console.log('Public:', publicBalance.toString(), 'microcredits =', Number(publicBalance) / 1_000_000, 'ALEO');
+      console.log('Private:', privateBalance.toString(), 'microcredits =', Number(privateBalance) / 1_000_000, 'ALEO');
+      console.log('Total:', (publicBalance + privateBalance).toString(), 'microcredits =', Number(publicBalance + privateBalance) / 1_000_000, 'ALEO');
+
+      return finalBalance;
     } catch (error) {
       console.error('Failed to fetch Leo Wallet balance:', error);
       return { public: 0n, private: 0n };
@@ -601,6 +755,32 @@ export class LeoWalletAdapter {
     }
 
     try {
+      console.log('Leo Wallet: Starting transaction');
+      console.log('Leo Wallet: Connected:', this.adapter.connected);
+      console.log('Leo Wallet: Public key:', this.adapter.publicKey);
+
+      // Try direct window.leoWallet API if available
+      const leoWallet = (window as any).leoWallet || (window as any).leo;
+
+      if (leoWallet && typeof leoWallet.requestTransaction === 'function') {
+        console.log('Leo Wallet: Using window.leoWallet.requestTransaction');
+
+        const result = await leoWallet.requestTransaction({
+          program: request.programId,
+          functionName: request.functionName,
+          inputs: request.inputs,
+          fee: request.fee,
+          privateFee: false,
+        });
+
+        console.log('Leo Wallet: Direct API result:', result);
+
+        const txId = result?.transactionId || result?.txId || result;
+        if (txId) return txId;
+      }
+
+      // Use requestExecution which is the standard method for Leo Wallet
+      console.log('Leo Wallet: Using adapter.requestExecution');
       const result = await this.adapter.requestExecution({
         program: request.programId,
         functionName: request.functionName,
@@ -608,9 +788,49 @@ export class LeoWalletAdapter {
         fee: request.fee,
       } as any);
 
-      return (result as any)?.transactionId || '';
+      console.log('Leo Wallet: Transaction result:', result);
+
+      // Extract transaction ID from result
+      let transactionId = '';
+
+      if (typeof result === 'string') {
+        transactionId = result;
+      } else if (result && typeof result === 'object') {
+        transactionId = (result as any).transactionId
+          || (result as any).txId
+          || (result as any).id
+          || '';
+      }
+
+      console.log('Leo Wallet: Transaction ID:', transactionId);
+
+      if (!transactionId) {
+        throw new Error('No transaction ID returned from wallet');
+      }
+
+      return transactionId;
     } catch (error: any) {
-      throw new Error(error.message || 'Transaction failed');
+      console.error('Leo Wallet: Transaction failed');
+      console.error('Leo Wallet: Error type:', error?.constructor?.name);
+      console.error('Leo Wallet: Error message:', error?.message);
+      console.error('Leo Wallet: Full error:', error);
+
+      // Check for specific error types
+      if (error?.message?.includes('User rejected') || error?.message?.includes('denied')) {
+        throw new Error('Transaction rejected by user');
+      }
+
+      if (error?.message?.includes('Insufficient')) {
+        throw new Error('Insufficient balance for transaction');
+      }
+
+      if (error?.message?.includes('not found') || error?.message?.includes('does not exist')) {
+        throw new Error('Program not found. Please ensure veiled_markets.aleo is deployed on testnet.');
+      }
+
+      // Generic error with more context
+      const errorMsg = error?.message || 'Transaction failed';
+      throw new Error(`${errorMsg}. Please check: 1) Wallet is unlocked, 2) Connected to Testnet Beta, 3) Sufficient balance`);
     }
   }
 

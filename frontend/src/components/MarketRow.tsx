@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion'
-import { Clock, TrendingUp, Shield, ChevronRight } from 'lucide-react'
+import { Clock, TrendingUp, Shield, ChevronRight, ExternalLink } from 'lucide-react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
+import { config } from '@/lib/config'
 
 interface MarketRowProps {
     market: Market
@@ -10,7 +11,7 @@ interface MarketRowProps {
 }
 
 export function MarketRow({ market, index, onClick }: MarketRowProps) {
-    const timeRemaining = getTimeRemaining(market.deadline)
+    const timeRemaining = getTimeRemaining(market.deadline, market.timeRemaining)
 
     return (
         <motion.div
@@ -107,31 +108,81 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                         </div>
                     </div>
 
+                    {/* On-chain Verification Link */}
+                    {market.transactionId && (
+                        <a
+                            href={`${config.explorerUrl}/transaction/${market.transactionId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className={cn(
+                                'hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-lg',
+                                'bg-brand-500/10 border border-brand-500/20 text-brand-400',
+                                'hover:bg-brand-500/20 hover:border-brand-500/40 transition-all',
+                                'text-xs font-mono'
+                            )}
+                            title="Verify on blockchain"
+                        >
+                            <Shield className="w-3 h-3" />
+                            <span>VERIFY</span>
+                            <ExternalLink className="w-3 h-3" />
+                        </a>
+                    )}
+
                     <ChevronRight className="w-5 h-5 text-surface-500 group-hover:text-brand-400 group-hover:translate-x-1 transition-all" />
                 </div>
             </div>
 
             {/* Mobile Stats - Show on small screens */}
-            <div className="md:hidden mt-3 pt-3 border-t border-surface-800/50 flex items-center justify-between text-xs font-mono">
-                <div className="flex items-center gap-4">
-                    <span className="text-surface-400">
-                        <TrendingUp className="w-3 h-3 inline mr-1" />
-                        {formatCredits(market.totalVolume, 0)}
-                    </span>
-                    <span className="text-surface-400">
-                        {market.totalBets} bets
-                    </span>
-                    <span className="text-surface-400">
-                        <Clock className="w-3 h-3 inline mr-1" />
-                        {timeRemaining}
-                    </span>
+            <div className="md:hidden mt-3 pt-3 border-t border-surface-800/50">
+                <div className="flex items-center justify-between text-xs font-mono mb-2">
+                    <div className="flex items-center gap-4">
+                        <span className="text-surface-400">
+                            <TrendingUp className="w-3 h-3 inline mr-1" />
+                            {formatCredits(market.totalVolume, 0)}
+                        </span>
+                        <span className="text-surface-400">
+                            {market.totalBets} bets
+                        </span>
+                        <span className="text-surface-400">
+                            <Clock className="w-3 h-3 inline mr-1" />
+                            {timeRemaining}
+                        </span>
+                    </div>
                 </div>
+
+                {/* Mobile Verification Link */}
+                {market.transactionId && (
+                    <a
+                        href={`${config.explorerUrl}/transaction/${market.transactionId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className={cn(
+                            'flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg',
+                            'bg-brand-500/10 border border-brand-500/20 text-brand-400',
+                            'hover:bg-brand-500/20 hover:border-brand-500/40 transition-all',
+                            'text-xs font-mono'
+                        )}
+                    >
+                        <Shield className="w-3 h-3" />
+                        <span>VERIFY ON-CHAIN</span>
+                        <ExternalLink className="w-3 h-3" />
+                    </a>
+                )}
             </div>
         </motion.div>
     )
 }
 
-function getTimeRemaining(deadline: bigint): string {
+function getTimeRemaining(deadline: bigint, timeRemaining?: string): string {
+    // If timeRemaining is already calculated (from block height), use it
+    if (timeRemaining) {
+        // Convert to uppercase format (17d 13h -> 17D 13H)
+        return timeRemaining.toUpperCase();
+    }
+
+    // Fallback: treat deadline as Unix timestamp
     const now = Date.now() / 1000
     const target = Number(deadline)
     const diff = target - now
