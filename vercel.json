@@ -1,13 +1,9 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "pnpm build",
-    "devCommand": "pnpm dev",
+    "buildCommand": "cd frontend && pnpm build",
+    "devCommand": "cd frontend && pnpm dev",
     "installCommand": "pnpm install",
-    "framework": "vite",
     "outputDirectory": "frontend/dist",
-    "regions": [
-        "iad1"
-    ],
     "rewrites": [
         {
             "source": "/(.*)",
@@ -45,18 +41,5 @@
                 }
             ]
         }
-    ],
-    "env": {
-        "VITE_NETWORK": "testnet",
-        "VITE_PROGRAM_ID": "veiled_markets.aleo",
-        "VITE_CREDITS_PROGRAM_ID": "credits.aleo",
-        "VITE_APP_NAME": "Veiled Markets",
-        "VITE_APP_DESCRIPTION": "Privacy-Preserving Prediction Markets on Aleo",
-        "VITE_ENABLE_DEMO_MODE": "true",
-        "VITE_DEFAULT_WALLET": "puzzle",
-        "VITE_ENABLE_CREATE_MARKET": "true",
-        "VITE_ENABLE_BETTING": "true",
-        "VITE_SHOW_TESTNET_BANNER": "true",
-        "VITE_DEBUG": "false"
-    }
+    ]
 }
