@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { 
-  walletManager, 
-  type WalletType, 
+import {
+  walletManager,
+  type WalletType,
   type NetworkType,
   type WalletAccount,
   type WalletBalance,
@@ -20,16 +20,43 @@ export interface Market {
   deadline: bigint
   resolutionDeadline: bigint
   status: number // 1 = active, 2 = resolved_yes, 3 = resolved_no, 4 = cancelled
+
+  // AMM Pool Data
+  yesReserve: bigint
+  noReserve: bigint
+  yesPrice: number      // Current YES price (0-1)
+  noPrice: number       // Current NO price (0-1)
+
+  // Legacy fields (for backward compatibility)
   yesPercentage: number
   noPercentage: number
   totalVolume: bigint
   totalBets: number
+
+  // Issued shares
+  totalYesIssued: bigint
+  totalNoIssued: bigint
+
+  // Payout calculations
   potentialYesPayout: number
   potentialNoPayout: number
+
   creator?: string
   timeRemaining?: string
   resolutionSource?: string
   tags?: string[]
+}
+
+export interface SharePosition {
+  id: string
+  marketId: string
+  shareType: 'yes' | 'no'
+  quantity: bigint
+  avgPrice: number
+  currentValue: number
+  profitLoss: number
+  profitLossPercent: number
+  acquiredAt: number
 }
 
 export interface Bet {
@@ -59,7 +86,7 @@ export interface WalletState {
 interface WalletStore {
   wallet: WalletState
   error: string | null
-  
+
   // Actions
   connect: (walletType: WalletType) => Promise<void>
   disconnect: () => Promise<void>
@@ -80,17 +107,17 @@ const initialWalletState: WalletState = {
 export const useWalletStore = create<WalletStore>((set, get) => ({
   wallet: initialWalletState,
   error: null,
-  
+
   connect: async (walletType: WalletType) => {
-    set({ 
+    set({
       wallet: { ...get().wallet, connecting: true },
       error: null,
     })
-    
+
     try {
       const account = await walletManager.connect(walletType)
       const balance = await walletManager.getBalance()
-      
+
       set({
         wallet: {
           connected: true,
@@ -103,7 +130,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         },
         error: null,
       })
-      
+
       // Set up event listeners for real wallets
       if (!walletManager.isDemoMode()) {
         walletManager.onAccountChange((newAccount: WalletAccount | null) => {
@@ -120,7 +147,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             get().disconnect()
           }
         })
-        
+
         walletManager.onNetworkChange((network: NetworkType) => {
           set({
             wallet: {
@@ -132,10 +159,10 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       }
     } catch (error: unknown) {
       console.error('Store connect error:', error)
-      
+
       // Extract error message from various formats
       let errorMessage = 'Failed to connect wallet'
-      
+
       if (error instanceof Error) {
         errorMessage = error.message
       } else if (typeof error === 'string') {
@@ -146,7 +173,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           errorMessage = errObj.message
         }
       }
-      
+
       set({
         wallet: { ...initialWalletState },
         error: errorMessage,
@@ -154,7 +181,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       throw new Error(errorMessage)
     }
   },
-  
+
   disconnect: async () => {
     try {
       await walletManager.disconnect()
@@ -166,10 +193,10 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       error: null,
     })
   },
-  
+
   refreshBalance: async () => {
     if (!get().wallet.connected) return
-    
+
     try {
       const balance = await walletManager.getBalance()
       set({
@@ -182,7 +209,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       console.error('Failed to refresh balance:', error)
     }
   },
-  
+
   clearError: () => {
     set({ error: null })
   },
@@ -199,7 +226,7 @@ interface MarketsStore {
   searchQuery: string
   selectedCategory: number | null
   viewMode: 'grid' | 'list'
-  
+
   // Actions
   fetchMarkets: () => Promise<void>
   selectMarket: (market: Market | null) => void
@@ -454,33 +481,33 @@ export const useMarketsStore = create<MarketsStore>((set, get) => ({
   searchQuery: '',
   selectedCategory: null,
   viewMode: 'grid',
-  
+
   fetchMarkets: async () => {
     set({ isLoading: true })
     // Simulate API call - in production, this would fetch from Aleo network
     await new Promise(resolve => setTimeout(resolve, 800))
     set({ markets: mockMarkets, isLoading: false })
   },
-  
+
   selectMarket: (market) => {
     set({ selectedMarket: market })
   },
-  
+
   setSearchQuery: (query) => {
     set({ searchQuery: query })
   },
-  
+
   setCategory: (category) => {
     set({ selectedCategory: category })
   },
-  
+
   setViewMode: (mode) => {
     set({ viewMode: mode })
   },
-  
+
   getFilteredMarkets: () => {
     const { markets, searchQuery, selectedCategory } = get()
-    
+
     return markets.filter(market => {
       // Filter by search query
       if (searchQuery && !market.question.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -503,7 +530,7 @@ interface BetsStore {
   userBets: Bet[]
   pendingBets: Bet[]
   isPlacingBet: boolean
-  
+
   // Actions
   placeBet: (marketId: string, amount: bigint, outcome: 'yes' | 'no') => Promise<string>
   fetchUserBets: () => Promise<void>
@@ -515,16 +542,16 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   userBets: [],
   pendingBets: [],
   isPlacingBet: false,
-  
+
   placeBet: async (marketId, amount, outcome) => {
     const walletState = useWalletStore.getState().wallet
-    
+
     if (!walletState.connected) {
       throw new Error('Wallet not connected')
     }
-    
+
     set({ isPlacingBet: true })
-    
+
     try {
       // Request transaction through wallet
       const transactionId = await walletManager.requestTransaction({
@@ -538,7 +565,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         ],
         fee: 100000, // 0.1 credits fee
       })
-      
+
       // Add to pending bets
       const newBet: Bet = {
         id: transactionId,
@@ -548,12 +575,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         placedAt: Date.now(),
         status: 'pending',
       }
-      
-      set({ 
+
+      set({
         pendingBets: [...get().pendingBets, newBet],
         isPlacingBet: false,
       })
-      
+
       // In real app, we'd poll for transaction confirmation
       // and move from pending to active when confirmed
       setTimeout(() => {
@@ -562,23 +589,23 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
         })
       }, 3000)
-      
+
       return transactionId
     } catch (error: any) {
       set({ isPlacingBet: false })
       throw error
     }
   },
-  
+
   fetchUserBets: async () => {
     const walletState = useWalletStore.getState().wallet
-    
+
     if (!walletState.connected) return
-    
+
     try {
       // In production, this would fetch and decrypt bet records from the network
       const records = await walletManager.getRecords('veiled_markets.aleo')
-      
+
       // Parse bet records
       const bets: Bet[] = records
         .filter((r: any) => r.type === 'Bet')
@@ -590,17 +617,17 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           placedAt: parseInt(r.data.placed_at),
           status: 'active' as const,
         }))
-      
+
       set({ userBets: bets })
     } catch (error) {
       console.error('Failed to fetch user bets:', error)
     }
   },
-  
+
   getBetsByMarket: (marketId) => {
     return get().userBets.filter(bet => bet.marketId === marketId)
   },
-  
+
   getTotalBetsValue: () => {
     return get().userBets.reduce((total, bet) => total + bet.amount, 0n)
   },
@@ -614,7 +641,7 @@ interface UIStore {
   theme: 'dark' | 'light'
   sidebarOpen: boolean
   notificationsEnabled: boolean
-  
+
   // Actions
   setTheme: (theme: 'dark' | 'light') => void
   toggleSidebar: () => void
@@ -627,7 +654,7 @@ export const useUIStore = create<UIStore>()(
       theme: 'dark' as const,
       sidebarOpen: true,
       notificationsEnabled: true,
-      
+
       setTheme: (theme: 'light' | 'dark') => set({ theme }),
       toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
       setNotificationsEnabled: (enabled: boolean) => set({ notificationsEnabled: enabled }),
