@@ -1,10 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  X, 
-  Trophy, 
-  Shield, 
-  Check, 
-  Loader2, 
+import {
+  X,
+  Trophy,
+  Shield,
+  Check,
+  Loader2,
   AlertCircle,
   Wallet,
   Sparkles,
@@ -28,14 +28,12 @@ interface ClaimWinningsModalProps {
 
 type ClaimStep = 'select' | 'claiming' | 'success' | 'error'
 
-export function ClaimWinningsModal({ 
-  isOpen, 
-  onClose, 
+export function ClaimWinningsModal({
+  isOpen,
+  onClose,
   winningBets,
-  onClaimSuccess 
+  onClaimSuccess
 }: ClaimWinningsModalProps) {
-  // Wallet store for potential future use
-  const _walletStore = useWalletStore()
   const [step, setStep] = useState<ClaimStep>('select')
   const [selectedBets, setSelectedBets] = useState<Set<string>>(new Set())
   const [claimedBets, setClaimedBets] = useState<string[]>([])
@@ -81,12 +79,12 @@ export function ClaimWinningsModal({
     try {
       // Simulate claiming (in production, this would call the SDK for each bet)
       await new Promise(resolve => setTimeout(resolve, 2500))
-      
+
       // Generate mock transaction IDs
       const newTxIds = Array.from(selectedBets).map(
         () => `tx_${Date.now()}_${Math.random().toString(36).substring(7)}`
       )
-      
+
       setTxIds(newTxIds)
       setClaimedBets(Array.from(selectedBets))
       setStep('success')
@@ -216,7 +214,7 @@ export function ClaimWinningsModal({
                                     <p className="text-xs text-surface-500">ALEO</p>
                                   </div>
                                 </div>
-                                
+
                                 {/* Checkbox indicator */}
                                 <div className={cn(
                                   "absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",

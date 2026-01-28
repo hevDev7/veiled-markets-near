@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Shield, Eye, TrendingUp, Lock, ArrowRight, Sparkles } from 'lucide-react'
+import { Shield, Eye, Lock, ArrowRight, Sparkles } from 'lucide-react'
 
 export function Hero() {
   return (
@@ -9,9 +9,9 @@ export function Hero() {
         {/* Gradient orbs */}
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-brand-500/20 rounded-full blur-[120px] animate-pulse-slow" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-accent-500/20 rounded-full blur-[100px] animate-pulse-slow" style={{ animationDelay: '2s' }} />
-        
+
         {/* Grid pattern */}
-        <div 
+        <div
           className="absolute inset-0 opacity-[0.02]"
           style={{
             backgroundImage: `
@@ -57,8 +57,8 @@ export function Hero() {
             transition={{ duration: 0.6, delay: 0.2 }}
             className="max-w-2xl mx-auto text-lg sm:text-xl text-surface-400 mb-10"
           >
-            The first prediction market where your bets are truly private. 
-            No front-running, no whale tracking, no social pressure. 
+            The first prediction market where your bets are truly private.
+            No front-running, no whale tracking, no social pressure.
             Just pure market wisdom.
           </motion.p>
 
@@ -123,16 +123,16 @@ export function Hero() {
   )
 }
 
-function FeatureCard({ 
-  icon, 
-  title, 
-  description, 
-  gradient 
-}: { 
+function FeatureCard({
+  icon,
+  title,
+  description,
+  gradient
+}: {
   icon: React.ReactNode
   title: string
   description: string
-  gradient: string 
+  gradient: string
 }) {
   return (
     <div className="glass-card p-6 text-left group hover:border-brand-500/30 transition-all duration-300">

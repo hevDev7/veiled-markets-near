@@ -19,7 +19,7 @@ import { useWalletStore, useMarketsStore, useBetsStore, type Market } from '@/li
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { OddsChart } from '@/components/OddsChart'
-import { PrivacyNotice, PrivacyBadge } from '@/components/PrivacyNotice'
+import { PrivacyNotice } from '@/components/PrivacyNotice'
 import { cn, formatCredits } from '@/lib/utils'
 
 const categoryNames: Record<number, string> = {

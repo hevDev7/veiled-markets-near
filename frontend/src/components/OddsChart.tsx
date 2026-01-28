@@ -20,82 +20,82 @@ function generateMockHistory(currentYes: number): OddsDataPoint[] {
   const now = Date.now()
   const hour = 60 * 60 * 1000
   const points: OddsDataPoint[] = []
-  
+
   // Start from 50% and gradually move towards current percentage
   let yesValue = 50
   const steps = 24 // 24 data points (hourly for last day)
   const stepSize = (currentYes - 50) / steps
-  
+
   for (let i = 0; i < steps; i++) {
     // Add some randomness
     const noise = (Math.random() - 0.5) * 8
     yesValue = Math.max(5, Math.min(95, yesValue + stepSize + noise))
-    
+
     points.push({
       timestamp: now - (steps - i) * hour,
       yesPercentage: yesValue,
       noPercentage: 100 - yesValue,
     })
   }
-  
+
   // Ensure last point matches current
   points.push({
     timestamp: now,
     yesPercentage: currentYes,
     noPercentage: 100 - currentYes,
   })
-  
+
   return points
 }
 
-export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) {
+export function OddsChart({ currentYes, className }: OddsChartProps) {
   const historyData = useMemo(() => generateMockHistory(currentYes), [currentYes])
-  
+
   // Calculate chart dimensions
   const width = 100 // percentage
   const height = 100 // will be mapped to actual height
   const padding = 5
-  
+
   // Generate SVG path for the line
   const yesPath = useMemo(() => {
     if (historyData.length < 2) return ''
-    
+
     const xStep = (width - padding * 2) / (historyData.length - 1)
-    
+
     const points = historyData.map((d, i) => ({
       x: padding + i * xStep,
       y: height - padding - (d.yesPercentage / 100) * (height - padding * 2),
     }))
-    
+
     // Create smooth curve
     let path = `M ${points[0].x} ${points[0].y}`
-    
+
     for (let i = 1; i < points.length; i++) {
       const prev = points[i - 1]
       const curr = points[i]
       const cpx = (prev.x + curr.x) / 2
       path += ` C ${cpx} ${prev.y}, ${cpx} ${curr.y}, ${curr.x} ${curr.y}`
     }
-    
+
     return path
   }, [historyData])
-  
+
   // Generate area fill path
   const areaPath = useMemo(() => {
     if (!yesPath) return ''
-    
+
     const xStep = (width - padding * 2) / (historyData.length - 1)
     const lastX = padding + (historyData.length - 1) * xStep
     const firstX = padding
-    
+
     return `${yesPath} L ${lastX} ${height - padding} L ${firstX} ${height - padding} Z`
   }, [yesPath, historyData])
-  
+
   // Calculate trend
   const startYes = historyData[0]?.yesPercentage || 50
   const trend = currentYes - startYes
   const trendDirection = trend > 0 ? 'up' : trend < 0 ? 'down' : 'neutral'
-  
+
   // Time labels
   const timeLabels = ['24h ago', '12h ago', 'Now']
 
@@ -109,7 +109,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
           <span className="text-surface-400">Last 24 hours</span>
         </div>
       </div>
-      
+
       {/* Chart Container */}
       <div className="relative h-48 bg-surface-800/30 rounded-xl p-4">
         {/* Grid Lines */}
@@ -126,9 +126,9 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
             </div>
           ))}
         </div>
-        
+
         {/* SVG Chart */}
-        <svg 
+        <svg
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-full"
           preserveAspectRatio="none"
@@ -143,7 +143,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
               <stop offset="100%" stopColor="rgb(16, 185, 129)" stopOpacity="1" />
             </linearGradient>
           </defs>
-          
+
           {/* Area Fill */}
           <motion.path
             d={areaPath}
@@ -152,7 +152,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5 }}
           />
-          
+
           {/* Line */}
           <motion.path
             d={yesPath}
@@ -165,7 +165,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
             animate={{ pathLength: 1 }}
             transition={{ duration: 1, ease: "easeOut" }}
           />
-          
+
           {/* Current Point */}
           <motion.circle
             cx={padding + (historyData.length - 1) * ((width - padding * 2) / (historyData.length - 1))}
@@ -179,7 +179,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
             transition={{ delay: 1, type: "spring" }}
           />
         </svg>
-        
+
         {/* Time Labels */}
         <div className="absolute bottom-1 left-4 right-4 flex justify-between">
           {timeLabels.map((label) => (
@@ -189,7 +189,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
           ))}
         </div>
       </div>
-      
+
       {/* Stats Row */}
       <div className="grid grid-cols-3 gap-4 mt-4">
         <div className="text-center p-3 rounded-lg bg-surface-800/30">
@@ -200,8 +200,8 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
           <p className="text-xs text-surface-500 mb-1">24h Change</p>
           <div className={cn(
             "flex items-center justify-center gap-1",
-            trendDirection === 'up' ? "text-yes-400" : 
-            trendDirection === 'down' ? "text-no-400" : "text-surface-400"
+            trendDirection === 'up' ? "text-yes-400" :
+              trendDirection === 'down' ? "text-no-400" : "text-surface-400"
           )}>
             {trendDirection === 'up' ? (
               <TrendingUp className="w-4 h-4" />
@@ -218,7 +218,7 @@ export function OddsChart({ currentYes, currentNo, className }: OddsChartProps) 
           <p className="text-lg font-bold text-yes-400">{currentYes.toFixed(1)}%</p>
         </div>
       </div>
-      
+
       {/* Legend */}
       <div className="flex items-center justify-center gap-6 mt-4 text-sm">
         <div className="flex items-center gap-2">

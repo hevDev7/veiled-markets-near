@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Search, Filter, TrendingUp, Clock, Flame, Bitcoin, DollarSign, Trophy, Cpu, Vote } from 'lucide-react'
+import { Search, TrendingUp, Clock, Flame, Bitcoin, DollarSign, Trophy, Cpu, Vote } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useMarketsStore, type Market } from '@/lib/store'
 import { MarketCard } from './MarketCard'

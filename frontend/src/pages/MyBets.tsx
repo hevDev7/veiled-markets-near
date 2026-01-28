@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
-import { 
-  TrendingUp, 
+import {
+  TrendingUp,
   TrendingDown,
   Clock,
   Loader2,
@@ -19,7 +19,6 @@ import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { cn, formatCredits } from '@/lib/utils'
 
 interface WinningBet extends Bet {
-  market?: { question: string }
   winAmount: bigint
 }
 
@@ -74,19 +73,19 @@ export function MyBets() {
 
   // Get active bets only (not completed)
   const activeBets = userBets.filter(bet => bet.status === 'active')
-  
+
   // Get won bets
   const wonBets = userBets.filter(bet => bet.status === 'won')
-  
+
   // Combine for display based on filter
-  const displayBets = filter === 'pending' 
-    ? pendingBets 
-    : filter === 'active' 
+  const displayBets = filter === 'pending'
+    ? pendingBets
+    : filter === 'active'
       ? activeBets
       : filter === 'won'
         ? wonBets
         : [...pendingBets, ...activeBets]
-  
+
   // Total unclaimed winnings
   const totalUnclaimedWinnings = winningBets.reduce((sum, b) => sum + b.winAmount, 0n)
 
@@ -121,7 +120,7 @@ export function MyBets() {
               </p>
             </div>
 
-            <button 
+            <button
               onClick={() => {
                 setIsLoading(true)
                 fetchUserBets().finally(() => setIsLoading(false))
@@ -281,13 +280,13 @@ export function MyBets() {
               </div>
               <h3 className="text-xl font-semibold text-white mb-2">No bets found</h3>
               <p className="text-surface-400 mb-6">
-                {filter === 'pending' 
+                {filter === 'pending'
                   ? "You don't have any pending bets"
                   : filter === 'active'
                     ? "You don't have any active bets"
                     : "Start placing bets on prediction markets"}
               </p>
-              <button 
+              <button
                 onClick={() => navigate('/dashboard')}
                 className="btn-primary"
               >
@@ -297,9 +296,9 @@ export function MyBets() {
           ) : (
             <div className="space-y-4">
               {displayBets.map((bet, index) => (
-                <BetCard 
-                  key={bet.id} 
-                  bet={bet} 
+                <BetCard
+                  key={bet.id}
+                  bet={bet}
                   market={getMarketInfo(bet.marketId)}
                   index={index}
                 />
@@ -325,14 +324,14 @@ export function MyBets() {
   )
 }
 
-function BetCard({ 
-  bet, 
+function BetCard({
+  bet,
   market,
-  index 
-}: { 
+  index
+}: {
   bet: Bet
   market?: { question: string; yesPercentage: number; noPercentage: number }
-  index: number 
+  index: number
 }) {
   const isYes = bet.outcome === 'yes'
   const isPending = bet.status === 'pending'
@@ -365,8 +364,8 @@ function BetCard({
           <div className="flex items-center gap-2 mb-1">
             <span className={cn(
               "px-2 py-0.5 text-xs font-medium rounded-full",
-              isYes 
-                ? "bg-yes-500/20 text-yes-400" 
+              isYes
+                ? "bg-yes-500/20 text-yes-400"
                 : "bg-no-500/20 text-no-400"
             )}>
               {isYes ? 'YES' : 'NO'}

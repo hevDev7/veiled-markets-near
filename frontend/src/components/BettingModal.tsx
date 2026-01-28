@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Shield, Lock, TrendingUp, AlertCircle, Check, Loader2 } from 'lucide-react'
+import { X, Shield, Lock, TrendingUp, Check, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { type Market, useWalletStore, useBetsStore } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
@@ -16,7 +16,7 @@ type BetStep = 'select' | 'amount' | 'confirm' | 'success'
 export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const { wallet } = useWalletStore()
   const { placeBet } = useBetsStore()
-  
+
   const [selectedOutcome, setSelectedOutcome] = useState<BetOutcome>(null)
   const [betAmount, setBetAmount] = useState('')
   const [step, setStep] = useState<BetStep>('select')
@@ -24,7 +24,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
   const handlePlaceBet = async () => {
     if (!market || !selectedOutcome || !betAmount) return
-    
+
     setIsPlacing(true)
     try {
       await placeBet(market.id, BigInt(parseFloat(betAmount) * 1_000_000), selectedOutcome)
@@ -177,7 +177,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                     >
                       <div className={cn(
                         'flex items-center gap-3 p-4 rounded-xl mb-6',
-                        selectedOutcome === 'yes' 
+                        selectedOutcome === 'yes'
                           ? 'bg-yes-500/10 border border-yes-500/20'
                           : 'bg-no-500/10 border border-no-500/20'
                       )}>
@@ -308,8 +308,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         transition={{ type: 'spring', delay: 0.2 }}
                         className={cn(
                           'w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center',
-                          selectedOutcome === 'yes' 
-                            ? 'bg-yes-500/20 shadow-glow-yes' 
+                          selectedOutcome === 'yes'
+                            ? 'bg-yes-500/20 shadow-glow-yes'
                             : 'bg-no-500/20 shadow-glow-no'
                         )}
                       >

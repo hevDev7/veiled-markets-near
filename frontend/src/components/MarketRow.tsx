@@ -2,7 +2,6 @@ import { motion } from 'framer-motion'
 import { Clock, TrendingUp, Shield, ChevronRight } from 'lucide-react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
-import { PrivacyBadge } from './PrivacyNotice'
 
 interface MarketRowProps {
     market: Market

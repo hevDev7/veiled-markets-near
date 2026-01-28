@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Shield, Eye, Lock, ArrowRight, Sparkles, Wallet, Terminal, Code, Zap } from 'lucide-react'
+import { Shield, Eye, Lock, ArrowRight, Wallet, Terminal, Code, Zap } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useWalletStore } from '@/lib/store'
