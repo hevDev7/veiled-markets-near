@@ -1,0 +1,6 @@
+export { Landing } from './Landing'
+export { Dashboard } from './Dashboard'
+export { MyBets } from './MyBets'
+export { History } from './History'
+export { MarketDetail } from './MarketDetail'
+export { Settings } from './Settings'

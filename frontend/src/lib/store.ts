@@ -1,0 +1,663 @@
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
+import { 
+  walletManager, 
+  type WalletType, 
+  type NetworkType,
+  type WalletAccount,
+  type WalletBalance,
+} from './wallet'
+
+// ============================================================================
+// Types
+// ============================================================================
+
+export interface Market {
+  id: string
+  question: string
+  description?: string
+  category: number
+  deadline: bigint
+  resolutionDeadline: bigint
+  status: number // 1 = active, 2 = resolved_yes, 3 = resolved_no, 4 = cancelled
+  yesPercentage: number
+  noPercentage: number
+  totalVolume: bigint
+  totalBets: number
+  potentialYesPayout: number
+  potentialNoPayout: number
+  creator?: string
+  timeRemaining?: string
+  resolutionSource?: string
+  tags?: string[]
+}
+
+export interface Bet {
+  id: string
+  marketId: string
+  amount: bigint
+  outcome: 'yes' | 'no'
+  placedAt: number
+  status: 'pending' | 'active' | 'won' | 'lost' | 'refunded'
+  marketQuestion?: string
+}
+
+export interface WalletState {
+  connected: boolean
+  connecting: boolean
+  address: string | null
+  network: NetworkType
+  balance: WalletBalance
+  walletType: WalletType | null
+  isDemoMode: boolean
+}
+
+// ============================================================================
+// Wallet Store
+// ============================================================================
+
+interface WalletStore {
+  wallet: WalletState
+  error: string | null
+  
+  // Actions
+  connect: (walletType: WalletType) => Promise<void>
+  disconnect: () => Promise<void>
+  refreshBalance: () => Promise<void>
+  clearError: () => void
+}
+
+const initialWalletState: WalletState = {
+  connected: false,
+  connecting: false,
+  address: null,
+  network: 'testnet',
+  balance: { public: 0n, private: 0n },
+  walletType: null,
+  isDemoMode: false,
+}
+
+export const useWalletStore = create<WalletStore>((set, get) => ({
+  wallet: initialWalletState,
+  error: null,
+  
+  connect: async (walletType: WalletType) => {
+    set({ 
+      wallet: { ...get().wallet, connecting: true },
+      error: null,
+    })
+    
+    try {
+      const account = await walletManager.connect(walletType)
+      const balance = await walletManager.getBalance()
+      
+      set({
+        wallet: {
+          connected: true,
+          connecting: false,
+          address: account.address,
+          network: account.network,
+          balance,
+          walletType,
+          isDemoMode: walletManager.isDemoMode(),
+        },
+        error: null,
+      })
+      
+      // Set up event listeners for real wallets
+      if (!walletManager.isDemoMode()) {
+        walletManager.onAccountChange((newAccount: WalletAccount | null) => {
+          if (newAccount) {
+            set({
+              wallet: {
+                ...get().wallet,
+                address: newAccount.address,
+                network: newAccount.network,
+              },
+            })
+          } else {
+            // Account disconnected
+            get().disconnect()
+          }
+        })
+        
+        walletManager.onNetworkChange((network: NetworkType) => {
+          set({
+            wallet: {
+              ...get().wallet,
+              network,
+            },
+          })
+        })
+      }
+    } catch (error: unknown) {
+      console.error('Store connect error:', error)
+      
+      // Extract error message from various formats
+      let errorMessage = 'Failed to connect wallet'
+      
+      if (error instanceof Error) {
+        errorMessage = error.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      } else if (error && typeof error === 'object') {
+        const errObj = error as Record<string, unknown>
+        if (typeof errObj.message === 'string') {
+          errorMessage = errObj.message
+        }
+      }
+      
+      set({
+        wallet: { ...initialWalletState },
+        error: errorMessage,
+      })
+      throw new Error(errorMessage)
+    }
+  },
+  
+  disconnect: async () => {
+    try {
+      await walletManager.disconnect()
+    } catch (error) {
+      console.error('Disconnect error:', error)
+    }
+    set({
+      wallet: initialWalletState,
+      error: null,
+    })
+  },
+  
+  refreshBalance: async () => {
+    if (!get().wallet.connected) return
+    
+    try {
+      const balance = await walletManager.getBalance()
+      set({
+        wallet: {
+          ...get().wallet,
+          balance,
+        },
+      })
+    } catch (error) {
+      console.error('Failed to refresh balance:', error)
+    }
+  },
+  
+  clearError: () => {
+    set({ error: null })
+  },
+}))
+
+// ============================================================================
+// Markets Store
+// ============================================================================
+
+interface MarketsStore {
+  markets: Market[]
+  selectedMarket: Market | null
+  isLoading: boolean
+  searchQuery: string
+  selectedCategory: number | null
+  viewMode: 'grid' | 'list'
+  
+  // Actions
+  fetchMarkets: () => Promise<void>
+  selectMarket: (market: Market | null) => void
+  setSearchQuery: (query: string) => void
+  setCategory: (category: number | null) => void
+  setViewMode: (mode: 'grid' | 'list') => void
+  getFilteredMarkets: () => Market[]
+}
+
+// Categories: 1=Politics, 2=Sports, 3=Crypto, 4=Entertainment, 5=Tech, 6=Economics, 7=Science
+const mockMarkets: Market[] = [
+  // === CRYPTO MARKETS ===
+  {
+    id: 'market_001',
+    question: 'Will Bitcoin reach $150,000 by end of Q1 2026?',
+    description: 'This market resolves YES if the price of Bitcoin (BTC) reaches or exceeds $150,000 USD on any major exchange (Coinbase, Binance, Kraken) before March 31, 2026 11:59 PM UTC.',
+    category: 3,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 65 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 68 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 62.5,
+    noPercentage: 37.5,
+    totalVolume: 2500000000n, // 2500 ALEO
+    totalBets: 342,
+    potentialYesPayout: 1.60,
+    potentialNoPayout: 2.67,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '65d',
+    resolutionSource: 'CoinGecko API',
+    tags: ['Bitcoin', 'Price Prediction', 'Hot'],
+  },
+  {
+    id: 'market_002',
+    question: 'Will Ethereum flip Bitcoin in market cap by 2027?',
+    description: 'Resolves YES if Ethereum market capitalization exceeds Bitcoin market cap at any point before January 1, 2027.',
+    category: 3,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 370 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 18.2,
+    noPercentage: 81.8,
+    totalVolume: 1800000000n,
+    totalBets: 567,
+    potentialYesPayout: 5.49,
+    potentialNoPayout: 1.22,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '365d',
+    resolutionSource: 'CoinMarketCap',
+    tags: ['Ethereum', 'Bitcoin', 'Flippening'],
+  },
+  {
+    id: 'market_003',
+    question: 'Will Solana reach $500 before ETH reaches $10,000?',
+    description: 'Race market: Resolves YES if SOL reaches $500 first, NO if ETH reaches $10,000 first. If neither happens by end of 2026, resolves NO.',
+    category: 3,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 340 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 345 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 45.3,
+    noPercentage: 54.7,
+    totalVolume: 980000000n,
+    totalBets: 234,
+    potentialYesPayout: 2.21,
+    potentialNoPayout: 1.83,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '340d',
+    resolutionSource: 'CoinGecko API',
+    tags: ['Solana', 'Ethereum', 'Race'],
+  },
+  {
+    id: 'market_004',
+    question: 'Will Aleo token price exceed $1 by June 2026?',
+    description: 'Resolves YES if ALEO token trades above $1.00 USD on any major exchange before June 30, 2026.',
+    category: 3,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 155 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 160 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 71.8,
+    noPercentage: 28.2,
+    totalVolume: 3200000000n,
+    totalBets: 892,
+    potentialYesPayout: 1.39,
+    potentialNoPayout: 3.55,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '155d',
+    resolutionSource: 'CoinGecko API',
+    tags: ['Aleo', 'Price', 'Featured'],
+  },
+  // === ECONOMICS MARKETS ===
+  {
+    id: 'market_005',
+    question: 'Will the Fed cut interest rates in February 2026?',
+    description: 'Resolves YES if the Federal Reserve announces a rate cut at the FOMC meeting in February 2026.',
+    category: 6,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 16 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 36.3,
+    noPercentage: 63.7,
+    totalVolume: 1450000000n,
+    totalBets: 423,
+    potentialYesPayout: 2.75,
+    potentialNoPayout: 1.57,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '14d',
+    resolutionSource: 'Federal Reserve',
+    tags: ['Fed', 'Interest Rates', 'Ending Soon'],
+  },
+  {
+    id: 'market_006',
+    question: 'Will US inflation drop below 2% by Q2 2026?',
+    description: 'Resolves YES if the official US CPI year-over-year inflation rate drops below 2.0% in any month of Q2 2026.',
+    category: 6,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 120 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 125 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 42.1,
+    noPercentage: 57.9,
+    totalVolume: 890000000n,
+    totalBets: 312,
+    potentialYesPayout: 2.38,
+    potentialNoPayout: 1.73,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '120d',
+    resolutionSource: 'Bureau of Labor Statistics',
+    tags: ['Inflation', 'Economy'],
+  },
+  // === TECH MARKETS ===
+  {
+    id: 'market_007',
+    question: 'Will Apple announce Apple Intelligence 2.0 at WWDC 2026?',
+    description: 'Resolves YES if Apple announces a major update to Apple Intelligence branded as "2.0" or equivalent at WWDC 2026.',
+    category: 5,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 135 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 140 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 72.4,
+    noPercentage: 27.6,
+    totalVolume: 1230000000n,
+    totalBets: 456,
+    potentialYesPayout: 1.38,
+    potentialNoPayout: 3.62,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '135d',
+    resolutionSource: 'Apple Official Announcement',
+    tags: ['Apple', 'AI', 'WWDC'],
+  },
+  {
+    id: 'market_008',
+    question: 'Will OpenAI release GPT-5 before July 2026?',
+    description: 'Resolves YES if OpenAI publicly releases or announces GPT-5 (or equivalent next-gen model) before July 1, 2026.',
+    category: 5,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 160 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 165 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 58.9,
+    noPercentage: 41.1,
+    totalVolume: 2100000000n,
+    totalBets: 678,
+    potentialYesPayout: 1.70,
+    potentialNoPayout: 2.43,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '160d',
+    resolutionSource: 'OpenAI Official',
+    tags: ['OpenAI', 'GPT-5', 'AI'],
+  },
+  // === SPORTS MARKETS ===
+  {
+    id: 'market_009',
+    question: 'Will Real Madrid win Champions League 2026?',
+    description: 'Resolves YES if Real Madrid CF wins the UEFA Champions League 2025-26 season.',
+    category: 2,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 120 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 122 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 28.5,
+    noPercentage: 71.5,
+    totalVolume: 1560000000n,
+    totalBets: 534,
+    potentialYesPayout: 3.51,
+    potentialNoPayout: 1.40,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '120d',
+    resolutionSource: 'UEFA Official',
+    tags: ['Champions League', 'Real Madrid', 'Football'],
+  },
+  {
+    id: 'market_010',
+    question: 'Will the Super Bowl 2026 have over 110M US viewers?',
+    description: 'Resolves YES if official Nielsen ratings show over 110 million US viewers for Super Bowl LX.',
+    category: 2,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 20 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 25 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 67.2,
+    noPercentage: 32.8,
+    totalVolume: 780000000n,
+    totalBets: 289,
+    potentialYesPayout: 1.49,
+    potentialNoPayout: 3.05,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '20d',
+    resolutionSource: 'Nielsen Ratings',
+    tags: ['Super Bowl', 'NFL', 'Trending'],
+  },
+  // === POLITICS MARKETS ===
+  {
+    id: 'market_011',
+    question: 'Will a new crypto regulation bill pass US Congress in 2026?',
+    description: 'Resolves YES if any comprehensive cryptocurrency regulation bill is signed into law in the US during 2026.',
+    category: 1,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 340 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 345 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 45.8,
+    noPercentage: 54.2,
+    totalVolume: 920000000n,
+    totalBets: 367,
+    potentialYesPayout: 2.18,
+    potentialNoPayout: 1.85,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '340d',
+    resolutionSource: 'US Congress Records',
+    tags: ['Regulation', 'Crypto', 'Politics'],
+  },
+  // === ENDING SOON ===
+  {
+    id: 'market_012',
+    question: 'Will ETH close above $4,000 this week?',
+    description: 'Resolves YES if Ethereum (ETH) price is above $4,000 at Sunday 11:59 PM UTC.',
+    category: 3,
+    deadline: BigInt(Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60),
+    resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 4 * 24 * 60 * 60),
+    status: 1,
+    yesPercentage: 52.3,
+    noPercentage: 47.7,
+    totalVolume: 650000000n,
+    totalBets: 198,
+    potentialYesPayout: 1.91,
+    potentialNoPayout: 2.10,
+    creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
+    timeRemaining: '3d',
+    resolutionSource: 'CoinGecko API',
+    tags: ['Ethereum', 'Weekly', 'Ending Soon'],
+  },
+]
+
+export const useMarketsStore = create<MarketsStore>((set, get) => ({
+  markets: [],
+  selectedMarket: null,
+  isLoading: false,
+  searchQuery: '',
+  selectedCategory: null,
+  viewMode: 'grid',
+  
+  fetchMarkets: async () => {
+    set({ isLoading: true })
+    // Simulate API call - in production, this would fetch from Aleo network
+    await new Promise(resolve => setTimeout(resolve, 800))
+    set({ markets: mockMarkets, isLoading: false })
+  },
+  
+  selectMarket: (market) => {
+    set({ selectedMarket: market })
+  },
+  
+  setSearchQuery: (query) => {
+    set({ searchQuery: query })
+  },
+  
+  setCategory: (category) => {
+    set({ selectedCategory: category })
+  },
+  
+  setViewMode: (mode) => {
+    set({ viewMode: mode })
+  },
+  
+  getFilteredMarkets: () => {
+    const { markets, searchQuery, selectedCategory } = get()
+    
+    return markets.filter(market => {
+      // Filter by search query
+      if (searchQuery && !market.question.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false
+      }
+      // Filter by category
+      if (selectedCategory !== null && market.category !== selectedCategory) {
+        return false
+      }
+      return true
+    })
+  },
+}))
+
+// ============================================================================
+// Bets Store
+// ============================================================================
+
+interface BetsStore {
+  userBets: Bet[]
+  pendingBets: Bet[]
+  isPlacingBet: boolean
+  
+  // Actions
+  placeBet: (marketId: string, amount: bigint, outcome: 'yes' | 'no') => Promise<string>
+  fetchUserBets: () => Promise<void>
+  getBetsByMarket: (marketId: string) => Bet[]
+  getTotalBetsValue: () => bigint
+}
+
+export const useBetsStore = create<BetsStore>((set, get) => ({
+  userBets: [],
+  pendingBets: [],
+  isPlacingBet: false,
+  
+  placeBet: async (marketId, amount, outcome) => {
+    const walletState = useWalletStore.getState().wallet
+    
+    if (!walletState.connected) {
+      throw new Error('Wallet not connected')
+    }
+    
+    set({ isPlacingBet: true })
+    
+    try {
+      // Request transaction through wallet
+      const transactionId = await walletManager.requestTransaction({
+        programId: 'veiled_markets.aleo',
+        functionName: 'place_bet',
+        inputs: [
+          marketId,
+          `${amount}u64`,
+          outcome === 'yes' ? '1u8' : '2u8',
+          // Credits record would be provided by wallet
+        ],
+        fee: 100000, // 0.1 credits fee
+      })
+      
+      // Add to pending bets
+      const newBet: Bet = {
+        id: transactionId,
+        marketId,
+        amount,
+        outcome,
+        placedAt: Date.now(),
+        status: 'pending',
+      }
+      
+      set({ 
+        pendingBets: [...get().pendingBets, newBet],
+        isPlacingBet: false,
+      })
+      
+      // In real app, we'd poll for transaction confirmation
+      // and move from pending to active when confirmed
+      setTimeout(() => {
+        set({
+          pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
+          userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
+        })
+      }, 3000)
+      
+      return transactionId
+    } catch (error: any) {
+      set({ isPlacingBet: false })
+      throw error
+    }
+  },
+  
+  fetchUserBets: async () => {
+    const walletState = useWalletStore.getState().wallet
+    
+    if (!walletState.connected) return
+    
+    try {
+      // In production, this would fetch and decrypt bet records from the network
+      const records = await walletManager.getRecords('veiled_markets.aleo')
+      
+      // Parse bet records
+      const bets: Bet[] = records
+        .filter((r: any) => r.type === 'Bet')
+        .map((r: any) => ({
+          id: r.id,
+          marketId: r.data.market_id,
+          amount: BigInt(r.data.amount),
+          outcome: r.data.outcome === '1u8' ? 'yes' : 'no',
+          placedAt: parseInt(r.data.placed_at),
+          status: 'active' as const,
+        }))
+      
+      set({ userBets: bets })
+    } catch (error) {
+      console.error('Failed to fetch user bets:', error)
+    }
+  },
+  
+  getBetsByMarket: (marketId) => {
+    return get().userBets.filter(bet => bet.marketId === marketId)
+  },
+  
+  getTotalBetsValue: () => {
+    return get().userBets.reduce((total, bet) => total + bet.amount, 0n)
+  },
+}))
+
+// ============================================================================
+// UI Store (for persistent preferences)
+// ============================================================================
+
+interface UIStore {
+  theme: 'dark' | 'light'
+  sidebarOpen: boolean
+  notificationsEnabled: boolean
+  
+  // Actions
+  setTheme: (theme: 'dark' | 'light') => void
+  toggleSidebar: () => void
+  setNotificationsEnabled: (enabled: boolean) => void
+}
+
+export const useUIStore = create<UIStore>()(
+  persist(
+    (set: (partial: Partial<UIStore>) => void, get: () => UIStore) => ({
+      theme: 'dark' as const,
+      sidebarOpen: true,
+      notificationsEnabled: true,
+      
+      setTheme: (theme: 'light' | 'dark') => set({ theme }),
+      toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
+      setNotificationsEnabled: (enabled: boolean) => set({ notificationsEnabled: enabled }),
+    }),
+    {
+      name: 'veiled-markets-ui',
+    }
+  )
+)
+
+// ============================================================================
+// Category Labels
+// ============================================================================
+
+export const CATEGORY_LABELS: Record<number, string> = {
+  1: 'Politics',
+  2: 'Sports',
+  3: 'Crypto',
+  4: 'Entertainment',
+  5: 'Science & Tech',
+  6: 'Economics',
+  99: 'Other',
+}
+
+export const CATEGORY_ICONS: Record<number, string> = {
+  1: '🏛️',
+  2: '⚽',
+  3: '₿',
+  4: '🎬',
+  5: '🔬',
+  6: '📈',
+  99: '🔮',
+}

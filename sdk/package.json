@@ -1,0 +1,47 @@
+{
+  "name": "@veiled-markets/sdk",
+  "version": "0.2.0",
+  "description": "TypeScript SDK for Veiled Markets prediction protocol on Aleo",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "eslint src/",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@provablehq/sdk": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.1.0"
+  },
+  "peerDependencies": {
+    "@provablehq/sdk": "^0.6.0"
+  },
+  "keywords": [
+    "aleo",
+    "blockchain",
+    "prediction-market",
+    "zero-knowledge",
+    "privacy",
+    "defi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/veiled-markets/sdk"
+  },
+  "license": "MIT"
+}
+

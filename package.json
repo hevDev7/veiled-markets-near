@@ -1,0 +1,35 @@
+{
+  "name": "veiled-markets",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Privacy-preserving prediction market built on Aleo blockchain",
+  "author": "Veiled Markets Team",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm --filter @veiled-markets/frontend dev",
+    "build": "pnpm --filter @veiled-markets/frontend build",
+    "build:all": "pnpm build:sdk && pnpm build:contracts && pnpm build",
+    "build:contracts": "cd contracts && leo build",
+    "build:sdk": "pnpm --filter @veiled-markets/sdk build",
+    "test": "pnpm test:sdk",
+    "test:sdk": "pnpm --filter @veiled-markets/sdk test",
+    "test:contracts": "cd contracts && leo test",
+    "test:all": "pnpm test:sdk && pnpm test:contracts",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean && rm -rf contracts/build",
+    "setup": "./scripts/setup-local.sh",
+    "deploy": "./scripts/deploy.sh",
+    "deploy:testnet": "./scripts/deploy.sh --network testnet",
+    "deploy:mainnet": "./scripts/deploy.sh --network mainnet",
+    "deploy:dry-run": "./scripts/deploy.sh --dry-run",
+    "verify": "./scripts/verify-deployment.sh",
+    "check-env": "./scripts/check-env.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

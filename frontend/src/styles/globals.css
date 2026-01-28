@@ -1,0 +1,239 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-brand: 139 92 246;
+    --color-accent: 6 182 212;
+    --color-yes: 16 185 129;
+    --color-no: 244 63 94;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface-950 text-white;
+    background-image: 
+      radial-gradient(ellipse 80% 80% at 50% -20%, rgba(139, 92, 246, 0.15), transparent),
+      radial-gradient(ellipse 60% 60% at 100% 0%, rgba(6, 182, 212, 0.1), transparent);
+    min-height: 100vh;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-600;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-brand-500/30 text-white;
+  }
+}
+
+@layer components {
+  /* Glass morphism card */
+  .glass-card {
+    @apply bg-surface-900/50 backdrop-blur-xl border border-surface-800/50 rounded-2xl;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-brand-400 via-accent-400 to-brand-400 bg-clip-text text-transparent;
+  }
+
+  /* Animated gradient background */
+  .animated-gradient {
+    background: linear-gradient(
+      135deg,
+      rgba(139, 92, 246, 0.2) 0%,
+      rgba(6, 182, 212, 0.2) 50%,
+      rgba(139, 92, 246, 0.2) 100%
+    );
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+  }
+
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  /* Glow button */
+  .btn-glow {
+    @apply relative overflow-hidden;
+  }
+
+  .btn-glow::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-brand-500 to-accent-500 opacity-0 transition-opacity duration-300;
+  }
+
+  .btn-glow:hover::before {
+    @apply opacity-20;
+  }
+
+  /* Shimmer effect */
+  .shimmer {
+    @apply relative overflow-hidden;
+  }
+
+  .shimmer::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  /* Floating animation */
+  .float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+
+  /* Progress bar for odds */
+  .odds-bar {
+    @apply relative h-2 rounded-full overflow-hidden bg-surface-800;
+  }
+
+  .odds-bar-yes {
+    @apply absolute left-0 top-0 h-full bg-gradient-to-r from-yes-600 to-yes-400 rounded-full transition-all duration-500;
+  }
+
+  .odds-bar-no {
+    @apply absolute right-0 top-0 h-full bg-gradient-to-l from-no-600 to-no-400 rounded-full transition-all duration-500;
+  }
+
+  /* Market card hover effect */
+  .market-card {
+    @apply glass-card p-6 transition-all duration-300 cursor-pointer;
+  }
+
+  .market-card:hover {
+    @apply border-brand-500/50 shadow-glow-brand transform -translate-y-1;
+  }
+
+  /* Input styling */
+  .input-field {
+    @apply w-full px-4 py-3 bg-surface-800/50 border border-surface-700 rounded-xl 
+           focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 
+           transition-all duration-200 outline-none placeholder-surface-500;
+  }
+
+  /* Button variants */
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-brand-600 to-brand-500 
+           hover:from-brand-500 hover:to-brand-400
+           text-white font-semibold rounded-xl 
+           transition-all duration-200 shadow-lg shadow-brand-500/25
+           hover:shadow-xl hover:shadow-brand-500/30
+           active:scale-[0.98];
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-surface-800 hover:bg-surface-700
+           text-white font-medium rounded-xl 
+           border border-surface-700 hover:border-surface-600
+           transition-all duration-200;
+  }
+
+  .btn-yes {
+    @apply px-6 py-3 bg-gradient-to-r from-yes-600 to-yes-500 
+           hover:from-yes-500 hover:to-yes-400
+           text-white font-semibold rounded-xl 
+           transition-all duration-200 shadow-lg shadow-yes-500/25
+           hover:shadow-xl hover:shadow-yes-500/30;
+  }
+
+  .btn-no {
+    @apply px-6 py-3 bg-gradient-to-r from-no-600 to-no-500 
+           hover:from-no-500 hover:to-no-400
+           text-white font-semibold rounded-xl 
+           transition-all duration-200 shadow-lg shadow-no-500/25
+           hover:shadow-xl hover:shadow-no-500/30;
+  }
+
+  /* Badge styling */
+  .badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium;
+  }
+
+  .badge-active {
+    @apply bg-yes-500/20 text-yes-400 border border-yes-500/30;
+  }
+
+  .badge-closed {
+    @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
+  }
+
+  .badge-resolved {
+    @apply bg-accent-500/20 text-accent-400 border border-accent-500/30;
+  }
+
+  /* Category badges */
+  .category-badge {
+    @apply px-3 py-1 rounded-lg text-xs font-medium bg-surface-800/80 text-surface-300;
+  }
+
+  /* Stat display */
+  .stat-value {
+    @apply font-display text-2xl font-bold;
+  }
+
+  .stat-label {
+    @apply text-sm text-surface-400;
+  }
+
+  /* Privacy indicator */
+  .privacy-indicator {
+    @apply inline-flex items-center gap-1.5 px-2 py-1 rounded-lg 
+           bg-brand-500/10 text-brand-400 text-xs font-medium
+           border border-brand-500/20;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Gradient borders */
+  .border-gradient {
+    border: 1px solid transparent;
+    background: 
+      linear-gradient(var(--tw-gradient-stops)) padding-box,
+      linear-gradient(135deg, rgb(139 92 246 / 0.5), rgb(6 182 212 / 0.5)) border-box;
+  }
+}
+

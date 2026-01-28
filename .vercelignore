@@ -1,0 +1,52 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+frontend/dist
+frontend/node_modules
+sdk/node_modules
+contracts/build
+contracts/outputs
+
+# Leo and SnarkOS
+leo
+snarkOS
+*.prover
+*.verifier
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+.git
+.github
+docs
+scripts
+*.md
+!README.md
+LICENSE
