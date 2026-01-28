@@ -105,10 +105,15 @@ async function transformMarketData(
     console.log('Category:', market.category);
     console.log('Transaction ID:', transactionId);
 
+    // Create description with truncated hash for verification
+    const hashPreview = market.question_hash.length > 20
+        ? `${market.question_hash.slice(0, 16)}...${market.question_hash.slice(-10)}`
+        : market.question_hash;
+
     return {
         id: market.id,
         question: questionText,
-        description: 'Market details stored on-chain. Question hash: ' + market.question_hash,
+        description: `Market verified on-chain. Question hash: ${hashPreview}`,
         category: market.category,
         deadline: market.deadline,
         resolutionDeadline: market.resolution_deadline,
