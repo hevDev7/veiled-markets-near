@@ -1,8 +1,8 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "pnpm --filter @veiled-markets/frontend build",
+    "buildCommand": "pnpm --filter @veiled-markets/frontend build && cp -r frontend/dist dist",
     "installCommand": "pnpm install",
-    "outputDirectory": "./frontend/dist",
+    "outputDirectory": "dist",
     "rewrites": [
         {
             "source": "/(.*)",
