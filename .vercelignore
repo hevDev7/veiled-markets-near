@@ -49,4 +49,5 @@ docs
 scripts
 *.md
 !README.md
+!build.sh
 LICENSE
