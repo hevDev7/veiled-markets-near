@@ -1,7 +1,7 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "bash build.sh",
+    "buildCommand": "ls -la && pwd && cd frontend && npm install && npm run build",
     "outputDirectory": "frontend/dist",
-    "installCommand": "echo 'Dependencies will be installed in build script'",
+    "installCommand": "echo 'Dependencies will be installed in build command'",
     "framework": null
 }
