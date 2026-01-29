@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, type Market } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { MarketRow } from '@/components/MarketRow'
 import { DashboardHeader } from '@/components/DashboardHeader'
@@ -47,7 +47,8 @@ const sortOptions = [
 export function Dashboard() {
     const navigate = useNavigate()
     const { wallet } = useWalletStore()
-    const { markets, isLoading, fetchMarkets, addMarket } = useRealMarketsStore()
+    const { markets, isLoading, isRefreshing, fetchMarkets, addMarket } = useRealMarketsStore()
+    const { userBets, pendingBets, fetchUserBets } = useBetsStore()
 
     const [selectedCategory, setSelectedCategory] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
@@ -62,10 +63,11 @@ export function Dashboard() {
 
     useEffect(() => {
         fetchMarkets()
+        fetchUserBets() // Fetch user's bet records
         // Refresh markets every 30 seconds
         const interval = setInterval(fetchMarkets, 30000)
         return () => clearInterval(interval)
-    }, [fetchMarkets])
+    }, [fetchMarkets, fetchUserBets])
 
     const filteredMarkets = markets
         .filter(market =>
@@ -126,14 +128,20 @@ export function Dashboard() {
                                 <span className="text-brand-400 font-mono font-bold">ON_CHAIN_DATA</span>
                             </div>
                             <span className="text-brand-300/80 font-mono">
-                                Showing real markets from veiled_markets.aleo contract. Create your first market to get started!
+                                Showing real markets from veiled_markets_v2.aleo contract. Create your first market to get started!
                             </span>
                             <button
                                 onClick={() => fetchMarkets()}
-                                className="ml-auto flex items-center gap-2 text-brand-400 hover:text-brand-300 font-mono text-xs"
+                                disabled={isRefreshing}
+                                className={cn(
+                                    "ml-auto flex items-center gap-2 font-mono text-xs transition-colors",
+                                    isRefreshing
+                                        ? "text-brand-400/50 cursor-not-allowed"
+                                        : "text-brand-400 hover:text-brand-300"
+                                )}
                             >
-                                <RefreshCw className="w-3 h-3" />
-                                REFRESH
+                                <RefreshCw className={cn("w-3 h-3", isRefreshing && "animate-spin")} />
+                                {isRefreshing ? "SYNCING..." : "REFRESH"}
                             </button>
                         </div>
                     </div>
@@ -174,7 +182,7 @@ export function Dashboard() {
                             <StatTicker
                                 icon={<Activity className="w-4 h-4" />}
                                 label="ACTIVE_BETS"
-                                value="0"
+                                value={String(userBets.filter(b => b.status === 'active').length + pendingBets.length)}
                                 color="text-yes-400"
                                 delay={0.1}
                             />
@@ -188,7 +196,7 @@ export function Dashboard() {
                             <StatTicker
                                 icon={<Zap className="w-4 h-4" />}
                                 label="TOTAL_TRADES"
-                                value="0"
+                                value={String(markets.reduce((sum, m) => sum + m.totalBets, 0))}
                                 color="text-surface-400"
                                 delay={0.3}
                             />
@@ -315,8 +323,13 @@ export function Dashboard() {
                                         SHOWING {filteredMarkets.length} OF {markets.length} MARKETS
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
-                                        <span className="text-yes-400">LIVE</span>
+                                        <div className={cn(
+                                            "w-1.5 h-1.5 rounded-full animate-pulse",
+                                            isRefreshing ? "bg-accent-400" : "bg-yes-400"
+                                        )} />
+                                        <span className={isRefreshing ? "text-accent-400" : "text-yes-400"}>
+                                            {isRefreshing ? "SYNCING" : "LIVE"}
+                                        </span>
                                     </div>
                                 </div>
                             </motion.div>

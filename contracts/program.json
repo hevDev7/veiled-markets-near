@@ -1,7 +1,7 @@
 {
-  "program": "veiled_markets.aleo",
-  "version": "0.1.0",
-  "description": "Privacy-preserving prediction market protocol",
+  "program": "veiled_markets_v2.aleo",
+  "version": "0.2.0",
+  "description": "Privacy-preserving prediction market protocol with integrated credits transfer",
   "license": "MIT",
   "dependencies": [
     {

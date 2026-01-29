@@ -22,26 +22,26 @@ export interface AppConfig {
   network: NetworkType;
   rpcUrl: string;
   explorerUrl: string;
-  
+
   // Program
   programId: string;
   creditsProgramId: string;
-  
+
   // Wallet
   enableDemoMode: boolean;
   defaultWallet: WalletType;
-  
+
   // Development keys (local testing only - NEVER use in production!)
   devPrivateKey: string | null;
   devViewKey: string | null;
   devAddress: string | null;
-  
+
   // Features
   enableCreateMarket: boolean;
   enableBetting: boolean;
   showTestnetBanner: boolean;
   debug: boolean;
-  
+
   // App
   appName: string;
   appDescription: string;
@@ -84,32 +84,32 @@ function getEnvBool(key: string, fallback: boolean = false): boolean {
 function loadConfig(): AppConfig {
   const network = (getEnv('VITE_NETWORK', 'testnet') as NetworkType);
   const networkConfig = NETWORK_CONFIGS[network] || NETWORK_CONFIGS.testnet;
-  
+
   return {
     // Network
     network,
     rpcUrl: getEnv('VITE_ALEO_RPC_URL', networkConfig.rpcUrl),
     explorerUrl: getEnv('VITE_EXPLORER_URL', networkConfig.explorerUrl),
-    
+
     // Program
-    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets.aleo'),
+    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v2.aleo'),
     creditsProgramId: getEnv('VITE_CREDITS_PROGRAM_ID', 'credits.aleo'),
-    
+
     // Wallet
     enableDemoMode: getEnvBool('VITE_ENABLE_DEMO_MODE', true),
     defaultWallet: getEnv('VITE_DEFAULT_WALLET', 'puzzle') as WalletType,
-    
+
     // Development keys (local testing only)
     devPrivateKey: getEnv('VITE_DEV_PRIVATE_KEY') || null,
     devViewKey: getEnv('VITE_DEV_VIEW_KEY') || null,
     devAddress: getEnv('VITE_DEV_ADDRESS') || null,
-    
+
     // Features
     enableCreateMarket: getEnvBool('VITE_ENABLE_CREATE_MARKET', true),
     enableBetting: getEnvBool('VITE_ENABLE_BETTING', true),
     showTestnetBanner: getEnvBool('VITE_SHOW_TESTNET_BANNER', true),
     debug: getEnvBool('VITE_DEBUG', false),
-    
+
     // App
     appName: getEnv('VITE_APP_NAME', 'Veiled Markets'),
     appDescription: getEnv('VITE_APP_DESCRIPTION', 'Privacy-Preserving Prediction Markets on Aleo'),
@@ -143,9 +143,22 @@ export function debug(...args: unknown[]): void {
 
 /**
  * Get transaction URL on explorer
+ * Supports both Aleo transaction IDs (at1...) and UUIDs
  */
 export function getTransactionUrl(txId: string): string {
-  return `${config.explorerUrl}/transaction/${txId}`;
+  console.log('getTransactionUrl called with:', txId);
+
+  // Clean the transaction ID (remove any whitespace)
+  const cleanTxId = txId.trim();
+
+  // Build the URL - Provable Explorer supports both formats
+  const url = `${config.explorerUrl}/transaction/${cleanTxId}`;
+
+  console.log('Generated URL:', url);
+  console.log('Explorer base:', config.explorerUrl);
+  console.log('Transaction ID format:', cleanTxId.startsWith('at1') ? 'Aleo format' : 'UUID format');
+
+  return url;
 }
 
 /**

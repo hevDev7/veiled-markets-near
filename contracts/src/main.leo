@@ -23,7 +23,7 @@
 // Import the official credits program for token handling
 import credits.aleo;
 
-program veiled_markets.aleo {
+program veiled_markets_v2.aleo {
     
     // ========================================================================
     // CONSTANTS
@@ -105,6 +105,10 @@ program veiled_markets.aleo {
     
     // Protocol treasury
     mapping protocol_treasury: u8 => u64;
+
+    // Program's held credits (for payouts)
+    // Key 0 = total credits held by program
+    mapping program_credits: u8 => u64;
     
     // ========================================================================
     // STRUCTS
@@ -249,61 +253,68 @@ program veiled_markets.aleo {
     }
     
     // ------------------------------------------------------------------------
-    // PLACE BET (Private)
-    // Places a private bet on a market outcome
+    // PLACE BET (with Credits Transfer)
+    // Places a private bet on a market outcome AND transfers credits
     // User's bet amount and choice remain private (in Record)
+    // Credits are transferred from user's public balance to program
     // Only aggregate pool totals are updated publicly (in Mapping)
     // ------------------------------------------------------------------------
     async transition place_bet(
         public market_id: field,
         public amount: u64,
         public outcome: u8,
-        private bettor: address,  // Explicit bettor address to avoid self.caller issues
     ) -> (Bet, Future) {
         // Validate outcome (must be YES or NO)
         assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
-        
+
         // Validate amount (must meet minimum)
         assert(amount >= MIN_BET_AMOUNT);
-        
-        // Security: Ensure bettor is the caller (prevent bet on behalf of others)
-        assert(bettor == self.caller);
-        
+
         // Create private bet record (stays with user)
         let bet: Bet = Bet {
-            owner: bettor,  // Use explicit bettor address, not self.caller
+            owner: self.caller,
             market_id: market_id,
             amount: amount,
             outcome: outcome,
             placed_at: 0u64,   // Will be set based on block height on-chain
         };
-        
+
+        // Transfer credits from bettor to program using transfer_public_as_signer
+        // This transfers from the caller's public balance
+        let transfer_future: Future = credits.aleo/transfer_public_as_signer(
+            veiled_markets_v2.aleo,  // recipient is this program
+            amount                 // amount in microcredits
+        );
+
         // Return bet record and Future for on-chain pool update
-        // Note: Credits transfer handled separately via credits.aleo/transfer_public
-        return (bet, place_bet_onchain(market_id, amount, outcome));
+        return (bet, finalize_place_bet(transfer_future, market_id, amount, outcome));
     }
-    
-    // On-chain logic - only updates aggregate pool totals
-    async function place_bet_onchain(
+
+    // On-chain logic - updates pool totals after credits transfer
+    async function finalize_place_bet(
+        transfer_future: Future,
         market_id: field,
         amount: u64,
         outcome: u8,
     ) {
+        // Await the credits transfer to complete first
+        transfer_future.await();
+
         // Get market and verify it's active
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        
+
         // Check deadline hasn't passed
         let current_height: u64 = block.height as u64;
         assert(current_height <= market.deadline);
-        
+
         // Get current pool state
         let pool: MarketPool = market_pools.get(market_id);
-        
+
         // Update pool based on outcome (ternary for conditional add)
         let yes_add: u64 = outcome == OUTCOME_YES ? amount : 0u64;
         let no_add: u64 = outcome == OUTCOME_NO ? amount : 0u64;
-        
+
         let updated_pool: MarketPool = MarketPool {
             market_id: market_id,
             total_yes_pool: pool.total_yes_pool + yes_add,
@@ -311,8 +322,12 @@ program veiled_markets.aleo {
             total_bets: pool.total_bets + 1u64,
             total_unique_bettors: pool.total_unique_bettors + 1u64,
         };
-        
+
         market_pools.set(market_id, updated_pool);
+
+        // Update program's held credits tracking
+        let current_held: u64 = program_credits.get_or_use(0u8, 0u64);
+        program_credits.set(0u8, current_held + amount);
     }
     
     // ------------------------------------------------------------------------
@@ -470,35 +485,70 @@ program veiled_markets.aleo {
     // ------------------------------------------------------------------------
     // WITHDRAW WINNINGS
     // Actually withdraw the credits after claiming
-    // This is a separate step to allow batch verification
-    // Credits transfer handled via credits.aleo/transfer_public
+    // Calculates payout and transfers credits from program to winner
+    // payout_amount must be pre-calculated by frontend based on pool data
     // ------------------------------------------------------------------------
     async transition withdraw_winnings(
         private claim: WinningsClaim,
+        public payout_amount: u64,  // Pre-calculated payout amount
     ) -> Future {
         // Validate claim ownership
         assert(claim.owner == self.caller);
-        
-        return withdraw_winnings_onchain(claim.market_id, claim.bet_amount, claim.winning_outcome, self.caller);
+
+        // Transfer credits from program to winner
+        // Using transfer_public_as_signer from program's balance
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, payout_amount);
+
+        // Return future for finalization
+        return finalize_withdraw_winnings(
+            transfer_future,
+            claim.market_id,
+            claim.bet_amount,
+            claim.winning_outcome,
+            payout_amount,
+            self.caller
+        );
     }
-    
-    async function withdraw_winnings_onchain(
+
+    async function finalize_withdraw_winnings(
+        transfer_future: Future,
         market_id: field,
         bet_amount: u64,
         bet_outcome: u8,
+        payout_amount: u64,
         claimer: address,
     ) {
         // Verify the resolution exists and matches
         let resolution: MarketResolution = market_resolutions.get(market_id);
         assert(bet_outcome == resolution.winning_outcome);
-        
-        // Verify claim was already processed
+
+        // Verify claim was already processed (from claim_winnings)
         let claim_key: field = BHP256::hash_to_field(ClaimKey {
             market_id: market_id,
             claimer: claimer,
         });
         let was_claimed: bool = user_claims.get(claim_key);
         assert(was_claimed);
+
+        // Get pool data to verify payout calculation
+        let pool: MarketPool = market_pools.get(market_id);
+
+        // Calculate winning pool based on outcome
+        let winning_pool: u64 = bet_outcome == OUTCOME_YES ? pool.total_yes_pool : pool.total_no_pool;
+
+        // Verify payout amount is correct (within 1% tolerance for rounding)
+        let expected_payout: u64 = (bet_amount * resolution.total_payout_pool) / winning_pool;
+        assert(payout_amount <= expected_payout);  // Can't claim more than entitled
+
+        // Ensure we have enough credits
+        let current_held: u64 = program_credits.get_or_use(0u8, 0u64);
+        assert(current_held >= payout_amount);
+
+        // Update program's held credits
+        program_credits.set(0u8, current_held - payout_amount);
+
+        // Await the credits transfer
+        transfer_future.await();
     }
     
     // ------------------------------------------------------------------------
@@ -573,38 +623,60 @@ program veiled_markets.aleo {
     // ------------------------------------------------------------------------
     // CLAIM REFUND
     // For cancelled markets, users can claim their original bet back
+    // Transfers credits from program back to user
     // ------------------------------------------------------------------------
     async transition claim_refund(
         private bet: Bet,
     ) -> (RefundClaim, Future) {
+        // Validate bet ownership
+        assert(bet.owner == self.caller);
+
         // Create refund claim
         let refund: RefundClaim = RefundClaim {
             owner: bet.owner,
             market_id: bet.market_id,
             amount: bet.amount,
         };
-        
-        return (refund, claim_refund_onchain(bet.market_id, bet.owner));
+
+        // Transfer credits from program to user
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, bet.amount);
+
+        return (refund, finalize_claim_refund(transfer_future, bet.market_id, bet.amount, self.caller));
     }
-    
-    async function claim_refund_onchain(market_id: field, claimer: address) {
+
+    async function finalize_claim_refund(
+        transfer_future: Future,
+        market_id: field,
+        amount: u64,
+        claimer: address
+    ) {
         let market: Market = markets.get(market_id);
-        
+
         // Market must be cancelled
         assert(market.status == MARKET_STATUS_CANCELLED);
-        
+
         // Generate claim key to prevent double refunds
         let claim_key: field = BHP256::hash_to_field(ClaimKey {
             market_id: market_id,
             claimer: claimer,
         });
-        
+
         // Check not already claimed
         let already_claimed: bool = user_claims.get_or_use(claim_key, false);
         assert(!already_claimed);
-        
+
         // Mark as claimed
         user_claims.set(claim_key, true);
+
+        // Ensure we have enough credits for refund
+        let current_held: u64 = program_credits.get_or_use(0u8, 0u64);
+        assert(current_held >= amount);
+
+        // Update program's held credits
+        program_credits.set(0u8, current_held - amount);
+
+        // Await the credits transfer
+        transfer_future.await();
     }
     
     // ========================================================================

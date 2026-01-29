@@ -204,10 +204,37 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
   },
 
   refreshBalance: async () => {
-    if (!get().wallet.connected) return
+    if (!get().wallet.connected) {
+      console.log('refreshBalance: Wallet not connected, skipping')
+      return
+    }
 
     try {
+      console.log('=== REFRESHING BALANCE ===')
+      console.log('Current balance:', {
+        public: get().wallet.balance.public.toString(),
+        private: get().wallet.balance.private.toString(),
+      })
+
       const balance = await walletManager.getBalance()
+
+      console.log('New balance:', {
+        public: balance.public.toString(),
+        private: balance.private.toString(),
+      })
+
+      const oldTotal = get().wallet.balance.public + get().wallet.balance.private
+      const newTotal = balance.public + balance.private
+
+      if (oldTotal !== newTotal) {
+        console.log('✅ Balance changed!')
+        console.log('Old total:', oldTotal.toString())
+        console.log('New total:', newTotal.toString())
+        console.log('Difference:', (newTotal - oldTotal).toString())
+      } else {
+        console.log('⚠️ Balance unchanged')
+      }
+
       set({
         wallet: {
           ...get().wallet,
@@ -274,7 +301,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets.aleo program.
+// in the veiled_markets_v2.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -607,8 +634,41 @@ interface BetsStore {
   getTotalBetsValue: () => bigint
 }
 
+// Helper to load bets from localStorage
+function loadBetsFromStorage(): Bet[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const saved = localStorage.getItem('veiled_markets_user_bets')
+    if (!saved) return []
+    const parsed = JSON.parse(saved)
+    // Convert amount strings back to BigInt
+    return parsed.map((bet: any) => ({
+      ...bet,
+      amount: BigInt(bet.amount),
+    }))
+  } catch (e) {
+    console.error('Failed to load bets from storage:', e)
+    return []
+  }
+}
+
+// Helper to save bets to localStorage
+function saveBetsToStorage(bets: Bet[]) {
+  if (typeof window === 'undefined') return
+  try {
+    // Convert BigInt to string for JSON serialization
+    const serializable = bets.map(bet => ({
+      ...bet,
+      amount: bet.amount.toString(),
+    }))
+    localStorage.setItem('veiled_markets_user_bets', JSON.stringify(serializable))
+  } catch (e) {
+    console.error('Failed to save bets to storage:', e)
+  }
+}
+
 export const useBetsStore = create<BetsStore>((set, get) => ({
-  userBets: [],
+  userBets: loadBetsFromStorage(),
   pendingBets: [],
   isPlacingBet: false,
 
@@ -626,7 +686,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     set({ isPlacingBet: true })
 
     try {
-      // Build inputs for the deployed veiled_markets.aleo contract
+      // Build inputs for the deployed veiled_markets_v2.aleo contract
       // place_bet(market_id: field, amount: u64, outcome: u8, bettor: address)
       const inputs = buildPlaceBetInputs(
         marketId,
@@ -635,8 +695,27 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         walletState.address
       )
 
-      console.log('Placing bet with inputs:', inputs)
+      console.log('=== PLACE BET DEBUG ===')
+      console.log('Market ID:', marketId)
+      console.log('Amount:', amount.toString())
+      console.log('Outcome:', outcome)
+      console.log('Bettor:', walletState.address)
+      console.log('Inputs:', inputs)
+      console.log('Inputs types:', inputs.map(i => typeof i))
       console.log('Program ID:', CONTRACT_INFO.programId)
+      console.log('Wallet type:', walletState.walletType)
+
+      // Validate inputs
+      for (let i = 0; i < inputs.length; i++) {
+        if (typeof inputs[i] !== 'string') {
+          throw new Error(`Input ${i} is not a string: ${typeof inputs[i]}`)
+        }
+        if (!inputs[i]) {
+          throw new Error(`Input ${i} is empty`)
+        }
+      }
+
+      console.log('Inputs validated, requesting transaction...')
 
       // Request transaction through wallet
       const transactionId = await walletManager.requestTransaction({
@@ -647,6 +726,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       })
 
       console.log('Bet transaction submitted:', transactionId)
+
+      // Immediately refresh balance (optimistic update)
+      console.log('Refreshing balance immediately after bet...')
+      setTimeout(() => {
+        useWalletStore.getState().refreshBalance()
+      }, 1000)
 
       // Add to pending bets
       const newBet: Bet = {
@@ -663,6 +748,15 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         isPlacingBet: false,
       })
 
+      // Refresh balance multiple times to catch the update
+      const refreshIntervals = [3000, 5000, 10000, 15000, 30000]
+      refreshIntervals.forEach(delay => {
+        setTimeout(() => {
+          console.log(`Refreshing balance after ${delay}ms...`)
+          useWalletStore.getState().refreshBalance()
+        }, delay)
+      })
+
       // Poll for transaction confirmation
       // In production, use WebSocket or more sophisticated polling
       const pollInterval = setInterval(async () => {
@@ -672,11 +766,15 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           )
           if (response.ok) {
             clearInterval(pollInterval)
+            const activeBet = { ...newBet, status: 'active' as const }
+            const updatedBets = [...get().userBets, activeBet]
             set({
               pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
-              userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
+              userBets: updatedBets,
             })
-            // Refresh balance after successful bet
+            saveBetsToStorage(updatedBets)
+            // Final refresh after confirmation
+            console.log('Transaction confirmed, final balance refresh...')
             useWalletStore.getState().refreshBalance()
           }
         } catch {
@@ -690,10 +788,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         // If still pending after timeout, mark as active (optimistic)
         const stillPending = get().pendingBets.find(b => b.id === transactionId)
         if (stillPending) {
+          const activeBet = { ...newBet, status: 'active' as const }
+          const updatedBets = [...get().userBets, activeBet]
           set({
             pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
-            userBets: [...get().userBets, { ...newBet, status: 'active' as const }],
+            userBets: updatedBets,
           })
+          saveBetsToStorage(updatedBets)
         }
       }, 120000)
 
@@ -711,11 +812,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     if (!walletState.connected) return
 
     try {
-      // In production, this would fetch and decrypt bet records from the network
-      const records = await walletManager.getRecords('veiled_markets.aleo')
+      // First, load from localStorage (our local cache)
+      const localBets = loadBetsFromStorage()
 
-      // Parse bet records
-      const bets: Bet[] = records
+      // Try to fetch from wallet records (may not work with all wallets)
+      const records = await walletManager.getRecords('veiled_markets_v2.aleo')
+
+      // Parse bet records from wallet
+      const walletBets: Bet[] = records
         .filter((r: any) => r.type === 'Bet')
         .map((r: any) => ({
           id: r.id,
@@ -726,9 +830,27 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           status: 'active' as const,
         }))
 
-      set({ userBets: bets })
+      // Merge: use wallet bets if available, otherwise use local cache
+      // Also merge to avoid duplicates (by id)
+      const existingIds = new Set(walletBets.map(b => b.id))
+      const mergedBets = [
+        ...walletBets,
+        ...localBets.filter(b => !existingIds.has(b.id))
+      ]
+
+      set({ userBets: mergedBets })
+
+      // Update localStorage with merged data
+      if (mergedBets.length > 0) {
+        saveBetsToStorage(mergedBets)
+      }
     } catch (error) {
-      console.error('Failed to fetch user bets:', error)
+      console.error('Failed to fetch user bets from wallet:', error)
+      // On error, still use localStorage cache
+      const localBets = loadBetsFromStorage()
+      if (localBets.length > 0) {
+        set({ userBets: localBets })
+      }
     }
   },
 

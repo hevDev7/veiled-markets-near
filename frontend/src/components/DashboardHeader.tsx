@@ -271,12 +271,27 @@ export function DashboardHeader() {
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-surface-500 mb-0.5">Private</p>
+                        <p className="text-xs text-surface-500 mb-0.5">
+                          Private {wallet.balance.private === 0n && !wallet.isDemoMode && '⚠️'}
+                        </p>
                         <p className="text-sm font-medium text-white">
-                          {formatCredits(wallet.balance.private)}
+                          {wallet.balance.private > 0n
+                            ? formatCredits(wallet.balance.private)
+                            : <span className="text-surface-600">Not available</span>
+                          }
                         </p>
                       </div>
                     </div>
+
+                    {/* Info about private balance */}
+                    {wallet.balance.private === 0n && !wallet.isDemoMode && (
+                      <div className="mt-2 pt-2 border-t border-surface-700/50">
+                        <p className="text-xs text-yellow-400/80 leading-relaxed">
+                          ⚠️ Private balance is encrypted and cannot be read via API.
+                          Check your Leo Wallet extension for accurate total balance.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Menu Items */}

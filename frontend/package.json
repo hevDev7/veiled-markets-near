@@ -9,8 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@demox-labs/aleo-wallet-adapter-base": "^0.0.23",
-    "@demox-labs/aleo-wallet-adapter-leo": "^0.0.25",
+    "@provablehq/aleo-wallet-adaptor-core": "^0.3.0-alpha.2",
+    "@provablehq/aleo-wallet-adaptor-fox": "^0.3.0-alpha.2",
+    "@provablehq/aleo-wallet-adaptor-leo": "^0.3.0-alpha.2",
+    "@provablehq/aleo-wallet-adaptor-puzzle": "^0.3.0-alpha.2",
+    "@provablehq/aleo-wallet-adaptor-react": "^0.3.0-alpha.2",
+    "@provablehq/aleo-wallet-adaptor-soter": "^0.3.0-alpha.2",
     "@provablehq/sdk": "^0.6.0",
     "@puzzlehq/sdk": "^1.0.0",
     "@radix-ui/react-dialog": "^1.0.5",

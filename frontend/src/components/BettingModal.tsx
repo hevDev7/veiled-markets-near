@@ -1,9 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Shield, Lock, TrendingUp, Check, Loader2, ExternalLink, AlertCircle } from 'lucide-react'
+import { X, Shield, Lock, TrendingUp, Check, Loader2, AlertCircle } from 'lucide-react'
 import { useState } from 'react'
 import { type Market, useWalletStore, useBetsStore } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
-import { getTransactionUrl } from '@/lib/aleo-client'
+import { TransactionLink } from './TransactionLink'
 
 interface BettingModalProps {
   market: Market | null
@@ -238,16 +238,22 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                             ALEO
                           </div>
                         </div>
-                        <div className="flex justify-between mt-2 text-sm">
-                          <span className="text-surface-500">
-                            Balance: {formatCredits(wallet.balance.public + wallet.balance.private)} ALEO
-                          </span>
-                          <button
-                            onClick={() => setBetAmount((Number(wallet.balance.public + wallet.balance.private) / 1_000_000).toString())}
-                            className="text-brand-400 hover:text-brand-300"
-                          >
-                            Max
-                          </button>
+                        <div className="mt-2 space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-surface-500">
+                              Total Balance: {formatCredits(wallet.balance.public + wallet.balance.private)} ALEO
+                            </span>
+                            <button
+                              onClick={() => setBetAmount((Number(wallet.balance.public + wallet.balance.private) / 1_000_000).toString())}
+                              className="text-brand-400 hover:text-brand-300"
+                            >
+                              Max
+                            </button>
+                          </div>
+                          <div className="flex justify-between text-xs text-surface-600">
+                            <span>Public: {formatCredits(wallet.balance.public)} ALEO</span>
+                            <span>Private: {formatCredits(wallet.balance.private)} ALEO</span>
+                          </div>
                         </div>
                       </div>
 
@@ -272,12 +278,26 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       )}
 
                       {/* Privacy Notice */}
-                      <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 mb-6">
+                      <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 mb-4">
                         <Lock className="w-5 h-5 text-brand-400 mt-0.5" />
                         <div>
                           <p className="text-sm font-medium text-brand-300">Your bet is private</p>
                           <p className="text-xs text-surface-400 mt-1">
                             Only the total pool is visible. Your bet amount and position are encrypted on-chain.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Aleo Balance Info */}
+                      <div className="flex items-start gap-3 p-4 rounded-xl bg-surface-800/50 border border-surface-700 mb-6">
+                        <div className="text-lg">ℹ️</div>
+                        <div>
+                          <p className="text-sm font-medium text-white mb-1">About Aleo Balance</p>
+                          <p className="text-xs text-surface-400 leading-relaxed">
+                            Aleo uses <span className="text-brand-400">private records</span> for transactions.
+                            Your bet amount may be deducted from private balance (encrypted),
+                            while only the transaction fee is deducted from public balance.
+                            Check your wallet extension for the most accurate total balance.
                           </p>
                         </div>
                       </div>
@@ -380,18 +400,32 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       </div>
 
                       {transactionId && (
-                        <div className="p-3 rounded-lg bg-surface-800/30 mb-4">
-                          <p className="text-xs text-surface-500 mb-1">Transaction ID</p>
-                          <p className="text-xs text-white font-mono break-all">{transactionId}</p>
-                          <a
-                            href={getTransactionUrl(transactionId)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 mt-2"
-                          >
-                            View on Explorer <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
+                        <>
+                          <TransactionLink
+                            transactionId={transactionId}
+                            className="mb-4"
+                            showCopy={true}
+                            showNote={true}
+                          />
+
+                          {/* Warning if UUID format */}
+                          {transactionId.includes('-') && !transactionId.startsWith('at1') && (
+                            <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 mb-4">
+                              <div className="flex items-start gap-2">
+                                <span className="text-yellow-400">⚠️</span>
+                                <div className="flex-1">
+                                  <p className="text-xs font-medium text-yellow-400 mb-1">
+                                    Temporary Event ID
+                                  </p>
+                                  <p className="text-xs text-surface-400">
+                                    This is a temporary event ID from Leo Wallet. The actual Aleo transaction ID (at1...)
+                                    will be available after confirmation (30-60 seconds). Explorer link will work once confirmed.
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
 
                       <div className="flex items-center justify-center gap-2 text-sm text-brand-400 mb-6">

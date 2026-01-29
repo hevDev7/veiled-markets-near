@@ -1,8 +1,8 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, ExternalLink, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { X, ExternalLink, AlertCircle, CheckCircle2, Download } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 import { useWalletStore } from '@/lib/store'
-import { WALLET_INFO, type WalletType, isLeoWalletInstalled, isPuzzleWalletInstalled } from '@/lib/wallet'
+import { WALLET_INFO, isLeoWalletInstalled } from '@/lib/wallet'
 import { cn } from '@/lib/utils'
 
 interface WalletModalProps {
@@ -11,40 +11,21 @@ interface WalletModalProps {
   onConnect: () => void
 }
 
-interface WalletOption {
-  type: WalletType
-  name: string
-  description: string
-  icon: string
-  installed: boolean
-  downloadUrl?: string
-  recommended?: boolean
-}
-
 export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
   const { connect, error, clearError } = useWalletStore()
-  const [connecting, setConnecting] = useState<WalletType | null>(null)
+  const [isConnecting, setIsConnecting] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
-  const [walletStatus, setWalletStatus] = useState({
-    puzzle: false,
-    leo: false,
-  })
+  const [isInstalled, setIsInstalled] = useState(false)
 
   // Check wallet installation status dynamically when modal opens
   const checkWalletStatus = useCallback(() => {
-    setWalletStatus({
-      puzzle: isPuzzleWalletInstalled(),
-      leo: isLeoWalletInstalled(),
-    })
+    setIsInstalled(isLeoWalletInstalled())
   }, [])
 
   // Re-check wallet status when modal opens and periodically while open
   useEffect(() => {
     if (isOpen) {
-      // Check immediately
       checkWalletStatus()
-
-      // Check again after a short delay (extensions may inject late)
       const timer1 = setTimeout(checkWalletStatus, 100)
       const timer2 = setTimeout(checkWalletStatus, 500)
       const timer3 = setTimeout(checkWalletStatus, 1000)
@@ -57,40 +38,17 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
     }
   }, [isOpen, checkWalletStatus])
 
-  // Get available wallets with dynamic status
-  const walletOptions: WalletOption[] = [
-    {
-      type: 'puzzle',
-      name: WALLET_INFO.puzzle.name,
-      description: WALLET_INFO.puzzle.description,
-      icon: WALLET_INFO.puzzle.icon,
-      installed: walletStatus.puzzle || true, // Always show as clickable, SDK handles detection
-      downloadUrl: WALLET_INFO.puzzle.downloadUrl,
-      recommended: true,
-    },
-    {
-      type: 'leo',
-      name: WALLET_INFO.leo.name,
-      description: WALLET_INFO.leo.description,
-      icon: WALLET_INFO.leo.icon,
-      installed: walletStatus.leo, // Show actual status but still allow clicking
-      downloadUrl: WALLET_INFO.leo.downloadUrl,
-    },
-  ]
-
-  const handleConnect = async (walletType: WalletType) => {
-    setConnecting(walletType)
+  const handleConnect = async () => {
+    setIsConnecting(true)
     setLocalError(null)
     clearError()
 
     try {
-      await connect(walletType)
+      await connect('leo')
       onConnect()
       onClose()
     } catch (err: unknown) {
       console.error('Wallet connection error:', err)
-
-      // Extract error message from various error formats
       let errorMessage = 'Failed to connect wallet'
 
       if (err instanceof Error) {
@@ -101,22 +59,12 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
         const errObj = err as Record<string, unknown>
         if (typeof errObj.message === 'string') {
           errorMessage = errObj.message
-        } else if (typeof errObj.error === 'string') {
-          errorMessage = errObj.error
-        } else if (typeof errObj.reason === 'string') {
-          errorMessage = errObj.reason
-        } else {
-          try {
-            errorMessage = JSON.stringify(err)
-          } catch {
-            errorMessage = 'An unexpected error occurred. Check console for details.'
-          }
         }
       }
 
       setLocalError(errorMessage)
     } finally {
-      setConnecting(null)
+      setIsConnecting(false)
     }
   }
 
@@ -136,7 +84,7 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={handleClose}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
           />
 
           {/* Modal */}
@@ -145,36 +93,99 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="relative z-10 w-full max-w-md mx-auto"
+            className="relative z-10 w-full max-w-sm mx-auto"
           >
-            <div className="glass-card p-0 overflow-hidden shadow-2xl">
+            <div className="bg-surface-900 rounded-2xl border border-surface-700/50 shadow-2xl overflow-hidden">
               {/* Header */}
-              <div className="flex items-center justify-between p-6 border-b border-surface-800/50">
+              <div className="flex items-center justify-between p-5 border-b border-surface-800">
                 <div>
-                  <h2 className="text-xl font-bold text-white">Connect Wallet</h2>
-                  <p className="text-sm text-surface-400 mt-1">
-                    Choose a wallet to connect to Veiled Markets
+                  <h2 className="text-lg font-semibold text-white">Connect Wallet</h2>
+                  <p className="text-sm text-surface-400 mt-0.5">
+                    Connect with Leo Wallet to continue
                   </p>
                 </div>
                 <button
                   onClick={handleClose}
-                  className="p-2 rounded-lg hover:bg-surface-800 transition-colors"
+                  className="p-2 rounded-lg hover:bg-surface-800 transition-colors text-surface-400 hover:text-white"
                 >
-                  <X className="w-5 h-5 text-surface-400" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Wallet Options */}
-              <div className="p-4 space-y-3">
-                {walletOptions.map((wallet) => (
-                  <WalletOptionButton
-                    key={wallet.type}
-                    wallet={wallet}
-                    isConnecting={connecting === wallet.type}
-                    disabled={connecting !== null}
-                    onClick={() => handleConnect(wallet.type)}
-                  />
-                ))}
+              {/* Leo Wallet Option */}
+              <div className="p-4">
+                <button
+                  onClick={handleConnect}
+                  disabled={isConnecting}
+                  className={cn(
+                    'flex items-center gap-4 w-full p-4 rounded-xl border transition-all duration-200',
+                    'border-surface-700/50 bg-surface-800/30',
+                    'hover:bg-surface-800/60 hover:border-brand-500/30',
+                    isConnecting && 'border-brand-500/50 bg-brand-500/10'
+                  )}
+                >
+                  {/* Leo Wallet Logo */}
+                  <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0">
+                    <img
+                      src="/wallets/leo-wallet.png"
+                      alt="Leo Wallet"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-semibold text-white">
+                        Leo Wallet
+                      </span>
+                      <span className="px-2 py-0.5 text-[10px] font-medium rounded-full bg-brand-500/20 text-brand-400">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-sm text-surface-400 mt-0.5">
+                      The official wallet for Aleo
+                    </p>
+                  </div>
+
+                  {/* Status */}
+                  <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
+                    {isConnecting ? (
+                      <div className="w-6 h-6 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
+                    ) : isInstalled ? (
+                      <CheckCircle2 className="w-6 h-6 text-green-500" />
+                    ) : (
+                      <Download className="w-5 h-5 text-surface-500" />
+                    )}
+                  </div>
+                </button>
+
+                {/* Install prompt if not installed */}
+                {!isInstalled && !isConnecting && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="mt-3"
+                  >
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-brand-500/10 border border-brand-500/20">
+                      <Download className="w-5 h-5 text-brand-400 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm text-brand-300">
+                          Leo Wallet not detected
+                        </p>
+                        <a
+                          href={WALLET_INFO.leo.downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 mt-1"
+                        >
+                          <span>Install from Chrome Web Store</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
               </div>
 
               {/* Error Message */}
@@ -182,65 +193,45 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
-                  className="px-6 pb-4"
+                  className="px-4 pb-4"
                 >
-                  <div className="flex items-start gap-3 p-4 rounded-xl bg-no-500/10 border border-no-500/20">
-                    <AlertCircle className="w-5 h-5 text-no-400 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-no-400">Connection Failed</p>
-                      {/* Handle multiline error messages */}
-                      <div className="text-sm text-surface-400 mt-1 whitespace-pre-line">
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+                    <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-red-400">Connection Failed</p>
+                      <p className="text-xs text-surface-400 mt-1 break-words">
                         {localError || error}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        <a
+                          href={WALLET_INFO.leo.downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500/10 text-xs text-brand-400 hover:bg-brand-500/20 transition-colors"
+                        >
+                          <span>Install Leo Wallet</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                        <button
+                          onClick={() => {
+                            setLocalError(null)
+                            clearError()
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-surface-700/50 text-xs text-surface-300 hover:bg-surface-700 transition-colors"
+                        >
+                          Try Again
+                        </button>
                       </div>
-                      {/* Show install link if wallet not found */}
-                      {((localError || error || '').toLowerCase().includes('not installed') ||
-                        (localError || error || '').toLowerCase().includes('not responding') ||
-                        (localError || error || '').toLowerCase().includes('timed out') ||
-                        (localError || error || '').toLowerCase().includes('not found') ||
-                        (localError || error || '').toLowerCase().includes('please check')) && (
-                          <div className="flex flex-wrap gap-3 mt-3 pt-3 border-t border-surface-700/50">
-                            {(localError || error || '').toLowerCase().includes('leo') ? (
-                              <a
-                                href={WALLET_INFO.leo.downloadUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500/10 text-sm text-brand-400 hover:text-brand-300 hover:bg-brand-500/20 transition-colors"
-                              >
-                                <span>Install Leo Wallet</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            ) : (
-                              <a
-                                href={WALLET_INFO.puzzle.downloadUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-500/10 text-sm text-brand-400 hover:text-brand-300 hover:bg-brand-500/20 transition-colors"
-                              >
-                                <span>Install Puzzle Wallet</span>
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                            <button
-                              onClick={() => {
-                                setLocalError(null)
-                                clearError()
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-700/50 text-sm text-surface-300 hover:text-white hover:bg-surface-700 transition-colors"
-                            >
-                              Try Again
-                            </button>
-                          </div>
-                        )}
                     </div>
                   </div>
                 </motion.div>
               )}
 
               {/* Footer */}
-              <div className="p-4 border-t border-surface-800/50 bg-surface-900/50">
+              <div className="p-4 border-t border-surface-800 bg-surface-900/50">
                 <p className="text-xs text-surface-500 text-center">
-                  By connecting, you agree to the{' '}
-                  <a href="#" className="text-brand-400 hover:underline">Terms of Service</a>
+                  By connecting, you agree to our{' '}
+                  <a href="#" className="text-brand-400 hover:underline">Terms</a>
                   {' '}and{' '}
                   <a href="#" className="text-brand-400 hover:underline">Privacy Policy</a>
                 </p>
@@ -250,66 +241,5 @@ export function WalletModal({ isOpen, onClose, onConnect }: WalletModalProps) {
         </div>
       )}
     </AnimatePresence>
-  )
-}
-
-function WalletOptionButton({
-  wallet,
-  isConnecting,
-  disabled,
-  onClick,
-}: {
-  wallet: WalletOption
-  isConnecting: boolean
-  disabled: boolean
-  onClick: () => void
-}) {
-  const isLeo = wallet.type === 'leo'
-
-  // Always show as clickable button - let the connect function handle detection
-  // This is important because extensions may inject after page load
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        'flex items-center gap-4 w-full p-4 rounded-xl border transition-all duration-200',
-        'border-surface-700/50 bg-surface-800/30 hover:bg-surface-800/50 hover:border-brand-500/30',
-        disabled && !isConnecting && 'opacity-50 cursor-not-allowed',
-        isConnecting && 'border-brand-500/50 bg-brand-500/10'
-      )}
-    >
-      <div className="text-3xl">{wallet.icon}</div>
-      <div className="flex-1 text-left">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-white">{wallet.name}</span>
-          {wallet.recommended && (
-            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-brand-500/20 text-brand-400">
-              Recommended
-            </span>
-          )}
-          {!wallet.installed && (
-            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-surface-700/50 text-surface-400">
-              Click to connect
-            </span>
-          )}
-        </div>
-        <p className="text-sm text-surface-400 mt-0.5">
-          {!wallet.installed
-            ? `${wallet.description} (extension may need to be enabled)`
-            : wallet.description
-          }
-        </p>
-      </div>
-      <div className="w-6 h-6 flex items-center justify-center">
-        {isConnecting ? (
-          <div className="w-5 h-5 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
-        ) : wallet.installed ? (
-          <CheckCircle2 className="w-5 h-5 text-yes-500" />
-        ) : isLeo ? (
-          <ExternalLink className="w-4 h-4 text-surface-400" />
-        ) : null}
-      </div>
-    </button>
   )
 }

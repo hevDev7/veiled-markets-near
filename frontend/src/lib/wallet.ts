@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Wallet Integration
 // ============================================================================
-// Real wallet integration using Puzzle SDK and Leo Wallet adapter
+// Wallet integration using ProvableHQ adapters for Leo, Fox, Soter, and Puzzle
 // ============================================================================
 
 import {
@@ -13,8 +13,11 @@ import {
   type EventType,
 } from '@puzzlehq/sdk';
 
-import { LeoWalletAdapter as OfficialLeoWalletAdapter } from '@demox-labs/aleo-wallet-adapter-leo';
-import { WalletAdapterNetwork, DecryptPermission } from '@demox-labs/aleo-wallet-adapter-base';
+import { LeoWalletAdapter as ProvableLeoWalletAdapter } from '@provablehq/aleo-wallet-adaptor-leo';
+import { FoxWalletAdapter as ProvableFoxWalletAdapter } from '@provablehq/aleo-wallet-adaptor-fox';
+import { SoterWalletAdapter as ProvableSoterWalletAdapter } from '@provablehq/aleo-wallet-adaptor-soter';
+import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core';
+import { Network } from '@provablehq/aleo-types';
 
 // Import config for API URLs
 import { config } from './config';
@@ -36,7 +39,7 @@ export interface TransactionRequest {
   functionName: string;
   inputs: string[];
   fee: number;
-  network?: string; // Add network parameter
+  network?: string;
 }
 
 export interface WalletEvents {
@@ -47,26 +50,42 @@ export interface WalletEvents {
 }
 
 // ============================================================================
-// PUZZLE WALLET ADAPTER
+// HELPER FUNCTIONS
 // ============================================================================
 
 /**
  * Check if Puzzle Wallet extension is installed
- * Puzzle SDK uses Chrome extension messaging, but we can check for some indicators
  */
 export function isPuzzleWalletInstalled(): boolean {
   if (typeof window === 'undefined') return false;
-
-  // Check for potential Puzzle Wallet indicators
-  // The extension may inject objects or listen for specific events
   const hasPuzzle = !!(window as any).puzzle || !!(window as any).puzzleWallet;
-
-  // Also check if Chrome extension messaging is available (general indicator)
   const chromeObj = (window as any).chrome;
   const hasExtensionSupport = chromeObj?.runtime?.sendMessage !== undefined;
-
-  // Return true if we find puzzle, or if extensions are supported (we'll try to connect)
   return hasPuzzle || hasExtensionSupport;
+}
+
+/**
+ * Check if Leo Wallet extension is installed
+ */
+export function isLeoWalletInstalled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!(window as any).leo || !!(window as any).leoWallet;
+}
+
+/**
+ * Check if Fox Wallet extension is installed
+ */
+export function isFoxWalletInstalled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!(window as any).foxwallet?.aleo;
+}
+
+/**
+ * Check if Soter Wallet extension is installed
+ */
+export function isSoterWalletInstalled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!(window as any).soterWallet || !!(window as any).soter;
 }
 
 /**
@@ -89,31 +108,55 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: s
 }
 
 /**
- * Check if Leo Wallet extension is installed
- */
-export function isLeoWalletInstalled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return !!(window as any).leo || !!(window as any).leoWallet;
-}
-
-/**
  * Get available wallet adapters
  */
 export function getAvailableWallets(): string[] {
-  const wallets: string[] = ['puzzle']; // Puzzle always available to attempt
+  const wallets: string[] = ['puzzle'];
   if (isLeoWalletInstalled()) wallets.push('leo');
+  if (isFoxWalletInstalled()) wallets.push('fox');
+  if (isSoterWalletInstalled()) wallets.push('soter');
   return wallets;
 }
 
+
 /**
- * Puzzle Wallet Adapter - Using @puzzlehq/sdk
+ * Fetch public balance from API
  */
+async function fetchPublicBalance(address: string): Promise<bigint> {
+  try {
+    const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
+    const url = `${baseUrl}/program/credits.aleo/mapping/account/${address}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return 0n; // No public balance
+      }
+      return 0n;
+    }
+
+    const data = await response.text();
+    const cleanData = data.replace(/"/g, '').trim();
+    const match = cleanData.match(/(\d+)/);
+    if (match) {
+      return BigInt(match[1]);
+    }
+    return 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+// ============================================================================
+// PUZZLE WALLET ADAPTER
+// ============================================================================
+
 export class PuzzleWalletAdapter {
   private connected: boolean = false;
   private account: WalletAccount | null = null;
 
   get isInstalled(): boolean {
-    return true; // SDK handles extension detection
+    return true;
   }
 
   get isConnected(): boolean {
@@ -124,15 +167,10 @@ export class PuzzleWalletAdapter {
     return this.account;
   }
 
-  /**
-   * Connect to Puzzle Wallet using @puzzlehq/sdk
-   */
   async connect(): Promise<WalletAccount> {
     try {
       console.log('Puzzle Wallet: Attempting to connect...');
-      console.log('Puzzle Wallet: Extension detected:', isPuzzleWalletInstalled());
 
-      // Create the connect promise
       const connectPromise = puzzleConnect({
         dAppInfo: {
           name: 'Veiled Markets',
@@ -141,13 +179,12 @@ export class PuzzleWalletAdapter {
         },
         permissions: {
           programIds: {
-            'AleoTestnet': ['veiled_markets.aleo', 'credits.aleo'],
-            'AleoMainnet': ['veiled_markets.aleo', 'credits.aleo'],
+            'AleoTestnet': ['veiled_markets_v2.aleo', 'credits.aleo'],
+            'AleoMainnet': ['veiled_markets_v2.aleo', 'credits.aleo'],
           }
         }
       });
 
-      // Use timeout wrapper - 10 seconds should be enough for extension communication
       const response = await withTimeout(
         connectPromise,
         10000,
@@ -165,25 +202,14 @@ export class PuzzleWalletAdapter {
         };
 
         console.log('Puzzle Wallet: Connected successfully');
-        console.log('Puzzle Wallet: Address:', this.account.address);
-        console.log('Puzzle Wallet: Network:', networkStr);
-
         return this.account;
       }
 
       throw new Error('Connection rejected or no account returned');
     } catch (error: any) {
       console.error('Puzzle Wallet connection error:', error);
-      console.error('Error details:', {
-        message: error?.message,
-        name: error?.name,
-        code: error?.code,
-        stack: error?.stack?.substring(0, 500)
-      });
-
       const errorMessage = error?.message || String(error);
 
-      // Timeout from our wrapper
       if (errorMessage.includes('timed out') || errorMessage.includes('timeout')) {
         throw new Error(
           'Puzzle Wallet is not responding. Please check:\n' +
@@ -193,25 +219,6 @@ export class PuzzleWalletAdapter {
         );
       }
 
-      // Check for specific error types and provide user-friendly messages
-      if (errorMessage.includes('Extension not found') ||
-        errorMessage.includes('not installed') ||
-        errorMessage.includes('not detected')) {
-        throw new Error('Puzzle Wallet not installed. Please install from https://puzzle.online/wallet');
-      }
-
-      // TRPC Internal server error usually means extension not responding
-      if (errorMessage.includes('Internal server error') ||
-        errorMessage.includes('TRPCClientError')) {
-        throw new Error(
-          'Puzzle Wallet is not responding. Please check:\n' +
-          '1. Extension is installed from puzzle.online/wallet\n' +
-          '2. Extension is enabled in your browser\n' +
-          '3. Wallet is unlocked'
-        );
-      }
-
-      // User rejected
       if (errorMessage.includes('rejected') || errorMessage.includes('denied') || errorMessage.includes('cancelled')) {
         throw new Error('Connection request was rejected by user.');
       }
@@ -220,9 +227,6 @@ export class PuzzleWalletAdapter {
     }
   }
 
-  /**
-   * Disconnect from wallet
-   */
   async disconnect(): Promise<void> {
     if (this.connected) {
       try {
@@ -235,27 +239,18 @@ export class PuzzleWalletAdapter {
     this.account = null;
   }
 
-  /**
-   * Get account balance
-   */
   async getBalance(): Promise<WalletBalance> {
     if (!this.connected || !this.account) {
       throw new Error('Wallet not connected');
     }
 
     try {
-      console.log('Puzzle Wallet: Fetching balance...');
       const balance = await puzzleGetBalance({});
-      console.log('Puzzle Wallet balance response:', JSON.stringify(balance, null, 2));
-
-      // Balance response has balances array with public and private amounts
       let publicBalance = 0n;
       let privateBalance = 0n;
 
       if (balance && (balance as any).balances) {
         for (const b of (balance as any).balances) {
-          console.log('Balance entry:', JSON.stringify(b, null, 2));
-          // Handle different possible formats
           if ((b as any).public !== undefined) {
             const pubVal = String((b as any).public).replace(/[^\d]/g, '');
             if (pubVal) publicBalance += BigInt(pubVal);
@@ -264,159 +259,119 @@ export class PuzzleWalletAdapter {
             const privVal = String((b as any).private).replace(/[^\d]/g, '');
             if (privVal) privateBalance += BigInt(privVal);
           }
-          // Some versions might use 'amount' field
-          if ((b as any).amount !== undefined) {
-            const amtVal = String((b as any).amount).replace(/[^\d]/g, '');
-            if (amtVal) {
-              // Assume private if not specified
-              privateBalance += BigInt(amtVal);
-            }
-          }
         }
       }
 
-      // Fallback: Also try to fetch from blockchain API if SDK returns 0
+      // Fallback to API
       if (publicBalance === 0n && this.account?.address) {
-        try {
-          const apiUrl = `https://api.explorer.provable.com/v1/testnet/program/credits.aleo/mapping/account/${this.account.address}`;
-          console.log('Puzzle Wallet: Fetching public balance from API:', apiUrl);
-          const response = await fetch(apiUrl);
-          if (response.ok) {
-            const data = await response.text();
-            console.log('Puzzle Wallet API response:', data);
-            const cleanData = data.replace(/"/g, '').trim();
-            const match = cleanData.match(/(\d+)/);
-            if (match) {
-              publicBalance = BigInt(match[1]);
-              console.log('Puzzle Wallet: Parsed public balance from API:', publicBalance.toString());
-            }
-          }
-        } catch (apiErr) {
-          console.log('Puzzle Wallet: API fallback failed:', apiErr);
-        }
+        publicBalance = await fetchPublicBalance(this.account.address);
       }
 
-      console.log('Puzzle Wallet final balance:', { public: publicBalance.toString(), private: privateBalance.toString() });
       return { public: publicBalance, private: privateBalance };
-    } catch (error) {
-      console.error('Failed to get Puzzle Wallet balance:', error);
-
-      // Fallback to API only
+    } catch {
       if (this.account?.address) {
-        try {
-          const apiUrl = `https://api.explorer.provable.com/v1/testnet/program/credits.aleo/mapping/account/${this.account.address}`;
-          const response = await fetch(apiUrl);
-          if (response.ok) {
-            const data = await response.text();
-            const cleanData = data.replace(/"/g, '').trim();
-            const match = cleanData.match(/(\d+)/);
-            if (match) {
-              return { public: BigInt(match[1]), private: 0n };
-            }
-          }
-        } catch {
-          // Ignore
-        }
+        const publicBalance = await fetchPublicBalance(this.account.address);
+        return { public: publicBalance, private: 0n };
       }
-
       return { public: 0n, private: 0n };
     }
   }
 
-  /**
-   * Request transaction execution
-   */
   async requestTransaction(request: TransactionRequest): Promise<string> {
     if (!this.connected) {
       throw new Error('Wallet not connected');
     }
 
     try {
-      console.log('Puzzle Wallet: Requesting transaction with:', {
-        type: 'Execute',
+      console.log('Puzzle Wallet: requestTransaction called with:', {
         programId: request.programId,
-        functionId: request.functionName,
+        functionName: request.functionName,
         fee: request.fee,
         inputs: request.inputs,
       });
 
-      // Puzzle SDK requestCreateEvent format
-      // Note: network parameter might not be supported
-      const eventParams: any = {
+      // Validate inputs
+      if (!request.inputs || !Array.isArray(request.inputs)) {
+        throw new Error('Invalid inputs: must be an array');
+      }
+
+      if (request.inputs.length === 0) {
+        throw new Error('Invalid inputs: array is empty');
+      }
+
+      // Check each input is a string
+      for (let i = 0; i < request.inputs.length; i++) {
+        if (typeof request.inputs[i] !== 'string') {
+          throw new Error(`Invalid input at index ${i}: must be a string, got ${typeof request.inputs[i]}`);
+        }
+        if (!request.inputs[i]) {
+          throw new Error(`Invalid input at index ${i}: empty string`);
+        }
+      }
+
+      // Puzzle SDK might expect inputs as plain strings array, not objects
+      // Let's try the simplest format first
+      const eventParams = {
         type: 'Execute' as EventType,
         programId: request.programId,
         functionId: request.functionName,
         fee: request.fee,
-        inputs: request.inputs.map(input => ({ type: 'raw' as const, value: input })),
+        inputs: request.inputs, // Try plain array first
       };
 
+      console.log('Puzzle Wallet: Attempt 1 - Plain array format');
       console.log('Puzzle Wallet: Event params:', JSON.stringify(eventParams, null, 2));
 
-      const response = await requestCreateEvent(eventParams);
+      try {
+        const response = await requestCreateEvent(eventParams);
+        console.log('Puzzle Wallet: Response:', response);
 
-      console.log('Puzzle Wallet: Transaction response:', response);
+        if (response && response.eventId) {
+          return response.eventId;
+        }
+      } catch (err: any) {
+        console.log('Puzzle Wallet: Plain array format failed, trying object format');
 
-      if (response && response.eventId) {
-        return response.eventId;
+        // If plain array fails, log the error and throw
+        console.error('Puzzle Wallet: Plain array format failed:', err);
+        throw err;
       }
 
-      throw new Error('Transaction rejected');
+      throw new Error('Transaction rejected or no event ID returned');
     } catch (error: any) {
-      console.error('Puzzle Wallet: Transaction error details:', error);
-      console.error('Puzzle Wallet: Error message:', error.message);
-      console.error('Puzzle Wallet: Error code:', error.code);
-      console.error('Puzzle Wallet: Error data:', error.data);
+      console.error('Puzzle Wallet: requestTransaction error:', error);
+      console.error('Puzzle Wallet: Error details:', {
+        message: error?.message,
+        name: error?.name,
+        stack: error?.stack?.substring(0, 500),
+      });
+
+      // Check if it's a Zod validation error from Puzzle SDK
+      const errorMsg = error?.message || '';
+      if (errorMsg.includes('invalid_type') || errorMsg.includes('params') || errorMsg.includes('inputs')) {
+        throw new Error(
+          'Puzzle Wallet SDK has a known issue with transaction inputs. ' +
+          'Please try using Leo Wallet instead. ' +
+          'Install from: https://leo.app'
+        );
+      }
+
       throw new Error(error.message || 'Transaction failed');
     }
   }
 
-  /**
-   * Get user's records for a program
-   */
   async getRecords(_programId: string): Promise<any[]> {
-    if (!this.connected) {
-      throw new Error('Wallet not connected');
-    }
-
-    try {
-      // Records are managed by the wallet extension
-      // For now return empty - would need to use getRecords from SDK
-      return [];
-    } catch (error) {
-      console.error('Failed to get records:', error);
-      return [];
-    }
+    return [];
   }
 
-  /**
-   * Sign a message
-   */
   async signMessage(_message: string): Promise<string> {
     if (!this.connected) {
       throw new Error('Wallet not connected');
     }
-
-    // Puzzle SDK doesn't have direct signMessage - return placeholder
     return `puzzle_sig_${Date.now()}`;
   }
 
-  /**
-   * Decrypt a record
-   */
-  async decryptRecord(_ciphertext: string): Promise<any> {
-    if (!this.connected) {
-      throw new Error('Wallet not connected');
-    }
-
-    // Would need SDK support for decryption
-    throw new Error('Decryption not supported');
-  }
-
-  /**
-   * Subscribe to account changes
-   */
   onAccountChange(callback: (account: WalletAccount | null) => void): () => void {
-    // Check account periodically as SDK may not have event subscription
     const interval = setInterval(async () => {
       try {
         const account = await getAccount() as any;
@@ -438,11 +393,7 @@ export class PuzzleWalletAdapter {
     return () => clearInterval(interval);
   }
 
-  /**
-   * Subscribe to network changes
-   */
   onNetworkChange(callback: (network: NetworkType) => void): () => void {
-    // Check network periodically
     const interval = setInterval(async () => {
       try {
         const account = await getAccount() as any;
@@ -463,132 +414,89 @@ export class PuzzleWalletAdapter {
 }
 
 // ============================================================================
-// LEO WALLET ADAPTER (Using Official Adapter)
+// LEO WALLET ADAPTER (Using ProvableHQ Adapter)
 // ============================================================================
 
 export class LeoWalletAdapter {
-  private adapter: OfficialLeoWalletAdapter;
+  private adapter: ProvableLeoWalletAdapter;
   private account: WalletAccount | null = null;
 
   constructor() {
-    // Initialize the official Leo Wallet adapter with proper configuration
-    this.adapter = new OfficialLeoWalletAdapter({
+    this.adapter = new ProvableLeoWalletAdapter({
       appName: 'Veiled Markets',
     });
   }
 
   get isInstalled(): boolean {
-    // Check if the adapter is ready (wallet extension is present)
     return this.adapter.readyState === 'Installed' || this.adapter.readyState === 'Loadable';
   }
 
   get isConnected(): boolean {
-    return this.adapter.connected && !!this.account;
+    // Check if adapter is connected
+    if (!this.adapter.connected) {
+      return false;
+    }
+
+    // If adapter is connected but account is null, try to restore account
+    if (!this.account && this.adapter.account) {
+      console.log('Leo Wallet: Restoring account from adapter');
+      this.account = {
+        address: this.adapter.account.address,
+        network: 'testnet',
+      };
+    }
+
+    return this.adapter.connected;
   }
 
   get currentAccount(): WalletAccount | null {
+    // Try to restore account if null but adapter has account
+    if (!this.account && this.adapter.connected && this.adapter.account) {
+      this.account = {
+        address: this.adapter.account.address,
+        network: 'testnet',
+      };
+    }
     return this.account;
   }
 
   async connect(): Promise<WalletAccount> {
     try {
-      console.log('Leo Wallet adapter readyState:', this.adapter.readyState);
-      console.log('Leo Wallet adapter publicKey:', this.adapter.publicKey);
+      console.log('Leo Wallet: Attempting to connect...');
+      console.log('Leo Wallet: readyState:', this.adapter.readyState);
 
-      // Try connecting with different network configurations
-      // Leo Wallet might be on Testnet (testnet3) instead of TestnetBeta
-      let lastError: Error | null = null;
+      // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
+      try {
+        console.log('Leo Wallet: Trying network testnet...');
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v2.aleo', 'credits.aleo']);
 
-      // Try different combinations of network and permissions
-      // IMPORTANT: Use AutoDecrypt first to be able to read private records/balance
-      const attempts = [
-        { network: WalletAdapterNetwork.TestnetBeta, permission: DecryptPermission.AutoDecrypt },
-        { network: WalletAdapterNetwork.Testnet, permission: DecryptPermission.AutoDecrypt },
-        { network: WalletAdapterNetwork.TestnetBeta, permission: DecryptPermission.NoDecrypt },
-        { network: WalletAdapterNetwork.Testnet, permission: DecryptPermission.NoDecrypt },
-      ];
-
-      for (const attempt of attempts) {
-        try {
-          console.log(`Trying to connect with network: ${attempt.network}, permission: ${attempt.permission}`);
-          await this.adapter.connect(
-            attempt.permission,
-            attempt.network
-          );
-
-          if (this.adapter.publicKey) {
-            console.log('Successfully connected to Leo Wallet');
-            break;
-          }
-        } catch (err) {
-          console.log(`Failed with ${attempt.network}/${attempt.permission}:`, err);
-          lastError = err as Error;
-          // Try disconnecting before next attempt
-          try {
-            await this.adapter.disconnect();
-          } catch {
-            // ignore
-          }
+        if (this.adapter.account) {
+          console.log('Leo Wallet: Connected successfully');
+          this.account = {
+            address: this.adapter.account.address,
+            network: 'testnet',
+          };
+          return this.account;
         }
-      }
-
-      // If still not connected after all attempts, throw the last error
-      if (!this.adapter.publicKey && lastError) {
-        throw lastError;
-      }
-
-      console.log('Leo Wallet connected, publicKey:', this.adapter.publicKey);
-
-      if (this.adapter.publicKey) {
-        this.account = {
-          address: this.adapter.publicKey,
-          network: 'testnet',
-        };
-        return this.account;
+      } catch (err) {
+        console.log('Leo Wallet: Failed with network testnet:', err);
+        throw err;
       }
 
       throw new Error('Connection successful but no account returned');
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Leo Wallet connection error:', error);
-      console.error('Error type:', typeof error);
-      console.error('Error name:', (error as any)?.name);
-      console.error('Error message:', (error as any)?.message);
+      const errorMessage = error?.message?.toLowerCase() || '';
 
-      // Extract error message
-      let errorMessage = 'Failed to connect to Leo Wallet';
-
-      if (error instanceof Error) {
-        errorMessage = error.message;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      } else if (error && typeof error === 'object') {
-        const errObj = error as Record<string, unknown>;
-        if (typeof errObj.message === 'string') {
-          errorMessage = errObj.message;
-        }
-      }
-
-      const lowerMessage = errorMessage.toLowerCase();
-
-      // Handle specific error cases
-      if (lowerMessage.includes('user reject') || lowerMessage.includes('rejected') || lowerMessage.includes('denied')) {
+      if (errorMessage.includes('user reject') || errorMessage.includes('rejected') || errorMessage.includes('denied')) {
         throw new Error('Connection request was rejected by user.');
       }
 
-      if (lowerMessage.includes('not installed') || lowerMessage.includes('not found') || this.adapter.readyState === 'NotDetected') {
+      if (errorMessage.includes('not installed') || errorMessage.includes('not found')) {
         throw new Error('Leo Wallet not installed. Please install from https://leo.app');
       }
 
-      if (lowerMessage.includes('timeout')) {
-        throw new Error('Leo Wallet connection timed out. Please try again.');
-      }
-
-      // If error is the generic "unknown error", provide more context
-      if (lowerMessage.includes('unknown error')) {
-        throw new Error('Leo Wallet encountered an error. Try: 1) Refresh the page 2) Disable other wallet extensions 3) Update Leo Wallet');
-      }
-
-      throw new Error(errorMessage);
+      throw new Error(error?.message || 'Failed to connect to Leo Wallet');
     }
   }
 
@@ -602,286 +510,294 @@ export class LeoWalletAdapter {
   }
 
   async getBalance(): Promise<WalletBalance> {
-    if (!this.adapter.connected || !this.adapter.publicKey) {
+    if (!this.adapter.connected || !this.account) {
       return { public: 0n, private: 0n };
     }
 
+    let publicBalance = 0n;
+    let privateBalance = 0n;
+
+    // Fetch public balance from API
     try {
-      // Fetch public balance from Aleo network API
-      const address = this.adapter.publicKey;
-      console.log('\n=== FETCHING PUBLIC BALANCE ===');
-      console.log('Leo Wallet: Address:', address);
-      console.log('Leo Wallet: Adapter connected:', this.adapter.connected);
+      publicBalance = await fetchPublicBalance(this.account.address);
+      console.log('Leo Wallet: Public balance from API:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
+    } catch (error) {
+      console.error('Leo Wallet: Failed to fetch public balance:', error);
+    }
 
-      // Use config RPC URL or fallback to default
-      // Correct API format: /program/{id}/mapping/{name}/{key}
-      // For credits.aleo, the mapping is "account" and key is the address
-      const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-      const url = `${baseUrl}/program/credits.aleo/mapping/account/${address}`;
+    // Try to get balance directly from Leo Wallet window object FIRST
+    try {
+      console.log('Leo Wallet: Attempting to access window.leoWallet...');
+      const leoWallet = (window as any).leoWallet || (window as any).leo;
 
-      console.log('Leo Wallet: Fetching public balance from:', url);
-      console.log('Leo Wallet: Base URL:', baseUrl);
+      if (leoWallet) {
+        console.log('Leo Wallet: Found window.leoWallet object');
+        console.log('Leo Wallet: Available methods:', Object.keys(leoWallet));
 
-      let publicBalanceResponse: Response | null = null;
+        // Try to get balance from wallet
+        if (typeof leoWallet.getBalance === 'function') {
+          console.log('Leo Wallet: Calling leoWallet.getBalance()...');
+          const walletBalance = await leoWallet.getBalance();
+          console.log('Leo Wallet: Wallet balance response:', walletBalance);
 
-      try {
-        publicBalanceResponse = await fetch(url);
-        console.log('API response status:', publicBalanceResponse.status);
-      } catch (err) {
-        console.error('Failed to fetch public balance:', err);
-      }
-
-      let publicBalance = 0n;
-      if (publicBalanceResponse && publicBalanceResponse.ok) {
-        const data = await publicBalanceResponse.text();
-        console.log('Public balance API response:', data);
-
-        // Parse the response - format could be:
-        // - "123456u64" 
-        // - "123456"
-        // - just a number
-        // - JSON with value field
-        try {
-          // Remove quotes and whitespace
-          const cleanData = data.replace(/"/g, '').trim();
-          console.log('Cleaned public balance data:', cleanData);
-
-          // Try to extract number from various formats
-          // Format 1: "5691241u64"
-          // Format 2: "5691241"
-          // Format 3: {"value": "5691241u64"}
-
-          // Try parsing as JSON first
-          try {
-            const jsonData = JSON.parse(data);
-            console.log('Parsed as JSON:', jsonData);
-
-            if (typeof jsonData === 'number') {
-              publicBalance = BigInt(jsonData);
-            } else if (typeof jsonData === 'string') {
-              const match = jsonData.match(/(\d+)/);
-              if (match) publicBalance = BigInt(match[1]);
-            } else if (jsonData.value) {
-              const match = String(jsonData.value).match(/(\d+)/);
-              if (match) publicBalance = BigInt(match[1]);
-            }
-          } catch {
-            // Not JSON, parse as plain text
-            const match = cleanData.match(/(\d+)/);
-            if (match) {
-              publicBalance = BigInt(match[1]);
-              console.log('Extracted public balance from text:', publicBalance.toString());
+          if (walletBalance) {
+            // Try to parse the balance
+            if (typeof walletBalance.private === 'number' || typeof walletBalance.private === 'bigint') {
+              privateBalance = BigInt(walletBalance.private);
+              console.log('Leo Wallet: ✅ Got private balance from wallet:', privateBalance.toString());
             }
           }
-        } catch (parseError) {
-          console.error('Failed to parse public balance:', parseError);
         }
 
-        console.log('Parsed public balance:', publicBalance.toString(), 'microcredits');
-        console.log('Public balance in ALEO:', Number(publicBalance) / 1_000_000);
-      } else if (publicBalanceResponse) {
-        // API returned but not OK - might be 404 (no public balance) or other error
-        const errorText = await publicBalanceResponse.text().catch(() => 'Unknown error');
-        console.log('Public balance API error:', publicBalanceResponse.status, errorText);
+        // Try alternative method - getAccount
+        if (privateBalance === 0n && typeof leoWallet.getAccount === 'function') {
+          console.log('Leo Wallet: Trying leoWallet.getAccount()...');
+          const account = await leoWallet.getAccount();
+          console.log('Leo Wallet: Account response:', account);
 
-        // 404 means the account has no public balance (only private credits)
-        // This is normal for accounts that only have private records
-        if (publicBalanceResponse.status === 404) {
-          console.log('No public balance found - this is normal if you only have private credits');
+          if (account && account.balance) {
+            if (typeof account.balance.private === 'number' || typeof account.balance.private === 'bigint') {
+              privateBalance = BigInt(account.balance.private);
+              console.log('Leo Wallet: ✅ Got private balance from account:', privateBalance.toString());
+            }
+          }
         }
       } else {
-        console.log('Failed to fetch public balance - network error');
+        console.log('Leo Wallet: window.leoWallet not found');
       }
+    } catch (error) {
+      console.warn('Leo Wallet: Failed to access window.leoWallet:', error);
+    }
 
-      // For private balance, we need to request records from the wallet
-      let privateBalance = 0n;
+    // Fetch private balance from wallet records
+    try {
+      console.log('Leo Wallet: Requesting private credit records...');
+
+      // Try Method 1: Request unspent records only
       try {
-        console.log('Requesting private records from credits.aleo...');
-        const records = await this.adapter.requestRecords('credits.aleo');
-        console.log('Private records response:', records);
-        console.log('Records type:', typeof records);
-        console.log('Records is array:', Array.isArray(records));
+        console.log('Leo Wallet: Trying requestRecordPlaintexts...');
+        const recordPlaintexts = await (this.adapter as any).requestRecordPlaintexts?.('credits.aleo');
+        console.log('Leo Wallet: recordPlaintexts response:', recordPlaintexts);
 
-        if (records && Array.isArray(records)) {
-          console.log('Number of records:', records.length);
-          for (let i = 0; i < records.length; i++) {
-            const record = records[i];
-            console.log(`\n=== Record ${i} ===`);
-            console.log('Full record:', JSON.stringify(record, null, 2));
-            console.log('Record keys:', Object.keys(record));
+        if (recordPlaintexts && Array.isArray(recordPlaintexts)) {
+          for (let i = 0; i < recordPlaintexts.length; i++) {
+            const plaintext = String(recordPlaintexts[i]);
+            console.log(`Leo Wallet: Plaintext ${i}:`, plaintext);
 
-            // Try multiple possible field names and structures
-            let amount = 0n;
-
-            // Try different possible structures
-            const possiblePaths = [
-              () => record.microcredits,
-              () => record.data?.microcredits,
-              () => record.amount,
-              () => record.data?.amount,
-              () => {
-                const match = String(record.plaintext || '').match(/microcredits:\s*(\d+)u64/);
-                return match ? match[1] : null;
-              },
-              () => {
-                const match = String(record).match(/microcredits:\s*(\d+)u64/);
-                return match ? match[1] : null;
-              },
-            ];
-
-            for (const pathFn of possiblePaths) {
-              try {
-                const value = pathFn();
-                if (value !== null && value !== undefined) {
-                  const cleanAmount = String(value)
-                    .replace('u64.private', '')
-                    .replace('u64.public', '')
-                    .replace('u64', '')
-                    .replace(/[^\d]/g, '');
-
-                  if (cleanAmount && cleanAmount !== '0') {
-                    amount = BigInt(cleanAmount);
-                    console.log(`Record ${i} found amount:`, amount.toString(), 'microcredits');
-                    break;
-                  }
-                }
-              } catch (e) {
-                // Continue to next path
-              }
-            }
-
-            if (amount > 0n) {
+            const match = plaintext.match(/microcredits:\s*(\d+)u64/);
+            if (match) {
+              const amount = BigInt(match[1]);
               privateBalance += amount;
-              console.log(`Record ${i} added ${amount} microcredits. Total private: ${privateBalance}`);
-            } else {
-              console.log(`Record ${i} has no valid amount`);
-            }
-          }
-        } else if (records && typeof records === 'object') {
-          // Maybe it's not an array but a single record or object with records
-          console.log('Records is object, keys:', Object.keys(records));
-
-          // Try to extract from object format
-          if ((records as any).records && Array.isArray((records as any).records)) {
-            console.log('Found nested records array');
-            const nestedRecords = (records as any).records;
-            // Process nested records (recursive call to same logic above)
-            for (let i = 0; i < nestedRecords.length; i++) {
-              const record = nestedRecords[i];
-              console.log(`Nested record ${i}:`, record);
-              // Add similar parsing logic here if needed
+              console.log(`Leo Wallet: ✅ Found private credits ${i}:`, amount.toString(), `(${Number(amount) / 1_000_000} ALEO)`);
             }
           }
         }
-
-        console.log('Final private balance:', privateBalance.toString(), 'microcredits');
-        console.log('Final private balance in credits:', Number(privateBalance) / 1_000_000);
       } catch (err) {
-        console.log('Could not fetch private records:', err);
-        console.log('Error details:', JSON.stringify(err, null, 2));
-        // Private records might require decrypt permission - this is expected
-        // if user didn't grant AutoDecrypt permission
+        console.log('Leo Wallet: requestRecordPlaintexts not available or failed:', err);
       }
 
-      const finalBalance = {
-        public: publicBalance,
-        private: privateBalance
-      };
+      // Try Method 2: Request records with decrypt
+      if (privateBalance === 0n) {
+        console.log('Leo Wallet: Trying requestRecords with decrypt...');
+        const records = await this.adapter.requestRecords('credits.aleo', true);
+        console.log('Leo Wallet: Records response:', records);
+        console.log('Leo Wallet: Records type:', typeof records);
+        console.log('Leo Wallet: Records is array:', Array.isArray(records));
+        console.log('Leo Wallet: Records length:', records?.length);
 
-      console.log('\n=== FINAL BALANCE ===');
-      console.log('Public:', publicBalance.toString(), 'microcredits =', Number(publicBalance) / 1_000_000, 'ALEO');
-      console.log('Private:', privateBalance.toString(), 'microcredits =', Number(privateBalance) / 1_000_000, 'ALEO');
-      console.log('Total:', (publicBalance + privateBalance).toString(), 'microcredits =', Number(publicBalance + privateBalance) / 1_000_000, 'ALEO');
+        if (Array.isArray(records) && records.length > 0) {
+          for (let i = 0; i < records.length; i++) {
+            const record = records[i];
+            console.log(`Leo Wallet: Record ${i} full object:`, JSON.stringify(record, null, 2));
 
-      return finalBalance;
+            // Try multiple ways to extract plaintext
+            let plaintext = '';
+            if (typeof record === 'string') {
+              plaintext = record;
+            } else if (record && typeof record === 'object') {
+              plaintext = (record as any).plaintext
+                || (record as any).data
+                || (record as any).record
+                || (record as any).content
+                || JSON.stringify(record);
+            }
+
+            console.log(`Leo Wallet: Record ${i} plaintext:`, plaintext);
+
+            // Try to match microcredits pattern
+            const match = plaintext.match(/microcredits:\s*(\d+)u64/);
+            if (match) {
+              const amount = BigInt(match[1]);
+              privateBalance += amount;
+              console.log(`Leo Wallet: ✅ Found private record ${i}:`, amount.toString(), `(${Number(amount) / 1_000_000} ALEO)`);
+            } else {
+              console.log(`Leo Wallet: ❌ Record ${i} does not match microcredits pattern`);
+            }
+          }
+        } else {
+          console.log('Leo Wallet: No records returned or empty array');
+        }
+      }
+
+      // Try Method 3: Request records without decrypt flag
+      if (privateBalance === 0n) {
+        console.log('Leo Wallet: Trying requestRecords without decrypt...');
+        const records = await this.adapter.requestRecords('credits.aleo', false);
+        console.log('Leo Wallet: Records (no decrypt):', records);
+
+        if (Array.isArray(records) && records.length > 0) {
+          for (const record of records) {
+            const plaintext = String((record as any).plaintext || (record as any).data || record);
+            const match = plaintext.match(/microcredits:\s*(\d+)u64/);
+            if (match) {
+              privateBalance += BigInt(match[1]);
+              console.log('Leo Wallet: Found record (no decrypt):', match[1]);
+            }
+          }
+        }
+      }
+
+      // Try Method 4: Access wallet directly via window object
+      if (privateBalance === 0n) {
+        console.log('Leo Wallet: Trying window.leoWallet.getRecords...');
+        const leoWallet = (window as any).leoWallet || (window as any).leo;
+
+        if (leoWallet && typeof leoWallet.getRecords === 'function') {
+          try {
+            const walletRecords = await leoWallet.getRecords('credits.aleo');
+            console.log('Leo Wallet: Wallet records:', walletRecords);
+
+            if (walletRecords && Array.isArray(walletRecords)) {
+              for (const record of walletRecords) {
+                const plaintext = String(record.plaintext || record.data || record);
+                const match = plaintext.match(/microcredits:\s*(\d+)u64/);
+                if (match) {
+                  privateBalance += BigInt(match[1]);
+                  console.log('Leo Wallet: Found from window.leoWallet:', match[1]);
+                }
+              }
+            }
+          } catch (err) {
+            console.log('Leo Wallet: window.leoWallet.getRecords failed:', err);
+          }
+        }
+      }
+
     } catch (error) {
-      console.error('Failed to fetch Leo Wallet balance:', error);
-      return { public: 0n, private: 0n };
+      console.warn('Leo Wallet: Failed to fetch private records:', error);
     }
+
+    const totalBalance = publicBalance + privateBalance;
+    console.log('Leo Wallet: ========== FINAL BALANCE SUMMARY ==========');
+    console.log('Leo Wallet: Public:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
+    console.log('Leo Wallet: Private:', privateBalance.toString(), `(${Number(privateBalance) / 1_000_000} ALEO)`);
+    console.log('Leo Wallet: Total:', totalBalance.toString(), `(${Number(totalBalance) / 1_000_000} ALEO)`);
+    console.log('Leo Wallet: ==========================================');
+
+    if (privateBalance === 0n) {
+      console.warn('Leo Wallet: ⚠️ Private balance is 0 - this may not be accurate!');
+      console.warn('Leo Wallet: ⚠️ Leo Wallet extension may show different balance');
+      console.warn('Leo Wallet: ⚠️ Private records are encrypted and may not be accessible via SDK');
+    }
+
+    return { public: publicBalance, private: privateBalance };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
-    if (!this.adapter.connected) {
+    if (!this.adapter.connected || !this.account) {
       throw new Error('Wallet not connected');
     }
 
     try {
-      console.log('Leo Wallet: Starting transaction');
-      console.log('Leo Wallet: Connected:', this.adapter.connected);
-      console.log('Leo Wallet: Public key:', this.adapter.publicKey);
-
-      // Try direct window.leoWallet API if available
-      const leoWallet = (window as any).leoWallet || (window as any).leo;
-
-      if (leoWallet && typeof leoWallet.requestTransaction === 'function') {
-        console.log('Leo Wallet: Using window.leoWallet.requestTransaction');
-
-        const result = await leoWallet.requestTransaction({
-          program: request.programId,
-          functionName: request.functionName,
-          inputs: request.inputs,
-          fee: request.fee,
-          privateFee: false,
-        });
-
-        console.log('Leo Wallet: Direct API result:', result);
-
-        const txId = result?.transactionId || result?.txId || result;
-        if (txId) return txId;
-      }
-
-      // Use requestExecution which is the standard method for Leo Wallet
-      console.log('Leo Wallet: Using adapter.requestExecution');
-      const result = await this.adapter.requestExecution({
+      console.log('Leo Wallet: Executing transaction...');
+      console.log('Leo Wallet: Request:', {
         program: request.programId,
-        functionName: request.functionName,
+        function: request.functionName,
         inputs: request.inputs,
         fee: request.fee,
-      } as any);
+      });
+
+      // Validate inputs
+      if (!request.inputs || !Array.isArray(request.inputs)) {
+        throw new Error('Invalid inputs: must be an array');
+      }
+
+      for (let i = 0; i < request.inputs.length; i++) {
+        if (typeof request.inputs[i] !== 'string') {
+          throw new Error(`Input ${i} must be a string, got ${typeof request.inputs[i]}`);
+        }
+        if (!request.inputs[i]) {
+          throw new Error(`Input ${i} is empty`);
+        }
+      }
+
+      console.log('Leo Wallet: Inputs validated:', request.inputs);
+
+      const result = await this.adapter.executeTransaction({
+        program: request.programId,
+        function: request.functionName,
+        inputs: request.inputs,
+        fee: request.fee,
+        privateFee: false,
+      });
 
       console.log('Leo Wallet: Transaction result:', result);
+      console.log('Leo Wallet: Result type:', typeof result);
+      console.log('Leo Wallet: Result keys:', result ? Object.keys(result) : 'null');
 
-      // Extract transaction ID from result
-      let transactionId = '';
+      // Try different possible response formats
+      let transactionId = null;
 
       if (typeof result === 'string') {
         transactionId = result;
       } else if (result && typeof result === 'object') {
+        // Try to get the actual Aleo transaction ID (at1...)
         transactionId = (result as any).transactionId
           || (result as any).txId
           || (result as any).id
-          || '';
+          || (result as any).transaction_id
+          || (result as any).aleoTransactionId;
       }
 
-      console.log('Leo Wallet: Transaction ID:', transactionId);
+      if (transactionId) {
+        console.log('Leo Wallet: Transaction ID:', transactionId);
+        console.log('Leo Wallet: Transaction ID format:', transactionId.startsWith('at1') ? 'Aleo format (at1...)' : 'UUID/Event ID format');
 
-      if (!transactionId) {
-        throw new Error('No transaction ID returned from wallet');
+        // If it's a UUID (event ID), warn that it's not the final transaction ID
+        if (!transactionId.startsWith('at1') && transactionId.includes('-')) {
+          console.warn('⚠️ Leo Wallet returned UUID/Event ID, not Aleo transaction ID');
+          console.warn('⚠️ This is temporary ID. Actual transaction ID (at1...) will be available after confirmation');
+          console.warn('⚠️ Explorer link may not work until transaction is confirmed');
+          console.warn('⚠️ User can get correct transaction ID by clicking transaction in Leo Wallet extension');
+
+          // Store the event ID for potential polling later
+          (window as any).__lastLeoEventId = transactionId;
+        }
+
+        return transactionId;
       }
 
-      return transactionId;
+      console.error('Leo Wallet: No transaction ID in result:', result);
+      throw new Error('No transaction ID returned from wallet');
     } catch (error: any) {
-      console.error('Leo Wallet: Transaction failed');
-      console.error('Leo Wallet: Error type:', error?.constructor?.name);
+      console.error('Leo Wallet: Transaction failed:', error);
+      console.error('Leo Wallet: Error type:', typeof error);
       console.error('Leo Wallet: Error message:', error?.message);
-      console.error('Leo Wallet: Full error:', error);
+      console.error('Leo Wallet: Error stack:', error?.stack?.substring(0, 500));
 
-      // Check for specific error types
-      if (error?.message?.includes('User rejected') || error?.message?.includes('denied')) {
+      if (error?.message?.includes('User rejected') || error?.message?.includes('denied') || error?.message?.includes('rejected')) {
         throw new Error('Transaction rejected by user');
       }
 
-      if (error?.message?.includes('Insufficient')) {
+      if (error?.message?.includes('Insufficient') || error?.message?.includes('balance')) {
         throw new Error('Insufficient balance for transaction');
       }
 
       if (error?.message?.includes('not found') || error?.message?.includes('does not exist')) {
-        throw new Error('Program not found. Please ensure veiled_markets.aleo is deployed on testnet.');
+        throw new Error('Program or function not found on blockchain');
       }
 
-      // Generic error with more context
-      const errorMsg = error?.message || 'Transaction failed';
-      throw new Error(`${errorMsg}. Please check: 1) Wallet is unlocked, 2) Connected to Testnet Beta, 3) Sufficient balance`);
+      throw new Error(`Transaction failed: ${error?.message || 'Unknown error'}. Please check: 1) Wallet is unlocked, 2) Connected to Testnet, 3) Sufficient balance`);
     }
   }
 
@@ -889,10 +805,9 @@ export class LeoWalletAdapter {
     if (!this.adapter.connected) return [];
 
     try {
-      const records = await this.adapter.requestRecords(programId);
+      const records = await this.adapter.requestRecords(programId, true);
       return records || [];
-    } catch (error) {
-      console.error('Failed to get records:', error);
+    } catch {
       return [];
     }
   }
@@ -913,23 +828,384 @@ export class LeoWalletAdapter {
   }
 
   onAccountChange(callback: (account: WalletAccount | null) => void): () => void {
-    // Official adapter doesn't have direct event subscription
-    // Instead, we can listen to the 'disconnect' event
-    const disconnectHandler = () => {
+    const handler = () => {
       this.account = null;
       callback(null);
     };
 
-    this.adapter.on('disconnect', disconnectHandler);
-
+    this.adapter.on('disconnect', handler);
     return () => {
-      this.adapter.off('disconnect', disconnectHandler);
+      this.adapter.off('disconnect', handler);
     };
   }
 
   onNetworkChange(_callback: (network: NetworkType) => void): () => void {
-    // Official adapter doesn't expose network change events directly
-    // Network is set during connection
+    return () => { };
+  }
+}
+
+// ============================================================================
+// FOX WALLET ADAPTER (Using ProvableHQ Adapter)
+// ============================================================================
+
+export class FoxWalletAdapter {
+  private adapter: ProvableFoxWalletAdapter;
+  private account: WalletAccount | null = null;
+
+  constructor() {
+    this.adapter = new ProvableFoxWalletAdapter({
+      appName: 'Veiled Markets',
+    });
+  }
+
+  get isInstalled(): boolean {
+    return this.adapter.readyState === 'Installed' || this.adapter.readyState === 'Loadable';
+  }
+
+  get isConnected(): boolean {
+    return this.adapter.connected && !!this.account;
+  }
+
+  get currentAccount(): WalletAccount | null {
+    return this.account;
+  }
+
+  async connect(): Promise<WalletAccount> {
+    try {
+      console.log('Fox Wallet: Attempting to connect...');
+      console.log('Fox Wallet: readyState:', this.adapter.readyState);
+
+      try {
+        console.log('Fox Wallet: Trying network testnet...');
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v2.aleo', 'credits.aleo']);
+
+        if (this.adapter.account) {
+          console.log('Fox Wallet: Connected successfully');
+          this.account = {
+            address: this.adapter.account.address,
+            network: 'testnet',
+          };
+          return this.account;
+        }
+      } catch (err) {
+        console.log('Fox Wallet: Failed with network testnet:', err);
+        throw err;
+      }
+
+      throw new Error('Connection successful but no account returned');
+    } catch (error: any) {
+      console.error('Fox Wallet connection error:', error);
+      const errorMessage = error?.message?.toLowerCase() || '';
+
+      if (errorMessage.includes('user reject') || errorMessage.includes('rejected') || errorMessage.includes('denied')) {
+        throw new Error('Connection request was rejected by user.');
+      }
+
+      if (errorMessage.includes('not installed') || errorMessage.includes('not found')) {
+        throw new Error('Fox Wallet not installed. Please install from https://foxwallet.com');
+      }
+
+      throw new Error(error?.message || 'Failed to connect to Fox Wallet');
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      await this.adapter.disconnect();
+    } catch (error) {
+      console.error('Disconnect error:', error);
+    }
+    this.account = null;
+  }
+
+  async getBalance(): Promise<WalletBalance> {
+    if (!this.adapter.connected || !this.account) {
+      return { public: 0n, private: 0n };
+    }
+
+    let publicBalance = 0n;
+    let privateBalance = 0n;
+
+    publicBalance = await fetchPublicBalance(this.account.address);
+
+    try {
+      const records = await this.adapter.requestRecords('credits.aleo', true);
+      if (Array.isArray(records)) {
+        for (const record of records) {
+          const plaintext = String((record as any).plaintext || record);
+          const match = plaintext.match(/microcredits:\s*(\d+)u64/);
+          if (match) {
+            privateBalance += BigInt(match[1]);
+          }
+        }
+      }
+    } catch {
+      // Private records might require decrypt permission
+    }
+
+    return { public: publicBalance, private: privateBalance };
+  }
+
+  async requestTransaction(request: TransactionRequest): Promise<string> {
+    if (!this.adapter.connected || !this.account) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      console.log('Fox Wallet: Executing transaction...');
+
+      const result = await this.adapter.executeTransaction({
+        program: request.programId,
+        function: request.functionName,
+        inputs: request.inputs,
+        fee: request.fee,
+        privateFee: false,
+      });
+
+      console.log('Fox Wallet: Transaction result:', result);
+
+      if (result && result.transactionId) {
+        return result.transactionId;
+      }
+
+      throw new Error('No transaction ID returned from wallet');
+    } catch (error: any) {
+      console.error('Fox Wallet: Transaction failed:', error);
+
+      if (error?.message?.includes('User rejected') || error?.message?.includes('denied')) {
+        throw new Error('Transaction rejected by user');
+      }
+
+      if (error?.message?.includes('Insufficient')) {
+        throw new Error('Insufficient balance for transaction');
+      }
+
+      throw new Error(`${error?.message || 'Transaction failed'}. Please check: 1) Wallet is unlocked, 2) Connected to Testnet, 3) Sufficient balance`);
+    }
+  }
+
+  async getRecords(programId: string): Promise<any[]> {
+    if (!this.adapter.connected) return [];
+
+    try {
+      const records = await this.adapter.requestRecords(programId, true);
+      return records || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async signMessage(message: string): Promise<string> {
+    if (!this.adapter.connected) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const encoder = new TextEncoder();
+      const messageBytes = encoder.encode(message);
+      const signature = await this.adapter.signMessage(messageBytes);
+      return signature ? new TextDecoder().decode(signature) : '';
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to sign message');
+    }
+  }
+
+  onAccountChange(callback: (account: WalletAccount | null) => void): () => void {
+    const handler = () => {
+      this.account = null;
+      callback(null);
+    };
+
+    this.adapter.on('disconnect', handler);
+    return () => {
+      this.adapter.off('disconnect', handler);
+    };
+  }
+
+  onNetworkChange(_callback: (network: NetworkType) => void): () => void {
+    return () => { };
+  }
+}
+
+// ============================================================================
+// SOTER WALLET ADAPTER (Using ProvableHQ Adapter)
+// ============================================================================
+
+export class SoterWalletAdapter {
+  private adapter: ProvableSoterWalletAdapter;
+  private account: WalletAccount | null = null;
+
+  constructor() {
+    this.adapter = new ProvableSoterWalletAdapter({
+      appName: 'Veiled Markets',
+    });
+  }
+
+  get isInstalled(): boolean {
+    return this.adapter.readyState === 'Installed' || this.adapter.readyState === 'Loadable';
+  }
+
+  get isConnected(): boolean {
+    return this.adapter.connected && !!this.account;
+  }
+
+  get currentAccount(): WalletAccount | null {
+    return this.account;
+  }
+
+  async connect(): Promise<WalletAccount> {
+    try {
+      console.log('Soter Wallet: Attempting to connect...');
+      console.log('Soter Wallet: readyState:', this.adapter.readyState);
+
+      try {
+        console.log('Soter Wallet: Trying network testnet...');
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v2.aleo', 'credits.aleo']);
+
+        if (this.adapter.account) {
+          console.log('Soter Wallet: Connected successfully');
+          this.account = {
+            address: this.adapter.account.address,
+            network: 'testnet',
+          };
+          return this.account;
+        }
+      } catch (err) {
+        console.log('Soter Wallet: Failed with network testnet:', err);
+        throw err;
+      }
+
+      throw new Error('Connection successful but no account returned');
+    } catch (error: any) {
+      console.error('Soter Wallet connection error:', error);
+      const errorMessage = error?.message?.toLowerCase() || '';
+
+      if (errorMessage.includes('user reject') || errorMessage.includes('rejected') || errorMessage.includes('denied')) {
+        throw new Error('Connection request was rejected by user.');
+      }
+
+      if (errorMessage.includes('not installed') || errorMessage.includes('not found')) {
+        throw new Error('Soter Wallet not installed. Please install from Chrome Web Store');
+      }
+
+      throw new Error(error?.message || 'Failed to connect to Soter Wallet');
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      await this.adapter.disconnect();
+    } catch (error) {
+      console.error('Disconnect error:', error);
+    }
+    this.account = null;
+  }
+
+  async getBalance(): Promise<WalletBalance> {
+    if (!this.adapter.connected || !this.account) {
+      return { public: 0n, private: 0n };
+    }
+
+    let publicBalance = 0n;
+    let privateBalance = 0n;
+
+    publicBalance = await fetchPublicBalance(this.account.address);
+
+    try {
+      const records = await this.adapter.requestRecords('credits.aleo', true);
+      if (Array.isArray(records)) {
+        for (const record of records) {
+          const plaintext = String((record as any).plaintext || record);
+          const match = plaintext.match(/microcredits:\s*(\d+)u64/);
+          if (match) {
+            privateBalance += BigInt(match[1]);
+          }
+        }
+      }
+    } catch {
+      // Private records might require decrypt permission
+    }
+
+    return { public: publicBalance, private: privateBalance };
+  }
+
+  async requestTransaction(request: TransactionRequest): Promise<string> {
+    if (!this.adapter.connected || !this.account) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      console.log('Soter Wallet: Executing transaction...');
+
+      const result = await this.adapter.executeTransaction({
+        program: request.programId,
+        function: request.functionName,
+        inputs: request.inputs,
+        fee: request.fee,
+        privateFee: false,
+      });
+
+      console.log('Soter Wallet: Transaction result:', result);
+
+      if (result && result.transactionId) {
+        return result.transactionId;
+      }
+
+      throw new Error('No transaction ID returned from wallet');
+    } catch (error: any) {
+      console.error('Soter Wallet: Transaction failed:', error);
+
+      if (error?.message?.includes('User rejected') || error?.message?.includes('denied')) {
+        throw new Error('Transaction rejected by user');
+      }
+
+      if (error?.message?.includes('Insufficient')) {
+        throw new Error('Insufficient balance for transaction');
+      }
+
+      throw new Error(`${error?.message || 'Transaction failed'}. Please check: 1) Wallet is unlocked, 2) Connected to Testnet, 3) Sufficient balance`);
+    }
+  }
+
+  async getRecords(programId: string): Promise<any[]> {
+    if (!this.adapter.connected) return [];
+
+    try {
+      const records = await this.adapter.requestRecords(programId, true);
+      return records || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async signMessage(message: string): Promise<string> {
+    if (!this.adapter.connected) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const encoder = new TextEncoder();
+      const messageBytes = encoder.encode(message);
+      const signature = await this.adapter.signMessage(messageBytes);
+      return signature ? new TextDecoder().decode(signature) : '';
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to sign message');
+    }
+  }
+
+  onAccountChange(callback: (account: WalletAccount | null) => void): () => void {
+    const handler = () => {
+      this.account = null;
+      callback(null);
+    };
+
+    this.adapter.on('disconnect', handler);
+    return () => {
+      this.adapter.off('disconnect', handler);
+    };
+  }
+
+  onNetworkChange(_callback: (network: NetworkType) => void): () => void {
     return () => { };
   }
 }
@@ -938,10 +1214,10 @@ export class LeoWalletAdapter {
 // UNIFIED WALLET MANAGER
 // ============================================================================
 
-export type WalletType = 'puzzle' | 'leo' | 'demo';
+export type WalletType = 'puzzle' | 'leo' | 'fox' | 'soter' | 'demo';
 
 export class WalletManager {
-  private adapter: PuzzleWalletAdapter | LeoWalletAdapter | null = null;
+  private adapter: PuzzleWalletAdapter | LeoWalletAdapter | FoxWalletAdapter | SoterWalletAdapter | null = null;
   private walletType: WalletType | null = null;
   private demoMode: boolean = false;
   private demoAccount: WalletAccount | null = null;
@@ -952,16 +1228,28 @@ export class WalletManager {
   getAvailableWallets(): { type: WalletType; name: string; installed: boolean; icon: string }[] {
     return [
       {
-        type: 'puzzle',
-        name: 'Puzzle Wallet',
-        installed: isPuzzleWalletInstalled(),
-        icon: '🧩',
-      },
-      {
         type: 'leo',
         name: 'Leo Wallet',
         installed: isLeoWalletInstalled(),
         icon: '🦁',
+      },
+      {
+        type: 'fox',
+        name: 'Fox Wallet',
+        installed: isFoxWalletInstalled(),
+        icon: '🦊',
+      },
+      {
+        type: 'soter',
+        name: 'Soter Wallet',
+        installed: isSoterWalletInstalled(),
+        icon: '🛡️',
+      },
+      {
+        type: 'puzzle',
+        name: 'Puzzle Wallet',
+        installed: isPuzzleWalletInstalled(),
+        icon: '🧩',
       },
       {
         type: 'demo',
@@ -992,12 +1280,14 @@ export class WalletManager {
       this.adapter = new PuzzleWalletAdapter();
     } else if (type === 'leo') {
       this.adapter = new LeoWalletAdapter();
+    } else if (type === 'fox') {
+      this.adapter = new FoxWalletAdapter();
+    } else if (type === 'soter') {
+      this.adapter = new SoterWalletAdapter();
     } else {
       throw new Error('Unknown wallet type');
     }
 
-    // Let the connect() function handle detection and throw appropriate errors
-    // This allows for better error messages and handles late-injecting extensions
     const account = await this.adapter.connect();
     this.walletType = type;
     this.demoMode = false;
@@ -1140,16 +1430,28 @@ export const walletManager = new WalletManager();
 
 // Export wallet info for UI
 export const WALLET_INFO = {
-  puzzle: {
-    name: 'Puzzle Wallet',
-    description: 'Recommended wallet for Aleo dApps',
-    downloadUrl: 'https://puzzle.online/wallet',
-    icon: '🧩',
-  },
   leo: {
     name: 'Leo Wallet',
     description: 'Official Leo language wallet',
     downloadUrl: 'https://leo.app',
     icon: '🦁',
+  },
+  fox: {
+    name: 'Fox Wallet',
+    description: 'Multi-chain wallet with Aleo support',
+    downloadUrl: 'https://foxwallet.com',
+    icon: '🦊',
+  },
+  soter: {
+    name: 'Soter Wallet',
+    description: 'Secure Aleo wallet extension',
+    downloadUrl: 'https://chrome.google.com/webstore/detail/soter-aleo-wallet/gkodhkbmiflnmkipcmlhhgadebbeijhh',
+    icon: '🛡️',
+  },
+  puzzle: {
+    name: 'Puzzle Wallet',
+    description: 'Recommended wallet for Aleo dApps',
+    downloadUrl: 'https://puzzle.online/wallet',
+    icon: '🧩',
   },
 } as const;

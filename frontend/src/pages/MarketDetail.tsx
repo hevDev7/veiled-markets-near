@@ -412,12 +412,12 @@ export function MarketDetail() {
                   <div className="flex justify-between py-3">
                     <span className="text-surface-400">Contract</span>
                     <a
-                      href="https://testnet.explorer.provable.com/program/veiled_markets.aleo"
+                      href="https://testnet.explorer.provable.com/program/veiled_markets_v2.aleo"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
                     >
-                      <span>veiled_markets.aleo</span>
+                      <span>veiled_markets_v2.aleo</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -450,11 +450,16 @@ export function MarketDetail() {
                         href={`https://testnet.explorer.provable.com/transaction/${txId}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-6"
+                        className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-2"
                       >
                         <span>View Transaction</span>
                         <ExternalLink className="w-4 h-4" />
                       </a>
+                    )}
+                    {txId && (
+                      <p className="text-xs text-surface-500 mb-4">
+                        Transaction may take 30-60 seconds to appear on explorer
+                      </p>
                     )}
                     <button onClick={resetBet} className="btn-primary w-full">
                       Place Another Bet

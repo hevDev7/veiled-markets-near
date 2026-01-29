@@ -24,7 +24,6 @@ import {
   getTransactionUrl,
   registerQuestionText,
   registerMarketTransaction,
-  addKnownMarketId,
   waitForMarketCreation
 } from '@/lib/aleo-client'
 
@@ -147,11 +146,24 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
     setError(null)
 
     try {
+      console.log('=== STARTING MARKET CREATION ===')
+      console.log('Form data:', formData)
+
       // Hash the question to field for on-chain storage
+      console.log('Hashing question to field...')
       const questionHash = await hashToField(formData.question)
+      console.log('Question hash result:', questionHash)
+      console.log('Question hash type:', typeof questionHash)
+
+      if (!questionHash) {
+        throw new Error('Failed to generate question hash')
+      }
 
       // Get current block height to calculate deadlines
+      console.log('Fetching current block height...')
       const currentBlock = await getCurrentBlockHeight()
+      console.log('Current block height:', currentBlock.toString())
+      console.log('Current block type:', typeof currentBlock)
 
       // Convert dates to block heights (assuming ~15 seconds per block)
       const deadlineDate = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`)
@@ -163,22 +175,56 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const deadlineBlockHeight = currentBlock + deadlineBlocks
       const resolutionBlockHeight = currentBlock + resolutionBlocks
 
+      console.log('=== BLOCK HEIGHT CALCULATION ===')
+      console.log('Current time:', new Date().toISOString())
+      console.log('Deadline date:', deadlineDate.toISOString())
+      console.log('Resolution date:', resolutionDate.toISOString())
+      console.log('Deadline blocks from now:', deadlineBlocks.toString())
+      console.log('Resolution blocks from now:', resolutionBlocks.toString())
+      console.log('Current block height:', currentBlock.toString())
+      console.log('Deadline block height:', deadlineBlockHeight.toString())
+      console.log('Resolution block height:', resolutionBlockHeight.toString())
+
       // Build transaction inputs for create_market
       // create_market(question_hash: field, category: u8, deadline: u64, resolution_deadline: u64)
-      const inputs = [
-        questionHash,
-        `${formData.category}u8`,
-        `${deadlineBlockHeight}u64`,
-        `${resolutionBlockHeight}u64`,
-      ]
 
-      console.log('Creating market with inputs:', inputs)
+      // Ensure all values are properly converted to strings
+      const input0 = String(questionHash);
+      const input1 = `${Number(formData.category)}u8`;
+      const input2 = `${deadlineBlockHeight.toString()}u64`;
+      const input3 = `${resolutionBlockHeight.toString()}u64`;
+
+      const inputs = [input0, input1, input2, input3];
+
+      console.log('=== CREATE MARKET DEBUG ===')
+      console.log('Question:', formData.question)
+      console.log('Question Hash:', questionHash)
+      console.log('Category:', formData.category)
+      console.log('Current Block:', currentBlock.toString())
+      console.log('Deadline Block:', deadlineBlockHeight.toString())
+      console.log('Resolution Block:', resolutionBlockHeight.toString())
+      console.log('Input 0 (hash):', input0, '| type:', typeof input0)
+      console.log('Input 1 (category):', input1, '| type:', typeof input1)
+      console.log('Input 2 (deadline):', input2, '| type:', typeof input2)
+      console.log('Input 3 (resolution):', input3, '| type:', typeof input3)
+      console.log('Inputs array:', inputs)
+      console.log('Inputs JSON:', JSON.stringify(inputs, null, 2))
       console.log('Program ID:', CONTRACT_INFO.programId)
       console.log('Deployment TX:', CONTRACT_INFO.deploymentTxId)
 
       // Validate inputs before sending
       if (!questionHash || !questionHash.endsWith('field')) {
         throw new Error('Invalid question hash format')
+      }
+
+      // Validate all inputs are strings and not empty
+      for (let i = 0; i < inputs.length; i++) {
+        if (typeof inputs[i] !== 'string') {
+          throw new Error(`Input ${i} is not a string: ${typeof inputs[i]}`)
+        }
+        if (!inputs[i] || inputs[i] === 'undefined' || inputs[i] === 'null') {
+          throw new Error(`Input ${i} is empty or invalid: "${inputs[i]}"`)
+        }
       }
 
       if (formData.category < 1 || formData.category > 7) {
@@ -205,13 +251,15 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       console.log('Market creation transaction submitted:', transactionId)
 
       // Register the question text with the question hash for future lookup
+      // This allows us to display the question once the market is confirmed
       registerQuestionText(questionHash, formData.question)
 
       // Register the transaction ID temporarily with question hash
       registerMarketTransaction(questionHash, transactionId)
 
-      // Add the question hash to known market IDs temporarily
-      addKnownMarketId(questionHash)
+      // NOTE: Don't add questionHash to KNOWN_MARKET_IDS here!
+      // The blockchain uses a different marketId, so fetching by questionHash will fail.
+      // waitForMarketCreation will add the actual marketId once confirmed.
 
       console.log('Registered market:', { questionHash, question: formData.question, transactionId })
 
@@ -225,10 +273,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         .then((actualMarketId) => {
           if (actualMarketId) {
             console.log('✅ Actual market ID retrieved:', actualMarketId)
+            console.log('✅ Market should now appear on dashboard after refresh')
             // Call onSuccess with the actual market ID
             onSuccess?.(actualMarketId)
           } else {
-            console.warn('Could not retrieve actual market ID, using question hash as fallback')
+            console.warn('Could not retrieve actual market ID')
+            // Don't add questionHash as fallback - it won't work for fetching
             onSuccess?.(questionHash)
           }
         })

@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v2.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 
@@ -19,7 +19,8 @@ import {
 
 interface MarketsState {
     markets: Market[]
-    isLoading: boolean
+    isLoading: boolean      // True only on initial load (no markets yet)
+    isRefreshing: boolean   // True during background refresh (markets still visible)
     error: string | null
     lastFetchTime: number | null
 }
@@ -152,14 +153,24 @@ function getCategoryTags(category: number): string[] {
     return categoryMap[category] || []
 }
 
-export const useRealMarketsStore = create<MarketsStore>((set) => ({
+export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
     markets: [],
     isLoading: false,
+    isRefreshing: false,
     error: null,
     lastFetchTime: null,
 
     fetchMarkets: async () => {
-        set({ isLoading: true, error: null })
+        const currentMarkets = get().markets
+        const isInitialLoad = currentMarkets.length === 0
+
+        // Only show loading skeleton on initial load, not on background refresh
+        if (isInitialLoad) {
+            set({ isLoading: true, error: null })
+        } else {
+            set({ isRefreshing: true, error: null })
+        }
+
         try {
             // Fetch all markets from blockchain
             const blockchainMarkets = await fetchAllMarkets()
@@ -175,15 +186,19 @@ export const useRealMarketsStore = create<MarketsStore>((set) => ({
             set({
                 markets,
                 isLoading: false,
+                isRefreshing: false,
                 lastFetchTime: Date.now()
             })
         } catch (error) {
             console.error('Failed to fetch markets:', error)
-            set({
+            // On error during refresh, keep existing markets visible
+            set((state) => ({
                 error: error instanceof Error ? error.message : 'Failed to fetch markets',
                 isLoading: false,
-                markets: [] // Start with empty array - markets will be added as created
-            })
+                isRefreshing: false,
+                // Only clear markets if it was initial load that failed
+                markets: isInitialLoad ? [] : state.markets
+            }))
         }
     },
 
@@ -205,6 +220,8 @@ export const useRealMarketsStore = create<MarketsStore>((set) => ({
             set((state) => ({
                 markets: [market, ...state.markets]
             }))
+
+            console.log('✅ Market added to store:', marketId)
         } catch (error) {
             console.error('Failed to add market:', error)
         }

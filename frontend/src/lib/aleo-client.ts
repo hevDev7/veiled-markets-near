@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets.aleo program
+// Client for interacting with the deployed veiled_markets_v2.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -55,7 +55,7 @@ export interface MarketResolutionData {
 
 // API configuration
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const PROGRAM_ID = config.programId || 'veiled_markets.aleo';
+const PROGRAM_ID = 'veiled_markets_v2.aleo';  // Updated to v2
 
 /**
  * Transaction status and details
@@ -466,18 +466,20 @@ export function buildCreateMarketInputs(
 
 /**
  * Build inputs for place_bet transaction
+ * Note: v2 contract uses self.caller for bettor address, no need to pass it
+ * place_bet(market_id: field, amount: u64, outcome: u8)
  */
 export function buildPlaceBetInputs(
   marketId: string,
   amount: bigint,
   outcome: 'yes' | 'no',
-  bettorAddress: string
+  _bettorAddress?: string  // Deprecated in v2, kept for backwards compatibility
 ): string[] {
   return [
     marketId,
     `${amount}u64`,
     outcome === 'yes' ? '1u8' : '2u8',
-    bettorAddress,
+    // Note: bettor address removed in v2 - contract uses self.caller
   ];
 }
 
@@ -549,7 +551,10 @@ export function getProgramUrl(): string {
 }
 
 /**
- * Hash a string to field (simplified - in production use proper hashing)
+ * Hash a string to field
+ * IMPORTANT: Aleo field values must be decimal numbers, NOT hex strings
+ * The field modulus is approximately 2^253, so we use a portion of the hash
+ * to create a valid decimal field value
  */
 export async function hashToField(input: string): Promise<string> {
   // Use Web Crypto API for hashing
@@ -557,10 +562,28 @@ export async function hashToField(input: string): Promise<string> {
   const data = encoder.encode(input);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-  // Convert to field format (take first 62 chars + 'field')
-  return `${hashHex.substring(0, 62)}field`;
+  // Convert hash bytes to a BigInt (take first 31 bytes = 248 bits to stay under field modulus ~2^253)
+  let hashBigInt = BigInt(0);
+  for (let i = 0; i < 31; i++) {
+    hashBigInt = (hashBigInt << BigInt(8)) | BigInt(hashArray[i]);
+  }
+
+  // Ensure it's positive and within field range
+  // Aleo field modulus is approximately 8444461749428370424248824938781546531375899335154063827935233455917409239041
+  // We use a smaller range to be safe
+  const fieldModulus = BigInt('8444461749428370424248824938781546531375899335154063827935233455917409239040');
+  hashBigInt = hashBigInt % fieldModulus;
+
+  // Ensure non-zero (0field might cause issues)
+  if (hashBigInt === BigInt(0)) {
+    hashBigInt = BigInt(1);
+  }
+
+  console.log('hashToField input:', input);
+  console.log('hashToField result:', `${hashBigInt.toString()}field`);
+
+  return `${hashBigInt.toString()}field`;
 }
 
 /**
@@ -677,6 +700,7 @@ export function registerMarketTransaction(marketId: string, transactionId: strin
 /**
  * Load market IDs from indexer service
  * Returns empty array if indexer not available (user will create markets via UI)
+ * Also loads question texts from the index
  */
 async function loadMarketIdsFromIndexer(): Promise<string[]> {
   try {
@@ -688,6 +712,26 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
 
     const data = await response.json();
     const marketIds = data.marketIds || [];
+    const markets = data.markets || [];
+
+    // Load question texts from indexed markets
+    for (const market of markets) {
+      if (market.questionText) {
+        // Register question text with both marketId and questionHash
+        QUESTION_TEXT_MAP[market.marketId] = market.questionText;
+        QUESTION_TEXT_MAP[market.questionHash] = market.questionText;
+        console.log(`📝 Loaded question text for ${market.marketId.slice(0, 16)}...`);
+      }
+    }
+
+    // Persist merged question texts to localStorage
+    if (typeof window !== 'undefined' && markets.length > 0) {
+      try {
+        localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
+      } catch (e) {
+        console.warn('Failed to save question texts to localStorage:', e);
+      }
+    }
 
     if (marketIds.length > 0) {
       console.log(`✅ Loaded ${marketIds.length} markets from indexer`);
@@ -774,8 +818,8 @@ export async function fetchMarketById(marketId: string) {
 
 // Export a singleton instance info
 export const CONTRACT_INFO = {
-  programId: PROGRAM_ID,
-  deploymentTxId: 'at1j2f9r4mdls0n6k55nnscdckhuz7uyqfkuhj9kmer2v2hs6z0u5zsm8xf90',
+  programId: 'veiled_markets_v2.aleo',  // Updated to v2 with integrated credits transfer
+  deploymentTxId: 'at14f99436prgg6pec5hc9l6s3kpjz8xc8qrtgs6c8cjqv3ync9jypsvq0skd',
   network: 'testnet',
   explorerUrl: config.explorerUrl,
   // Real on-chain data - markets are stored in localStorage and fetched from blockchain
