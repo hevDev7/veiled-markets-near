@@ -1,5 +1,8 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "pnpm install && pnpm --filter @veiled-markets/frontend build && ln -s frontend/dist dist",
-    "outputDirectory": "dist"
+    "buildCommand": "cd frontend && npm ci && npm run build",
+    "outputDirectory": "frontend/dist",
+    "installCommand": "echo 'Using npm in frontend directory'",
+    "framework": null,
+    "ignoreCommand": "git diff --quiet HEAD^ HEAD ./"
 }
