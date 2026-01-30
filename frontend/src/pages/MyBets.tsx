@@ -391,14 +391,24 @@ function BetCard({
             </div>
           )}
 
-          <a
-            href={`https://testnet.explorer.provable.com/transaction/${bet.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
-          >
-            <ExternalLink className="w-4 h-4 text-surface-400" />
-          </a>
+          {bet.id.startsWith('at1') ? (
+            <a
+              href={`https://testnet.explorer.provable.com/transaction/${bet.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
+              title="View on Explorer"
+            >
+              <ExternalLink className="w-4 h-4 text-surface-400" />
+            </a>
+          ) : (
+            <div
+              className="p-2 rounded-lg bg-surface-800/30 cursor-help"
+              title="Transaction pending - check your wallet for explorer link"
+            >
+              <Clock className="w-4 h-4 text-surface-500" />
+            </div>
+          )}
         </div>
       </div>
     </motion.div>

@@ -445,22 +445,31 @@ export function MarketDetail() {
                     <p className="text-surface-400 mb-4">
                       Your {selectedOutcome?.toUpperCase()} bet of {betAmount} ALEO has been submitted.
                     </p>
-                    {txId && (
-                      <a
-                        href={`https://testnet.explorer.provable.com/transaction/${txId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-2"
-                      >
-                        <span>View Transaction</span>
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
-                    )}
-                    {txId && (
-                      <p className="text-xs text-surface-500 mb-4">
-                        Transaction may take 30-60 seconds to appear on explorer
-                      </p>
-                    )}
+                    {txId && txId.startsWith('at1') ? (
+                      <>
+                        <a
+                          href={`https://testnet.explorer.provable.com/transaction/${txId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-2"
+                        >
+                          <span>View Transaction</span>
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                        <p className="text-xs text-surface-500 mb-4">
+                          Transaction may take 30-60 seconds to appear on explorer
+                        </p>
+                      </>
+                    ) : txId ? (
+                      <div className="mb-4">
+                        <p className="text-xs text-surface-500 mb-2">
+                          Transaction is being processed on the blockchain.
+                        </p>
+                        <p className="text-xs text-brand-400">
+                          Check your Leo Wallet extension for the transaction status and explorer link.
+                        </p>
+                      </div>
+                    ) : null}
                     <button onClick={resetBet} className="btn-primary w-full">
                       Place Another Bet
                     </button>
