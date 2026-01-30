@@ -31,29 +31,14 @@ export function MyBets() {
   const [filter, setFilter] = useState<'all' | 'active' | 'pending' | 'won'>('all')
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false)
 
-  // Mock winning bets for demo
-  const [winningBets] = useState<WinningBet[]>([
-    {
-      id: 'winning_bet_1',
-      marketId: 'market_resolved_1',
-      amount: 50000000n, // 50 ALEO
-      outcome: 'yes',
-      placedAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
-      status: 'won',
-      marketQuestion: 'Did Ethereum reach $4,000 in December 2025?',
-      winAmount: 82500000n, // 82.5 ALEO
-    },
-    {
-      id: 'winning_bet_2',
-      marketId: 'market_resolved_2',
-      amount: 25000000n, // 25 ALEO
-      outcome: 'no',
-      placedAt: Date.now() - 14 * 24 * 60 * 60 * 1000,
-      status: 'won',
-      marketQuestion: 'Did the Fed raise rates in January 2026?',
-      winAmount: 43750000n, // 43.75 ALEO
-    },
-  ])
+  // Get actual winning bets from userBets (bets with status 'won')
+  const winningBets: WinningBet[] = userBets
+    .filter(bet => bet.status === 'won')
+    .map(bet => ({
+      ...bet,
+      // Calculate win amount based on potential payout (simplified: 1.5x for demo)
+      winAmount: bet.amount + (bet.amount / 2n),
+    }))
 
   // Redirect to landing if not connected
   useEffect(() => {
