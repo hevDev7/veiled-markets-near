@@ -763,15 +763,22 @@ export class LeoWalletAdapter {
         console.log('Leo Wallet: Transaction ID:', transactionId);
         console.log('Leo Wallet: Transaction ID format:', transactionId.startsWith('at1') ? 'Aleo format (at1...)' : 'UUID/Event ID format');
 
-        // If it's a UUID (event ID), warn that it's not the final transaction ID
+        // If it's a UUID (event ID), try to get the actual transaction ID from wallet
         if (!transactionId.startsWith('at1') && transactionId.includes('-')) {
-          console.warn('⚠️ Leo Wallet returned UUID/Event ID, not Aleo transaction ID');
-          console.warn('⚠️ This is temporary ID. Actual transaction ID (at1...) will be available after confirmation');
-          console.warn('⚠️ Explorer link may not work until transaction is confirmed');
-          console.warn('⚠️ User can get correct transaction ID by clicking transaction in Leo Wallet extension');
+          console.log('Leo Wallet: Got UUID, attempting to get real transaction ID...');
 
-          // Store the event ID for potential polling later
+          // Store the event ID
           (window as any).__lastLeoEventId = transactionId;
+
+          // Try to get transaction ID from wallet extension directly
+          const realTxId = await this.pollForTransactionId(transactionId);
+          if (realTxId) {
+            console.log('Leo Wallet: ✅ Got real transaction ID:', realTxId);
+            return realTxId;
+          }
+
+          console.warn('⚠️ Could not get real transaction ID, returning UUID');
+          console.warn('⚠️ User can get correct transaction ID from Leo Wallet extension');
         }
 
         return transactionId;
@@ -799,6 +806,84 @@ export class LeoWalletAdapter {
 
       throw new Error(`Transaction failed: ${error?.message || 'Unknown error'}. Please check: 1) Wallet is unlocked, 2) Connected to Testnet, 3) Sufficient balance`);
     }
+  }
+
+  /**
+   * Poll the wallet extension for the real transaction ID
+   * Leo Wallet stores transaction history that we can access
+   */
+  private async pollForTransactionId(eventId: string, maxAttempts: number = 10): Promise<string | null> {
+    const leoWallet = (window as any).leoWallet || (window as any).leo;
+
+    if (!leoWallet) {
+      console.log('Leo Wallet: window.leoWallet not available');
+      return null;
+    }
+
+    console.log('Leo Wallet: Polling for transaction ID...');
+    console.log('Leo Wallet: Available methods:', Object.keys(leoWallet));
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        // Try method 1: getTransactionStatus
+        if (typeof leoWallet.getTransactionStatus === 'function') {
+          const status = await leoWallet.getTransactionStatus(eventId);
+          console.log(`Leo Wallet: Attempt ${attempt + 1} - getTransactionStatus:`, status);
+          if (status?.transactionId?.startsWith('at1')) {
+            return status.transactionId;
+          }
+        }
+
+        // Try method 2: getTransaction
+        if (typeof leoWallet.getTransaction === 'function') {
+          const tx = await leoWallet.getTransaction(eventId);
+          console.log(`Leo Wallet: Attempt ${attempt + 1} - getTransaction:`, tx);
+          if (tx?.id?.startsWith('at1')) {
+            return tx.id;
+          }
+          if (tx?.transactionId?.startsWith('at1')) {
+            return tx.transactionId;
+          }
+        }
+
+        // Try method 3: getTransactions (get recent transactions and find by timestamp)
+        if (typeof leoWallet.getTransactions === 'function') {
+          const txs = await leoWallet.getTransactions();
+          console.log(`Leo Wallet: Attempt ${attempt + 1} - getTransactions:`, txs);
+          if (Array.isArray(txs) && txs.length > 0) {
+            // Get the most recent transaction
+            const recentTx = txs[0];
+            if (recentTx?.id?.startsWith('at1')) {
+              return recentTx.id;
+            }
+            if (recentTx?.transactionId?.startsWith('at1')) {
+              return recentTx.transactionId;
+            }
+          }
+        }
+
+        // Try method 4: getHistory
+        if (typeof leoWallet.getHistory === 'function') {
+          const history = await leoWallet.getHistory();
+          console.log(`Leo Wallet: Attempt ${attempt + 1} - getHistory:`, history);
+          if (Array.isArray(history) && history.length > 0) {
+            const recentTx = history[0];
+            if (recentTx?.id?.startsWith('at1')) {
+              return recentTx.id;
+            }
+          }
+        }
+
+        // Wait before next attempt
+        if (attempt < maxAttempts - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (err) {
+        console.log(`Leo Wallet: Attempt ${attempt + 1} failed:`, err);
+      }
+    }
+
+    return null;
   }
 
   async getRecords(programId: string): Promise<any[]> {
