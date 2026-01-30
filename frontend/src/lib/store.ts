@@ -652,6 +652,37 @@ function loadBetsFromStorage(): Bet[] {
   }
 }
 
+// Helper to load pending bets from localStorage
+function loadPendingBetsFromStorage(): Bet[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending_bets')
+    if (!saved) return []
+    const parsed = JSON.parse(saved)
+    return parsed.map((bet: any) => ({
+      ...bet,
+      amount: BigInt(bet.amount),
+    }))
+  } catch (e) {
+    console.error('Failed to load pending bets from storage:', e)
+    return []
+  }
+}
+
+// Helper to save pending bets to localStorage
+function savePendingBetsToStorage(bets: Bet[]) {
+  if (typeof window === 'undefined') return
+  try {
+    const serializable = bets.map(bet => ({
+      ...bet,
+      amount: bet.amount.toString(),
+    }))
+    localStorage.setItem('veiled_markets_pending_bets', JSON.stringify(serializable))
+  } catch (e) {
+    console.error('Failed to save pending bets to storage:', e)
+  }
+}
+
 // Helper to save bets to localStorage
 function saveBetsToStorage(bets: Bet[]) {
   if (typeof window === 'undefined') return
@@ -669,7 +700,7 @@ function saveBetsToStorage(bets: Bet[]) {
 
 export const useBetsStore = create<BetsStore>((set, get) => ({
   userBets: loadBetsFromStorage(),
-  pendingBets: [],
+  pendingBets: loadPendingBetsFromStorage(),
   isPlacingBet: false,
 
   placeBet: async (marketId, amount, outcome) => {
@@ -686,6 +717,11 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     set({ isPlacingBet: true })
 
     try {
+      // Get market question for display purposes
+      const markets = useMarketsStore.getState().markets
+      const market = markets.find(m => m.id === marketId)
+      const marketQuestion = market?.question || `Market ${marketId}`
+
       // Build inputs for the deployed veiled_markets_v2.aleo contract
       // place_bet(market_id: field, amount: u64, outcome: u8, bettor: address)
       const inputs = buildPlaceBetInputs(
@@ -733,7 +769,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         useWalletStore.getState().refreshBalance()
       }, 1000)
 
-      // Add to pending bets
+      // Add to pending bets with market question
       const newBet: Bet = {
         id: transactionId,
         marketId,
@@ -741,12 +777,17 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         outcome,
         placedAt: Date.now(),
         status: 'pending',
+        marketQuestion,
       }
 
+      const updatedPendingBets = [...get().pendingBets, newBet]
       set({
-        pendingBets: [...get().pendingBets, newBet],
+        pendingBets: updatedPendingBets,
         isPlacingBet: false,
       })
+
+      // Save pending bets to localStorage immediately
+      savePendingBetsToStorage(updatedPendingBets)
 
       // Refresh balance multiple times to catch the update
       const refreshIntervals = [3000, 5000, 10000, 15000, 30000]
@@ -768,11 +809,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
             clearInterval(pollInterval)
             const activeBet = { ...newBet, status: 'active' as const }
             const updatedBets = [...get().userBets, activeBet]
+            const updatedPending = get().pendingBets.filter(b => b.id !== transactionId)
             set({
-              pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
+              pendingBets: updatedPending,
               userBets: updatedBets,
             })
             saveBetsToStorage(updatedBets)
+            savePendingBetsToStorage(updatedPending)
             // Final refresh after confirmation
             console.log('Transaction confirmed, final balance refresh...')
             useWalletStore.getState().refreshBalance()
@@ -790,11 +833,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         if (stillPending) {
           const activeBet = { ...newBet, status: 'active' as const }
           const updatedBets = [...get().userBets, activeBet]
+          const updatedPending = get().pendingBets.filter(b => b.id !== transactionId)
           set({
-            pendingBets: get().pendingBets.filter(b => b.id !== transactionId),
+            pendingBets: updatedPending,
             userBets: updatedBets,
           })
           saveBetsToStorage(updatedBets)
+          savePendingBetsToStorage(updatedPending)
         }
       }, 120000)
 
@@ -814,6 +859,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     try {
       // First, load from localStorage (our local cache)
       const localBets = loadBetsFromStorage()
+      const localPendingBets = loadPendingBetsFromStorage()
+
+      // Get markets for question lookup
+      const markets = useMarketsStore.getState().markets
+      const getMarketQuestion = (marketId: string) => {
+        const market = markets.find(m => m.id === marketId)
+        return market?.question || `Market ${marketId}`
+      }
 
       // Try to fetch from wallet records (may not work with all wallets)
       const records = await walletManager.getRecords('veiled_markets_v2.aleo')
@@ -828,6 +881,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           outcome: r.data.outcome === '1u8' ? 'yes' : 'no',
           placedAt: parseInt(r.data.placed_at),
           status: 'active' as const,
+          marketQuestion: getMarketQuestion(r.data.market_id),
         }))
 
       // Merge: use wallet bets if available, otherwise use local cache
@@ -835,10 +889,16 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const existingIds = new Set(walletBets.map(b => b.id))
       const mergedBets = [
         ...walletBets,
-        ...localBets.filter(b => !existingIds.has(b.id))
+        ...localBets.filter(b => !existingIds.has(b.id)).map(b => ({
+          ...b,
+          marketQuestion: b.marketQuestion || getMarketQuestion(b.marketId),
+        }))
       ]
 
-      set({ userBets: mergedBets })
+      set({
+        userBets: mergedBets,
+        pendingBets: localPendingBets,
+      })
 
       // Update localStorage with merged data
       if (mergedBets.length > 0) {
@@ -848,9 +908,11 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       console.error('Failed to fetch user bets from wallet:', error)
       // On error, still use localStorage cache
       const localBets = loadBetsFromStorage()
-      if (localBets.length > 0) {
-        set({ userBets: localBets })
-      }
+      const localPendingBets = loadPendingBetsFromStorage()
+      set({
+        userBets: localBets,
+        pendingBets: localPendingBets,
+      })
     }
   },
 
