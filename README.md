@@ -94,8 +94,9 @@
 
 - [Aleo SDK](https://developer.aleo.org/getting_started) (v1.0+)
 - [Node.js](https://nodejs.org) (v18+)
-- [pnpm](https://pnpm.io) (v8+)
+- [pnpm](https://pnpm.io) (v8.15.9+)
 - [Leo](https://developer.aleo.org/leo) (latest)
+- Aleo wallet extension ([Puzzle Wallet](https://puzzle.online) or [Leo Wallet](https://leo.app))
 
 ### Installation
 
@@ -104,32 +105,59 @@
 git clone https://github.com/hevDev7/veiled-markets-near.git
 cd veiled-markets-near
 
-# Install dependencies
+# Install dependencies (uses pnpm workspaces)
 pnpm install
 
 # Setup environment variables
 cp frontend/.env.example frontend/.env
 # Edit frontend/.env with your configuration
 
-# Build smart contracts
+# Build smart contracts (optional - already deployed)
 cd contracts
 leo build
-
-# Deploy contracts (optional - already deployed on testnet)
-leo execute create_market "10001field" "1u8" "14107191u64" "14124471u64" --broadcast
 
 # Start frontend development server
 cd ../frontend
 pnpm dev
+
+# Open browser at http://localhost:5173
 ```
+
+### Quick Deploy to Vercel
+
+The project is configured for one-click deployment to Vercel:
+
+```bash
+# Install Vercel CLI
+npm i -g vercel
+
+# Deploy
+vercel
+
+# Or deploy to production
+vercel --prod
+```
+
+The `vercel.json` is configured to:
+- Use npm for installation (compatible with Vercel)
+- Build from the frontend directory
+- Output to `dist` folder
+- Use Vite framework
 
 ### Deployed Contract
 
 The contract is already deployed on Aleo Testnet:
 - **Program ID**: `veiled_markets.aleo`
-- **Deployment TX**: [at1j2f9r4mdls0n6k55nnscdckhuz7uyqfkuhj9kmer2v2hs6z0u5zsm8xf90](https://testnet.explorer.provable.com/transaction/at1j2f9r4mdls0n6k55nnscdckhuz7uyqfkuhj9kmer2v2hs6z0u5zsm8xf90)
 - **Network**: Testnet
 - **Explorer**: [View on Explorer](https://testnet.explorer.provable.com/program/veiled_markets.aleo)
+- **RPC Endpoint**: `https://api.explorer.provable.com/v1/testnet`
+
+### Live Application
+
+- **Production URL**: [https://veiled-markets.vercel.app](https://veiled-markets.vercel.app)
+- **Status**: ✅ Live on Vercel
+- **Auto-deploy**: Enabled on `main` branch push
+- **Framework**: Vite + React 18 + TypeScript
 
 ### Live Markets
 
@@ -283,33 +311,46 @@ Unlike AMM-based prediction markets, Veiled Markets uses a **parimutuel pool sys
 ### Smart Contracts
 - **Leo** - Aleo's ZK programming language
 - **Aleo VM** - Zero-knowledge virtual machine
-- **Parimutuel Logic** - Fair odds calculation
+- **Parimutuel Logic** - Fair odds calculation system
 
 ### Frontend
-- **React 18** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling
-- **Framer Motion** - Animations
-- **Zustand** - State management
-- **React Router** - Navigation
+- **React 18** - Modern UI framework with hooks
+- **TypeScript 5.3** - Type-safe development
+- **Vite 5** - Lightning-fast build tool
+- **Tailwind CSS 3.4** - Utility-first styling
+- **Framer Motion 11** - Smooth animations
+- **Zustand 4.4** - Lightweight state management
+- **React Router 6** - Client-side routing
+- **Radix UI** - Accessible component primitives
+- **Lucide React** - Beautiful icon library
 
-### Backend
-- **TypeScript** - Indexer service
-- **Node.js** - Runtime
-- **Aleo SDK** - Blockchain interaction
+### Blockchain Integration
+- **@provablehq/sdk 0.6** - Aleo SDK for blockchain interaction
+- **Aleo Wallet Adaptors 0.3** - Multi-wallet support
+- **@puzzlehq/sdk 1.0** - Puzzle Wallet integration
+
+### Backend/Indexer
+- **TypeScript** - Type-safe indexer service
+- **Node.js 18+** - Runtime environment
+- **Aleo SDK** - Blockchain data fetching
 
 ### Infrastructure
-- **Vercel** - Frontend hosting
+- **Vercel** - Frontend hosting with auto-deploy
 - **Aleo Testnet** - Blockchain network
-- **GitHub Actions** - CI/CD (optional)
+- **GitHub** - Version control & CI/CD
+- **pnpm 8.15** - Fast, disk-efficient package manager
+
+### Development Tools
+- **ESLint** - Code linting
+- **PostCSS** - CSS processing
+- **Autoprefixer** - CSS vendor prefixes
 
 ## 💼 Supported Wallets
 
 | Wallet | Status | Features | Notes |
 |--------|--------|----------|-------|
-| 🧩 **Puzzle Wallet** | ✅ Fully Supported | Full integration, balance display | Recommended |
-| 🦁 **Leo Wallet** | ✅ Supported | Full integration | Works with latest SDK |
+| 🧩 **Puzzle Wallet** | ✅ Fully Supported | Full integration, balance display, transaction signing | **Recommended** - Best compatibility |
+| 🦁 **Leo Wallet** | ✅ Supported | Full integration, transaction signing | Works with latest SDK |
 
 ### Wallet Features
 - ✅ **Real-time balance updates** (public + private credits)
@@ -317,11 +358,32 @@ Unlike AMM-based prediction markets, Veiled Markets uses a **parimutuel pool sys
 - ✅ **Network switching** (testnet/mainnet)
 - ✅ **Address display** with copy functionality
 - ✅ **Secure connection** with wallet encryption
+- ✅ **Auto-reconnect** on page refresh
+
+### Setup Instructions
+
+1. **Install Wallet Extension**
+   - Puzzle Wallet: [puzzle.online](https://puzzle.online)
+   - Leo Wallet: [leo.app](https://leo.app)
+
+2. **Create/Import Account**
+   - Generate new account or import existing
+   - Switch to **Testnet** network
+
+3. **Get Test Credits**
+   - Visit [Aleo Faucet](https://faucet.aleo.org)
+   - Request testnet credits to your address
+
+4. **Connect to Veiled Markets**
+   - Click "Connect Wallet" button
+   - Select your wallet
+   - Approve connection request
 
 ### Important Notes
-- Demo Mode has been removed - users must connect with real wallets
-- Puzzle Wallet requires specific network names: `AleoTestnet`, `AleoMainnet`
-- Private balance reading may be limited by wallet capabilities
+- ⚠️ Demo Mode has been removed - real wallet required
+- ⚠️ Puzzle Wallet requires network names: `AleoTestnet`, `AleoMainnet`
+- ⚠️ Private balance reading may be limited by wallet capabilities
+- ⚠️ Always verify you're on **Testnet** before transactions
 
 See [WALLET_TROUBLESHOOTING.md](./WALLET_TROUBLESHOOTING.md) for detailed solutions.
 
@@ -380,27 +442,76 @@ See [INDEXER_GUIDE.md](./INDEXER_GUIDE.md) for detailed documentation.
 
 ## 🧪 Development
 
+### Project Structure
+
+The project uses **pnpm workspaces** for monorepo management:
+
+```
+veiled-markets/
+├── frontend/          # React application (main workspace)
+├── backend/           # Blockchain indexer service
+├── sdk/              # TypeScript SDK (workspace package)
+├── contracts/        # Leo smart contracts
+└── scripts/          # Utility scripts
+```
+
+### Development Commands
+
+```bash
+# Start frontend dev server
+pnpm dev
+
+# Build frontend for production
+pnpm build
+
+# Build all workspaces (SDK + contracts + frontend)
+pnpm build:all
+
+# Run tests
+pnpm test              # SDK tests only
+pnpm test:all          # SDK + contract tests
+
+# Lint code
+pnpm lint
+
+# Clean build artifacts
+pnpm clean
+```
+
 ### Creating Markets via CLI
 
 ```bash
 cd contracts
 
-# Generate question hash first
+# 1. Generate question hash first
 node ../scripts/generate-question-hash.js "Will Ethereum reach $10,000 by end of Q2 2026?"
 # Output: 350929565016816493992297964402345071115472527106339097957348390879136520853field
 
-# Create a single market
+# 2. Create market on blockchain
 leo execute create_market \
-  "350929565016816493992297964402345071115472527106339097957348390879136520853field" \  # question_hash (decimal format)
-  "3u8" \             # category (3=Crypto)
-  "14107320u64" \     # betting_deadline (block height)
-  "14124600u64" \     # resolution_deadline (block height)
+  "350929565016816493992297964402345071115472527106339097957348390879136520853field" \
+  "3u8" \              # category: 0=Politics, 1=Sports, 2=Entertainment, 3=Crypto, 4=Tech, 5=Economics, 6=Science
+  "14107320u64" \      # betting_deadline (block height)
+  "14124600u64" \      # resolution_deadline (block height)
   --broadcast
 
-# Create multiple markets
+# 3. Run indexer to discover new market
+cd ../backend
+npm run index
+
+# 4. Add question mapping (frontend/src/lib/question-mapping.ts)
+# See "Adding Question Mapping" section below
+```
+
+### Batch Market Creation
+
+```bash
+cd contracts
+
+# Create multiple markets at once
 ./create-markets.sh
 
-# Or use the new market creation script
+# Or use the interactive script
 ./create-new-market.sh
 ```
 
@@ -426,7 +537,7 @@ The question will automatically appear in the dashboard after refresh!
 ### Testing
 
 ```bash
-# Frontend tests
+# Frontend tests (if available)
 cd frontend
 pnpm test
 
@@ -434,20 +545,104 @@ pnpm test
 cd contracts
 leo test
 
-# E2E tests (if available)
-pnpm test:e2e
+# SDK tests
+cd sdk
+pnpm test
+
+# Run all tests
+pnpm test:all
 ```
+
+### Deployment
+
+#### Deploy to Vercel
+
+```bash
+# Install Vercel CLI
+npm i -g vercel
+
+# Deploy to preview
+vercel
+
+# Deploy to production
+vercel --prod
+```
+
+#### Deploy Smart Contracts
+
+```bash
+cd contracts
+
+# Build contract
+leo build
+
+# Deploy to testnet
+leo deploy --network testnet --broadcast
+
+# Deploy to mainnet (requires mainnet credits)
+leo deploy --network mainnet --broadcast
+```
+
+### Vercel Configuration
+
+The project includes `vercel.json` with optimized settings:
+
+```json
+{
+  "installCommand": "npm install --include=dev",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite"
+}
+```
+
+**Key Points:**
+- Uses npm (not pnpm) for Vercel compatibility
+- Builds from frontend directory
+- Outputs to `dist` folder
+- Auto-deploys on push to `main` branch
 
 ### Environment Variables
 
-Create `frontend/.env`:
+Create `frontend/.env` from the example:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+Key configuration options:
 
 ```env
-VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets.aleo
+# Network Configuration
+VITE_NETWORK=testnet                                    # testnet | mainnet
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_EXPLORER_URL=https://testnet.explorer.provable.com
+
+# Program Configuration
+VITE_PROGRAM_ID=veiled_markets.aleo                     # Deployed contract
+VITE_CREDITS_PROGRAM_ID=credits.aleo                    # Aleo credits program
+
+# Wallet Configuration
+VITE_ENABLE_DEMO_MODE=false                             # Demo mode disabled
+VITE_DEFAULT_WALLET=puzzle                              # puzzle | leo
+
+# Feature Flags
+VITE_ENABLE_CREATE_MARKET=true                          # Allow market creation
+VITE_ENABLE_BETTING=true                                # Allow betting
+VITE_SHOW_TESTNET_BANNER=true                           # Show testnet warning
+VITE_DEBUG=false                                        # Debug logging
+
+# App Metadata
+VITE_APP_NAME=Veiled Markets
+VITE_APP_DESCRIPTION=Privacy-Preserving Prediction Markets on Aleo
+VITE_APP_URL=https://veiled-markets.vercel.app
 ```
+
+**⚠️ Security Notes:**
+- Never commit `.env` files to git
+- Never use real private keys in `VITE_DEV_*` variables
+- Development keys are exposed to browser - only for local testing
+- Use environment variables in Vercel dashboard for production
 
 ## 📚 Documentation
 
