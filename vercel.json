@@ -1,8 +1,6 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
-    "buildCommand": "npm install && npm run build",
-    "outputDirectory": "dist",
-    "installCommand": "npm install",
-    "framework": "vite",
-    "rootDirectory": "frontend"
+    "buildCommand": "pnpm --filter @veiled-markets/frontend build",
+    "outputDirectory": "frontend/dist",
+    "framework": "vite"
 }

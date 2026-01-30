@@ -2,6 +2,7 @@
   "name": "veiled-markets",
   "version": "0.2.0",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "description": "Privacy-preserving prediction market built on Aleo blockchain",
   "author": "Veiled Markets Team",
   "license": "MIT",
