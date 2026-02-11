@@ -250,7 +250,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         programId: CONTRACT_INFO.programId,
         functionName: 'create_market',
         inputs,
-        fee: 1000000, // 1 credit fee for market creation
+        fee: 1.0, // 1 ALEO fee (Leo Wallet expects fee in ALEO, not microcredits)
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(

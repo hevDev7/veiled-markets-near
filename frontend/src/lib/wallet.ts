@@ -8,6 +8,7 @@ import {
   connect as puzzleConnect,
   disconnect as puzzleDisconnect,
   getBalance as puzzleGetBalance,
+  getRecords as puzzleGetRecords,
   requestCreateEvent,
   getAccount,
   type EventType,
@@ -179,8 +180,8 @@ export class PuzzleWalletAdapter {
         },
         permissions: {
           programIds: {
-            'AleoTestnet': ['veiled_markets_v4.aleo', 'credits.aleo'],
-            'AleoMainnet': ['veiled_markets_v4.aleo', 'credits.aleo'],
+            'AleoTestnet': ['veiled_markets_v9.aleo', 'credits.aleo'],
+            'AleoMainnet': ['veiled_markets_v9.aleo', 'credits.aleo'],
           }
         }
       });
@@ -249,26 +250,57 @@ export class PuzzleWalletAdapter {
       let publicBalance = 0n;
       let privateBalance = 0n;
 
+      console.log('Puzzle Wallet: getBalance response:', JSON.stringify(balance));
+
       if (balance && (balance as any).balances) {
         for (const b of (balance as any).balances) {
-          if ((b as any).public !== undefined) {
-            const pubVal = String((b as any).public).replace(/[^\d]/g, '');
+          // Puzzle SDK Balance type: { values: { public: number, private: number }, ... }
+          const values = (b as any).values || b;
+
+          if (values.public !== undefined) {
+            const pubVal = String(values.public).replace(/[^\d]/g, '');
             if (pubVal) publicBalance += BigInt(pubVal);
           }
-          if ((b as any).private !== undefined) {
-            const privVal = String((b as any).private).replace(/[^\d]/g, '');
+          if (values.private !== undefined) {
+            const privVal = String(values.private).replace(/[^\d]/g, '');
             if (privVal) privateBalance += BigInt(privVal);
           }
         }
       }
 
-      // Fallback to API
+      console.log('Puzzle Wallet: Parsed balance - public:', publicBalance.toString(), 'private:', privateBalance.toString());
+
+      // Try getRecords as fallback for private balance
+      if (privateBalance === 0n) {
+        try {
+          const recordsResponse = await puzzleGetRecords({
+            filter: { programIds: ['credits.aleo'], status: 'Unspent' as any },
+          });
+          console.log('Puzzle Wallet: getRecords response:', JSON.stringify(recordsResponse));
+
+          if (recordsResponse && recordsResponse.records) {
+            for (const record of recordsResponse.records) {
+              const plaintext = (record as any).plaintext || (record as any).data || JSON.stringify(record);
+              const match = String(plaintext).match(/microcredits:\s*(\d+)u64/);
+              if (match) {
+                privateBalance += BigInt(match[1]);
+                console.log('Puzzle Wallet: Found private record:', match[1]);
+              }
+            }
+          }
+        } catch (err) {
+          console.log('Puzzle Wallet: getRecords fallback failed:', err);
+        }
+      }
+
+      // Fallback to API for public balance
       if (publicBalance === 0n && this.account?.address) {
         publicBalance = await fetchPublicBalance(this.account.address);
       }
 
       return { public: publicBalance, private: privateBalance };
-    } catch {
+    } catch (err) {
+      console.warn('Puzzle Wallet: getBalance failed:', err);
       if (this.account?.address) {
         const publicBalance = await fetchPublicBalance(this.account.address);
         return { public: publicBalance, private: 0n };
@@ -468,7 +500,7 @@ export class LeoWalletAdapter {
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
         console.log('Leo Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v4.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v9.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Leo Wallet: Connected successfully');
@@ -541,10 +573,15 @@ export class LeoWalletAdapter {
           console.log('Leo Wallet: Wallet balance response:', walletBalance);
 
           if (walletBalance) {
-            // Try to parse the balance
-            if (typeof walletBalance.private === 'number' || typeof walletBalance.private === 'bigint') {
-              privateBalance = BigInt(walletBalance.private);
-              console.log('Leo Wallet: ✅ Got private balance from wallet:', privateBalance.toString());
+            // Try to parse the balance - handle number, bigint, or string
+            const privVal = walletBalance.private ?? walletBalance.privateBalance;
+            if (privVal !== undefined && privVal !== null) {
+              const cleaned = String(privVal).replace(/[ui]\d+\.?\w*$/i, '').trim();
+              const parsed = BigInt(cleaned.replace(/[^\d]/g, '') || '0');
+              if (parsed > 0n) {
+                privateBalance = parsed;
+                console.log('Leo Wallet: Got private balance from wallet:', privateBalance.toString());
+              }
             }
           }
         }
@@ -570,121 +607,128 @@ export class LeoWalletAdapter {
     }
 
     // Fetch private balance from wallet records
-    try {
-      console.log('Leo Wallet: Requesting private credit records...');
+    // Helper to check if a record is spent
+    const isRecordSpent = (record: any): boolean => {
+      if (!record || typeof record !== 'object') return false;
+      // Check common spent indicators
+      if (record.spent === true) return true;
+      if (record.isSpent === true) return true;
+      if (record.status === 'spent' || record.status === 'Spent') return true;
+      if (record.recordStatus === 'spent' || record.recordStatus === 'Spent') return true;
+      return false;
+    };
 
-      // Try Method 1: Request unspent records only
+    // Helper to parse Aleo value - strips type suffixes like u64, u128 before parsing
+    const parseAleoU64 = (val: any): bigint => {
+      if (typeof val === 'bigint') return val;
+      if (typeof val === 'number') return BigInt(val);
+      // Strip Leo type suffix (u8, u16, u32, u64, u128, i8, etc.) BEFORE extracting digits
+      const str = String(val).replace(/[ui]\d+\.?\w*$/i, '').trim();
+      const digits = str.replace(/[^\d]/g, '');
+      return digits ? BigInt(digits) : 0n;
+    };
+
+    // Helper to extract microcredits from any record format
+    const extractMicrocredits = (record: any): bigint => {
+      // Direct property (JSON object)
+      if (record && typeof record === 'object') {
+        const mc = record.microcredits ?? record.data?.microcredits;
+        if (mc !== undefined) {
+          const val = parseAleoU64(mc);
+          if (val > 0n) return val;
+        }
+      }
+      // Plaintext string parsing
+      let text = '';
+      if (typeof record === 'string') {
+        text = record;
+      } else if (record && typeof record === 'object') {
+        text = record.plaintext || record.data || record.record || record.content || JSON.stringify(record);
+      }
+      const match = String(text).match(/microcredits["\s:]*(\d+)/);
+      return match ? BigInt(match[1]) : 0n;
+    };
+
+    // Helper to sum microcredits from records array or { records: [...] } response
+    const sumRecords = (response: any): bigint => {
+      const records = Array.isArray(response) ? response : (response?.records || []);
+      let sum = 0n;
+      let totalCount = 0;
+      let spentCount = 0;
+      for (const r of records) {
+        totalCount++;
+        // Log the first few records to debug format
+        if (totalCount <= 3) {
+          console.log(`Leo Wallet: Record ${totalCount} keys:`, r && typeof r === 'object' ? Object.keys(r) : typeof r);
+          console.log(`Leo Wallet: Record ${totalCount} spent?:`, r?.spent, r?.isSpent, r?.status, r?.recordStatus);
+        }
+        // Skip spent records
+        if (isRecordSpent(r)) {
+          spentCount++;
+          continue;
+        }
+        const amount = extractMicrocredits(r);
+        if (amount > 0n) {
+          sum += amount;
+          console.log('Leo Wallet: Unspent record:', (Number(amount) / 1_000_000).toFixed(2), 'ALEO');
+        }
+      }
+      console.log(`Leo Wallet: Total records: ${totalCount}, spent: ${spentCount}, unspent with value: ${totalCount - spentCount}`);
+      return sum;
+    };
+
+    // Method 1: Direct window.leoWallet.requestRecordPlaintexts (most reliable)
+    if (privateBalance === 0n) {
       try {
-        console.log('Leo Wallet: Trying requestRecordPlaintexts...');
-        const recordPlaintexts = await (this.adapter as any).requestRecordPlaintexts?.('credits.aleo');
-        console.log('Leo Wallet: recordPlaintexts response:', recordPlaintexts);
-
-        if (recordPlaintexts && Array.isArray(recordPlaintexts)) {
-          for (let i = 0; i < recordPlaintexts.length; i++) {
-            const plaintext = String(recordPlaintexts[i]);
-            console.log(`Leo Wallet: Plaintext ${i}:`, plaintext);
-
-            const match = plaintext.match(/microcredits:\s*(\d+)u64/);
-            if (match) {
-              const amount = BigInt(match[1]);
-              privateBalance += amount;
-              console.log(`Leo Wallet: ✅ Found private credits ${i}:`, amount.toString(), `(${Number(amount) / 1_000_000} ALEO)`);
-            }
-          }
+        const leoWallet = (window as any).leoWallet || (window as any).leo;
+        if (leoWallet && typeof leoWallet.requestRecordPlaintexts === 'function') {
+          console.log('Leo Wallet: Method 1 - window.leoWallet.requestRecordPlaintexts...');
+          const result = await leoWallet.requestRecordPlaintexts('credits.aleo');
+          console.log('Leo Wallet: Method 1 response:', result);
+          privateBalance = sumRecords(result);
         }
       } catch (err) {
-        console.log('Leo Wallet: requestRecordPlaintexts not available or failed:', err);
+        console.log('Leo Wallet: Method 1 failed:', err);
       }
+    }
 
-      // Try Method 2: Request records with decrypt
-      if (privateBalance === 0n) {
-        console.log('Leo Wallet: Trying requestRecords with decrypt...');
-        const records = await this.adapter.requestRecords('credits.aleo', true);
-        console.log('Leo Wallet: Records response:', records);
-        console.log('Leo Wallet: Records type:', typeof records);
-        console.log('Leo Wallet: Records is array:', Array.isArray(records));
-        console.log('Leo Wallet: Records length:', records?.length);
-
-        if (Array.isArray(records) && records.length > 0) {
-          for (let i = 0; i < records.length; i++) {
-            const record = records[i];
-            console.log(`Leo Wallet: Record ${i} full object:`, JSON.stringify(record, null, 2));
-
-            // Try multiple ways to extract plaintext
-            let plaintext = '';
-            if (typeof record === 'string') {
-              plaintext = record;
-            } else if (record && typeof record === 'object') {
-              plaintext = (record as any).plaintext
-                || (record as any).data
-                || (record as any).record
-                || (record as any).content
-                || JSON.stringify(record);
-            }
-
-            console.log(`Leo Wallet: Record ${i} plaintext:`, plaintext);
-
-            // Try to match microcredits pattern
-            const match = plaintext.match(/microcredits:\s*(\d+)u64/);
-            if (match) {
-              const amount = BigInt(match[1]);
-              privateBalance += amount;
-              console.log(`Leo Wallet: ✅ Found private record ${i}:`, amount.toString(), `(${Number(amount) / 1_000_000} ALEO)`);
-            } else {
-              console.log(`Leo Wallet: ❌ Record ${i} does not match microcredits pattern`);
-            }
-          }
-        } else {
-          console.log('Leo Wallet: No records returned or empty array');
-        }
-      }
-
-      // Try Method 3: Request records without decrypt flag
-      if (privateBalance === 0n) {
-        console.log('Leo Wallet: Trying requestRecords without decrypt...');
-        const records = await this.adapter.requestRecords('credits.aleo', false);
-        console.log('Leo Wallet: Records (no decrypt):', records);
-
-        if (Array.isArray(records) && records.length > 0) {
-          for (const record of records) {
-            const plaintext = String((record as any).plaintext || (record as any).data || record);
-            const match = plaintext.match(/microcredits:\s*(\d+)u64/);
-            if (match) {
-              privateBalance += BigInt(match[1]);
-              console.log('Leo Wallet: Found record (no decrypt):', match[1]);
-            }
-          }
-        }
-      }
-
-      // Try Method 4: Access wallet directly via window object
-      if (privateBalance === 0n) {
-        console.log('Leo Wallet: Trying window.leoWallet.getRecords...');
+    // Method 2: Direct window.leoWallet.requestRecords
+    if (privateBalance === 0n) {
+      try {
         const leoWallet = (window as any).leoWallet || (window as any).leo;
-
-        if (leoWallet && typeof leoWallet.getRecords === 'function') {
-          try {
-            const walletRecords = await leoWallet.getRecords('credits.aleo');
-            console.log('Leo Wallet: Wallet records:', walletRecords);
-
-            if (walletRecords && Array.isArray(walletRecords)) {
-              for (const record of walletRecords) {
-                const plaintext = String(record.plaintext || record.data || record);
-                const match = plaintext.match(/microcredits:\s*(\d+)u64/);
-                if (match) {
-                  privateBalance += BigInt(match[1]);
-                  console.log('Leo Wallet: Found from window.leoWallet:', match[1]);
-                }
-              }
-            }
-          } catch (err) {
-            console.log('Leo Wallet: window.leoWallet.getRecords failed:', err);
-          }
+        if (leoWallet && typeof leoWallet.requestRecords === 'function') {
+          console.log('Leo Wallet: Method 2 - window.leoWallet.requestRecords...');
+          const result = await leoWallet.requestRecords('credits.aleo');
+          console.log('Leo Wallet: Method 2 response:', result);
+          privateBalance = sumRecords(result);
         }
+      } catch (err) {
+        console.log('Leo Wallet: Method 2 failed:', err);
       }
+    }
 
-    } catch (error) {
-      console.warn('Leo Wallet: Failed to fetch private records:', error);
+    // Method 3: Adapter requestRecords(program, true) - calls requestRecordPlaintexts internally
+    if (privateBalance === 0n) {
+      try {
+        console.log('Leo Wallet: Method 3 - adapter.requestRecords(credits.aleo, true)...');
+        const records = await this.adapter.requestRecords('credits.aleo', true);
+        console.log('Leo Wallet: Method 3 response:', records);
+        privateBalance = sumRecords(records);
+      } catch (err) {
+        console.log('Leo Wallet: Method 3 failed:', err);
+      }
+    }
+
+    // Method 4: Adapter requestRecords(program, false)
+    if (privateBalance === 0n) {
+      try {
+        console.log('Leo Wallet: Method 4 - adapter.requestRecords(credits.aleo, false)...');
+        const records = await this.adapter.requestRecords('credits.aleo', false);
+        console.log('Leo Wallet: Method 4 response:', records);
+        privateBalance = sumRecords(records);
+      } catch (err) {
+        console.log('Leo Wallet: Method 4 failed:', err);
+      }
     }
 
     const totalBalance = publicBalance + privateBalance;
@@ -847,7 +891,7 @@ export class LeoWalletAdapter {
         // Method 2: Try requestTransactionHistory to find recent transaction
         if (typeof (this.adapter as any).requestTransactionHistory === 'function') {
           console.log(`Leo Wallet: Attempt ${attempt + 1} - calling requestTransactionHistory`);
-          const history = await (this.adapter as any).requestTransactionHistory('veiled_markets_v4.aleo');
+          const history = await (this.adapter as any).requestTransactionHistory('veiled_markets_v9.aleo');
           console.log('Leo Wallet: Transaction history:', history);
 
           if (Array.isArray(history) && history.length > 0) {
@@ -903,12 +947,91 @@ export class LeoWalletAdapter {
   async getRecords(programId: string): Promise<any[]> {
     if (!this.adapter.connected) return [];
 
-    try {
-      const records = await this.adapter.requestRecords(programId, true);
-      return records || [];
-    } catch {
-      return [];
+    const leoWallet = (window as any).leoWallet || (window as any).leo;
+
+    // Log available methods for debugging
+    if (leoWallet) {
+      try {
+        const proto = Object.getPrototypeOf(leoWallet) || {};
+        const methods = [...new Set([
+          ...Object.getOwnPropertyNames(proto),
+          ...Object.keys(leoWallet),
+        ])].filter(k => typeof leoWallet[k] === 'function');
+        console.log('Leo Wallet getRecords: Available wallet methods:', methods.join(', '));
+      } catch { /* ignore */ }
     }
+
+    // Method 1: window.leoWallet.requestRecordPlaintexts (returns decrypted records)
+    try {
+      if (leoWallet && typeof leoWallet.requestRecordPlaintexts === 'function') {
+        console.log('Leo Wallet getRecords: Method 1 - requestRecordPlaintexts("' + programId + '")...');
+        const result = await leoWallet.requestRecordPlaintexts(programId);
+        console.log('Leo Wallet getRecords: Method 1 raw type:', typeof result);
+        try { console.log('Leo Wallet getRecords: Method 1 raw:', JSON.stringify(result).slice(0, 1000)); } catch {}
+        const records = Array.isArray(result) ? result : (result?.records || []);
+        if (records.length > 0) {
+          console.log('Leo Wallet getRecords: Method 1 got', records.length, 'records');
+          for (let i = 0; i < Math.min(records.length, 2); i++) {
+            console.log(`Leo Wallet getRecords: Record[${i}] type:`, typeof records[i]);
+            if (typeof records[i] === 'object' && records[i]) {
+              console.log(`Leo Wallet getRecords: Record[${i}] keys:`, Object.keys(records[i]));
+            }
+            try { console.log(`Leo Wallet getRecords: Record[${i}]:`, JSON.stringify(records[i]).slice(0, 500)); } catch {}
+          }
+          return records;
+        }
+        console.log('Leo Wallet getRecords: Method 1 returned 0 records');
+      }
+    } catch (err) {
+      console.log('Leo Wallet getRecords: Method 1 failed:', err);
+    }
+
+    // Method 2: window.leoWallet.requestRecords
+    try {
+      if (leoWallet && typeof leoWallet.requestRecords === 'function') {
+        console.log('Leo Wallet getRecords: Method 2 - requestRecords("' + programId + '")...');
+        const result = await leoWallet.requestRecords(programId);
+        console.log('Leo Wallet getRecords: Method 2 raw type:', typeof result);
+        try { console.log('Leo Wallet getRecords: Method 2 raw:', JSON.stringify(result).slice(0, 1000)); } catch {}
+        const records = Array.isArray(result) ? result : (result?.records || []);
+        if (records.length > 0) {
+          console.log('Leo Wallet getRecords: Method 2 got', records.length, 'records');
+          return records;
+        }
+        console.log('Leo Wallet getRecords: Method 2 returned 0 records');
+      }
+    } catch (err) {
+      console.log('Leo Wallet getRecords: Method 2 failed:', err);
+    }
+
+    // Method 3: Adapter requestRecords with plaintext
+    try {
+      console.log('Leo Wallet getRecords: Method 3 - adapter.requestRecords(programId, true)...');
+      const records = await this.adapter.requestRecords(programId, true);
+      console.log('Leo Wallet getRecords: Method 3 result count:', records?.length || 0);
+      try { console.log('Leo Wallet getRecords: Method 3 raw:', JSON.stringify(records).slice(0, 1000)); } catch {}
+      if (records && records.length > 0) {
+        return records;
+      }
+    } catch (err) {
+      console.log('Leo Wallet getRecords: Method 3 failed:', err);
+    }
+
+    // Method 4: Adapter requestRecords without plaintext
+    try {
+      console.log('Leo Wallet getRecords: Method 4 - adapter.requestRecords(programId, false)...');
+      const records = await this.adapter.requestRecords(programId, false);
+      console.log('Leo Wallet getRecords: Method 4 result count:', records?.length || 0);
+      try { console.log('Leo Wallet getRecords: Method 4 raw:', JSON.stringify(records).slice(0, 1000)); } catch {}
+      if (records && records.length > 0) {
+        return records;
+      }
+    } catch (err) {
+      console.log('Leo Wallet getRecords: Method 4 failed:', err);
+    }
+
+    console.warn('Leo Wallet getRecords: ⚠️ All 4 methods returned empty for', programId);
+    return [];
   }
 
   async signMessage(message: string): Promise<string> {
@@ -976,7 +1099,7 @@ export class FoxWalletAdapter {
 
       try {
         console.log('Fox Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v4.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v9.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Fox Wallet: Connected successfully');
@@ -1159,7 +1282,7 @@ export class SoterWalletAdapter {
 
       try {
         console.log('Soter Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v4.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v9.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Soter Wallet: Connected successfully');
@@ -1493,6 +1616,33 @@ export class WalletManager {
     }
 
     return await this.adapter.getRecords(programId);
+  }
+
+  /**
+   * Shield credits: convert public balance to private record
+   * Calls credits.aleo/transfer_public_to_private
+   */
+  async shieldCredits(amount: bigint): Promise<string> {
+    if (this.demoMode) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return `demo_shield_${Date.now()}`;
+    }
+
+    if (!this.adapter?.isConnected) {
+      throw new Error('Wallet not connected');
+    }
+
+    const account = this.adapter.currentAccount;
+    if (!account) {
+      throw new Error('No account connected');
+    }
+
+    return await this.adapter.requestTransaction({
+      programId: 'credits.aleo',
+      functionName: 'transfer_public_to_private',
+      inputs: [account.address, `${amount}u64`],
+      fee: 0.3, // 0.3 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
+    });
   }
 
   /**

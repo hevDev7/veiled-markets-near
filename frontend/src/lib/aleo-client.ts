@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v4.aleo program
+// Client for interacting with the deployed veiled_markets_v9.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -55,7 +55,7 @@ export interface MarketResolutionData {
 
 // API configuration
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const PROGRAM_ID = 'veiled_markets_v4.aleo';  // Version 4 (privacy fix)
+const PROGRAM_ID = 'veiled_markets_v9.aleo';  // Version 5 (privacy-preserving with transfer_private_to_public)
 
 // Timeout for network requests (prevents UI from hanging indefinitely)
 const FETCH_TIMEOUT_MS = 10_000; // 10 seconds per request
@@ -478,21 +478,25 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for place_bet transaction (v4 - privacy-preserving)
- * place_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
- * Uses private Credits record to hide bettor's identity via transfer_private_to_public
+ * Build inputs for place_bet transaction (v5)
+ * place_bet(market_id: field, amount: u64, outcome: u8)
+ * Uses transfer_public_as_signer for wallet SDK compatibility
+ */
+/**
+ * Build inputs for place_bet transaction (Privacy-Preserving)
+ * Contract signature: place_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
+ * We pass only the 3 public inputs - the wallet auto-selects the private credits record
+ * This keeps the bettor's identity hidden via transfer_private_to_public
  */
 export function buildPlaceBetInputs(
   marketId: string,
   amount: bigint,
   outcome: 'yes' | 'no',
-  creditsRecord: string  // Private credits record plaintext from wallet
 ): string[] {
   return [
     marketId,
     `${amount}u64`,
     outcome === 'yes' ? '1u8' : '2u8',
-    creditsRecord,  // Private credits record
   ];
 }
 
@@ -869,7 +873,7 @@ export async function fetchMarketById(marketId: string) {
 
 // Export a singleton instance info
 export const CONTRACT_INFO = {
-  programId: 'veiled_markets_v4.aleo',  // Version 4 (privacy fix)
+  programId: 'veiled_markets_v9.aleo',  // Version 4 (privacy fix)
   deploymentTxId: 'at186jeh868hyrww5hltajpxvt6a2740ge7y6nfs078jfrcueqr8uqqugjtnq',
   network: 'testnet',
   explorerUrl: config.explorerUrl,

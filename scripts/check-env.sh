@@ -112,7 +112,7 @@ echo ""
 # Check program variables
 echo -e "${YELLOW}Program Variables:${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-check_optional "ALEO_PROGRAM_NAME" "veiled_markets_v4"
+check_optional "ALEO_PROGRAM_NAME" "veiled_markets_v9"
 echo ""
 
 # Check frontend .env
@@ -136,7 +136,7 @@ if [ -f "$PROJECT_ROOT/frontend/.env" ]; then
     if [ -n "$FRONTEND_PROGRAM_ID" ]; then
         echo -e "  ${GREEN}✓ VITE_PROGRAM_ID = ${FRONTEND_PROGRAM_ID}${NC}"
     else
-        echo -e "  ${YELLOW}○ VITE_PROGRAM_ID is not set (default: veiled_markets_v4.aleo)${NC}"
+        echo -e "  ${YELLOW}○ VITE_PROGRAM_ID is not set (default: veiled_markets_v9.aleo)${NC}"
         ((WARNINGS++))
     fi
 

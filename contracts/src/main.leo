@@ -21,7 +21,7 @@
 // - Only revealed after deadline for pool calculation
 //
 // Credits Handling:
-// - place_bet: Uses private credits records with transfer_private_to_public (hides bettor identity)
+// - place_bet: Uses transfer_private_to_public with private Credits record (hides bettor identity)
 // - commit_bet: Uses private credits records (fully private until reveal)
 // - reveal_bet: Transfers private credits to public balance (after deadline)
 // - Winnings are transferred back via credits.aleo/transfer_public
@@ -30,7 +30,7 @@
 // Import the official credits program for token handling
 import credits.aleo;
 
-program veiled_markets_v4.aleo {
+program veiled_markets_v9.aleo {
     
     // ========================================================================
     // CONSTANTS
@@ -329,12 +329,12 @@ program veiled_markets_v4.aleo {
     }
     
     // ------------------------------------------------------------------------
-    // PLACE BET (PRIVACY-ENHANCED with Delayed Updates & Noise)
-    // Places a bet on a market outcome with privacy enhancements:
+    // PLACE BET (PRIVACY-PRESERVING with Delayed Updates & Noise)
+    // Places a bet on a market outcome with full privacy:
     // - Bet record is PRIVATE (encrypted, only owner can decrypt)
     // - Pool updates are DELAYED (batched every N blocks)
     // - Pool totals include NOISE to prevent exact bet inference
-    // - Credits transfer requires public amount (Aleo limitation)
+    // - Uses transfer_private_to_public to HIDE bettor's identity
     // ------------------------------------------------------------------------
     async transition place_bet(
         public market_id: field,
@@ -361,7 +361,7 @@ program veiled_markets_v4.aleo {
         };
 
         // Transfer credits from private record to program's public balance
-        // Using transfer_private_to_public hides the bettor's address
+        // Using transfer_private_to_public HIDES the bettor's address
         // Only the program address and amount are visible on-chain
         let (change, transfer_future): (credits.aleo/credits, Future) = credits.aleo/transfer_private_to_public(
             credits_in,    // Private credits record (bettor identity hidden)
@@ -421,21 +421,20 @@ program veiled_markets_v4.aleo {
         // Generate deterministic noise based on market_id, block height, and amount
         // Use struct for noise input to avoid field arithmetic issues
         // Create a unique seed combining market_id, current_height, and amount
-        let noise_seed: field = BHP256::hash_to_field(
+        let noise_raw: u64 = BHP256::hash_to_u64(
             MarketSeed {
-                creator: market.creator,  // Use market creator for randomness
+                creator: market.creator,
                 question_hash: market_id,
                 deadline: current_height,
-                nonce: amount,  // Use amount as nonce
+                nonce: amount,
             }
         );
-        let noise_raw: u64 = (noise_seed as u64);
         let noise_amount: u64 = add_noise ? (noise_raw % MIN_POOL_NOISE) : 0u64;
-        
+
         // Calculate final amounts with optional noise
         let yes_final: u64 = yes_add + (noise_amount / 2u64);
         let no_final: u64 = no_add + (noise_amount / 2u64);
-        
+
         // Update pool
         let updated_pool: MarketPool = MarketPool {
             market_id: market_id,
@@ -444,16 +443,113 @@ program veiled_markets_v4.aleo {
             total_bets: pool.total_bets + 1u64,
             total_unique_bettors: pool.total_unique_bettors + 1u64,
         };
-        
+
         market_pools.set(market_id, updated_pool);
-        
+
         // Update last pool update time if we did immediate update
         let update_time: bool = should_update_now || closing_soon;
         if (update_time) {
             last_pool_update.set(market_id, current_height);
         }
     }
-    
+
+    // ------------------------------------------------------------------------
+    // PLACE BET PUBLIC (Wallet-Compatible Version)
+    // Uses transfer_public_as_signer for wallets that don't expose
+    // private record plaintexts. Bet record is still PRIVATE.
+    // For maximum privacy, use place_bet (requires wallet record support).
+    // ------------------------------------------------------------------------
+    async transition place_bet_public(
+        private market_id: field,
+        private amount: u64,
+        private outcome: u8,
+    ) -> (Bet, Future) {
+        // Validate outcome (must be YES or NO)
+        assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
+
+        // Validate amount (must meet minimum)
+        assert(amount >= MIN_BET_AMOUNT);
+
+        // Create PRIVATE bet record (stays with user, encrypted on-chain)
+        let bet: Bet = Bet {
+            owner: self.caller,
+            market_id: market_id,
+            amount: amount,
+            outcome: outcome,
+            placed_at: 0u64,
+            locked_yes_pool: 0u64,
+            locked_no_pool: 0u64,
+        };
+
+        // Transfer credits from signer's public balance
+        let transfer_future: Future = credits.aleo/transfer_public_as_signer(
+            self.address,
+            amount
+        );
+
+        return (bet, finalize_place_bet_public(transfer_future, market_id, amount, outcome));
+    }
+
+    async function finalize_place_bet_public(
+        transfer_future: Future,
+        market_id: field,
+        amount: u64,
+        outcome: u8,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= market.deadline);
+
+        let current_held: u64 = program_credits.get_or_use(0u8, 0u64);
+        program_credits.set(0u8, current_held + amount);
+
+        let last_update: u64 = last_pool_update.get_or_use(market_id, market.created_at);
+        let blocks_since_update: u64 = current_height - last_update;
+
+        let should_update_now: bool = blocks_since_update >= POOL_UPDATE_DELAY_BLOCKS;
+        let blocks_until_deadline: u64 = market.deadline - current_height;
+        let closing_soon: bool = blocks_until_deadline <= POOL_UPDATE_DELAY_BLOCKS;
+
+        let pool: MarketPool = market_pools.get(market_id);
+
+        let yes_add: u64 = outcome == OUTCOME_YES ? amount : 0u64;
+        let no_add: u64 = outcome == OUTCOME_NO ? amount : 0u64;
+
+        let add_noise: bool = !should_update_now && !closing_soon;
+
+        let noise_raw: u64 = BHP256::hash_to_u64(
+            MarketSeed {
+                creator: market.creator,
+                question_hash: market_id,
+                deadline: current_height,
+                nonce: amount,
+            }
+        );
+        let noise_amount: u64 = add_noise ? (noise_raw % MIN_POOL_NOISE) : 0u64;
+
+        let yes_final: u64 = yes_add + (noise_amount / 2u64);
+        let no_final: u64 = no_add + (noise_amount / 2u64);
+
+        let updated_pool: MarketPool = MarketPool {
+            market_id: market_id,
+            total_yes_pool: pool.total_yes_pool + yes_final,
+            total_no_pool: pool.total_no_pool + no_final,
+            total_bets: pool.total_bets + 1u64,
+            total_unique_bettors: pool.total_unique_bettors + 1u64,
+        };
+
+        market_pools.set(market_id, updated_pool);
+
+        let update_time: bool = should_update_now || closing_soon;
+        if (update_time) {
+            last_pool_update.set(market_id, current_height);
+        }
+    }
+
     // ------------------------------------------------------------------------
     // COMMIT BET (Phase 2: Commit-Reveal Scheme)
     // Phase 1: Commit bet with private parameters

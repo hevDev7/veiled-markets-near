@@ -128,7 +128,7 @@ export function Dashboard() {
                                 <span className="text-brand-400 font-mono font-bold">ON_CHAIN_DATA</span>
                             </div>
                             <span className="text-brand-300/80 font-mono">
-                                Showing real markets from veiled_markets_v4.aleo contract. Create your first market to get started!
+                                Showing real markets from veiled_markets_v9.aleo contract. Create your first market to get started!
                             </span>
                             <button
                                 onClick={() => fetchMarkets()}

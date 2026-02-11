@@ -34,7 +34,7 @@ if [ -f "$PROJECT_ROOT/contracts/program.json" ]; then
 fi
 
 PROGRAM_NAME="${ALEO_PROGRAM_NAME:-${PROGRAM_FROM_MANIFEST%.aleo}}"
-PROGRAM_NAME="${PROGRAM_NAME:-veiled_markets_v4}"
+PROGRAM_NAME="${PROGRAM_NAME:-veiled_markets_v9}"
 PROGRAM_NAME="${PROGRAM_NAME%.aleo}"
 
 while [[ $# -gt 0 ]]; do

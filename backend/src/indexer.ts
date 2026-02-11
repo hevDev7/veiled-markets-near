@@ -24,45 +24,21 @@ export interface IndexedMarket {
  * In production, this would be fetched from an indexer service or custom node
  * Question hashes are generated from actual market questions using SHA-256
  * 
- * NOTE: veiled_markets_v4.aleo is the version 4 deployment with privacy fix
+ * NOTE: veiled_markets_v9.aleo is the version 4 deployment with privacy fix
  * Includes delayed pool updates, noise addition, and commit-reveal betting for better privacy
  */
 const KNOWN_MARKETS: IndexedMarket[] = [
-    // Market 1 - Ethereum $10k (First market on veiled_markets_privacy.aleo)
+    // v9 Market - BTC $150k (1-day market on veiled_markets_v9.aleo)
     {
-        marketId: '1827467977240901494339036217017462683817421549474947615723082367626884127079field',
-        transactionId: 'at12zhzvenstjeyrk0p2tdcj4j2wwn87wgc7230sr6h3pyguj2hpvpsahyxd7',
+        marketId: '4955759583890935181829299956112762375922522931362007427296273692424871920919field',
+        transactionId: 'at15fpk5w50lpr8z22resqp6g8eqsjm83tn955y77wf7thqfhpnmy9qras8x4',
         creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
-        questionHash: '3582024152336217571382682973364798990155453514672503623063651091171230848724field', // Hash of "Will Ethereum reach $10,000 by end of Q2 2026?"
-        category: 3,
-        deadline: '14107320u64',
-        resolutionDeadline: '14124600u64',
+        questionHash: '1234567890field',
+        category: 1,
+        deadline: '14396209u64',
+        resolutionDeadline: '14425009u64',
         createdAt: Date.now(),
-        blockHeight: 14067000,
-    },
-    // Market 2 - Bitcoin $100k (Crypto market)
-    {
-        marketId: '2324599315804307583621629508171904754376140563814202582516489027393343318776field',
-        transactionId: 'at1kzeh5j7gkm4qsyzpsacyl3sjg7tz550vvggg5tv5kpqkfs9lvgxqf5gtvc',
-        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
-        questionHash: '286436157692503798507031276544051911294111113992262510563720965993924436183field', // Hash of "Will Bitcoin reach $100,000 by end of Q2 2026?"
-        category: 3,
-        deadline: '14149402u64',
-        resolutionDeadline: '14166682u64',
-        createdAt: Date.now(),
-        blockHeight: 14109082,
-    },
-    // Market 3 - Ethereum $10k (legacy veiled_market_v3.aleo)
-    {
-        marketId: '6799979859013350088666057543392479876047176358286654383237647068200827543742field',
-        transactionId: 'at1cwm8msj2y4z23suhtsghyahl34xexflz3x5kwhfh34pt2yplqqrstutuwz',
-        creator: 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8',
-        questionHash: '350929565016816493992297964402345071115472527106339097957348390879136520853field', // Hash of "Will Ethereum reach $10,000 by end of Q2 2026?"
-        category: 3,
-        deadline: '14149933u64',
-        resolutionDeadline: '14167213u64',
-        createdAt: Date.now(),
-        blockHeight: 14109613,
+        blockHeight: 14367415,
     },
 ];
 

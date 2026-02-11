@@ -117,6 +117,7 @@ interface WalletStore {
   connect: (walletType: WalletType) => Promise<void>
   disconnect: () => Promise<void>
   refreshBalance: () => Promise<void>
+  shieldCredits: (amount: bigint) => Promise<string>
   clearError: () => void
 }
 
@@ -263,6 +264,34 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     }
   },
 
+  shieldCredits: async (amount: bigint) => {
+    const txId = await walletManager.shieldCredits(amount)
+
+    // Refresh balance after a delay to allow transaction to process
+    setTimeout(() => {
+      useWalletStore.getState().refreshBalance()
+    }, 3000)
+
+    // Poll for confirmation
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(
+          `${config.rpcUrl}/transaction/${txId}`
+        )
+        if (response.ok) {
+          clearInterval(pollInterval)
+          useWalletStore.getState().refreshBalance()
+        }
+      } catch {
+        // Not confirmed yet
+      }
+    }, 5000)
+
+    setTimeout(() => clearInterval(pollInterval), 120000)
+
+    return txId
+  },
+
   clearError: () => {
     set({ error: null })
   },
@@ -318,7 +347,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v4.aleo program.
+// in the veiled_markets_v9.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -776,58 +805,19 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = markets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Fetch a private Credits record from the wallet for privacy-preserving betting
-      // place_bet now uses transfer_private_to_public (hides bettor identity)
-      let creditsRecord: string | null = null
-      const isDemoMode = walletState.walletType === 'demo'
-
-      if (!isDemoMode) {
-        try {
-          const records = await walletManager.getRecords('credits.aleo')
-          if (Array.isArray(records) && records.length > 0) {
-            // Find a record with enough microcredits for the bet
-            for (const record of records) {
-              const plaintext = String((record as any).plaintext || (record as any).data || record)
-              const match = plaintext.match(/microcredits:\s*(\d+)u64/)
-              if (match) {
-                const recordAmount = BigInt(match[1])
-                if (recordAmount >= amount) {
-                  creditsRecord = plaintext
-                  break
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('Could not fetch private credits records:', err)
-        }
-
-        if (!creditsRecord) {
-          throw new Error(
-            'No private credits record found with sufficient balance. ' +
-            'Please ensure you have private credits (not just public balance). ' +
-            'You can convert public to private credits using your wallet.'
-          )
-        }
-      } else {
-        // Demo mode: use a placeholder record
-        creditsRecord = `{ owner: ${walletState.address}.private, microcredits: ${amount}u64.private, _nonce: 0group.public }`
-      }
-
-      // Build inputs for the veiled_markets_v4.aleo contract
+      // Build inputs for the veiled_markets_v9.aleo contract
       // place_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
+      // We pass only 3 public inputs - Leo Wallet auto-selects the private credits record
       const inputs = buildPlaceBetInputs(
         marketId,
         amount,
         outcome,
-        creditsRecord
       )
 
       console.log('=== PLACE BET DEBUG ===')
       console.log('Market ID:', marketId)
       console.log('Amount:', amount.toString())
       console.log('Outcome:', outcome)
-      console.log('Using private credits record')
       console.log('Program ID:', CONTRACT_INFO.programId)
 
       // Validate inputs
@@ -841,11 +831,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }
 
       // Request transaction through wallet
+      // Uses place_bet_public (wallet-compatible, uses transfer_public_as_signer)
+      // Contract also has place_bet (privacy-preserving with transfer_private_to_public)
+      // but Leo Wallet SDK doesn't expose private record plaintexts
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
-        functionName: 'place_bet',
+        functionName: 'place_bet_public',
         inputs,
-        fee: 500000, // 0.5 credits fee for testnet
+        fee: 0.5, // 0.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
       })
 
       console.log('Bet transaction submitted:', transactionId)
@@ -997,7 +990,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         programId: CONTRACT_INFO.programId,
         functionName: 'commit_bet',  // Phase 2: Commit-Reveal Scheme
         inputs,
-        fee: 500000, // 0.5 credits fee for testnet
+        fee: 0.5, // 0.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
       })
 
       console.log('Commit bet transaction submitted:', transactionId)
@@ -1160,7 +1153,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         programId: CONTRACT_INFO.programId,
         functionName: 'reveal_bet',  // Phase 2: Commit-Reveal Scheme
         inputs,
-        fee: 500000, // 0.5 credits fee for testnet
+        fee: 0.5, // 0.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
       })
 
       console.log('Reveal bet transaction submitted:', transactionId)
@@ -1235,7 +1228,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }
 
       // Try to fetch from wallet records (may not work with all wallets)
-      const records = await walletManager.getRecords('veiled_markets_v4.aleo')
+      const records = await walletManager.getRecords('veiled_markets_v9.aleo')
 
       // Parse bet records from wallet
       const walletBets: Bet[] = records

@@ -412,12 +412,12 @@ export function MarketDetail() {
                   <div className="flex justify-between py-3">
                     <span className="text-surface-400">Contract</span>
                     <a
-                      href="https://testnet.explorer.provable.com/program/veiled_markets_v4.aleo"
+                      href="https://testnet.explorer.provable.com/program/veiled_markets_v9.aleo"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
                     >
-                      <span>veiled_markets_v4.aleo</span>
+                      <span>veiled_markets_v9.aleo</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>

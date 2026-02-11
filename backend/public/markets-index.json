@@ -1,6 +1,19 @@
 {
-  "lastUpdated": "2026-02-10T00:00:00.000Z",
-  "totalMarkets": 0,
-  "markets": [],
-  "marketIds": []
+  "lastUpdated": "2026-02-11T22:00:00.000Z",
+  "totalMarkets": 1,
+  "markets": [
+    {
+      "id": "4955759583890935181829299956112762375922522931362007427296273692424871920919field",
+      "questionHash": "1234567890field",
+      "question": "Will Bitcoin reach $150,000 by end of 2026?",
+      "category": 1,
+      "status": 1,
+      "createdAt": 14367415,
+      "deadline": 14396209,
+      "resolutionDeadline": 14425009
+    }
+  ],
+  "marketIds": [
+    "4955759583890935181829299956112762375922522931362007427296273692424871920919field"
+  ]
 }

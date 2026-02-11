@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import {
   Shield,
+  ShieldCheck,
   ChevronDown,
   LogOut,
   ExternalLink,
@@ -12,7 +13,8 @@ import {
   Settings,
   Bell,
   Gamepad2,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -28,10 +30,13 @@ const navItems = [
 export function DashboardHeader() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { wallet, disconnect, refreshBalance } = useWalletStore()
+  const { wallet, disconnect, refreshBalance, shieldCredits } = useWalletStore()
   const [showDropdown, setShowDropdown] = useState(false)
   const [copied, setCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [shielding, setShielding] = useState(false)
+  const [shieldError, setShieldError] = useState<string | null>(null)
+  const [shieldSuccess, setShieldSuccess] = useState(false)
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -54,6 +59,28 @@ export function DashboardHeader() {
     await disconnect()
     setShowDropdown(false)
     navigate('/')
+  }
+
+  const handleShieldCredits = async () => {
+    setShielding(true)
+    setShieldError(null)
+    setShieldSuccess(false)
+    try {
+      // Shield 5 ALEO (5_000_000 microcredits) - enough for several bets
+      await shieldCredits(5_000_000n)
+      setShieldSuccess(true)
+      setTimeout(() => setShieldSuccess(false), 10000)
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancelled')) {
+        setShieldError('Transaction rejected by wallet')
+      } else {
+        setShieldError('Failed to shield credits')
+      }
+      setTimeout(() => setShieldError(null), 5000)
+    } finally {
+      setShielding(false)
+    }
   }
 
   // Get total balance (public + private)
@@ -283,13 +310,52 @@ export function DashboardHeader() {
                       </div>
                     </div>
 
-                    {/* Info about private balance */}
+                    {/* Shield Credits action when private balance is 0 */}
                     {wallet.balance.private === 0n && !wallet.isDemoMode && (
                       <div className="mt-2 pt-2 border-t border-surface-700/50">
-                        <p className="text-xs text-yellow-400/80 leading-relaxed">
-                          ⚠️ Private balance is encrypted and cannot be read via API.
-                          Check your Leo Wallet extension for accurate total balance.
-                        </p>
+                        {shieldSuccess ? (
+                          <div className="flex items-center gap-2 text-yes-400 text-xs">
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Shield TX sent! Balance will update shortly.</span>
+                          </div>
+                        ) : shieldError ? (
+                          <p className="text-xs text-no-400">{shieldError}</p>
+                        ) : (
+                          <>
+                            <p className="text-xs text-yellow-400/80 leading-relaxed mb-2">
+                              No private credits found. You need private credits to place bets with privacy.
+                            </p>
+                            <button
+                              onClick={handleShieldCredits}
+                              disabled={shielding || wallet.balance.public < 5_300_000n}
+                              className={cn(
+                                'w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+                                shielding
+                                  ? 'bg-brand-500/20 text-brand-300 cursor-wait'
+                                  : wallet.balance.public < 5_300_000n
+                                    ? 'bg-surface-800/50 text-surface-500 cursor-not-allowed'
+                                    : 'bg-brand-500/20 text-brand-300 hover:bg-brand-500/30'
+                              )}
+                            >
+                              {shielding ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  Shielding...
+                                </>
+                              ) : (
+                                <>
+                                  <Shield className="w-3.5 h-3.5" />
+                                  Shield 5 ALEO to Private
+                                </>
+                              )}
+                            </button>
+                            {wallet.balance.public < 5_300_000n && (
+                              <p className="text-xs text-surface-500 mt-1">
+                                Insufficient public balance (need ~5.3 ALEO)
+                              </p>
+                            )}
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

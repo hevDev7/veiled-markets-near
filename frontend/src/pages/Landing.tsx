@@ -277,7 +277,7 @@ export function Landing() {
                     <div className="w-3 h-3 rounded-full bg-amber-500" />
                     <div className="w-3 h-3 rounded-full bg-yes-500" />
                   </div>
-                  <span className="text-xs text-surface-400 font-mono ml-2">veiled_markets_v4.aleo</span>
+                  <span className="text-xs text-surface-400 font-mono ml-2">veiled_markets_v9.aleo</span>
                 </div>
 
                 {/* Terminal Content */}
