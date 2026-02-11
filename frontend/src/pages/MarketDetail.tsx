@@ -85,7 +85,7 @@ export function MarketDetail() {
   const { marketId } = useParams<{ marketId: string }>()
   const { wallet } = useWalletStore()
   const { markets } = useRealMarketsStore()
-  const { placeBet, isPlacingBet } = useBetsStore()
+  const { placeBet, commitBet, isPlacingBet } = useBetsStore()
 
   const [market, setMarket] = useState<Market | null>(null)
   const [selectedOutcome, setSelectedOutcome] = useState<'yes' | 'no' | null>(null)
@@ -140,8 +140,10 @@ export function MarketDetail() {
   const betAmountMicro = BigInt(Math.floor(betAmountNum * 1_000_000))
   const potentialWin = betAmountNum * potentialPayout
 
+  const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
+
   const handlePlaceBet = async () => {
-    if (!selectedOutcome || betAmountMicro <= 0n || !market) return
+    if (!selectedOutcome || betAmountMicro <= 0n || !market || isExpired) return
 
     setStep('processing')
     setError(null)
@@ -155,6 +157,7 @@ export function MarketDetail() {
         )
       }
 
+      // place_bet now uses private Credits record (transfer_private_to_public)
       const transactionId = await placeBet(market.id, betAmountMicro, selectedOutcome)
       setTxId(transactionId)
       setStep('success')
@@ -162,13 +165,10 @@ export function MarketDetail() {
       console.error('Bet failed:', err)
       const errorMessage = err instanceof Error ? err.message : 'Failed to place bet'
 
-      // Check for "unknown error" which usually means the market doesn't exist on-chain
       if (errorMessage.toLowerCase().includes('unknown error')) {
         setError(
           'Transaction failed. This usually means the market does not exist on the blockchain yet. ' +
-          'If you just created this market, please wait for the transaction to be confirmed and ' +
-          'the actual market ID to be indexed. The contract generates a unique market ID that differs ' +
-          'from the question hash used for display.'
+          'Please wait for the transaction to be confirmed.'
         )
       } else {
         setError(errorMessage)
@@ -412,12 +412,12 @@ export function MarketDetail() {
                   <div className="flex justify-between py-3">
                     <span className="text-surface-400">Contract</span>
                     <a
-                      href="https://testnet.explorer.provable.com/program/veiled_markets_v2.aleo"
+                      href="https://testnet.explorer.provable.com/program/veiled_markets_v4.aleo"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
                     >
-                      <span>veiled_markets_v2.aleo</span>
+                      <span>veiled_markets_v4.aleo</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
@@ -433,7 +433,25 @@ export function MarketDetail() {
                 transition={{ delay: 0.1 }}
                 className="glass-card p-6 sticky top-24"
               >
-                <h2 className="text-lg font-semibold text-white mb-4">Place Your Bet</h2>
+                <h2 className="text-lg font-semibold text-white mb-4">
+                  {isExpired ? 'Market Expired' : 'Place Your Bet'}
+                </h2>
+
+                {/* Expired State */}
+                {isExpired && step === 'select' && (
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-4">
+                      <Clock className="w-8 h-8 text-surface-500" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2">Betting Closed</h3>
+                    <p className="text-surface-400 text-sm mb-4">
+                      The betting deadline for this market has passed. No new bets can be placed.
+                    </p>
+                    <button onClick={() => navigate('/dashboard')} className="btn-secondary w-full">
+                      Browse Active Markets
+                    </button>
+                  </div>
+                )}
 
                 {/* Success State */}
                 {step === 'success' && (
@@ -502,7 +520,7 @@ export function MarketDetail() {
                 )}
 
                 {/* Betting Form */}
-                {(step === 'select' || step === 'amount' || step === 'confirm') && (
+                {!isExpired && (step === 'select' || step === 'amount' || step === 'confirm') && (
                   <>
                     {/* Outcome Selection */}
                     <div className="mb-6">

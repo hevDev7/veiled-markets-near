@@ -1,34 +1,6 @@
 {
-  "lastUpdated": "2026-01-29T21:30:00.000Z",
-  "totalMarkets": 2,
-  "markets": [
-    {
-      "marketId": "1827467977240901494339036217017462683817421549474947615723082367626884127079field",
-      "transactionId": "at12zhzvenstjeyrk0p2tdcj4j2wwn87wgc7230sr6h3pyguj2hpvpsahyxd7",
-      "creator": "aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8",
-      "questionHash": "3582024152336217571382682973364798990155453514672503623063651091171230848724field",
-      "questionText": "Will Ethereum reach $10,000 by end of Q2 2026?",
-      "category": 3,
-      "deadline": "14107320u64",
-      "resolutionDeadline": "14124600u64",
-      "createdAt": 1769682290462,
-      "blockHeight": 14067000
-    },
-    {
-      "marketId": "1991095299122407831052875180244961491379013999051586010676626125612021123290field",
-      "transactionId": "at1yp4fz4h6grqezhcd6s9xygavva0fq8peldzlvna2tjayz75nyu8qqpkv9x",
-      "creator": "aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8",
-      "questionHash": "81349561537860150622751008726647061375742999245768151761580822385860098829field",
-      "questionText": "Will Bitcoin reach $150,000 by end of 2026?",
-      "category": 3,
-      "deadline": "14114570u64",
-      "resolutionDeadline": "14131850u64",
-      "createdAt": 1738171800000,
-      "blockHeight": 14074250
-    }
-  ],
-  "marketIds": [
-    "1827467977240901494339036217017462683817421549474947615723082367626884127079field",
-    "1991095299122407831052875180244961491379013999051586010676626125612021123290field"
-  ]
+  "lastUpdated": "2026-02-10T00:00:00.000Z",
+  "totalMarkets": 0,
+  "markets": [],
+  "marketIds": []
 }

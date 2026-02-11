@@ -67,6 +67,31 @@ check_optional() {
     fi
 }
 
+# Read KEY=value from a dotenv-like file without sourcing it.
+# This avoids shell parse errors for values with spaces.
+read_dotenv_value() {
+    local file_path=$1
+    local key=$2
+    local line
+
+    if [ ! -f "$file_path" ]; then
+        return 1
+    fi
+
+    line=$(grep -E "^${key}=" "$file_path" | tail -n 1 || true)
+    if [ -z "$line" ]; then
+        return 1
+    fi
+
+    local value="${line#*=}"
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+
+    echo "$value"
+}
+
 # Check deployment variables
 echo -e "${YELLOW}Deployment Variables:${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -87,7 +112,7 @@ echo ""
 # Check program variables
 echo -e "${YELLOW}Program Variables:${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-check_optional "ALEO_PROGRAM_NAME" "veiled_markets"
+check_optional "ALEO_PROGRAM_NAME" "veiled_markets_v4"
 echo ""
 
 # Check frontend .env
@@ -96,15 +121,31 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 if [ -f "$PROJECT_ROOT/frontend/.env" ]; then
     echo -e "  ${GREEN}✓ frontend/.env exists${NC}"
-    
-    # Source frontend env (with VITE_ prefix)
-    set -a
-    source "$PROJECT_ROOT/frontend/.env"
-    set +a
-    
-    check_optional "VITE_NETWORK" "testnet"
-    check_optional "VITE_PROGRAM_ID" "veiled_markets.aleo"
-    check_optional "VITE_ENABLE_DEMO_MODE" "true"
+
+    FRONTEND_NETWORK=$(read_dotenv_value "$PROJECT_ROOT/frontend/.env" "VITE_NETWORK" || true)
+    FRONTEND_PROGRAM_ID=$(read_dotenv_value "$PROJECT_ROOT/frontend/.env" "VITE_PROGRAM_ID" || true)
+    FRONTEND_DEMO_MODE=$(read_dotenv_value "$PROJECT_ROOT/frontend/.env" "VITE_ENABLE_DEMO_MODE" || true)
+
+    if [ -n "$FRONTEND_NETWORK" ]; then
+        echo -e "  ${GREEN}✓ VITE_NETWORK = ${FRONTEND_NETWORK}${NC}"
+    else
+        echo -e "  ${YELLOW}○ VITE_NETWORK is not set (default: testnet)${NC}"
+        ((WARNINGS++))
+    fi
+
+    if [ -n "$FRONTEND_PROGRAM_ID" ]; then
+        echo -e "  ${GREEN}✓ VITE_PROGRAM_ID = ${FRONTEND_PROGRAM_ID}${NC}"
+    else
+        echo -e "  ${YELLOW}○ VITE_PROGRAM_ID is not set (default: veiled_markets_v4.aleo)${NC}"
+        ((WARNINGS++))
+    fi
+
+    if [ -n "$FRONTEND_DEMO_MODE" ]; then
+        echo -e "  ${GREEN}✓ VITE_ENABLE_DEMO_MODE = ${FRONTEND_DEMO_MODE}${NC}"
+    else
+        echo -e "  ${YELLOW}○ VITE_ENABLE_DEMO_MODE is not set (default: true)${NC}"
+        ((WARNINGS++))
+    fi
 else
     echo -e "  ${YELLOW}○ frontend/.env does not exist${NC}"
     echo -e "    Run: cp frontend/.env.example frontend/.env"

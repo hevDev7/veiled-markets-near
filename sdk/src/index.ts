@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Main Entry Point
 // ============================================================================
-// TypeScript SDK for interacting with the veiled_markets.aleo program
+// TypeScript SDK for interacting with the veiled_markets_v4.aleo program
 // ============================================================================
 
 // Client

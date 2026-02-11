@@ -179,8 +179,8 @@ export class PuzzleWalletAdapter {
         },
         permissions: {
           programIds: {
-            'AleoTestnet': ['veiled_markets_v2.aleo', 'credits.aleo'],
-            'AleoMainnet': ['veiled_markets_v2.aleo', 'credits.aleo'],
+            'AleoTestnet': ['veiled_markets_v4.aleo', 'credits.aleo'],
+            'AleoMainnet': ['veiled_markets_v4.aleo', 'credits.aleo'],
           }
         }
       });
@@ -468,7 +468,7 @@ export class LeoWalletAdapter {
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
         console.log('Leo Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v2.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v4.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Leo Wallet: Connected successfully');
@@ -847,7 +847,7 @@ export class LeoWalletAdapter {
         // Method 2: Try requestTransactionHistory to find recent transaction
         if (typeof (this.adapter as any).requestTransactionHistory === 'function') {
           console.log(`Leo Wallet: Attempt ${attempt + 1} - calling requestTransactionHistory`);
-          const history = await (this.adapter as any).requestTransactionHistory('veiled_markets_v2.aleo');
+          const history = await (this.adapter as any).requestTransactionHistory('veiled_markets_v4.aleo');
           console.log('Leo Wallet: Transaction history:', history);
 
           if (Array.isArray(history) && history.length > 0) {
@@ -976,7 +976,7 @@ export class FoxWalletAdapter {
 
       try {
         console.log('Fox Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v2.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v4.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Fox Wallet: Connected successfully');
@@ -1159,7 +1159,7 @@ export class SoterWalletAdapter {
 
       try {
         console.log('Soter Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v2.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v4.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Soter Wallet: Connected successfully');

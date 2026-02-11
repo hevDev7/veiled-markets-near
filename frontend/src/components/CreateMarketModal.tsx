@@ -73,6 +73,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
   const [marketId, setMarketId] = useState<string | null>(null)
+  const [isSlowTransaction, setIsSlowTransaction] = useState(false)
 
   const updateForm = (updates: Partial<MarketFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }))
@@ -239,27 +240,36 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         throw new Error('Resolution deadline must be after betting deadline')
       }
 
-      // Request transaction through wallet
-      const transactionId = await walletManager.requestTransaction({
+      // Request transaction through wallet with timeout
+      // Shows "taking longer" message after 30s, times out at 2 minutes
+      setIsSlowTransaction(false)
+      const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
+
+      const WALLET_TIMEOUT_MS = 120_000 // 2 minutes
+      const txPromise = walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
         functionName: 'create_market',
         inputs,
         fee: 1000000, // 1 credit fee for market creation
-        // Don't specify network, let wallet use its current network
       })
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(
+          'Wallet did not respond within 2 minutes. Please check your wallet extension is unlocked and try again.'
+        )), WALLET_TIMEOUT_MS)
+      })
+
+      let transactionId: string
+      try {
+        transactionId = await Promise.race([txPromise, timeoutPromise])
+      } finally {
+        clearTimeout(slowTimer)
+      }
 
       console.log('Market creation transaction submitted:', transactionId)
 
       // Register the question text with the question hash for future lookup
-      // This allows us to display the question once the market is confirmed
       registerQuestionText(questionHash, formData.question)
-
-      // Register the transaction ID temporarily with question hash
       registerMarketTransaction(questionHash, transactionId)
-
-      // NOTE: Don't add questionHash to KNOWN_MARKET_IDS here!
-      // The blockchain uses a different marketId, so fetching by questionHash will fail.
-      // waitForMarketCreation will add the actual marketId once confirmed.
 
       console.log('Registered market:', { questionHash, question: formData.question, transactionId })
 
@@ -268,17 +278,13 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       setStep('success')
 
       // Start polling for the actual market ID in the background
-      // This will update localStorage with the real market ID once confirmed
       waitForMarketCreation(transactionId, questionHash, formData.question)
         .then((actualMarketId) => {
           if (actualMarketId) {
-            console.log('✅ Actual market ID retrieved:', actualMarketId)
-            console.log('✅ Market should now appear on dashboard after refresh')
-            // Call onSuccess with the actual market ID
+            console.log('Market ID retrieved:', actualMarketId)
             onSuccess?.(actualMarketId)
           } else {
             console.warn('Could not retrieve actual market ID')
-            // Don't add questionHash as fallback - it won't work for fetching
             onSuccess?.(questionHash)
           }
         })
@@ -288,7 +294,19 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         })
     } catch (err: unknown) {
       console.error('Failed to create market:', err)
-      setError(err instanceof Error ? err.message : 'Failed to create market')
+      let errorMsg = 'Failed to create market'
+      if (err instanceof Error) {
+        if (err.name === 'AbortError' || err.message.includes('abort')) {
+          errorMsg = 'Network request timed out. Please check your connection and try again.'
+        } else if (err.message.includes('Wallet did not respond')) {
+          errorMsg = err.message
+        } else if (err.message.includes('rejected') || err.message.includes('denied')) {
+          errorMsg = 'Transaction was rejected in your wallet.'
+        } else {
+          errorMsg = err.message
+        }
+      }
+      setError(errorMsg)
       setStep('error')
     }
   }
@@ -686,6 +704,15 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         <p className="text-surface-400">
                           Please confirm the transaction in your wallet.
                         </p>
+                        {isSlowTransaction && (
+                          <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                            <p className="text-sm text-yellow-400">
+                              This is taking longer than expected. Please check that your wallet extension
+                              is open and unlocked. The wallet may be generating a zero-knowledge proof,
+                              which can take 30-60 seconds.
+                            </p>
+                          </div>
+                        )}
                       </motion.div>
                     )}
 

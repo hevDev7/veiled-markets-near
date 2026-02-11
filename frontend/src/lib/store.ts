@@ -9,6 +9,8 @@ import {
 } from './wallet'
 import {
   buildPlaceBetInputs,
+  buildCommitBetInputs,
+  buildRevealBetInputs,
   CONTRACT_INFO,
 } from './aleo-client'
 import { config } from './config'
@@ -76,6 +78,21 @@ export interface Bet {
   placedAt: number
   status: 'pending' | 'active' | 'won' | 'lost' | 'refunded'
   marketQuestion?: string
+  lockedMultiplier?: number  // Payout multiplier locked at time of bet
+}
+
+// Phase 2: Commit-Reveal Scheme Records
+export interface CommitmentRecord {
+  betRecord: string  // Private Bet record ciphertext
+  commitmentRecord: string  // Private Commitment record ciphertext
+  betAmountRecord: string  // Private credits record ciphertext (for reveal)
+  marketId: string
+  amount: bigint
+  outcome: 'yes' | 'no'
+  committedAt: number
+  commitmentTxId: string
+  revealed: boolean
+  revealTxId?: string
 }
 
 export interface WalletState {
@@ -301,7 +318,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v2.aleo program.
+// in the veiled_markets_v4.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -626,12 +643,17 @@ interface BetsStore {
   userBets: Bet[]
   pendingBets: Bet[]
   isPlacingBet: boolean
+  commitmentRecords: CommitmentRecord[]  // Phase 2: Store commitments for reveal
 
   // Actions
-  placeBet: (marketId: string, amount: bigint, outcome: 'yes' | 'no') => Promise<string>
+  placeBet: (marketId: string, amount: bigint, outcome: 'yes' | 'no') => Promise<string>  // Legacy method
+  commitBet: (marketId: string, amount: bigint, outcome: 'yes' | 'no', creditsRecord: string) => Promise<string>  // Phase 2: Commit bet
+  revealBet: (commitmentRecord: CommitmentRecord) => Promise<string>  // Phase 2: Reveal bet
   fetchUserBets: () => Promise<void>
   getBetsByMarket: (marketId: string) => Bet[]
   getTotalBetsValue: () => bigint
+  getCommitmentRecords: (marketId?: string) => CommitmentRecord[]
+  getPendingReveals: () => CommitmentRecord[]
 }
 
 // Helper to load bets from localStorage
@@ -698,9 +720,41 @@ function saveBetsToStorage(bets: Bet[]) {
   }
 }
 
+// Helper to load commitment records from localStorage
+function loadCommitmentRecordsFromStorage(): CommitmentRecord[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const saved = localStorage.getItem('veiled_markets_commitments')
+    if (!saved) return []
+    const parsed = JSON.parse(saved)
+    return parsed.map((record: any) => ({
+      ...record,
+      amount: BigInt(record.amount),
+    }))
+  } catch (e) {
+    console.error('Failed to load commitment records from storage:', e)
+    return []
+  }
+}
+
+// Helper to save commitment records to localStorage
+function saveCommitmentRecordsToStorage(records: CommitmentRecord[]) {
+  if (typeof window === 'undefined') return
+  try {
+    const serializable = records.map(record => ({
+      ...record,
+      amount: record.amount.toString(),
+    }))
+    localStorage.setItem('veiled_markets_commitments', JSON.stringify(serializable))
+  } catch (e) {
+    console.error('Failed to save commitment records to storage:', e)
+  }
+}
+
 export const useBetsStore = create<BetsStore>((set, get) => ({
   userBets: loadBetsFromStorage(),
   pendingBets: loadPendingBetsFromStorage(),
+  commitmentRecords: loadCommitmentRecordsFromStorage(),
   isPlacingBet: false,
 
   placeBet: async (marketId, amount, outcome) => {
@@ -722,24 +776,59 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = markets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the deployed veiled_markets_v2.aleo contract
-      // place_bet(market_id: field, amount: u64, outcome: u8, bettor: address)
+      // Fetch a private Credits record from the wallet for privacy-preserving betting
+      // place_bet now uses transfer_private_to_public (hides bettor identity)
+      let creditsRecord: string | null = null
+      const isDemoMode = walletState.walletType === 'demo'
+
+      if (!isDemoMode) {
+        try {
+          const records = await walletManager.getRecords('credits.aleo')
+          if (Array.isArray(records) && records.length > 0) {
+            // Find a record with enough microcredits for the bet
+            for (const record of records) {
+              const plaintext = String((record as any).plaintext || (record as any).data || record)
+              const match = plaintext.match(/microcredits:\s*(\d+)u64/)
+              if (match) {
+                const recordAmount = BigInt(match[1])
+                if (recordAmount >= amount) {
+                  creditsRecord = plaintext
+                  break
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Could not fetch private credits records:', err)
+        }
+
+        if (!creditsRecord) {
+          throw new Error(
+            'No private credits record found with sufficient balance. ' +
+            'Please ensure you have private credits (not just public balance). ' +
+            'You can convert public to private credits using your wallet.'
+          )
+        }
+      } else {
+        // Demo mode: use a placeholder record
+        creditsRecord = `{ owner: ${walletState.address}.private, microcredits: ${amount}u64.private, _nonce: 0group.public }`
+      }
+
+      // Build inputs for the veiled_markets_v4.aleo contract
+      // place_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
       const inputs = buildPlaceBetInputs(
         marketId,
         amount,
         outcome,
-        walletState.address
+        creditsRecord
       )
 
       console.log('=== PLACE BET DEBUG ===')
       console.log('Market ID:', marketId)
       console.log('Amount:', amount.toString())
       console.log('Outcome:', outcome)
-      console.log('Bettor:', walletState.address)
-      console.log('Inputs:', inputs)
-      console.log('Inputs types:', inputs.map(i => typeof i))
+      console.log('Using private credits record')
       console.log('Program ID:', CONTRACT_INFO.programId)
-      console.log('Wallet type:', walletState.walletType)
 
       // Validate inputs
       for (let i = 0; i < inputs.length; i++) {
@@ -751,8 +840,6 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         }
       }
 
-      console.log('Inputs validated, requesting transaction...')
-
       // Request transaction through wallet
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
@@ -763,13 +850,17 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       console.log('Bet transaction submitted:', transactionId)
 
-      // Immediately refresh balance (optimistic update)
-      console.log('Refreshing balance immediately after bet...')
+      // Immediately refresh balance
       setTimeout(() => {
         useWalletStore.getState().refreshBalance()
       }, 1000)
 
-      // Add to pending bets with market question
+      // Calculate locked multiplier for display
+      const lockedMultiplier = outcome === 'yes'
+        ? market?.potentialYesPayout
+        : market?.potentialNoPayout
+
+      // Add to pending bets with market question and locked odds
       const newBet: Bet = {
         id: transactionId,
         marketId,
@@ -778,6 +869,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         placedAt: Date.now(),
         status: 'pending',
         marketQuestion,
+        lockedMultiplier,
       }
 
       const updatedPendingBets = [...get().pendingBets, newBet]
@@ -851,6 +943,280 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     }
   },
 
+  // Phase 2: Commit-Reveal Scheme - Commit Bet (Fully Private)
+  commitBet: async (marketId, amount, outcome, creditsRecord) => {
+    const walletState = useWalletStore.getState().wallet
+
+    if (!walletState.connected) {
+      throw new Error('Wallet not connected')
+    }
+
+    if (!walletState.address) {
+      throw new Error('Wallet address not available')
+    }
+
+    set({ isPlacingBet: true })
+
+    try {
+      // Get market question for display purposes
+      const markets = useMarketsStore.getState().markets
+      const market = markets.find(m => m.id === marketId)
+      const marketQuestion = market?.question || `Market ${marketId}`
+
+      // Build inputs for commit_bet transaction
+      // commit_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
+      const inputs = buildCommitBetInputs(
+        marketId,
+        amount,
+        outcome,
+        creditsRecord
+      )
+
+      console.log('=== COMMIT BET DEBUG ===')
+      console.log('Market ID:', marketId)
+      console.log('Amount:', amount.toString())
+      console.log('Outcome:', outcome)
+      console.log('Credits Record:', creditsRecord.substring(0, 50) + '...')
+      console.log('Inputs:', inputs)
+      console.log('Program ID:', CONTRACT_INFO.programId)
+
+      // Validate inputs
+      for (let i = 0; i < inputs.length; i++) {
+        if (typeof inputs[i] !== 'string') {
+          throw new Error(`Input ${i} is not a string: ${typeof inputs[i]}`)
+        }
+        if (!inputs[i]) {
+          throw new Error(`Input ${i} is empty`)
+        }
+      }
+
+      console.log('Inputs validated, requesting commit transaction...')
+
+      // Request transaction through wallet
+      const transactionId = await walletManager.requestTransaction({
+        programId: CONTRACT_INFO.programId,
+        functionName: 'commit_bet',  // Phase 2: Commit-Reveal Scheme
+        inputs,
+        fee: 500000, // 0.5 credits fee for testnet
+      })
+
+      console.log('Commit bet transaction submitted:', transactionId)
+
+      // Note: The transaction output will contain:
+      // - Bet record (private)
+      // - Commitment record (private)
+      // - Bet amount record (private, for reveal)
+      // We need to extract these from the transaction output
+      // For now, we'll store a placeholder and update when we can parse the output
+
+      // Create commitment record (will be updated with actual records from transaction output)
+      const commitmentRecord: CommitmentRecord = {
+        betRecord: '',  // Will be updated from transaction output
+        commitmentRecord: '',  // Will be updated from transaction output
+        betAmountRecord: '',  // Will be updated from transaction output
+        marketId,
+        amount,
+        outcome,
+        committedAt: Date.now(),
+        commitmentTxId: transactionId,
+        revealed: false,
+      }
+
+      // Save commitment record
+      const updatedCommitments = [...get().commitmentRecords, commitmentRecord]
+      set({
+        commitmentRecords: updatedCommitments,
+        isPlacingBet: false,
+      })
+      saveCommitmentRecordsToStorage(updatedCommitments)
+
+      // Add to pending bets
+      const newBet: Bet = {
+        id: transactionId,
+        marketId,
+        amount,
+        outcome,
+        placedAt: Date.now(),
+        status: 'pending',
+        marketQuestion,
+      }
+
+      const updatedPendingBets = [...get().pendingBets, newBet]
+      set({ pendingBets: updatedPendingBets })
+      savePendingBetsToStorage(updatedPendingBets)
+
+      // Poll for transaction confirmation to extract records
+      const pollInterval = setInterval(async () => {
+        try {
+          const response = await fetch(
+            `${config.rpcUrl}/transaction/${transactionId}`
+          )
+          if (response.ok) {
+            clearInterval(pollInterval)
+            const txData = await response.json()
+            
+            // Extract records from transaction output
+            // Note: This is a simplified version - actual parsing depends on wallet/explorer API
+            // In production, you'd parse the actual record ciphertexts from the transaction output
+            // The transaction output contains:
+            // - Bet record (private)
+            // - Commitment record (private)
+            // - Bet amount record (private, for reveal)
+            
+            // TODO: Parse actual record ciphertexts from transaction output
+            // For now, we'll need to get records from wallet response or transaction details
+            // Update commitment record with actual records (if available)
+            const updatedCommitments = get().commitmentRecords.map(record => 
+              record.commitmentTxId === transactionId
+                ? { 
+                    ...record, 
+                    // TODO: Replace with actual record ciphertexts from transaction output
+                    betRecord: 'extracted_from_tx', 
+                    commitmentRecord: 'extracted_from_tx', 
+                    betAmountRecord: 'extracted_from_tx' 
+                  }
+                : record
+            )
+            set({ commitmentRecords: updatedCommitments })
+            saveCommitmentRecordsToStorage(updatedCommitments)
+
+            // Mark bet as active
+            const activeBet = { ...newBet, status: 'active' as const }
+            const updatedBets = [...get().userBets, activeBet]
+            const updatedPending = get().pendingBets.filter(b => b.id !== transactionId)
+            set({
+              pendingBets: updatedPending,
+              userBets: updatedBets,
+            })
+            saveBetsToStorage(updatedBets)
+            savePendingBetsToStorage(updatedPending)
+          }
+        } catch {
+          // Transaction not confirmed yet, continue polling
+        }
+      }, 5000)
+
+      // Timeout after 2 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval)
+      }, 120000)
+
+      return transactionId
+    } catch (error: any) {
+      console.error('Commit bet error:', error)
+      set({ isPlacingBet: false })
+      throw error
+    }
+  },
+
+  // Phase 2: Commit-Reveal Scheme - Reveal Bet (After Deadline)
+  revealBet: async (commitmentRecord) => {
+    const walletState = useWalletStore.getState().wallet
+
+    if (!walletState.connected) {
+      throw new Error('Wallet not connected')
+    }
+
+    if (commitmentRecord.revealed) {
+      throw new Error('Bet already revealed')
+    }
+
+    if (!commitmentRecord.betRecord || !commitmentRecord.commitmentRecord || !commitmentRecord.betAmountRecord) {
+      throw new Error('Missing bet records. Cannot reveal without records.')
+    }
+
+    set({ isPlacingBet: true })
+
+    try {
+      // Build inputs for reveal_bet transaction
+      // reveal_bet(bet: Bet, commitment: Commitment, credits_record: credits.aleo/credits, amount: u64)
+      const inputs = buildRevealBetInputs(
+        commitmentRecord.betRecord,
+        commitmentRecord.commitmentRecord,
+        commitmentRecord.betAmountRecord,
+        commitmentRecord.amount
+      )
+
+      console.log('=== REVEAL BET DEBUG ===')
+      console.log('Market ID:', commitmentRecord.marketId)
+      console.log('Amount:', commitmentRecord.amount.toString())
+      console.log('Outcome:', commitmentRecord.outcome)
+      console.log('Inputs:', inputs)
+
+      // Validate inputs
+      for (let i = 0; i < inputs.length; i++) {
+        if (typeof inputs[i] !== 'string') {
+          throw new Error(`Input ${i} is not a string: ${typeof inputs[i]}`)
+        }
+        if (!inputs[i]) {
+          throw new Error(`Input ${i} is empty`)
+        }
+      }
+
+      console.log('Inputs validated, requesting reveal transaction...')
+
+      // Request transaction through wallet
+      const transactionId = await walletManager.requestTransaction({
+        programId: CONTRACT_INFO.programId,
+        functionName: 'reveal_bet',  // Phase 2: Commit-Reveal Scheme
+        inputs,
+        fee: 500000, // 0.5 credits fee for testnet
+      })
+
+      console.log('Reveal bet transaction submitted:', transactionId)
+
+      // Update commitment record as revealed
+      const updatedCommitments = get().commitmentRecords.map(record =>
+        record.commitmentTxId === commitmentRecord.commitmentTxId
+          ? { ...record, revealed: true, revealTxId: transactionId }
+          : record
+      )
+      set({
+        commitmentRecords: updatedCommitments,
+        isPlacingBet: false,
+      })
+      saveCommitmentRecordsToStorage(updatedCommitments)
+
+      // Poll for transaction confirmation
+      const pollInterval = setInterval(async () => {
+        try {
+          const response = await fetch(
+            `${config.rpcUrl}/transaction/${transactionId}`
+          )
+          if (response.ok) {
+            clearInterval(pollInterval)
+            console.log('Reveal transaction confirmed:', transactionId)
+            useWalletStore.getState().refreshBalance()
+          }
+        } catch {
+          // Transaction not confirmed yet, continue polling
+        }
+      }, 5000)
+
+      // Timeout after 2 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval)
+      }, 120000)
+
+      return transactionId
+    } catch (error: any) {
+      console.error('Reveal bet error:', error)
+      set({ isPlacingBet: false })
+      throw error
+    }
+  },
+
+  // Get commitment records (optionally filtered by marketId)
+  getCommitmentRecords: (marketId?: string) => {
+    const records = get().commitmentRecords
+    return marketId ? records.filter(r => r.marketId === marketId) : records
+  },
+
+  // Get pending reveals (commitments that haven't been revealed yet)
+  getPendingReveals: () => {
+    return get().commitmentRecords.filter(r => !r.revealed)
+  },
+
   fetchUserBets: async () => {
     const walletState = useWalletStore.getState().wallet
 
@@ -869,7 +1235,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }
 
       // Try to fetch from wallet records (may not work with all wallets)
-      const records = await walletManager.getRecords('veiled_markets_v2.aleo')
+      const records = await walletManager.getRecords('veiled_markets_v4.aleo')
 
       // Parse bet records from wallet
       const walletBets: Bet[] = records

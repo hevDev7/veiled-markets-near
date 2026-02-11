@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v2.aleo program
+// Client for interacting with the deployed veiled_markets_v4.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -55,7 +55,20 @@ export interface MarketResolutionData {
 
 // API configuration
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const PROGRAM_ID = 'veiled_markets_v2.aleo';  // Updated to v2
+const PROGRAM_ID = 'veiled_markets_v4.aleo';  // Version 4 (privacy fix)
+
+// Timeout for network requests (prevents UI from hanging indefinitely)
+const FETCH_TIMEOUT_MS = 10_000; // 10 seconds per request
+
+async function fetchWithTimeout(url: string, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 /**
  * Transaction status and details
@@ -81,7 +94,7 @@ export async function getTransactionDetails(transactionId: string): Promise<Tran
     const url = `${API_BASE_URL}/transaction/${transactionId}`;
     console.log('Fetching transaction details:', url);
 
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) {
       if (response.status === 404) {
         // Transaction not yet confirmed
@@ -172,7 +185,7 @@ export async function waitForMarketCreation(
   transactionId: string,
   questionHash: string,
   questionText: string,
-  maxAttempts: number = 40, // ~10 minutes at 15 second intervals
+  maxAttempts: number = 20, // ~5 minutes at 15 second intervals
   intervalMs: number = 15000
 ): Promise<string | null> {
   console.log('Waiting for market creation transaction:', transactionId);
@@ -290,7 +303,7 @@ function parseAleoValue(value: string): string | number | bigint | boolean {
  */
 export async function getCurrentBlockHeight(): Promise<bigint> {
   try {
-    const response = await fetch(`${API_BASE_URL}/latest/height`);
+    const response = await fetchWithTimeout(`${API_BASE_URL}/latest/height`);
     if (!response.ok) throw new Error('Failed to fetch block height');
     const height = await response.json();
     return BigInt(height);
@@ -312,7 +325,7 @@ export async function getMappingValue<T>(
     const url = `${API_BASE_URL}/program/${PROGRAM_ID}/mapping/${mappingName}/${key}`;
     console.log('Fetching mapping:', url);
 
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error(`Failed to fetch mapping: ${response.status}`);
@@ -465,21 +478,59 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for place_bet transaction
- * Note: v2 contract uses self.caller for bettor address, no need to pass it
- * place_bet(market_id: field, amount: u64, outcome: u8)
+ * Build inputs for place_bet transaction (v4 - privacy-preserving)
+ * place_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
+ * Uses private Credits record to hide bettor's identity via transfer_private_to_public
  */
 export function buildPlaceBetInputs(
   marketId: string,
   amount: bigint,
   outcome: 'yes' | 'no',
-  _bettorAddress?: string  // Deprecated in v2, kept for backwards compatibility
+  creditsRecord: string  // Private credits record plaintext from wallet
 ): string[] {
   return [
     marketId,
     `${amount}u64`,
     outcome === 'yes' ? '1u8' : '2u8',
-    // Note: bettor address removed in v2 - contract uses self.caller
+    creditsRecord,  // Private credits record
+  ];
+}
+
+/**
+ * Build inputs for commit_bet transaction (Phase 2: Commit-Reveal Scheme)
+ * commit_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
+ * Note: amount and outcome are PRIVATE parameters for maximum privacy
+ */
+export function buildCommitBetInputs(
+  marketId: string,
+  amount: bigint,
+  outcome: 'yes' | 'no',
+  creditsRecord: string  // Private credits record ciphertext
+): string[] {
+  return [
+    marketId,
+    `${amount}u64`,  // Private parameter
+    outcome === 'yes' ? '1u8' : '2u8',  // Private parameter
+    creditsRecord,  // Private credits record
+  ];
+}
+
+/**
+ * Build inputs for reveal_bet transaction (Phase 2: Commit-Reveal Scheme)
+ * reveal_bet(bet: Bet, commitment: Commitment, credits_record: credits.aleo/credits, amount: u64)
+ * Note: bet, commitment, and credits_record are PRIVATE, amount is PUBLIC (revealed after deadline)
+ */
+export function buildRevealBetInputs(
+  betRecord: string,  // Private Bet record ciphertext
+  commitmentRecord: string,  // Private Commitment record ciphertext
+  creditsRecord: string,  // Private credits record ciphertext
+  amount: bigint  // Public amount (revealed after deadline)
+): string[] {
+  return [
+    betRecord,  // Private
+    commitmentRecord,  // Private
+    creditsRecord,  // Private
+    `${amount}u64`,  // Public (revealed)
   ];
 }
 
@@ -818,8 +869,8 @@ export async function fetchMarketById(marketId: string) {
 
 // Export a singleton instance info
 export const CONTRACT_INFO = {
-  programId: 'veiled_markets_v2.aleo',  // Updated to v2 with integrated credits transfer
-  deploymentTxId: 'at14f99436prgg6pec5hc9l6s3kpjz8xc8qrtgs6c8cjqv3ync9jypsvq0skd',
+  programId: 'veiled_markets_v4.aleo',  // Version 4 (privacy fix)
+  deploymentTxId: 'at186jeh868hyrww5hltajpxvt6a2740ge7y6nfs078jfrcueqr8uqqugjtnq',
   network: 'testnet',
   explorerUrl: config.explorerUrl,
   // Real on-chain data - markets are stored in localStorage and fetched from blockchain

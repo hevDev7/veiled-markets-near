@@ -16,7 +16,7 @@ type BetStep = 'select' | 'amount' | 'confirm' | 'success'
 
 export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const { wallet } = useWalletStore()
-  const { placeBet } = useBetsStore()
+  const { placeBet, commitBet } = useBetsStore()
 
   const [selectedOutcome, setSelectedOutcome] = useState<BetOutcome>(null)
   const [betAmount, setBetAmount] = useState('')
@@ -41,7 +41,11 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         )
       }
 
-      const txId = await placeBet(market.id, BigInt(parseFloat(betAmount) * 1_000_000), selectedOutcome)
+      const amountMicro = BigInt(parseFloat(betAmount) * 1_000_000)
+
+      // place_bet now uses private Credits record (transfer_private_to_public)
+      // The store.placeBet handles fetching the Credits record from the wallet
+      const txId = await placeBet(market.id, amountMicro, selectedOutcome)
       setTransactionId(txId)
       setStep('success')
     } catch (err: unknown) {
@@ -65,6 +69,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const potentialPayout = selectedOutcome && betAmount
     ? parseFloat(betAmount) * (selectedOutcome === 'yes' ? market?.potentialYesPayout || 0 : market?.potentialNoPayout || 0)
     : 0
+
+  const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
 
   if (!market) return null
 
@@ -122,8 +128,19 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
                     >
+                      {isExpired && (
+                        <div className="p-4 rounded-xl bg-no-500/10 border border-no-500/20 mb-4">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-5 h-5 text-no-400 flex-shrink-0" />
+                            <p className="text-sm text-no-400 font-medium">
+                              This market has expired. Betting is no longer available.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       <p className="text-surface-400 text-sm mb-4">
-                        Choose your prediction
+                        {isExpired ? 'Market odds at close:' : 'Choose your prediction'}
                       </p>
 
                       <div className="grid grid-cols-2 gap-4 mb-6">
@@ -175,14 +192,14 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       </div>
 
                       <button
-                        onClick={() => selectedOutcome && setStep('amount')}
-                        disabled={!selectedOutcome}
+                        onClick={() => selectedOutcome && !isExpired && setStep('amount')}
+                        disabled={!selectedOutcome || isExpired}
                         className={cn(
                           'w-full btn-primary',
-                          !selectedOutcome && 'opacity-50 cursor-not-allowed'
+                          (!selectedOutcome || isExpired) && 'opacity-50 cursor-not-allowed'
                         )}
                       >
-                        Continue
+                        {isExpired ? 'Market Expired' : 'Continue'}
                       </button>
                     </motion.div>
                   )}
@@ -283,7 +300,9 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         <div>
                           <p className="text-sm font-medium text-brand-300">Your bet is private</p>
                           <p className="text-xs text-surface-400 mt-1">
-                            Only the total pool is visible. Your bet amount and position are encrypted on-chain.
+                            Uses private Credits record with zero-knowledge proof.
+                            Your identity, bet amount, and position are hidden on-chain.
+                            Odds shown are locked at the time you place your bet.
                           </p>
                         </div>
                       </div>

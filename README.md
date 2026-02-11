@@ -9,7 +9,7 @@
 Privacy-preserving prediction market built on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiled-markets.vercel.app)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_market_v3.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -32,7 +32,7 @@ Frontend (React + TypeScript)
     ↓
 Aleo Wallet (Puzzle/Leo)
     ↓
-Smart Contract (veiled_markets.aleo)
+Smart Contract (veiled_market_v3.aleo)
     ↓
 Aleo Blockchain (Testnet)
 ```
@@ -62,7 +62,7 @@ pnpm dev
 
 **Live App:** [veiled-markets.vercel.app](https://veiled-markets.vercel.app)
 
-**Contract:** `veiled_markets.aleo` on [Aleo Testnet](https://testnet.explorer.provable.com/program/veiled_markets.aleo)
+**Contract:** `veiled_market_v3.aleo` on [Aleo Testnet](https://testnet.explorer.provable.com/program/veiled_market_v3.aleo)
 
 ## 📁 Project Structure
 
@@ -194,11 +194,12 @@ node scripts/generate-question-hash.js "Your question?"
 
 # 2. Create on blockchain
 cd contracts
-leo execute create_market \
+leo execute veiled_market_v3.aleo/create_market \
   "HASH_field" \
   "3u8" \              # category (0-6)
   "14107320u64" \      # betting deadline
   "14124600u64" \      # resolution deadline
+  --network testnet \
   --broadcast
 
 # 3. Run indexer
@@ -212,7 +213,7 @@ Copy `frontend/.env.example` to `frontend/.env`:
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets.aleo
+VITE_PROGRAM_ID=veiled_market_v3.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 ```
 
@@ -254,7 +255,7 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built with 💜 on Aleo**
 
-[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
+[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_market_v3.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
 
 </div>
 
