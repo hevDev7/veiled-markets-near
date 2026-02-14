@@ -34,3 +34,5 @@ yarn-debug.log*
 coverage/
 .nyc_output/
 
+# Aleo dev toolkit
+aleo-dev-toolkit/
