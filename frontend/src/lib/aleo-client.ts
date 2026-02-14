@@ -1,10 +1,11 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v9.aleo program
+// Client for interacting with the deployed veiled_markets_v10.aleo program
 // ============================================================================
 
 import { config } from './config';
+import { fetchMarketRegistry, isSupabaseAvailable } from './supabase';
 
 // Contract constants (matching main.leo)
 export const MARKET_STATUS = {
@@ -29,6 +30,7 @@ export const FEES = {
 export interface MarketData {
   id: string;
   creator: string;
+  resolver: string;
   question_hash: string;
   category: number;
   deadline: bigint;
@@ -55,7 +57,7 @@ export interface MarketResolutionData {
 
 // API configuration
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const PROGRAM_ID = 'veiled_markets_v9.aleo';  // Version 5 (privacy-preserving with transfer_private_to_public)
+const PROGRAM_ID = 'veiled_markets_v10.aleo';
 
 // Timeout for network requests (prevents UI from hanging indefinitely)
 const FETCH_TIMEOUT_MS = 10_000; // 10 seconds per request
@@ -68,6 +70,34 @@ async function fetchWithTimeout(url: string, timeoutMs: number = FETCH_TIMEOUT_M
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// Retry wrapper for flaky API (testnet often returns 522 errors)
+async function fetchWithRetry(url: string, maxRetries: number = 3): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await fetchWithTimeout(url);
+      if (response.ok || response.status === 404) {
+        return response;
+      }
+      // Retry on server errors (5xx)
+      if (response.status >= 500) {
+        lastError = new Error(`Server error: ${response.status}`);
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+      }
+      return response;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError || new Error('Fetch failed after retries');
 }
 
 /**
@@ -302,16 +332,10 @@ function parseAleoValue(value: string): string | number | bigint | boolean {
  * Fetch current block height
  */
 export async function getCurrentBlockHeight(): Promise<bigint> {
-  try {
-    const response = await fetchWithTimeout(`${API_BASE_URL}/latest/height`);
-    if (!response.ok) throw new Error('Failed to fetch block height');
-    const height = await response.json();
-    return BigInt(height);
-  } catch (error) {
-    console.error('Failed to fetch block height:', error);
-    // Estimate based on time
-    return BigInt(Math.floor(Date.now() / 15000));
-  }
+  const response = await fetchWithRetry(`${API_BASE_URL}/latest/height`);
+  if (!response.ok) throw new Error(`Failed to fetch block height: ${response.status}`);
+  const height = await response.json();
+  return BigInt(height);
 }
 
 /**
@@ -325,7 +349,7 @@ export async function getMappingValue<T>(
     const url = `${API_BASE_URL}/program/${PROGRAM_ID}/mapping/${mappingName}/${key}`;
     console.log('Fetching mapping:', url);
 
-    const response = await fetchWithTimeout(url);
+    const response = await fetchWithRetry(url);
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error(`Failed to fetch mapping: ${response.status}`);
@@ -377,6 +401,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
   const result = {
     id: data.id || marketId,
     creator: data.creator || '',
+    resolver: data.resolver || data.creator || '',
     question_hash: data.question_hash || '',
     category: typeof parsedCategory === 'number' ? parsedCategory : 0,
     deadline: typeof parsedDeadline === 'bigint' ? parsedDeadline : 0n,
@@ -467,13 +492,15 @@ export function buildCreateMarketInputs(
   questionHash: string,
   category: number,
   deadline: bigint,
-  resolutionDeadline: bigint
+  resolutionDeadline: bigint,
+  resolverAddress: string
 ): string[] {
   return [
     questionHash,
     `${category}u8`,
     `${deadline}u64`,
     `${resolutionDeadline}u64`,
+    resolverAddress,
   ];
 }
 
@@ -493,49 +520,118 @@ export function buildPlaceBetInputs(
   amount: bigint,
   outcome: 'yes' | 'no',
 ): string[] {
+  // Fix 7: Generate random bet_nonce for unique per-bet claim tracking
+  const randomBytes = new Uint8Array(31); // 31 bytes = 248 bits, safely < field max (~253 bits)
+  crypto.getRandomValues(randomBytes);
+  let betNonce = BigInt(0);
+  for (let i = 0; i < randomBytes.length; i++) {
+    betNonce = (betNonce << BigInt(8)) | BigInt(randomBytes[i]);
+  }
+  const betNonceStr = `${betNonce}field`;
+
   return [
     marketId,
     `${amount}u64`,
     outcome === 'yes' ? '1u8' : '2u8',
+    betNonceStr,
+  ];
+}
+
+/**
+ * Build inputs for place_bet (PRIVATE version) - uses a Credits record
+ * place_bet(market_id: field, amount: u64, outcome: u8, bet_nonce: field, credits_in: credits.aleo/credits)
+ * This version uses transfer_private_to_public, hiding the bettor's identity.
+ */
+export function buildPlaceBetPrivateInputs(
+  marketId: string,
+  amount: bigint,
+  outcome: 'yes' | 'no',
+  creditsRecord: string,
+): string[] {
+  const randomBytes = new Uint8Array(31);
+  crypto.getRandomValues(randomBytes);
+  let betNonce = BigInt(0);
+  for (let i = 0; i < randomBytes.length; i++) {
+    betNonce = (betNonce << BigInt(8)) | BigInt(randomBytes[i]);
+  }
+  const betNonceStr = `${betNonce}field`;
+
+  return [
+    marketId,
+    `${amount}u64`,
+    outcome === 'yes' ? '1u8' : '2u8',
+    betNonceStr,
+    creditsRecord,
   ];
 }
 
 /**
  * Build inputs for commit_bet transaction (Phase 2: Commit-Reveal Scheme)
- * commit_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
- * Note: amount and outcome are PRIVATE parameters for maximum privacy
+ * commit_bet(market_id: field, amount: u64, outcome: u8, user_nonce: field, credits_in: credits.aleo/credits)
+ * Fix 2: No longer returns a Bet record (only Commitment + credits change)
+ * H-02: user_nonce is user-provided for commitment uniqueness
  */
 export function buildCommitBetInputs(
   marketId: string,
   amount: bigint,
   outcome: 'yes' | 'no',
-  creditsRecord: string  // Private credits record ciphertext
+  userNonce: string,       // User-provided random nonce (H-02)
+  creditsRecord: string,   // Private credits record ciphertext
 ): string[] {
   return [
     marketId,
     `${amount}u64`,  // Private parameter
     outcome === 'yes' ? '1u8' : '2u8',  // Private parameter
-    creditsRecord,  // Private credits record
+    userNonce,       // Private user nonce
+    creditsRecord,   // Private credits record
   ];
 }
 
 /**
  * Build inputs for reveal_bet transaction (Phase 2: Commit-Reveal Scheme)
- * reveal_bet(bet: Bet, commitment: Commitment, credits_record: credits.aleo/credits, amount: u64)
- * Note: bet, commitment, and credits_record are PRIVATE, amount is PUBLIC (revealed after deadline)
+ * reveal_bet(commitment: Commitment, credits_record: credits.aleo/credits, amount: u64, outcome: u8)
+ * Fix 2: No longer takes a Bet record (Bet is created at reveal time)
+ * Fix 3: Single hash verification (matches simplified commit_bet)
  */
 export function buildRevealBetInputs(
-  betRecord: string,  // Private Bet record ciphertext
   commitmentRecord: string,  // Private Commitment record ciphertext
   creditsRecord: string,  // Private credits record ciphertext
-  amount: bigint  // Public amount (revealed after deadline)
+  amount: bigint,  // Private amount
+  outcome: 'yes' | 'no',  // Private outcome
 ): string[] {
   return [
-    betRecord,  // Private
     commitmentRecord,  // Private
     creditsRecord,  // Private
-    `${amount}u64`,  // Public (revealed)
+    `${amount}u64`,  // Private
+    outcome === 'yes' ? '1u8' : '2u8',  // Private
   ];
+}
+
+/**
+ * Build Commitment struct input string for reveal_bet
+ * Format: "{ hash: Xfield, nonce: Xfield, market_id: Xfield, bettor: aleoX, committed_at: 0u64 }"
+ * committed_at is 0u64 because the transition value is always 0 (finalize updates it)
+ * reveal_bet doesn't check committed_at
+ */
+export function buildCommitmentStructInput(
+  hash: string,
+  nonce: string,
+  marketId: string,
+  bettor: string,
+): string {
+  return `{ hash: ${hash}, nonce: ${nonce}, market_id: ${marketId}, bettor: ${bettor}, committed_at: 0u64 }`;
+}
+
+/**
+ * Verify a commitment exists on-chain by checking the bet_commitments mapping
+ */
+export async function verifyCommitmentOnChain(commitmentHash: string): Promise<boolean> {
+  try {
+    const data = await getMappingValue<any>('bet_commitments', commitmentHash);
+    return data !== null;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -596,6 +692,55 @@ export function formatTimeRemaining(deadlineBlock: bigint, currentBlock: bigint)
  */
 export function getTransactionUrl(transactionId: string): string {
   return `${config.explorerUrl}/transaction/${transactionId}`;
+}
+
+/**
+ * Look up a transaction on-chain and check if it was rejected (finalize failed).
+ * Returns diagnostic info for failed transactions.
+ */
+export async function diagnoseTransaction(txId: string): Promise<{
+  found: boolean;
+  status: 'accepted' | 'rejected' | 'unknown';
+  type?: string;
+  functions?: string[];
+  message?: string;
+}> {
+  if (!txId.startsWith('at1')) {
+    return { found: false, status: 'unknown', message: 'Not an on-chain transaction ID (UUID from wallet)' };
+  }
+  try {
+    const resp = await fetch(`${config.rpcUrl}/transaction/${txId}`);
+    if (!resp.ok) {
+      return { found: false, status: 'unknown', message: `API returned ${resp.status}` };
+    }
+    const data = await resp.json();
+    const txType = data?.type;
+
+    // Check for rejected status — Aleo marks failed finalize as "rejected" type
+    if (txType === 'rejected') {
+      const functions: string[] = [];
+      const transitions = data?.execution?.transitions || [];
+      for (const t of transitions) {
+        if (t.program && t.function) functions.push(`${t.program}/${t.function}`);
+      }
+      return {
+        found: true,
+        status: 'rejected',
+        type: txType,
+        functions,
+        message: 'Transaction was included on-chain but finalize ABORTED. ' +
+          'Most likely cause: transfer_public_as_signer failed (insufficient public balance after fee deduction).',
+      };
+    }
+
+    if (txType === 'execute') {
+      return { found: true, status: 'accepted', type: txType };
+    }
+
+    return { found: true, status: 'unknown', type: txType };
+  } catch (err) {
+    return { found: false, status: 'unknown', message: String(err) };
+  }
 }
 
 /**
@@ -771,11 +916,15 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
 
     // Load question texts from indexed markets
     for (const market of markets) {
-      if (market.questionText) {
+      const questionText = market.questionText || market.question;
+      const marketId = market.marketId || market.id;
+      if (questionText && marketId) {
         // Register question text with both marketId and questionHash
-        QUESTION_TEXT_MAP[market.marketId] = market.questionText;
-        QUESTION_TEXT_MAP[market.questionHash] = market.questionText;
-        console.log(`📝 Loaded question text for ${market.marketId.slice(0, 16)}...`);
+        QUESTION_TEXT_MAP[marketId] = questionText;
+        if (market.questionHash) {
+          QUESTION_TEXT_MAP[market.questionHash] = questionText;
+        }
+        console.log(`Loaded question text for ${marketId.slice(0, 16)}...`);
       }
     }
 
@@ -803,13 +952,93 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
 }
 
 /**
- * Initialize market IDs (call this on app startup)
+ * Market metadata (description + resolution source) from Supabase registry.
+ * Maps market_id to { description, resolutionSource }
+ */
+let MARKET_METADATA_MAP: Record<string, { description?: string; resolutionSource?: string }> = {};
+
+/**
+ * Get market description from registry
+ */
+export function getMarketDescription(marketId: string): string | null {
+  return MARKET_METADATA_MAP[marketId]?.description || null;
+}
+
+/**
+ * Get market resolution source from registry
+ */
+export function getMarketResolutionSource(marketId: string): string | null {
+  return MARKET_METADATA_MAP[marketId]?.resolutionSource || null;
+}
+
+/**
+ * Load market registry from Supabase (shared across all users/devices).
+ * Also populates question text and transaction ID maps.
+ */
+async function loadMarketIdsFromSupabase(): Promise<string[]> {
+  if (!isSupabaseAvailable()) return [];
+  try {
+    const entries = await fetchMarketRegistry();
+    if (entries.length === 0) return [];
+
+    const ids: string[] = [];
+    for (const entry of entries) {
+      ids.push(entry.market_id);
+      // Populate question text mappings
+      if (entry.question_text) {
+        QUESTION_TEXT_MAP[entry.market_id] = entry.question_text;
+        if (entry.question_hash) {
+          QUESTION_TEXT_MAP[entry.question_hash] = entry.question_text;
+        }
+      }
+      // Populate transaction ID mappings
+      if (entry.transaction_id) {
+        MARKET_TX_MAP[entry.market_id] = entry.transaction_id;
+      }
+      // Populate metadata (description + resolution source)
+      if (entry.description || entry.resolution_source) {
+        MARKET_METADATA_MAP[entry.market_id] = {
+          description: entry.description || undefined,
+          resolutionSource: entry.resolution_source || undefined,
+        };
+      }
+    }
+
+    console.log(`[Supabase] Loaded ${ids.length} markets from registry`);
+    return ids;
+  } catch (error) {
+    console.warn('[Supabase] Failed to load market registry:', error);
+    return [];
+  }
+}
+
+/**
+ * Initialize market IDs (call this on app startup).
+ * Merges from 3 sources: localStorage, markets-index.json, and Supabase.
  */
 export async function initializeMarketIds(): Promise<void> {
-  const indexedIds = await loadMarketIdsFromIndexer();
-  if (indexedIds.length > 0) {
-    KNOWN_MARKET_IDS = indexedIds;
+  // Fetch from both sources in parallel
+  const [indexedIds, supabaseIds] = await Promise.all([
+    loadMarketIdsFromIndexer(),
+    loadMarketIdsFromSupabase(),
+  ]);
+
+  // Merge all sources: localStorage (already in KNOWN_MARKET_IDS), index file, Supabase
+  const allIds = new Set([...KNOWN_MARKET_IDS, ...indexedIds, ...supabaseIds]);
+  KNOWN_MARKET_IDS = Array.from(allIds);
+
+  // Persist merged question texts to localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
+      localStorage.setItem('veiled_markets_txs', JSON.stringify(MARKET_TX_MAP));
+      localStorage.setItem('veiled_markets_ids', JSON.stringify(KNOWN_MARKET_IDS));
+    } catch (e) {
+      console.warn('Failed to persist merged data to localStorage:', e);
+    }
   }
+
+  console.log(`[Markets] Initialized ${KNOWN_MARKET_IDS.length} total markets`);
 }
 
 /**
@@ -873,7 +1102,7 @@ export async function fetchMarketById(marketId: string) {
 
 // Export a singleton instance info
 export const CONTRACT_INFO = {
-  programId: 'veiled_markets_v9.aleo',  // Version 4 (privacy fix)
+  programId: 'veiled_markets_v10.aleo',
   deploymentTxId: 'at186jeh868hyrww5hltajpxvt6a2740ge7y6nfs078jfrcueqr8uqqugjtnq',
   network: 'testnet',
   explorerUrl: config.explorerUrl,

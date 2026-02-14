@@ -3,98 +3,93 @@ import {
   X,
   Trophy,
   Shield,
+  Copy,
   Check,
-  Loader2,
-  AlertCircle,
-  Wallet,
-  Sparkles,
+  RefreshCcw,
+  Terminal,
+  AlertTriangle,
   ExternalLink
 } from 'lucide-react'
 import { useState } from 'react'
-import { type Bet, type Market } from '@/lib/store'
+import { type Bet, useBetsStore, CONTRACT_INFO } from '@/lib/store'
 import { cn, formatCredits } from '@/lib/utils'
 
-interface WinningBet extends Bet {
-  market?: Market
-  winAmount: bigint
-}
-
 interface ClaimWinningsModalProps {
+  mode: 'winnings' | 'refund'
   isOpen: boolean
   onClose: () => void
-  winningBets: WinningBet[]
+  bets: Bet[]
   onClaimSuccess?: () => void
 }
 
-type ClaimStep = 'select' | 'claiming' | 'success' | 'error'
-
 export function ClaimWinningsModal({
+  mode,
   isOpen,
   onClose,
-  winningBets,
+  bets,
   onClaimSuccess
 }: ClaimWinningsModalProps) {
-  const [step, setStep] = useState<ClaimStep>('select')
-  const [selectedBets, setSelectedBets] = useState<Set<string>>(new Set())
-  const [claimedBets, setClaimedBets] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [txIds, setTxIds] = useState<string[]>([])
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
+  const { markBetClaimed } = useBetsStore()
 
-  const toggleBet = (betId: string) => {
-    const newSelected = new Set(selectedBets)
-    if (newSelected.has(betId)) {
-      newSelected.delete(betId)
-    } else {
-      newSelected.add(betId)
-    }
-    setSelectedBets(newSelected)
-  }
-
-  const selectAll = () => {
-    if (selectedBets.size === winningBets.length) {
-      setSelectedBets(new Set())
-    } else {
-      setSelectedBets(new Set(winningBets.map(b => b.id)))
-    }
-  }
-
-  const totalWinnings = winningBets
-    .filter(b => selectedBets.has(b.id))
-    .reduce((sum, b) => sum + b.winAmount, 0n)
+  const isRefund = mode === 'refund'
+  const bet = bets[0] // We now handle one bet at a time
 
   const handleClose = () => {
-    setStep('select')
-    setSelectedBets(new Set())
-    setError(null)
-    setTxIds([])
+    setCopiedCommand(null)
     onClose()
   }
 
-  const handleClaim = async () => {
-    if (selectedBets.size === 0) return
-
-    setStep('claiming')
-    setError(null)
-
-    try {
-      // Simulate claiming (in production, this would call the SDK for each bet)
-      await new Promise(resolve => setTimeout(resolve, 2500))
-
-      // Generate mock transaction IDs
-      const newTxIds = Array.from(selectedBets).map(
-        () => `tx_${Date.now()}_${Math.random().toString(36).substring(7)}`
-      )
-
-      setTxIds(newTxIds)
-      setClaimedBets(Array.from(selectedBets))
-      setStep('success')
+  const handleMarkClaimed = () => {
+    if (bet) {
+      markBetClaimed(bet.id)
       onClaimSuccess?.()
-    } catch (err: unknown) {
-      console.error('Failed to claim winnings:', err)
-      setError(err instanceof Error ? err.message : 'Failed to claim winnings')
-      setStep('error')
+    }
+    handleClose()
+  }
+
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedCommand(id)
+      setTimeout(() => setCopiedCommand(null), 2000)
+    } catch {
+      // Fallback for non-secure contexts
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      setCopiedCommand(id)
+      setTimeout(() => setCopiedCommand(null), 2000)
     }
   }
+
+  if (!bet) return null
+
+  const payoutDisplay = isRefund
+    ? formatCredits(bet.amount)
+    : formatCredits(bet.payoutAmount || bet.amount)
+
+  // Build CLI commands
+  const claimRefundCmd = `snarkos developer execute ${CONTRACT_INFO.programId} claim_refund \\
+  "<YOUR_BET_RECORD>" \\
+  --private-key <YOUR_PRIVATE_KEY> \\
+  --endpoint https://api.explorer.provable.com \\
+  --broadcast --network 1 --priority-fee 500000`
+
+  const claimWinningsCmd = `snarkos developer execute ${CONTRACT_INFO.programId} claim_winnings \\
+  "<YOUR_BET_RECORD>" \\
+  --private-key <YOUR_PRIVATE_KEY> \\
+  --endpoint https://api.explorer.provable.com \\
+  --broadcast --network 1 --priority-fee 500000`
+
+  const withdrawWinningsCmd = `snarkos developer execute ${CONTRACT_INFO.programId} withdraw_winnings \\
+  "<WINNINGS_CLAIM_RECORD>" "${bet.payoutAmount || bet.amount}u64" \\
+  --private-key <YOUR_PRIVATE_KEY> \\
+  --endpoint https://api.explorer.provable.com \\
+  --broadcast --network 1 --priority-fee 500000`
 
   return (
     <AnimatePresence>
@@ -127,277 +122,216 @@ export function ClaimWinningsModal({
                 </button>
 
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-yellow-500/20 to-orange-500/20 flex items-center justify-center">
-                    <Trophy className="w-6 h-6 text-yellow-400" />
+                  <div className={cn(
+                    "w-12 h-12 rounded-xl flex items-center justify-center",
+                    isRefund
+                      ? "bg-orange-500/20"
+                      : "bg-gradient-to-br from-yellow-500/20 to-orange-500/20"
+                  )}>
+                    {isRefund ? (
+                      <RefreshCcw className="w-6 h-6 text-orange-400" />
+                    ) : (
+                      <Trophy className="w-6 h-6 text-yellow-400" />
+                    )}
                   </div>
                   <div>
-                    <h2 className="text-xl font-semibold text-white">Claim Winnings</h2>
+                    <h2 className="text-xl font-semibold text-white">
+                      {isRefund ? 'Claim Refund' : 'Claim Winnings'}
+                    </h2>
                     <p className="text-sm text-surface-400">
-                      {winningBets.length} winning {winningBets.length === 1 ? 'bet' : 'bets'} available
+                      {isRefund ? 'Market was cancelled — get your bet back' : 'Withdraw your winnings'}
                     </p>
                   </div>
                 </div>
               </div>
 
               {/* Content */}
-              <div className="p-6">
-                <AnimatePresence mode="wait">
-                  {/* Select Bets */}
-                  {step === 'select' && (
-                    <motion.div
-                      key="select"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                    >
-                      {winningBets.length === 0 ? (
-                        <div className="text-center py-8">
-                          <div className="w-16 h-16 rounded-full bg-surface-800 flex items-center justify-center mx-auto mb-4">
-                            <Trophy className="w-8 h-8 text-surface-500" />
-                          </div>
-                          <h3 className="text-lg font-semibold text-white mb-2">No Winnings to Claim</h3>
-                          <p className="text-surface-400 text-sm">
-                            Your winning bets will appear here after markets are resolved.
-                          </p>
+              <div className="p-6 space-y-6">
+                {/* Bet Summary */}
+                <div className={cn(
+                  "p-4 rounded-xl border",
+                  isRefund
+                    ? "bg-orange-500/5 border-orange-500/20"
+                    : "bg-yes-500/5 border-yes-500/20"
+                )}>
+                  <p className="text-sm text-surface-400 mb-2 truncate">
+                    {bet.marketQuestion || `Market ${bet.marketId}`}
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className={cn(
+                        "text-xs font-medium px-2 py-0.5 rounded-full",
+                        bet.outcome === 'yes'
+                          ? "bg-yes-500/20 text-yes-400"
+                          : "bg-no-500/20 text-no-400"
+                      )}>
+                        {bet.outcome.toUpperCase()}
+                      </span>
+                      <span className="text-sm text-surface-400 ml-2">
+                        Bet: {formatCredits(bet.amount)} ALEO
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <p className={cn(
+                        "text-2xl font-bold",
+                        isRefund ? "text-orange-400" : "text-yes-400"
+                      )}>
+                        {isRefund ? '' : '+'}{payoutDisplay}
+                      </p>
+                      <p className="text-xs text-surface-500">ALEO</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CLI Requirement Notice */}
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-accent-500/5 border border-accent-500/20">
+                  <AlertTriangle className="w-5 h-5 text-accent-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-accent-300">CLI Required</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      {isRefund ? 'Claiming refunds' : 'Claiming winnings'} requires your private <strong>Bet record</strong>, which wallets cannot expose through their API.
+                      You need to use the <code className="text-accent-300">snarkos</code> CLI with your private key.
+                    </p>
+                  </div>
+                </div>
+
+                {/* CLI Commands */}
+                <div className="space-y-4">
+                  {isRefund ? (
+                    <>
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Terminal className="w-4 h-4 text-surface-400" />
+                          <h4 className="text-sm font-medium text-white">Run claim_refund</h4>
                         </div>
-                      ) : (
-                        <>
-                          {/* Select All */}
-                          <div className="flex items-center justify-between mb-4">
-                            <button
-                              onClick={selectAll}
-                              className="text-sm text-brand-400 hover:text-brand-300"
-                            >
-                              {selectedBets.size === winningBets.length ? 'Deselect All' : 'Select All'}
-                            </button>
-                            <span className="text-sm text-surface-400">
-                              {selectedBets.size} selected
-                            </span>
-                          </div>
-
-                          {/* Winning Bets List */}
-                          <div className="space-y-3 max-h-64 overflow-y-auto mb-6">
-                            {winningBets.map((bet) => (
-                              <button
-                                key={bet.id}
-                                onClick={() => toggleBet(bet.id)}
-                                className={cn(
-                                  "w-full p-4 rounded-xl border-2 transition-all text-left",
-                                  selectedBets.has(bet.id)
-                                    ? "border-yes-500 bg-yes-500/10"
-                                    : "border-surface-700 hover:border-surface-600"
-                                )}
-                              >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-white font-medium truncate pr-4">
-                                      {bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
-                                    </p>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      <span className={cn(
-                                        "text-xs font-medium px-2 py-0.5 rounded-full",
-                                        bet.outcome === 'yes'
-                                          ? "bg-yes-500/20 text-yes-400"
-                                          : "bg-no-500/20 text-no-400"
-                                      )}>
-                                        {bet.outcome.toUpperCase()}
-                                      </span>
-                                      <span className="text-xs text-surface-400">
-                                        Bet: {formatCredits(bet.amount)} ALEO
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="text-lg font-bold text-yes-400">
-                                      +{formatCredits(bet.winAmount)}
-                                    </p>
-                                    <p className="text-xs text-surface-500">ALEO</p>
-                                  </div>
-                                </div>
-
-                                {/* Checkbox indicator */}
-                                <div className={cn(
-                                  "absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all",
-                                  selectedBets.has(bet.id)
-                                    ? "border-yes-500 bg-yes-500"
-                                    : "border-surface-600"
-                                )}>
-                                  {selectedBets.has(bet.id) && (
-                                    <Check className="w-3 h-3 text-white" />
-                                  )}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-
-                          {/* Total Winnings */}
-                          {selectedBets.size > 0 && (
-                            <div className="p-4 rounded-xl bg-gradient-to-r from-yes-500/10 to-brand-500/10 border border-yes-500/20 mb-6">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Sparkles className="w-5 h-5 text-yellow-400" />
-                                  <span className="text-surface-300">Total Winnings</span>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-2xl font-bold text-white">
-                                    {formatCredits(totalWinnings)} ALEO
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Privacy Notice */}
-                          <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 mb-6">
-                            <Shield className="w-5 h-5 text-brand-400 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <p className="text-sm font-medium text-brand-300">Private Claim</p>
-                              <p className="text-xs text-surface-400 mt-1">
-                                Your winnings will be transferred privately. Only you will know how much you won.
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Claim Button */}
+                        <div className="relative">
+                          <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                            {claimRefundCmd}
+                          </pre>
                           <button
-                            onClick={handleClaim}
-                            disabled={selectedBets.size === 0}
-                            className={cn(
-                              "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
-                              selectedBets.size > 0
-                                ? "bg-gradient-to-r from-yes-500 to-brand-500 hover:from-yes-400 hover:to-brand-400 text-white"
-                                : "bg-surface-800 text-surface-500 cursor-not-allowed"
-                            )}
+                            onClick={() => copyToClipboard(claimRefundCmd, 'refund')}
+                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
+                            title="Copy command"
                           >
-                            <Wallet className="w-5 h-5" />
-                            Claim {formatCredits(totalWinnings)} ALEO
+                            {copiedCommand === 'refund' ? (
+                              <Check className="w-3.5 h-3.5 text-yes-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-surface-400" />
+                            )}
                           </button>
-                        </>
-                      )}
-                    </motion.div>
-                  )}
-
-                  {/* Claiming State */}
-                  {step === 'claiming' && (
-                    <motion.div
-                      key="claiming"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-center py-12"
-                    >
-                      <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
-                      <h3 className="text-xl font-bold text-white mb-2">Processing Claims...</h3>
-                      <p className="text-surface-400">
-                        Please confirm the transactions in your wallet.
-                      </p>
-                      <div className="mt-6 flex items-center justify-center gap-2 text-sm text-surface-500">
-                        <Shield className="w-4 h-4" />
-                        <span>Generating ZK proofs for private transfer</span>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Success State */}
-                  {step === 'success' && (
-                    <motion.div
-                      key="success"
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="text-center py-8"
-                    >
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        transition={{ type: 'spring', delay: 0.2 }}
-                        className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-500/20 to-yes-500/20 mx-auto mb-6 flex items-center justify-center"
-                      >
-                        <motion.div
-                          initial={{ rotate: -20 }}
-                          animate={{ rotate: 0 }}
-                          transition={{ type: 'spring', delay: 0.3 }}
-                        >
-                          <Trophy className="w-10 h-10 text-yellow-400" />
-                        </motion.div>
-                      </motion.div>
-
-                      <h3 className="text-2xl font-bold text-white mb-2">
-                        Winnings Claimed!
-                      </h3>
-                      <p className="text-surface-400 mb-6">
-                        {formatCredits(totalWinnings)} ALEO has been added to your wallet.
-                      </p>
-
-                      {/* Claimed Bets Summary */}
-                      <div className="p-4 rounded-xl bg-surface-800/50 mb-6 text-left">
-                        <p className="text-xs text-surface-500 uppercase tracking-wide mb-2">
-                          Claimed {claimedBets.length} winning {claimedBets.length === 1 ? 'bet' : 'bets'}
+                        </div>
+                        <p className="text-xs text-surface-500 mt-2">
+                          Replace <code className="text-surface-300">&lt;YOUR_BET_RECORD&gt;</code> with your Bet record plaintext and <code className="text-surface-300">&lt;YOUR_PRIVATE_KEY&gt;</code> with your Aleo private key.
                         </p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-surface-400">Total Amount</span>
-                          <span className="text-xl font-bold text-yes-400">
-                            +{formatCredits(totalWinnings)} ALEO
-                          </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Step 1: claim_winnings */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Terminal className="w-4 h-4 text-surface-400" />
+                          <h4 className="text-sm font-medium text-white">Step 1: claim_winnings</h4>
                         </div>
+                        <div className="relative">
+                          <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                            {claimWinningsCmd}
+                          </pre>
+                          <button
+                            onClick={() => copyToClipboard(claimWinningsCmd, 'claim')}
+                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
+                            title="Copy command"
+                          >
+                            {copiedCommand === 'claim' ? (
+                              <Check className="w-3.5 h-3.5 text-yes-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-surface-400" />
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-xs text-surface-500 mt-2">
+                          This produces a <strong>WinningsClaim</strong> record. Check your transaction output.
+                        </p>
                       </div>
 
-                      {/* Transaction Links */}
-                      {txIds.length > 0 && (
-                        <div className="space-y-2 mb-6">
-                          {txIds.slice(0, 3).map((txId, i) => (
-                            <a
-                              key={txId}
-                              href={`https://testnet.explorer.provable.com/transaction/${txId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center justify-center gap-2 text-sm text-brand-400 hover:text-brand-300"
-                            >
-                              <span>Transaction {i + 1}</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ))}
-                          {txIds.length > 3 && (
-                            <p className="text-xs text-surface-500">
-                              +{txIds.length - 3} more transactions
-                            </p>
-                          )}
+                      {/* Step 2: withdraw_winnings */}
+                      <div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Terminal className="w-4 h-4 text-surface-400" />
+                          <h4 className="text-sm font-medium text-white">Step 2: withdraw_winnings</h4>
                         </div>
-                      )}
-
-                      <div className="flex items-center justify-center gap-2 text-sm text-brand-400 mb-6">
-                        <Shield className="w-4 h-4" />
-                        <span>Private Transfer Complete</span>
+                        <div className="relative">
+                          <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                            {withdrawWinningsCmd}
+                          </pre>
+                          <button
+                            onClick={() => copyToClipboard(withdrawWinningsCmd, 'withdraw')}
+                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
+                            title="Copy command"
+                          >
+                            {copiedCommand === 'withdraw' ? (
+                              <Check className="w-3.5 h-3.5 text-yes-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-surface-400" />
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-xs text-surface-500 mt-2">
+                          Replace <code className="text-surface-300">&lt;WINNINGS_CLAIM_RECORD&gt;</code> with the record output from Step 1.
+                        </p>
                       </div>
-
-                      <button onClick={handleClose} className="btn-primary w-full">
-                        Done
-                      </button>
-                    </motion.div>
+                    </>
                   )}
+                </div>
 
-                  {/* Error State */}
-                  {step === 'error' && (
-                    <motion.div
-                      key="error"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-center py-8"
+                {/* Privacy Notice */}
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-500/5 border border-brand-500/20">
+                  <Shield className="w-5 h-5 text-brand-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-brand-300">Privacy Preserved</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      {isRefund
+                        ? 'Your refund will be transferred privately. No one can see you placed this bet.'
+                        : 'Your winnings are transferred privately via ZK proof. Your payout amount is hidden from observers.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Bet record hint */}
+                <div className="text-xs text-surface-500 p-3 rounded-xl bg-surface-800/50">
+                  <p className="font-medium text-surface-400 mb-1">Finding your Bet record:</p>
+                  <p>
+                    Your Bet record was created when the bet was placed. You can find it by looking up your bet transaction on the{' '}
+                    <a
+                      href="https://testnet.explorer.provable.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-brand-400 hover:text-brand-300 inline-flex items-center gap-1"
                     >
-                      <div className="w-16 h-16 rounded-full bg-no-500/10 flex items-center justify-center mx-auto mb-4">
-                        <AlertCircle className="w-8 h-8 text-no-400" />
-                      </div>
-                      <h3 className="text-xl font-bold text-white mb-2">Claim Failed</h3>
-                      <p className="text-surface-400 mb-6">{error}</p>
-                      <div className="flex gap-3">
-                        <button onClick={() => setStep('select')} className="flex-1 btn-secondary">
-                          Go Back
-                        </button>
-                        <button onClick={handleClaim} className="flex-1 btn-primary">
-                          Try Again
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                      Aleo Explorer <ExternalLink className="w-3 h-3" />
+                    </a>
+                    {' '}and decrypting the record output with your view key.
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button onClick={handleClose} className="flex-1 btn-secondary">
+                    Close
+                  </button>
+                  <button
+                    onClick={handleMarkClaimed}
+                    className={cn(
+                      "flex-1 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2",
+                      isRefund
+                        ? "bg-orange-500 hover:bg-orange-400 text-white"
+                        : "bg-gradient-to-r from-yes-500 to-brand-500 hover:from-yes-400 hover:to-brand-400 text-white"
+                    )}
+                  >
+                    <Check className="w-4 h-4" />
+                    Mark as Claimed
+                  </button>
+                </div>
               </div>
             </div>
           </motion.div>

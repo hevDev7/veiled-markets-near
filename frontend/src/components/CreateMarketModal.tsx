@@ -16,7 +16,7 @@ import {
 import { useState } from 'react'
 import { useWalletStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
-import { walletManager } from '@/lib/wallet'
+import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
   hashToField,
   getCurrentBlockHeight,
@@ -26,6 +26,7 @@ import {
   registerMarketTransaction,
   waitForMarketCreation
 } from '@/lib/aleo-client'
+import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
 
 interface CreateMarketModalProps {
   isOpen: boolean
@@ -69,6 +70,7 @@ const initialFormData: MarketFormData = {
 
 export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketModalProps) {
   const { wallet } = useWalletStore()
+  const { executeTransaction } = useAleoTransaction()
   const [step, setStep] = useState<CreateStep>('details')
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
@@ -187,15 +189,17 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       console.log('Resolution block height:', resolutionBlockHeight.toString())
 
       // Build transaction inputs for create_market
-      // create_market(question_hash: field, category: u8, deadline: u64, resolution_deadline: u64)
+      // create_market(question_hash: field, category: u8, deadline: u64, resolution_deadline: u64, resolver: address)
+      // v10: resolver defaults to creator's own address (can be changed for delegation)
 
       // Ensure all values are properly converted to strings
       const input0 = String(questionHash);
       const input1 = `${Number(formData.category)}u8`;
       const input2 = `${deadlineBlockHeight.toString()}u64`;
       const input3 = `${resolutionBlockHeight.toString()}u64`;
+      const input4 = wallet.address!; // resolver = creator by default
 
-      const inputs = [input0, input1, input2, input3];
+      const inputs = [input0, input1, input2, input3, input4];
 
       console.log('=== CREATE MARKET DEBUG ===')
       console.log('Question:', formData.question)
@@ -240,17 +244,17 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         throw new Error('Resolution deadline must be after betting deadline')
       }
 
-      // Request transaction through wallet with timeout
+      // Request transaction through useAleoTransaction hook (bypasses adapter, calls wallet directly)
       // Shows "taking longer" message after 30s, times out at 2 minutes
       setIsSlowTransaction(false)
       const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
 
       const WALLET_TIMEOUT_MS = 120_000 // 2 minutes
-      const txPromise = walletManager.requestTransaction({
-        programId: CONTRACT_INFO.programId,
-        functionName: 'create_market',
+      const txPromise = executeTransaction({
+        program: CONTRACT_INFO.programId,
+        function: 'create_market',
         inputs,
-        fee: 1.0, // 1 ALEO fee (Leo Wallet expects fee in ALEO, not microcredits)
+        fee: 1.0, // 1 ALEO (hook converts to microcredits internally)
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -258,9 +262,14 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         )), WALLET_TIMEOUT_MS)
       })
 
+      let result: { transactionId?: string }
       let transactionId: string
       try {
-        transactionId = await Promise.race([txPromise, timeoutPromise])
+        result = await Promise.race([txPromise, timeoutPromise])
+        transactionId = result?.transactionId || ''
+        if (!transactionId) {
+          throw new Error('No transaction ID returned from wallet')
+        }
       } finally {
         clearTimeout(slowTimer)
       }
@@ -282,6 +291,22 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         .then((actualMarketId) => {
           if (actualMarketId) {
             console.log('Market ID retrieved:', actualMarketId)
+
+            // Auto-register in Supabase so all users can discover this market
+            if (isSupabaseAvailable()) {
+              registerMarketInRegistry({
+                market_id: actualMarketId,
+                question_hash: questionHash,
+                question_text: formData.question,
+                description: formData.description || undefined,
+                resolution_source: formData.resolutionSource || undefined,
+                category: formData.category,
+                creator_address: wallet.address!,
+                transaction_id: transactionId,
+                created_at: Date.now(),
+              }).catch(err => console.warn('Failed to register market in Supabase:', err))
+            }
+
             onSuccess?.(actualMarketId)
           } else {
             console.warn('Could not retrieve actual market ID')
@@ -734,37 +759,48 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         </motion.div>
 
                         <h3 className="text-2xl font-bold text-white mb-2">
-                          Market Created!
+                          Transaction Submitted!
                         </h3>
                         <p className="text-surface-400 mb-6">
-                          Your prediction market is now live.
+                          Your market creation transaction has been sent to the network.
                         </p>
 
                         <div className="p-4 rounded-xl bg-surface-800/50 mb-4 text-left">
-                          <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Transaction ID</p>
-                          <p className="text-sm text-white font-mono break-all">{marketId}</p>
-                          {marketId && (
-                            <a
-                              href={getTransactionUrl(marketId)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 mt-2"
-                            >
-                              View on Explorer <ExternalLink className="w-3 h-3" />
-                            </a>
+                          {marketId?.startsWith('at1') ? (
+                            <>
+                              <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Transaction ID</p>
+                              <p className="text-sm text-white font-mono break-all">{marketId}</p>
+                              <a
+                                href={getTransactionUrl(marketId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 mt-2"
+                              >
+                                View on Explorer <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Wallet Request ID</p>
+                              <p className="text-sm text-surface-300 font-mono break-all">{marketId}</p>
+                              <p className="text-xs text-surface-500 mt-2">
+                                Your wallet is processing this transaction. The on-chain transaction ID will appear once confirmed.
+                                Check your Leo Wallet extension for real-time status.
+                              </p>
+                            </>
                           )}
                         </div>
 
-                        {/* Important Note about Market ID */}
+                        {/* Polling for on-chain confirmation */}
                         <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-6 text-left">
                           <div className="flex items-start gap-3">
                             <Loader2 className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
                             <div>
-                              <p className="text-sm font-medium text-brand-300">Retrieving Market ID...</p>
+                              <p className="text-sm font-medium text-brand-300">Waiting for on-chain confirmation...</p>
                               <p className="text-xs text-surface-400 mt-1">
-                                The system is polling for the actual on-chain market ID. This happens automatically
-                                in the background. Once confirmed, you'll be able to place bets on this market.
-                                You can close this dialog - the process will continue.
+                                The wallet is generating a zero-knowledge proof and broadcasting to the network.
+                                This can take 1-3 minutes. Once confirmed, the market will appear on the dashboard.
+                                You can close this dialog — the process continues in the background.
                               </p>
                             </div>
                           </div>

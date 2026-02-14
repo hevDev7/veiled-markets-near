@@ -90,6 +90,15 @@ export function isSoterWalletInstalled(): boolean {
 }
 
 /**
+ * Check if Shield Wallet extension is installed
+ * Shield Wallet (shield.app) may inject window.shield or window.shieldWallet
+ */
+export function isShieldWalletInstalled(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!(window as any).shield || !!(window as any).shieldWallet || !!(window as any).shieldAleo;
+}
+
+/**
  * Helper: Create a timeout promise
  */
 function createTimeoutPromise<T>(ms: number, message: string): Promise<T> {
@@ -116,36 +125,36 @@ export function getAvailableWallets(): string[] {
   if (isLeoWalletInstalled()) wallets.push('leo');
   if (isFoxWalletInstalled()) wallets.push('fox');
   if (isSoterWalletInstalled()) wallets.push('soter');
+  if (isShieldWalletInstalled()) wallets.push('shield');
   return wallets;
 }
 
 
 /**
- * Fetch public balance from API
+ * Fetch public balance from API.
+ * Returns 0n for HTTP 404 (address has no public balance mapping).
+ * THROWS on network errors or server errors (5xx) so callers can
+ * distinguish "balance is genuinely 0" from "API unreachable".
  */
-async function fetchPublicBalance(address: string): Promise<bigint> {
-  try {
-    const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-    const url = `${baseUrl}/program/credits.aleo/mapping/account/${address}`;
-    const response = await fetch(url);
+export async function fetchPublicBalance(address: string): Promise<bigint> {
+  const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
+  const url = `${baseUrl}/program/credits.aleo/mapping/account/${address}`;
+  const response = await fetch(url); // throws on network error (ERR_NETWORK_CHANGED, etc.)
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        return 0n; // No public balance
-      }
-      return 0n;
+  if (!response.ok) {
+    if (response.status === 404) {
+      return 0n; // No public balance mapping — genuinely 0
     }
-
-    const data = await response.text();
-    const cleanData = data.replace(/"/g, '').trim();
-    const match = cleanData.match(/(\d+)/);
-    if (match) {
-      return BigInt(match[1]);
-    }
-    return 0n;
-  } catch {
-    return 0n;
+    throw new Error(`Balance API returned HTTP ${response.status}`);
   }
+
+  const data = await response.text();
+  const cleanData = data.replace(/"/g, '').trim();
+  const match = cleanData.match(/(\d+)/);
+  if (match) {
+    return BigInt(match[1]);
+  }
+  return 0n;
 }
 
 // ============================================================================
@@ -180,8 +189,8 @@ export class PuzzleWalletAdapter {
         },
         permissions: {
           programIds: {
-            'AleoTestnet': ['veiled_markets_v9.aleo', 'credits.aleo'],
-            'AleoMainnet': ['veiled_markets_v9.aleo', 'credits.aleo'],
+            'AleoTestnet': ['veiled_markets_v10.aleo', 'credits.aleo'],
+            'AleoMainnet': ['veiled_markets_v10.aleo', 'credits.aleo'],
           }
         }
       });
@@ -302,8 +311,12 @@ export class PuzzleWalletAdapter {
     } catch (err) {
       console.warn('Puzzle Wallet: getBalance failed:', err);
       if (this.account?.address) {
-        const publicBalance = await fetchPublicBalance(this.account.address);
-        return { public: publicBalance, private: 0n };
+        try {
+          const publicBalance = await fetchPublicBalance(this.account.address);
+          return { public: publicBalance, private: 0n };
+        } catch {
+          console.warn('Puzzle Wallet: fetchPublicBalance also failed');
+        }
       }
       return { public: 0n, private: 0n };
     }
@@ -500,7 +513,7 @@ export class LeoWalletAdapter {
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
         console.log('Leo Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v9.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v10.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Leo Wallet: Connected successfully');
@@ -777,15 +790,80 @@ export class LeoWalletAdapter {
 
       console.log('Leo Wallet: Inputs validated:', request.inputs);
 
-      const result = await this.adapter.executeTransaction({
-        program: request.programId,
-        function: request.functionName,
-        inputs: request.inputs,
-        fee: request.fee,
-        privateFee: false,
-      });
+      // Bypass the ProvableHQ alpha adapter and call Leo Wallet extension directly.
+      // The adapter (v0.3.0-alpha.2) uses requestTransaction() internally, but
+      // requestExecution() is the correct method for executing program functions.
+      // Also try both 'testnetbeta' (old) and 'testnet' (new) chain IDs.
+      const leoWallet = (window as any).leoWallet || (window as any).leo;
+      let result: any = null;
 
-      console.log('Leo Wallet: Transaction result:', result);
+      if (leoWallet) {
+        const txData = {
+          address: this.adapter.account?.address || this.account.address,
+          chainId: 'testnetbeta',
+          transitions: [{
+            program: request.programId,
+            functionName: request.functionName,
+            inputs: request.inputs,
+          }],
+          fee: request.fee || 0.5,
+          feePrivate: false,
+        };
+
+        // Method 1: requestExecution with 'testnetbeta' chainId
+        if (typeof leoWallet.requestExecution === 'function') {
+          try {
+            console.log('Leo Wallet: Method 1 - requestExecution (testnetbeta)...');
+            result = await leoWallet.requestExecution(txData);
+            console.log('Leo Wallet: Method 1 result:', result);
+          } catch (err: any) {
+            console.log('Leo Wallet: Method 1 failed:', err?.message || err);
+
+            // Method 2: requestExecution with 'testnet' chainId
+            try {
+              console.log('Leo Wallet: Method 2 - requestExecution (testnet)...');
+              result = await leoWallet.requestExecution({ ...txData, chainId: 'testnet' });
+              console.log('Leo Wallet: Method 2 result:', result);
+            } catch (err2: any) {
+              console.log('Leo Wallet: Method 2 failed:', err2?.message || err2);
+            }
+          }
+        }
+
+        // Method 3: requestTransaction with 'testnetbeta' (what the adapter does)
+        if (!result && typeof leoWallet.requestTransaction === 'function') {
+          try {
+            console.log('Leo Wallet: Method 3 - requestTransaction (testnetbeta)...');
+            result = await leoWallet.requestTransaction(txData);
+            console.log('Leo Wallet: Method 3 result:', result);
+          } catch (err: any) {
+            console.log('Leo Wallet: Method 3 failed:', err?.message || err);
+
+            // Method 4: requestTransaction with 'testnet' chainId
+            try {
+              console.log('Leo Wallet: Method 4 - requestTransaction (testnet)...');
+              result = await leoWallet.requestTransaction({ ...txData, chainId: 'testnet' });
+              console.log('Leo Wallet: Method 4 result:', result);
+            } catch (err2: any) {
+              console.log('Leo Wallet: Method 4 failed:', err2?.message || err2);
+            }
+          }
+        }
+      }
+
+      // Fallback: use the adapter's executeTransaction if direct calls all failed
+      if (!result) {
+        console.log('Leo Wallet: Falling back to adapter executeTransaction...');
+        result = await this.adapter.executeTransaction({
+          program: request.programId,
+          function: request.functionName,
+          inputs: request.inputs,
+          fee: request.fee,
+          privateFee: false,
+        });
+      }
+
+      console.log('Leo Wallet: Final result:', result);
       console.log('Leo Wallet: Result type:', typeof result);
       console.log('Leo Wallet: Result keys:', result ? Object.keys(result) : 'null');
 
@@ -809,20 +887,20 @@ export class LeoWalletAdapter {
 
         // If it's a UUID (event ID), try to get the actual transaction ID from wallet
         if (!transactionId.startsWith('at1') && transactionId.includes('-')) {
-          console.log('Leo Wallet: Got UUID, attempting to get real transaction ID...');
+          console.log('Leo Wallet: Got UUID, polling for on-chain transaction ID...');
 
           // Store the event ID
           (window as any).__lastLeoEventId = transactionId;
 
-          // Try to get transaction ID from wallet extension directly
-          const realTxId = await this.pollForTransactionId(transactionId);
+          // Poll with longer timeout (ZK proving can take 1-3 minutes for complex programs)
+          const realTxId = await this.pollForTransactionId(transactionId, 30);
           if (realTxId) {
-            console.log('Leo Wallet: ✅ Got real transaction ID:', realTxId);
+            console.log('Leo Wallet: Got real transaction ID:', realTxId);
             return realTxId;
           }
 
-          console.warn('⚠️ Could not get real transaction ID, returning UUID');
-          console.warn('⚠️ User can get correct transaction ID from Leo Wallet extension');
+          console.warn('Leo Wallet: Could not get real transaction ID, returning UUID');
+          console.warn('Leo Wallet: User can check Leo Wallet extension for actual transaction');
         }
 
         return transactionId;
@@ -853,33 +931,45 @@ export class LeoWalletAdapter {
   }
 
   /**
-   * Poll the wallet adapter for the real transaction ID using transactionStatus()
-   * According to Leo Wallet docs, requestTransaction returns an ID that is NOT the on-chain tx ID
-   * We need to use transactionStatus() to get the actual on-chain transaction ID
+   * Poll the wallet for the real transaction ID using transactionStatus()
+   * Leo Wallet returns a UUID event ID, not the on-chain at1... tx ID.
+   * ZK proving for complex programs (500+ statements) can take 1-3 minutes,
+   * so we poll with longer timeouts.
    */
-  private async pollForTransactionId(eventId: string, maxAttempts: number = 15): Promise<string | null> {
+  private async pollForTransactionId(eventId: string, maxAttempts: number = 30): Promise<string | null> {
     console.log('Leo Wallet: Polling for on-chain transaction ID...');
     console.log('Leo Wallet: Event/Request ID:', eventId);
+    console.log('Leo Wallet: Max attempts:', maxAttempts, '(~', maxAttempts * 5, 'seconds)');
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        // Method 1: Use adapter's transactionStatus (official method from docs)
-        if (typeof (this.adapter as any).transactionStatus === 'function') {
-          console.log(`Leo Wallet: Attempt ${attempt + 1} - calling transactionStatus(${eventId})`);
-          const status = await (this.adapter as any).transactionStatus(eventId);
-          console.log(`Leo Wallet: transactionStatus response:`, status);
+        const leoWallet = (window as any).leoWallet || (window as any).leo;
 
-          // Check various possible response formats
+        // Try transactionStatus on window.leoWallet (most direct)
+        if (leoWallet && typeof leoWallet.transactionStatus === 'function') {
+          const status = await leoWallet.transactionStatus(eventId);
+          if (attempt < 3 || attempt % 5 === 0) {
+            console.log(`Leo Wallet: Poll ${attempt + 1}/${maxAttempts} - status:`, status);
+          }
+
           if (status) {
-            // The on-chain transaction ID might be in different fields
+            const statusStr = status.status || '';
+
+            // Check for failure
+            if (statusStr === 'Failed' || statusStr === 'Rejected' || statusStr === 'Error') {
+              console.error('Leo Wallet: Transaction FAILED:', status);
+              return null;
+            }
+
+            // Check for on-chain transaction ID
             const onChainId = status.transactionId || status.transaction_id || status.txId || status.id;
             if (onChainId && typeof onChainId === 'string' && onChainId.startsWith('at1')) {
-              console.log('Leo Wallet: ✅ Found on-chain transaction ID:', onChainId);
+              console.log('Leo Wallet: Found on-chain transaction ID:', onChainId);
               return onChainId;
             }
 
-            // Check if status indicates completion
-            if (status.status === 'Finalized' || status.status === 'Completed' || status.finalized) {
+            // Check if finalized
+            if (statusStr === 'Finalized' || statusStr === 'Completed') {
               console.log('Leo Wallet: Transaction finalized, checking for ID...');
               if (status.transaction?.id?.startsWith('at1')) {
                 return status.transaction.id;
@@ -888,59 +978,33 @@ export class LeoWalletAdapter {
           }
         }
 
-        // Method 2: Try requestTransactionHistory to find recent transaction
-        if (typeof (this.adapter as any).requestTransactionHistory === 'function') {
-          console.log(`Leo Wallet: Attempt ${attempt + 1} - calling requestTransactionHistory`);
-          const history = await (this.adapter as any).requestTransactionHistory('veiled_markets_v9.aleo');
-          console.log('Leo Wallet: Transaction history:', history);
-
-          if (Array.isArray(history) && history.length > 0) {
-            // Get the most recent transaction
-            const recentTx = history[0];
-            const txId = recentTx?.transactionId || recentTx?.transaction_id || recentTx?.id;
-            if (txId && typeof txId === 'string' && txId.startsWith('at1')) {
-              console.log('Leo Wallet: ✅ Found recent transaction ID:', txId);
-              return txId;
+        // Also try adapter's transactionStatus
+        if (typeof (this.adapter as any).transactionStatus === 'function') {
+          try {
+            const adapterStatus = await (this.adapter as any).transactionStatus(eventId);
+            if (adapterStatus) {
+              const onChainId = adapterStatus.transactionId || adapterStatus.transaction_id;
+              if (onChainId && typeof onChainId === 'string' && onChainId.startsWith('at1')) {
+                console.log('Leo Wallet: Found on-chain ID via adapter:', onChainId);
+                return onChainId;
+              }
             }
+          } catch {
+            // Adapter method may fail, continue with direct polling
           }
         }
 
-        // Method 3: Try window.leoWallet direct access
-        const leoWallet = (window as any).leoWallet || (window as any).leo;
-        if (leoWallet) {
-          // Try transactionStatus on window object
-          if (typeof leoWallet.transactionStatus === 'function') {
-            const status = await leoWallet.transactionStatus(eventId);
-            console.log(`Leo Wallet: window.leoWallet.transactionStatus:`, status);
-            const txId = status?.transactionId || status?.transaction_id || status?.id;
-            if (txId && typeof txId === 'string' && txId.startsWith('at1')) {
-              return txId;
-            }
-          }
-
-          // Try getTransactionStatus
-          if (typeof leoWallet.getTransactionStatus === 'function') {
-            const status = await leoWallet.getTransactionStatus(eventId);
-            console.log(`Leo Wallet: window.leoWallet.getTransactionStatus:`, status);
-            const txId = status?.transactionId || status?.transaction_id || status?.id;
-            if (txId && typeof txId === 'string' && txId.startsWith('at1')) {
-              return txId;
-            }
-          }
-        }
-
-        // Wait before next attempt (increasing delay)
-        const delay = Math.min(1000 + attempt * 500, 3000);
-        console.log(`Leo Wallet: Attempt ${attempt + 1} - no on-chain ID yet, waiting ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        // Wait 5 seconds between polls (ZK proving takes 1-3 minutes)
+        await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (err) {
-        console.log(`Leo Wallet: Attempt ${attempt + 1} error:`, err);
-        // Continue polling even on error
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (attempt < 3) {
+          console.log(`Leo Wallet: Poll ${attempt + 1} error:`, err);
+        }
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
 
-    console.log('Leo Wallet: Could not get on-chain transaction ID after', maxAttempts, 'attempts');
+    console.log('Leo Wallet: Could not get on-chain transaction ID after', maxAttempts, 'attempts (~', maxAttempts * 5, 'seconds)');
     return null;
   }
 
@@ -1099,7 +1163,7 @@ export class FoxWalletAdapter {
 
       try {
         console.log('Fox Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v9.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v10.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Fox Wallet: Connected successfully');
@@ -1148,7 +1212,11 @@ export class FoxWalletAdapter {
     let publicBalance = 0n;
     let privateBalance = 0n;
 
-    publicBalance = await fetchPublicBalance(this.account.address);
+    try {
+      publicBalance = await fetchPublicBalance(this.account.address);
+    } catch {
+      console.warn('Wallet: fetchPublicBalance failed, using 0');
+    }
 
     try {
       const records = await this.adapter.requestRecords('credits.aleo', true);
@@ -1282,7 +1350,7 @@ export class SoterWalletAdapter {
 
       try {
         console.log('Soter Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v9.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v10.aleo', 'credits.aleo']);
 
         if (this.adapter.account) {
           console.log('Soter Wallet: Connected successfully');
@@ -1331,7 +1399,11 @@ export class SoterWalletAdapter {
     let publicBalance = 0n;
     let privateBalance = 0n;
 
-    publicBalance = await fetchPublicBalance(this.account.address);
+    try {
+      publicBalance = await fetchPublicBalance(this.account.address);
+    } catch {
+      console.warn('Wallet: fetchPublicBalance failed, using 0');
+    }
 
     try {
       const records = await this.adapter.requestRecords('credits.aleo', true);
@@ -1433,13 +1505,325 @@ export class SoterWalletAdapter {
 }
 
 // ============================================================================
+// SHIELD WALLET ADAPTER (shield.app - Mobile-first Aleo wallet)
+// ============================================================================
+
+export class ShieldWalletAdapter {
+  private account: WalletAccount | null = null;
+  private connected: boolean = false;
+
+  get isInstalled(): boolean {
+    return isShieldWalletInstalled();
+  }
+
+  get isConnected(): boolean {
+    return this.connected && !!this.account;
+  }
+
+  get currentAccount(): WalletAccount | null {
+    return this.account;
+  }
+
+  private getShieldWallet(): any {
+    if (typeof window === 'undefined') return null;
+    return (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo;
+  }
+
+  async connect(): Promise<WalletAccount> {
+    try {
+      console.log('Shield Wallet: Attempting to connect...');
+      const shieldWallet = this.getShieldWallet();
+
+      if (!shieldWallet) {
+        throw new Error(
+          'Shield Wallet not detected. Please install from https://shield.app\n' +
+          'Shield Wallet is a mobile app - scan the QR code or install the browser extension.'
+        );
+      }
+
+      console.log('Shield Wallet: Found wallet object, methods:', Object.keys(shieldWallet));
+
+      // Try to connect using standard Aleo wallet interface
+      if (typeof shieldWallet.connect === 'function') {
+        // Try standard Aleo wallet connect pattern
+        try {
+          await shieldWallet.connect('AutoDecrypt', 'testnetbeta', ['veiled_markets_v10.aleo', 'credits.aleo']);
+        } catch {
+          // Try alternative connect signature
+          try {
+            await shieldWallet.connect({ network: 'testnet', programs: ['veiled_markets_v10.aleo', 'credits.aleo'] });
+          } catch {
+            await shieldWallet.connect();
+          }
+        }
+      }
+
+      // Get public key / address
+      let address: string | null = null;
+
+      if (shieldWallet.publicKey) {
+        address = shieldWallet.publicKey;
+      } else if (typeof shieldWallet.getAccount === 'function') {
+        const acc = await shieldWallet.getAccount();
+        address = acc?.address || acc?.publicKey || acc;
+      } else if (typeof shieldWallet.getAddress === 'function') {
+        address = await shieldWallet.getAddress();
+      }
+
+      if (!address || typeof address !== 'string' || !address.startsWith('aleo1')) {
+        throw new Error('Shield Wallet connected but no valid Aleo address returned');
+      }
+
+      this.connected = true;
+      this.account = {
+        address,
+        network: 'testnet',
+      };
+
+      console.log('Shield Wallet: Connected successfully:', address);
+      return this.account;
+    } catch (error: any) {
+      console.error('Shield Wallet connection error:', error);
+      const errorMessage = error?.message?.toLowerCase() || '';
+
+      if (errorMessage.includes('user reject') || errorMessage.includes('rejected') || errorMessage.includes('denied')) {
+        throw new Error('Connection request was rejected by user.');
+      }
+
+      throw new Error(error?.message || 'Failed to connect to Shield Wallet. Install from https://shield.app');
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      const shieldWallet = this.getShieldWallet();
+      if (shieldWallet && typeof shieldWallet.disconnect === 'function') {
+        await shieldWallet.disconnect();
+      }
+    } catch (error) {
+      console.error('Shield disconnect error:', error);
+    }
+    this.connected = false;
+    this.account = null;
+  }
+
+  async getBalance(): Promise<WalletBalance> {
+    if (!this.connected || !this.account) {
+      return { public: 0n, private: 0n };
+    }
+
+    let publicBalance = 0n;
+    let privateBalance = 0n;
+
+    // Get public balance from API
+    try {
+      publicBalance = await fetchPublicBalance(this.account.address);
+    } catch {
+      console.warn('Shield Wallet: fetchPublicBalance failed');
+    }
+
+    // Try to get balance from Shield Wallet
+    const shieldWallet = this.getShieldWallet();
+    if (shieldWallet) {
+      try {
+        if (typeof shieldWallet.getBalance === 'function') {
+          const balance = await shieldWallet.getBalance();
+          if (balance?.private !== undefined) {
+            const privVal = String(balance.private).replace(/[ui]\d+\.?\w*$/i, '').trim();
+            const parsed = BigInt(privVal.replace(/[^\d]/g, '') || '0');
+            if (parsed > 0n) privateBalance = parsed;
+          }
+        }
+      } catch (err) {
+        console.log('Shield Wallet: getBalance failed:', err);
+      }
+
+      // Try requestRecordPlaintexts
+      if (privateBalance === 0n) {
+        try {
+          if (typeof shieldWallet.requestRecordPlaintexts === 'function') {
+            const result = await shieldWallet.requestRecordPlaintexts('credits.aleo');
+            const records = Array.isArray(result) ? result : (result?.records || []);
+            for (const r of records) {
+              const text = typeof r === 'string' ? r : (r?.plaintext || r?.data || JSON.stringify(r));
+              const match = String(text).match(/microcredits["\s:]*(\d+)/);
+              if (match) privateBalance += BigInt(match[1]);
+            }
+          }
+        } catch (err) {
+          console.log('Shield Wallet: requestRecordPlaintexts failed:', err);
+        }
+      }
+    }
+
+    return { public: publicBalance, private: privateBalance };
+  }
+
+  async requestTransaction(request: TransactionRequest): Promise<string> {
+    if (!this.connected || !this.account) {
+      throw new Error('Wallet not connected');
+    }
+
+    const shieldWallet = this.getShieldWallet();
+    if (!shieldWallet) {
+      throw new Error('Shield Wallet not available');
+    }
+
+    console.log('Shield Wallet: Executing transaction...');
+    console.log('Shield Wallet: Request:', {
+      program: request.programId,
+      function: request.functionName,
+      inputs: request.inputs,
+      fee: request.fee,
+    });
+
+    const txData = {
+      address: this.account.address,
+      chainId: 'testnetbeta',
+      transitions: [{
+        program: request.programId,
+        functionName: request.functionName,
+        inputs: request.inputs,
+      }],
+      fee: request.fee || 0.5,
+      feePrivate: false,
+    };
+
+    let result: any = null;
+
+    // Method 1: requestExecution (preferred for program execution)
+    if (typeof shieldWallet.requestExecution === 'function') {
+      try {
+        console.log('Shield Wallet: Trying requestExecution...');
+        result = await shieldWallet.requestExecution(txData);
+        console.log('Shield Wallet: requestExecution result:', result);
+      } catch (err: any) {
+        console.log('Shield Wallet: requestExecution failed:', err?.message || err);
+      }
+    }
+
+    // Method 2: requestTransaction
+    if (!result && typeof shieldWallet.requestTransaction === 'function') {
+      try {
+        console.log('Shield Wallet: Trying requestTransaction...');
+        result = await shieldWallet.requestTransaction(txData);
+        console.log('Shield Wallet: requestTransaction result:', result);
+      } catch (err: any) {
+        console.log('Shield Wallet: requestTransaction failed:', err?.message || err);
+      }
+    }
+
+    // Method 3: executeTransaction (alternative API)
+    if (!result && typeof shieldWallet.executeTransaction === 'function') {
+      try {
+        console.log('Shield Wallet: Trying executeTransaction...');
+        result = await shieldWallet.executeTransaction({
+          program: request.programId,
+          function: request.functionName,
+          inputs: request.inputs,
+          fee: request.fee,
+          privateFee: false,
+        });
+        console.log('Shield Wallet: executeTransaction result:', result);
+      } catch (err: any) {
+        console.log('Shield Wallet: executeTransaction failed:', err?.message || err);
+      }
+    }
+
+    if (!result) {
+      throw new Error('Shield Wallet: All transaction methods failed. The wallet may not support this operation yet.');
+    }
+
+    // Extract transaction ID
+    let transactionId = null;
+    if (typeof result === 'string') {
+      transactionId = result;
+    } else if (result && typeof result === 'object') {
+      transactionId = result.transactionId || result.txId || result.id || result.transaction_id || result.eventId;
+    }
+
+    if (transactionId) {
+      console.log('Shield Wallet: Transaction ID:', transactionId);
+      return transactionId;
+    }
+
+    throw new Error('No transaction ID returned from Shield Wallet');
+  }
+
+  async getRecords(programId: string): Promise<any[]> {
+    if (!this.connected) return [];
+
+    const shieldWallet = this.getShieldWallet();
+    if (!shieldWallet) return [];
+
+    try {
+      if (typeof shieldWallet.requestRecordPlaintexts === 'function') {
+        const result = await shieldWallet.requestRecordPlaintexts(programId);
+        return Array.isArray(result) ? result : (result?.records || []);
+      }
+    } catch {
+      // Ignore
+    }
+
+    try {
+      if (typeof shieldWallet.requestRecords === 'function') {
+        const result = await shieldWallet.requestRecords(programId);
+        return Array.isArray(result) ? result : (result?.records || []);
+      }
+    } catch {
+      // Ignore
+    }
+
+    return [];
+  }
+
+  async signMessage(message: string): Promise<string> {
+    if (!this.connected) {
+      throw new Error('Wallet not connected');
+    }
+
+    const shieldWallet = this.getShieldWallet();
+    if (shieldWallet && typeof shieldWallet.signMessage === 'function') {
+      const encoder = new TextEncoder();
+      const messageBytes = encoder.encode(message);
+      const signature = await shieldWallet.signMessage(messageBytes);
+      return signature ? new TextDecoder().decode(signature.signature || signature) : '';
+    }
+
+    throw new Error('Shield Wallet does not support message signing');
+  }
+
+  onAccountChange(callback: (account: WalletAccount | null) => void): () => void {
+    const shieldWallet = this.getShieldWallet();
+    if (shieldWallet && typeof shieldWallet.on === 'function') {
+      const handler = () => {
+        this.account = null;
+        this.connected = false;
+        callback(null);
+      };
+      shieldWallet.on('disconnect', handler);
+      return () => {
+        if (typeof shieldWallet.off === 'function') {
+          shieldWallet.off('disconnect', handler);
+        }
+      };
+    }
+    return () => {};
+  }
+
+  onNetworkChange(_callback: (network: NetworkType) => void): () => void {
+    return () => {};
+  }
+}
+
+// ============================================================================
 // UNIFIED WALLET MANAGER
 // ============================================================================
 
-export type WalletType = 'puzzle' | 'leo' | 'fox' | 'soter' | 'demo';
+export type WalletType = 'puzzle' | 'leo' | 'fox' | 'soter' | 'shield' | 'demo';
 
 export class WalletManager {
-  private adapter: PuzzleWalletAdapter | LeoWalletAdapter | FoxWalletAdapter | SoterWalletAdapter | null = null;
+  private adapter: PuzzleWalletAdapter | LeoWalletAdapter | FoxWalletAdapter | SoterWalletAdapter | ShieldWalletAdapter | null = null;
   private walletType: WalletType | null = null;
   private demoMode: boolean = false;
   private demoAccount: WalletAccount | null = null;
@@ -1454,6 +1838,12 @@ export class WalletManager {
         name: 'Leo Wallet',
         installed: isLeoWalletInstalled(),
         icon: '🦁',
+      },
+      {
+        type: 'shield',
+        name: 'Shield Wallet',
+        installed: isShieldWalletInstalled(),
+        icon: '🛡️',
       },
       {
         type: 'fox',
@@ -1506,6 +1896,8 @@ export class WalletManager {
       this.adapter = new FoxWalletAdapter();
     } else if (type === 'soter') {
       this.adapter = new SoterWalletAdapter();
+    } else if (type === 'shield') {
+      this.adapter = new ShieldWalletAdapter();
     } else {
       throw new Error('Unknown wallet type');
     }
@@ -1619,6 +2011,38 @@ export class WalletManager {
   }
 
   /**
+   * Test wallet transaction: send 1000 microcredits to self via credits.aleo/transfer_public
+   * This tests if the wallet's prover works for simple transactions.
+   * If this succeeds but place_bet_public fails, the issue is program-specific.
+   */
+  async testTransaction(): Promise<string> {
+    if (this.demoMode) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return `demo_test_${Date.now()}`;
+    }
+
+    if (!this.adapter?.isConnected) {
+      throw new Error('Wallet not connected');
+    }
+
+    const account = this.adapter.currentAccount;
+    if (!account) {
+      throw new Error('No account connected');
+    }
+
+    console.log('=== WALLET TEST TRANSACTION ===');
+    console.log('Testing credits.aleo/transfer_public (send 1000 microcredits to self)');
+    console.log('Address:', account.address);
+
+    return await this.adapter.requestTransaction({
+      programId: 'credits.aleo',
+      functionName: 'transfer_public',
+      inputs: [account.address, '1000u64'],
+      fee: 0.1, // 0.1 ALEO fee
+    });
+  }
+
+  /**
    * Shield credits: convert public balance to private record
    * Calls credits.aleo/transfer_public_to_private
    */
@@ -1684,6 +2108,12 @@ export const WALLET_INFO = {
     description: 'Official Leo language wallet',
     downloadUrl: 'https://leo.app',
     icon: '🦁',
+  },
+  shield: {
+    name: 'Shield Wallet',
+    description: 'Private transactions & stablecoins on Aleo',
+    downloadUrl: 'https://shield.app',
+    icon: '🛡️',
   },
   fox: {
     name: 'Fox Wallet',

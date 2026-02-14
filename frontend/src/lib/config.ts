@@ -92,7 +92,7 @@ function loadConfig(): AppConfig {
     explorerUrl: getEnv('VITE_EXPLORER_URL', networkConfig.explorerUrl),
 
     // Program
-    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v9.aleo'),
+    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v10.aleo'),
     creditsProgramId: getEnv('VITE_CREDITS_PROGRAM_ID', 'credits.aleo'),
 
     // Wallet

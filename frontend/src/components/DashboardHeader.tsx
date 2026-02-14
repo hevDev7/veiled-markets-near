@@ -1,7 +1,6 @@
 import { motion } from 'framer-motion'
 import {
   Shield,
-  ShieldCheck,
   ChevronDown,
   LogOut,
   ExternalLink,
@@ -14,10 +13,12 @@ import {
   Bell,
   Gamepad2,
   RefreshCw,
-  Loader2
+  Loader2,
+  Zap
 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { cn, shortenAddress, formatCredits } from '@/lib/utils'
 
@@ -30,13 +31,13 @@ const navItems = [
 export function DashboardHeader() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { wallet, disconnect, refreshBalance, shieldCredits } = useWalletStore()
+  const { wallet, refreshBalance, testTransaction } = useWalletStore()
+  const { disconnect: providerDisconnect } = useWallet()
   const [showDropdown, setShowDropdown] = useState(false)
   const [copied, setCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [shielding, setShielding] = useState(false)
-  const [shieldError, setShieldError] = useState<string | null>(null)
-  const [shieldSuccess, setShieldSuccess] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<string | null>(null)
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -56,45 +57,33 @@ export function DashboardHeader() {
   }
 
   const handleDisconnect = async () => {
-    await disconnect()
+    try {
+      await providerDisconnect()
+    } catch (e) {
+      console.error('Disconnect error:', e)
+    }
+    // WalletBridge will sync disconnected state to useWalletStore
     setShowDropdown(false)
     navigate('/')
   }
 
-  const handleShieldCredits = async () => {
-    setShielding(true)
-    setShieldError(null)
-    setShieldSuccess(false)
+  const handleTestTransaction = async () => {
+    setTesting(true)
+    setTestResult(null)
     try {
-      // Shield 5 ALEO (5_000_000 microcredits) - enough for several bets
-      await shieldCredits(5_000_000n)
-      setShieldSuccess(true)
-      setTimeout(() => setShieldSuccess(false), 10000)
+      const txId = await testTransaction()
+      setTestResult(`OK: ${txId.substring(0, 20)}...`)
+      setTimeout(() => setTestResult(null), 15000)
     } catch (err: any) {
-      const msg = err?.message || String(err)
-      if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancelled')) {
-        setShieldError('Transaction rejected by wallet')
-      } else {
-        setShieldError('Failed to shield credits')
-      }
-      setTimeout(() => setShieldError(null), 5000)
+      setTestResult(`FAIL: ${err?.message || err}`)
+      setTimeout(() => setTestResult(null), 10000)
     } finally {
-      setShielding(false)
+      setTesting(false)
     }
   }
 
   // Get total balance (public + private)
   const totalBalance = wallet.balance.public + wallet.balance.private
-
-  // Debug logging
-  console.log('Dashboard Header Balance:', {
-    public: wallet.balance.public.toString(),
-    private: wallet.balance.private.toString(),
-    total: totalBalance.toString(),
-    publicCredits: Number(wallet.balance.public) / 1_000_000,
-    privateCredits: Number(wallet.balance.private) / 1_000_000,
-    totalCredits: Number(totalBalance) / 1_000_000,
-  })
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50">
@@ -242,6 +231,9 @@ export function DashboardHeader() {
                       <p className="text-xs text-surface-500">
                         {wallet.walletType === 'puzzle' && '🧩 Puzzle Wallet'}
                         {wallet.walletType === 'leo' && '🦁 Leo Wallet'}
+                        {wallet.walletType === 'shield' && '🛡️ Shield Wallet'}
+                        {wallet.walletType === 'fox' && '🦊 Fox Wallet'}
+                        {wallet.walletType === 'soter' && '🛡️ Soter Wallet'}
                         {wallet.walletType === 'demo' && '🎮 Demo Wallet'}
                       </p>
                       <span className={cn(
@@ -289,76 +281,55 @@ export function DashboardHeader() {
                       {formatCredits(totalBalance)} <span className="text-sm text-surface-400">ALEO</span>
                     </p>
 
-                    {/* Public/Private breakdown */}
-                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-surface-700/50">
-                      <div>
-                        <p className="text-xs text-surface-500 mb-0.5">Public</p>
+                    {/* Balance breakdown */}
+                    <div className="pt-3 border-t border-surface-700/50">
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-surface-500">Public (used for betting)</p>
                         <p className="text-sm font-medium text-white">
-                          {formatCredits(wallet.balance.public)}
+                          {formatCredits(wallet.balance.public)} ALEO
                         </p>
                       </div>
-                      <div>
-                        <p className="text-xs text-surface-500 mb-0.5">
-                          Private {wallet.balance.private === 0n && !wallet.isDemoMode && '⚠️'}
+                      {wallet.balance.private > 0n ? (
+                        <div className="flex justify-between items-center mt-1">
+                          <p className="text-xs text-surface-500">Private</p>
+                          <p className="text-sm font-medium text-white">
+                            {formatCredits(wallet.balance.private)} ALEO
+                          </p>
+                        </div>
+                      ) : wallet.walletType === 'shield' ? (
+                        <p className="text-[10px] text-surface-500 mt-2">
+                          Private balance detection is not yet supported by Shield Wallet extension.
+                          Your private credits are safe — they just can't be read by dApps yet.
                         </p>
-                        <p className="text-sm font-medium text-white">
-                          {wallet.balance.private > 0n
-                            ? formatCredits(wallet.balance.private)
-                            : <span className="text-surface-600">Not available</span>
-                          }
-                        </p>
-                      </div>
+                      ) : null}
                     </div>
-
-                    {/* Shield Credits action when private balance is 0 */}
-                    {wallet.balance.private === 0n && !wallet.isDemoMode && (
-                      <div className="mt-2 pt-2 border-t border-surface-700/50">
-                        {shieldSuccess ? (
-                          <div className="flex items-center gap-2 text-yes-400 text-xs">
-                            <ShieldCheck className="w-3.5 h-3.5" />
-                            <span>Shield TX sent! Balance will update shortly.</span>
-                          </div>
-                        ) : shieldError ? (
-                          <p className="text-xs text-no-400">{shieldError}</p>
-                        ) : (
-                          <>
-                            <p className="text-xs text-yellow-400/80 leading-relaxed mb-2">
-                              No private credits found. You need private credits to place bets with privacy.
-                            </p>
-                            <button
-                              onClick={handleShieldCredits}
-                              disabled={shielding || wallet.balance.public < 5_300_000n}
-                              className={cn(
-                                'w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
-                                shielding
-                                  ? 'bg-brand-500/20 text-brand-300 cursor-wait'
-                                  : wallet.balance.public < 5_300_000n
-                                    ? 'bg-surface-800/50 text-surface-500 cursor-not-allowed'
-                                    : 'bg-brand-500/20 text-brand-300 hover:bg-brand-500/30'
-                              )}
-                            >
-                              {shielding ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  Shielding...
-                                </>
-                              ) : (
-                                <>
-                                  <Shield className="w-3.5 h-3.5" />
-                                  Shield 5 ALEO to Private
-                                </>
-                              )}
-                            </button>
-                            {wallet.balance.public < 5_300_000n && (
-                              <p className="text-xs text-surface-500 mt-1">
-                                Insufficient public balance (need ~5.3 ALEO)
-                              </p>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
                   </div>
+
+                  {/* Wallet Test */}
+                  {!wallet.isDemoMode && (
+                    <div className="p-1 mt-1 border-t border-surface-800">
+                      <button
+                        onClick={handleTestTransaction}
+                        disabled={testing}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-surface-800/50 transition-colors"
+                      >
+                        {testing ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Zap className="w-3.5 h-3.5" />
+                        )}
+                        {testing ? 'Testing wallet...' : 'Test Wallet TX (credits.aleo)'}
+                      </button>
+                      {testResult && (
+                        <p className={cn(
+                          'px-3 py-1 text-xs',
+                          testResult.startsWith('OK') ? 'text-yes-400' : 'text-no-400'
+                        )}>
+                          {testResult}
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Menu Items */}
                   <div className="p-1 mt-1 border-t border-surface-800">

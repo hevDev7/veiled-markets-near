@@ -14,13 +14,22 @@
  */
 export function initializeQuestionMappings(): void {
     const mappings: Record<string, string> = {
-        // v4 Markets
+        // v9 Markets (legacy)
         '1234567890field':
             'Will Bitcoin reach $150,000 by end of 2026?',
         '9876543210field':
             'Will Ethereum reach $10,000 by end of Q2 2026?',
         '5555555555field':
             'Will Solana reach $500 by end of 2026?',
+        // v10 Markets
+        '256405101151840648962409133633523383446118870689316654839429373790121035772field':
+            'Will BTC reach $200k by end of 2026?',
+        '335277485291523338300455425959878542481653519841988273486814275386244647837field':
+            'Will SOL reach $250 by Feb 13, 2026?',
+        '440149147741520429018871358059240796138407999260361667196147458351688115842field':
+            'Will Ethereum reach $5,000 by March 2026?',
+        '170581734373170323120054111589939112611634241828025336877451788205764410119field':
+            'S&P 500 (SPX) Opens Up or Down on February 17?',
     };
 
     // Store in localStorage

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { 
+import {
   Trophy,
   XCircle,
   RefreshCcw,
@@ -12,7 +12,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, useMarketsStore, type Bet } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Bet } from '@/lib/store'
+import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { cn, formatCredits } from '@/lib/utils'
@@ -22,8 +23,8 @@ type HistoryFilter = 'all' | 'won' | 'lost' | 'refunded'
 export function History() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
-  const { userBets, fetchUserBets } = useBetsStore()
-  const { markets } = useMarketsStore()
+  const { userBets, fetchUserBets, syncBetStatuses } = useBetsStore()
+  const { markets } = useRealMarketsStore()
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState<HistoryFilter>('all')
 
@@ -38,19 +39,20 @@ export function History() {
     const loadBets = async () => {
       setIsLoading(true)
       await fetchUserBets()
+      await syncBetStatuses()
       setIsLoading(false)
     }
     loadBets()
-  }, [fetchUserBets])
+  }, [fetchUserBets, syncBetStatuses])
 
   // Get completed bets only
-  const completedBets = userBets.filter(bet => 
+  const completedBets = userBets.filter(bet =>
     bet.status === 'won' || bet.status === 'lost' || bet.status === 'refunded'
   )
 
   // Filter based on selection
-  const displayBets = filter === 'all' 
-    ? completedBets 
+  const displayBets = filter === 'all'
+    ? completedBets
     : completedBets.filter(bet => bet.status === filter)
 
   // Get market info for a bet
@@ -62,52 +64,10 @@ export function History() {
   const wonBets = completedBets.filter(b => b.status === 'won')
   const lostBets = completedBets.filter(b => b.status === 'lost')
   const refundedBets = completedBets.filter(b => b.status === 'refunded')
-  
-  const totalWon = wonBets.reduce((sum, bet) => sum + bet.amount * 2n, 0n) // Simplified payout
+
+  const totalWon = wonBets.reduce((sum, bet) => sum + (bet.payoutAmount || bet.amount), 0n)
   const totalLost = lostBets.reduce((sum, bet) => sum + bet.amount, 0n)
   const netPnL = totalWon - totalLost
-
-  // Demo data for showing how history would look
-  const demoHistory: Bet[] = wallet.isDemoMode ? [
-    {
-      id: 'demo-1',
-      marketId: 'btc-100k',
-      amount: 50000000n, // 50 credits
-      outcome: 'yes',
-      placedAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
-      status: 'won',
-      marketQuestion: 'Will BTC reach $100,000 by Q1 2026?'
-    },
-    {
-      id: 'demo-2',
-      marketId: 'eth-upgrade',
-      amount: 25000000n,
-      outcome: 'no',
-      placedAt: Date.now() - 14 * 24 * 60 * 60 * 1000,
-      status: 'lost',
-      marketQuestion: 'Will Ethereum upgrade to Pectra by March 2026?'
-    },
-    {
-      id: 'demo-3',
-      marketId: 'fed-rate',
-      amount: 100000000n,
-      outcome: 'yes',
-      placedAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
-      status: 'won',
-      marketQuestion: 'Will the Fed cut rates in January 2026?'
-    },
-    {
-      id: 'demo-4',
-      marketId: 'aleo-mainnet',
-      amount: 75000000n,
-      outcome: 'yes',
-      placedAt: Date.now() - 45 * 24 * 60 * 60 * 1000,
-      status: 'refunded',
-      marketQuestion: 'Will Aleo reach 1M daily transactions?'
-    },
-  ] : []
-
-  const allBets = [...displayBets, ...demoHistory.filter(d => filter === 'all' || d.status === filter)]
 
   if (!wallet.connected) {
     return null
@@ -132,10 +92,12 @@ export function History() {
               </p>
             </div>
 
-            <button 
-              onClick={() => {
+            <button
+              onClick={async () => {
                 setIsLoading(true)
-                fetchUserBets().finally(() => setIsLoading(false))
+                await fetchUserBets()
+                await syncBetStatuses()
+                setIsLoading(false)
               }}
               className="btn-secondary flex items-center gap-2 self-start"
             >
@@ -159,7 +121,7 @@ export function History() {
                 <div>
                   <p className="text-sm text-surface-400">Won</p>
                   <p className="text-2xl font-bold text-yes-400">
-                    {wonBets.length + (wallet.isDemoMode ? 2 : 0)}
+                    {wonBets.length}
                   </p>
                 </div>
               </div>
@@ -173,7 +135,7 @@ export function History() {
                 <div>
                   <p className="text-sm text-surface-400">Lost</p>
                   <p className="text-2xl font-bold text-no-400">
-                    {lostBets.length + (wallet.isDemoMode ? 1 : 0)}
+                    {lostBets.length}
                   </p>
                 </div>
               </div>
@@ -187,7 +149,7 @@ export function History() {
                 <div>
                   <p className="text-sm text-surface-400">Refunded</p>
                   <p className="text-2xl font-bold text-accent-400">
-                    {refundedBets.length + (wallet.isDemoMode ? 1 : 0)}
+                    {refundedBets.length}
                   </p>
                 </div>
               </div>
@@ -197,20 +159,23 @@ export function History() {
               <div className="flex items-center gap-3">
                 <div className={cn(
                   "w-12 h-12 rounded-xl flex items-center justify-center",
-                  netPnL >= 0n || wallet.isDemoMode ? "bg-yes-500/10" : "bg-no-500/10"
+                  netPnL >= 0n ? "bg-yes-500/10" : "bg-no-500/10"
                 )}>
                   <TrendingUp className={cn(
                     "w-6 h-6",
-                    netPnL >= 0n || wallet.isDemoMode ? "text-yes-400" : "text-no-400"
+                    netPnL >= 0n ? "text-yes-400" : "text-no-400"
                   )} />
                 </div>
                 <div>
                   <p className="text-sm text-surface-400">Net P&L</p>
                   <p className={cn(
                     "text-2xl font-bold",
-                    netPnL >= 0n || wallet.isDemoMode ? "text-yes-400" : "text-no-400"
+                    netPnL >= 0n ? "text-yes-400" : "text-no-400"
                   )}>
-                    {wallet.isDemoMode ? '+125.00' : (netPnL >= 0n ? '+' : '-') + formatCredits(netPnL < 0n ? -netPnL : netPnL)} ALEO
+                    {completedBets.length === 0
+                      ? '0.00'
+                      : (netPnL >= 0n ? '+' : '-') + formatCredits(netPnL < 0n ? -netPnL : netPnL)
+                    } ALEO
                   </p>
                 </div>
               </div>
@@ -233,7 +198,7 @@ export function History() {
                   className={cn(
                     'px-4 py-2 rounded-xl text-sm font-medium transition-all',
                     filter === tab
-                      ? tab === 'won' 
+                      ? tab === 'won'
                         ? 'bg-yes-500 text-white'
                         : tab === 'lost'
                           ? 'bg-no-500 text-white'
@@ -254,7 +219,7 @@ export function History() {
             <div className="flex items-center justify-center py-20">
               <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
             </div>
-          ) : allBets.length === 0 ? (
+          ) : displayBets.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -267,7 +232,7 @@ export function History() {
               <p className="text-surface-400 mb-6">
                 Your completed bets will appear here after markets resolve
               </p>
-              <button 
+              <button
                 onClick={() => navigate('/dashboard')}
                 className="btn-primary"
               >
@@ -276,13 +241,12 @@ export function History() {
             </motion.div>
           ) : (
             <div className="space-y-4">
-              {allBets.map((bet, index) => (
-                <HistoryCard 
-                  key={bet.id} 
-                  bet={bet} 
+              {displayBets.map((bet, index) => (
+                <HistoryCard
+                  key={bet.id}
+                  bet={bet}
                   market={getMarketInfo(bet.marketId)}
                   index={index}
-                  isDemoMode={wallet.isDemoMode}
                 />
               ))}
             </div>
@@ -295,16 +259,14 @@ export function History() {
   )
 }
 
-function HistoryCard({ 
-  bet, 
+function HistoryCard({
+  bet,
   market,
-  index,
-  isDemoMode
-}: { 
+  index
+}: {
   bet: Bet
   market?: { question: string }
   index: number
-  isDemoMode: boolean
 }) {
   const isYes = bet.outcome === 'yes'
   const isWon = bet.status === 'won'
@@ -314,8 +276,12 @@ function HistoryCard({
   const StatusIcon = isWon ? Trophy : isLost ? XCircle : RefreshCcw
   const statusColor = isWon ? 'yes' : isLost ? 'no' : 'accent'
 
-  // Calculate payout (simplified)
-  const payout = isWon ? bet.amount * 2n : isRefunded ? bet.amount : 0n
+  // Use real payout amount from sync, or fall back to bet amount for refunds
+  const payout = isWon
+    ? (bet.payoutAmount || bet.amount)
+    : isRefunded
+      ? bet.amount
+      : 0n
 
   return (
     <motion.div
@@ -351,23 +317,18 @@ function HistoryCard({
             </span>
             <span className={cn(
               "px-2 py-0.5 text-xs font-medium rounded-full",
-              isYes 
-                ? "bg-yes-500/10 text-yes-300" 
+              isYes
+                ? "bg-yes-500/10 text-yes-300"
                 : "bg-no-500/10 text-no-300"
             )}>
               {isYes ? 'YES' : 'NO'}
             </span>
-            {isDemoMode && bet.id.startsWith('demo') && (
-              <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-surface-700 text-surface-400">
-                Demo
-              </span>
-            )}
           </div>
           <h3 className="font-medium text-white truncate">
             {market?.question || bet.marketQuestion || `Market ${bet.marketId}`}
           </h3>
           <p className="text-sm text-surface-400 mt-1">
-            Resolved {new Date(bet.placedAt + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+            Placed {new Date(bet.placedAt).toLocaleDateString()}
           </p>
         </div>
 
@@ -394,7 +355,7 @@ function HistoryCard({
             </p>
           </div>
 
-          {!bet.id.startsWith('demo') && (
+          {bet.id.startsWith('at1') && (
             <a
               href={`https://testnet.explorer.provable.com/transaction/${bet.id}`}
               target="_blank"

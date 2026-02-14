@@ -12,6 +12,7 @@ interface MarketRowProps {
 
 export function MarketRow({ market, index, onClick }: MarketRowProps) {
     const timeRemaining = getTimeRemaining(market.deadline, market.timeRemaining)
+    const isExpired = timeRemaining === 'ENDED' || market.status !== 1
 
     return (
         <motion.div
@@ -22,7 +23,8 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
             className={cn(
                 "group relative bg-surface-900/50 backdrop-blur-sm rounded-lg border border-surface-800/50",
                 "hover:border-brand-500/30 hover:bg-surface-900/80 transition-all duration-200 cursor-pointer",
-                "p-4"
+                "p-4",
+                isExpired && "opacity-60"
             )}
         >
             <div className="flex items-center gap-4">
@@ -39,6 +41,11 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                                 <Shield className="w-3 h-3 text-brand-400" />
                                 <span className="text-xs text-brand-400 font-mono">PRIVATE</span>
                             </div>
+                            {isExpired && (
+                                <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-no-500/20 text-no-400 border border-no-500/30">
+                                    EXPIRED
+                                </span>
+                            )}
                         </div>
                     </div>
 

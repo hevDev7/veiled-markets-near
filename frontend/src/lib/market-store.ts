@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets_v9.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v10.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 
@@ -11,8 +11,11 @@ import {
     fetchAllMarkets,
     getCurrentBlockHeight,
     fetchMarketById,
+    initializeMarketIds,
     getQuestionText,
     getMarketTransactionId,
+    getMarketDescription,
+    getMarketResolutionSource,
     type MarketData,
     type MarketPoolData,
 } from './aleo-client'
@@ -46,12 +49,14 @@ async function transformMarketData(
     console.log('Deadline:', market.deadline);
     console.log('Blocks remaining:', Number(market.deadline - currentBlock));
 
-    // Calculate percentages
+    // Calculate percentages (both from BigInt to avoid JS floating-point subtraction)
     const totalPool = pool.total_yes_pool + pool.total_no_pool
     const yesPercentage = totalPool > 0n
-        ? Number((pool.total_yes_pool * 10000n) / totalPool) / 100
+        ? Math.round(Number((pool.total_yes_pool * 10000n) / totalPool)) / 100
         : 50
-    const noPercentage = 100 - yesPercentage
+    const noPercentage = totalPool > 0n
+        ? Math.round(Number((pool.total_no_pool * 10000n) / totalPool)) / 100
+        : 50
 
     // Calculate time remaining
     const blocksRemaining = Number(market.deadline - currentBlock)
@@ -101,20 +106,17 @@ async function transformMarketData(
 
     const questionText = getQuestionText(market.question_hash);
     const transactionId = getMarketTransactionId(market.id);
+    const registryDescription = getMarketDescription(market.id);
+    const registryResolutionSource = getMarketResolutionSource(market.id);
     console.log('Question hash:', market.question_hash);
     console.log('Question text:', questionText);
     console.log('Category:', market.category);
     console.log('Transaction ID:', transactionId);
 
-    // Create description with truncated hash for verification
-    const hashPreview = market.question_hash.length > 20
-        ? `${market.question_hash.slice(0, 16)}...${market.question_hash.slice(-10)}`
-        : market.question_hash;
-
     return {
         id: market.id,
         question: questionText,
-        description: `Market verified on-chain. Question hash: ${hashPreview}`,
+        description: registryDescription || undefined,
         category: market.category,
         deadline: market.deadline,
         resolutionDeadline: market.resolution_deadline,
@@ -123,8 +125,8 @@ async function transformMarketData(
         noPercentage,
         totalVolume: totalPool,
         totalBets: Number(pool.total_bets),
-        yesReserve: yesPool, // Using pool terminology (parimutuel)
-        noReserve: noPool,   // Using pool terminology (parimutuel)
+        yesReserve: yesPool,
+        noReserve: noPool,
         yesPrice,
         noPrice,
         totalYesIssued: pool.total_yes_pool,
@@ -133,7 +135,7 @@ async function transformMarketData(
         potentialNoPayout,
         creator: market.creator,
         timeRemaining,
-        resolutionSource: 'On-chain verification',
+        resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,
     }
@@ -172,9 +174,18 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
         }
 
         try {
+            // Ensure market IDs are loaded from index before fetching
+            await initializeMarketIds()
+
             // Fetch all markets from blockchain
             const blockchainMarkets = await fetchAllMarkets()
-            const currentBlock = await getCurrentBlockHeight()
+            let currentBlock: bigint
+            try {
+                currentBlock = await getCurrentBlockHeight()
+            } catch {
+                console.warn('[Markets] Block height fetch failed, using 0 (all markets show active)')
+                currentBlock = 0n
+            }
 
             // Transform to Market format
             const markets: Market[] = await Promise.all(
