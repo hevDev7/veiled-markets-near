@@ -16,6 +16,7 @@ import {
     getMarketTransactionId,
     getMarketDescription,
     getMarketResolutionSource,
+    TOKEN_SYMBOLS,
     type MarketData,
     type MarketPoolData,
 } from './aleo-client'
@@ -138,6 +139,7 @@ async function transformMarketData(
         resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,
+        tokenType: TOKEN_SYMBOLS[market.token_type] || 'ALEO',
     }
 }
 

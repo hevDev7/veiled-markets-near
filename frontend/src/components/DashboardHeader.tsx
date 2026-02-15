@@ -302,6 +302,14 @@ export function DashboardHeader() {
                           Your private credits are safe — they just can't be read by dApps yet.
                         </p>
                       ) : null}
+                      {wallet.balance.usdcxPublic > 0n && (
+                        <div className="flex justify-between items-center mt-1">
+                          <p className="text-xs text-surface-500">USDCX (Public)</p>
+                          <p className="text-sm font-medium text-white">
+                            {formatCredits(wallet.balance.usdcxPublic)} USDCX
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 

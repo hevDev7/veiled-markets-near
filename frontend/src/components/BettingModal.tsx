@@ -1,11 +1,11 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Shield, TrendingUp, Check, Loader2, AlertCircle, Terminal, Copy, Check as CheckIcon } from 'lucide-react'
+import { X, Shield, TrendingUp, Check, Loader2, AlertCircle } from 'lucide-react'
 import { useState } from 'react'
 import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
-import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildPlaceBetInputs } from '@/lib/aleo-client'
+import { buildPlaceBetInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
 
 interface BettingModalProps {
   market: Market | null
@@ -14,7 +14,7 @@ interface BettingModalProps {
 }
 
 type BetOutcome = 'yes' | 'no' | null
-type BetStep = 'select' | 'amount' | 'confirm' | 'success' | 'cli'
+type BetStep = 'select' | 'amount' | 'confirm' | 'success'
 
 export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const { wallet } = useWalletStore()
@@ -27,27 +27,6 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const [isPlacing, setIsPlacing] = useState(false)
   const [transactionId, setTransactionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [cliCopied, setCliCopied] = useState(false)
-  const [cliTxId, setCliTxId] = useState('')
-  const [cliSaved, setCliSaved] = useState(false)
-
-  const handleSaveCliBet = () => {
-    if (!market || !selectedOutcome || !betAmount || !cliTxId.trim()) return
-    const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-    addPendingBet({
-      id: cliTxId.trim(),
-      marketId: market.id,
-      amount: amountMicro,
-      outcome: selectedOutcome,
-      placedAt: Date.now(),
-      status: cliTxId.trim().startsWith('at1') ? 'active' : 'pending',
-      marketQuestion: market.question,
-      lockedMultiplier: selectedOutcome === 'yes'
-        ? market.potentialYesPayout
-        : market.potentialNoPayout,
-    })
-    setCliSaved(true)
-  }
 
   const handlePlaceBet = async () => {
     if (!market || !selectedOutcome || !betAmount) return
@@ -64,11 +43,42 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       }
 
       const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-      const inputs = buildPlaceBetInputs(market.id, amountMicro, selectedOutcome)
+
+      // Validate amount against public balance (place_bet_public uses public credits only)
+      const tokenType = market.tokenType || 'ALEO'
+      const availableBalance = tokenType === 'USDCX' ? wallet.balance.usdcxPublic : wallet.balance.public
+      if (!wallet.isDemoMode && amountMicro > availableBalance) {
+        throw new Error(
+          `Insufficient public balance. You need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
+          `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} ${tokenType} public balance.` +
+          (tokenType === 'ALEO' && wallet.balance.private > 0n
+            ? ' Convert private to public in your wallet first.'
+            : '')
+        )
+      }
+
+      // Pre-validate market status on-chain to avoid wasted gas
+      try {
+        const onChainMarket = await getMarket(market.id)
+        if (onChainMarket && onChainMarket.status !== MARKET_STATUS.ACTIVE) {
+          const statusNames: Record<number, string> = { 2: 'CLOSED', 3: 'RESOLVED', 4: 'CANCELLED' }
+          throw new Error(
+            `Market is ${statusNames[onChainMarket.status] || 'not active'} on-chain. Betting is no longer available.`
+          )
+        }
+      } catch (validationErr) {
+        // Re-throw market status errors, but don't block on network errors
+        if (validationErr instanceof Error && validationErr.message.includes('Market is')) {
+          throw validationErr
+        }
+        console.warn('Pre-validation skipped (network error):', validationErr)
+      }
+
+      const { functionName, inputs } = buildPlaceBetInputs(market.id, amountMicro, selectedOutcome, tokenType)
 
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
-        function: 'place_bet_public',
+        function: functionName,
         inputs,
         fee: 0.5,
       })
@@ -102,30 +112,12 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     }
   }
 
-  const generateCliCommand = (): string => {
-    if (!market || !selectedOutcome || !betAmount) return ''
-    const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-    const inputs = buildPlaceBetInputs(market.id, amountMicro, selectedOutcome)
-    const inputsStr = inputs.join(' ')
-    return `snarkos developer execute ${CONTRACT_INFO.programId} place_bet_public ${inputsStr} --private-key YOUR_PRIVATE_KEY --endpoint https://api.explorer.provable.com --broadcast --priority-fee 500000 --network 1`
-  }
-
-  const handleCopyCliCommand = () => {
-    const cmd = generateCliCommand()
-    navigator.clipboard.writeText(cmd)
-    setCliCopied(true)
-    setTimeout(() => setCliCopied(false), 3000)
-  }
-
   const handleClose = () => {
     setSelectedOutcome(null)
     setBetAmount('')
     setStep('select')
     setTransactionId(null)
     setError(null)
-    setCliCopied(false)
-    setCliTxId('')
-    setCliSaved(false)
     onClose()
   }
 
@@ -134,6 +126,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     : 0
 
   const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
+  const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'ALEO'
+  const isUsdcx = market?.tokenType === 'USDCX'
 
   if (!market) return null
 
@@ -304,7 +298,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
                       <div className="mb-6">
                         <label className="block text-sm text-surface-400 mb-2">
-                          Bet Amount (ALEO)
+                          Bet Amount ({tokenSymbol})
                         </label>
                         <div className="relative">
                           <input
@@ -315,25 +309,37 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                             className="input-field text-2xl font-semibold pr-20"
                           />
                           <div className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400">
-                            ALEO
+                            {tokenSymbol}
                           </div>
                         </div>
                         <div className="mt-2 space-y-1">
                           <div className="flex justify-between text-sm">
                             <span className="text-surface-500">
-                              Total Balance: {formatCredits(wallet.balance.public + wallet.balance.private)} ALEO
+                              {isUsdcx
+                                ? `Balance: ${formatCredits(wallet.balance.usdcxPublic)} USDCX`
+                                : `Public Balance: ${formatCredits(wallet.balance.public)} ALEO`
+                              }
                             </span>
                             <button
-                              onClick={() => setBetAmount((Number(wallet.balance.public + wallet.balance.private) / 1_000_000).toString())}
+                              onClick={() => {
+                                // place_bet_public uses transfer_public_as_signer — only public balance is usable
+                                const maxBalance = isUsdcx ? wallet.balance.usdcxPublic : wallet.balance.public
+                                // Reserve 0.6 ALEO for gas fee when using ALEO
+                                const reserveForGas = isUsdcx ? 0n : 600_000n
+                                const usable = maxBalance > reserveForGas ? maxBalance - reserveForGas : 0n
+                                setBetAmount((Number(usable) / 1_000_000).toString())
+                              }}
                               className="text-brand-400 hover:text-brand-300"
                             >
                               Max
                             </button>
                           </div>
-                          <div className="flex justify-between text-xs text-surface-600">
-                            <span>Public: {formatCredits(wallet.balance.public)} ALEO</span>
-                            <span>Private: {formatCredits(wallet.balance.private)} ALEO</span>
-                          </div>
+                          {!isUsdcx && wallet.balance.private > 0n && (
+                            <div className="text-xs text-surface-600">
+                              <span>Private: {formatCredits(wallet.balance.private)} ALEO</span>
+                              <span className="ml-2 text-yellow-500/80">(not usable for betting)</span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -342,7 +348,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           <div className="flex justify-between items-center">
                             <span className="text-surface-400">Potential Payout</span>
                             <span className="text-2xl font-bold text-white">
-                              {potentialPayout.toFixed(2)} ALEO
+                              {potentialPayout.toFixed(2)} {tokenSymbol}
                             </span>
                           </div>
                           <div className="flex justify-between items-center mt-2">
@@ -351,7 +357,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                               'font-medium',
                               selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400'
                             )}>
-                              +{(potentialPayout - parseFloat(betAmount)).toFixed(2)} ALEO
+                              +{(potentialPayout - parseFloat(betAmount)).toFixed(2)} {tokenSymbol}
                             </span>
                           </div>
                         </div>
@@ -371,14 +377,19 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       </div>
 
                       {/* Warning: insufficient public balance */}
-                      {wallet.balance.public < 1_000_000n && !wallet.isDemoMode && (
+                      {(isUsdcx ? wallet.balance.usdcxPublic : wallet.balance.public) < 1_000_000n && !wallet.isDemoMode && (
                         <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-6">
                           <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient balance</p>
+                            <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient public balance</p>
                             <p className="text-xs text-surface-400 leading-relaxed">
-                              You need public ALEO credits to place a bet.
-                              Current balance: <span className="text-white">{formatCredits(wallet.balance.public)} ALEO</span>
+                              Betting uses <span className="text-white">public</span> {tokenSymbol} only (via transfer_public_as_signer).
+                              {!isUsdcx && wallet.balance.private > 0n && (
+                                <> You have {formatCredits(wallet.balance.private)} ALEO in private balance — convert to public first in Leo Wallet (Send &gt; Public transfer to yourself).</>
+                              )}
+                              {(isUsdcx ? wallet.balance.usdcxPublic : wallet.balance.public) === 0n && (
+                                <> Current public balance: <span className="text-white">0 {tokenSymbol}</span></>
+                              )}
                             </p>
                           </div>
                         </div>
@@ -406,7 +417,6 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           Back
                         </button>
 
-                        {/* Primary action: Wallet-based execution */}
                         <button
                           onClick={handlePlaceBet}
                           disabled={!betAmount || parseFloat(betAmount) <= 0 || isPlacing}
@@ -428,19 +438,6 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           )}
                         </button>
                       </div>
-
-                      {/* CLI mode alternative for on-chain markets */}
-                      {market.id.endsWith('field') && betAmount && parseFloat(betAmount) > 0 && (
-                        <div className="mt-3">
-                          <button
-                            onClick={() => setStep('cli')}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-surface-700/50 bg-surface-800/30 text-sm text-surface-400 hover:text-white hover:border-surface-600/50 transition-all"
-                          >
-                            <Terminal className="w-4 h-4" />
-                            <span>CLI Mode</span>
-                          </button>
-                        </div>
-                      )}
                     </motion.div>
                   )}
 
@@ -478,7 +475,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       <div className="p-4 rounded-xl bg-surface-800/50 mb-6">
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400">Amount</span>
-                          <span className="font-medium text-white">{betAmount} ALEO</span>
+                          <span className="font-medium text-white">{betAmount} {tokenSymbol}</span>
                         </div>
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400">Position</span>
@@ -491,7 +488,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-surface-400">Potential Payout</span>
-                          <span className="font-medium text-white">{potentialPayout.toFixed(2)} ALEO</span>
+                          <span className="font-medium text-white">{potentialPayout.toFixed(2)} {tokenSymbol}</span>
                         </div>
                       </div>
 
@@ -535,155 +532,6 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                     </motion.div>
                   )}
 
-                  {step === 'cli' && (
-                    <motion.div
-                      key="cli"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                    >
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center">
-                          <Terminal className="w-5 h-5 text-brand-400" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-white">CLI Mode</h3>
-                          <p className="text-xs text-surface-400">Run this command in your terminal</p>
-                        </div>
-                      </div>
-
-                      {/* Bet Summary */}
-                      <div className="p-3 rounded-xl bg-surface-800/50 mb-4">
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-surface-400">Position</span>
-                          <span className={cn('font-medium', selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400')}>
-                            {selectedOutcome === 'yes' ? 'YES' : 'NO'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-surface-400">Amount</span>
-                          <span className="font-medium text-white">{betAmount} ALEO</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-surface-400">Potential Payout</span>
-                          <span className="font-medium text-white">{potentialPayout.toFixed(2)} ALEO</span>
-                        </div>
-                      </div>
-
-                      {/* Why CLI? */}
-                      <div className="flex items-start gap-2 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-4">
-                        <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                        <p className="text-xs text-surface-400 leading-relaxed">
-                          Browser wallet provers cannot handle this program (529 statements).
-                          The CLI uses a native prover which is much faster and reliable.
-                        </p>
-                      </div>
-
-                      {/* CLI Command */}
-                      <div className="relative">
-                        <div className="p-4 rounded-xl bg-surface-950 border border-surface-700/50 font-mono text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed max-h-40 overflow-y-auto">
-                          {generateCliCommand()}
-                        </div>
-                        <button
-                          onClick={handleCopyCliCommand}
-                          className={cn(
-                            'absolute top-2 right-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-                            cliCopied
-                              ? 'bg-yes-500/20 text-yes-400'
-                              : 'bg-surface-800 text-surface-300 hover:bg-surface-700 hover:text-white'
-                          )}
-                        >
-                          {cliCopied ? (
-                            <>
-                              <CheckIcon className="w-3.5 h-3.5" />
-                              Copied!
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5" />
-                              Copy
-                            </>
-                          )}
-                        </button>
-                      </div>
-
-                      {/* Instructions */}
-                      <div className="mt-4 space-y-2">
-                        <p className="text-xs font-medium text-surface-300">Instructions:</p>
-                        <ol className="text-xs text-surface-400 space-y-1.5 list-decimal list-inside">
-                          <li>Replace <code className="px-1 py-0.5 rounded bg-surface-800 text-brand-400">YOUR_PRIVATE_KEY</code> with your Aleo private key</li>
-                          <li>Open terminal and paste the command</li>
-                          <li>Wait for ZK proof generation (~1-2 min)</li>
-                          <li>Transaction will be broadcast automatically</li>
-                        </ol>
-                      </div>
-
-                      {/* Private key info */}
-                      <div className="flex items-start gap-2 p-3 rounded-xl bg-brand-500/5 border border-brand-500/20 mt-4">
-                        <Shield className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
-                        <p className="text-xs text-surface-400 leading-relaxed">
-                          Your private key is in Leo Wallet &gt; Settings &gt; Export Private Key.
-                          Never share it. The command runs locally on your machine.
-                        </p>
-                      </div>
-
-                      {/* Record Transaction ID */}
-                      <div className="mt-4 p-3 rounded-xl bg-surface-800/50 border border-surface-700/50">
-                        <p className="text-xs font-medium text-surface-300 mb-2">
-                          After running the command, paste the Transaction ID here:
-                        </p>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={cliTxId}
-                            onChange={(e) => { setCliTxId(e.target.value); setCliSaved(false) }}
-                            placeholder="at1..."
-                            className="flex-1 px-3 py-2 rounded-lg bg-surface-950 border border-surface-700/50 text-sm text-white placeholder-surface-600 focus:outline-none focus:border-brand-500/50 font-mono"
-                          />
-                          <button
-                            onClick={handleSaveCliBet}
-                            disabled={!cliTxId.trim() || cliSaved}
-                            className={cn(
-                              'px-4 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5',
-                              cliSaved
-                                ? 'bg-yes-500/20 text-yes-400'
-                                : 'bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-50 disabled:cursor-not-allowed'
-                            )}
-                          >
-                            {cliSaved ? (
-                              <>
-                                <CheckIcon className="w-3.5 h-3.5" />
-                                Saved
-                              </>
-                            ) : (
-                              'Save'
-                            )}
-                          </button>
-                        </div>
-                        {cliSaved && (
-                          <p className="text-xs text-yes-400 mt-2">
-                            Bet recorded! Check My Bets page to track it.
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex gap-3 mt-4">
-                        <button
-                          onClick={() => setStep('amount')}
-                          className="btn-secondary flex-1"
-                        >
-                          Back
-                        </button>
-                        <button
-                          onClick={handleCopyCliCommand}
-                          className="flex-1 flex items-center justify-center gap-2 btn-primary"
-                        >
-                          <Copy className="w-4 h-4" />
-                          {cliCopied ? 'Copied!' : 'Copy Command'}
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
                 </AnimatePresence>
               </div>
             </div>

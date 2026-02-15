@@ -33,6 +33,23 @@ export function formatCredits(microcredits: bigint, decimals: number = 2): strin
 }
 
 /**
+ * Token type helpers
+ */
+export type TokenType = 'ALEO' | 'USDCX'
+
+export function getTokenSymbol(tokenType?: TokenType | number): string {
+  if (tokenType === 2 || tokenType === 'USDCX') return 'USDCX'
+  return 'ALEO'
+}
+
+/**
+ * Format token amount (both ALEO and USDCX use 6 decimals)
+ */
+export function formatTokenAmount(microAmount: bigint, _tokenType?: TokenType, decimals: number = 2): string {
+  return formatCredits(microAmount, decimals)
+}
+
+/**
  * Format percentage
  */
 export function formatPercentage(value: number, decimals: number = 1): string {

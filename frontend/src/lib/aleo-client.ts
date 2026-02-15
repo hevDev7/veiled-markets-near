@@ -37,6 +37,7 @@ export interface MarketData {
   resolution_deadline: bigint;
   status: number;
   created_at: bigint;
+  token_type: number; // 1=ALEO, 2=USDCX
 }
 
 export interface MarketPoolData {
@@ -57,7 +58,7 @@ export interface MarketResolutionData {
 
 // API configuration
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const PROGRAM_ID = 'veiled_markets_v10.aleo';
+const PROGRAM_ID = config.programId;
 
 // Timeout for network requests (prevents UI from hanging indefinitely)
 const FETCH_TIMEOUT_MS = 10_000; // 10 seconds per request
@@ -208,56 +209,176 @@ export function extractMarketIdFromTransaction(txDetails: TransactionDetails): s
 }
 
 /**
- * Poll for transaction confirmation and extract market ID
- * Returns the actual market ID once the transaction is confirmed
+ * Poll for transaction confirmation and extract market ID.
+ * Strategy:
+ *   1. If transactionId starts with 'at1', poll the RPC directly.
+ *   2. Otherwise (wallet event ID), skip RPC polling and go to blockchain scan.
+ *   3. Blockchain scan: scan recent blocks for create_market transitions
+ *      matching our questionHash.
  */
 export async function waitForMarketCreation(
   transactionId: string,
   questionHash: string,
   questionText: string,
-  maxAttempts: number = 20, // ~5 minutes at 15 second intervals
+  maxAttempts: number = 20,
   intervalMs: number = 15000
 ): Promise<string | null> {
-  console.log('Waiting for market creation transaction:', transactionId);
+  console.log('[waitForMarket] Waiting for market creation:', transactionId);
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    console.log(`Polling attempt ${attempt + 1}/${maxAttempts}...`);
+  // Strategy 1: If we have an on-chain tx ID, poll the RPC directly
+  if (transactionId.startsWith('at1')) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      console.log(`[waitForMarket] RPC poll ${attempt + 1}/${maxAttempts}...`);
+      const txDetails = await getTransactionDetails(transactionId);
 
-    const txDetails = await getTransactionDetails(transactionId);
-
-    if (txDetails?.status === 'confirmed') {
-      const marketId = extractMarketIdFromTransaction(txDetails);
-
-      if (marketId) {
-        console.log('Market created successfully! Market ID:', marketId);
-
-        // Register the market ID and question text
-        addKnownMarketId(marketId);
-        registerQuestionText(marketId, questionText);
-        registerMarketTransaction(marketId, transactionId);
-
-        // Also keep the question hash mapping for backwards compatibility
-        registerQuestionText(questionHash, questionText);
-
-        return marketId;
-      } else {
-        console.warn('Transaction confirmed but could not extract market ID from outputs');
-        // Still return null to indicate we couldn't get the market ID
+      if (txDetails?.status === 'confirmed') {
+        const marketId = extractMarketIdFromTransaction(txDetails);
+        if (marketId) {
+          console.log('[waitForMarket] Market created! ID:', marketId);
+          addKnownMarketId(marketId);
+          registerQuestionText(marketId, questionText);
+          registerMarketTransaction(marketId, transactionId);
+          registerQuestionText(questionHash, questionText);
+          return marketId;
+        }
+        console.warn('[waitForMarket] TX confirmed but no market ID in outputs');
         return null;
       }
-    }
 
-    if (txDetails?.status === 'failed') {
-      console.error('Transaction failed:', txDetails.error);
-      return null;
-    }
+      if (txDetails?.status === 'failed') {
+        console.error('[waitForMarket] Transaction failed:', txDetails.error);
+        return null;
+      }
 
-    // Wait before next attempt
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
   }
 
-  console.warn('Timed out waiting for transaction confirmation');
+  // Strategy 2: Blockchain scan — scan recent blocks for our create_market transition.
+  // This works for ALL wallets (Shield, Puzzle, Leo, etc.) regardless of event ID format.
+  console.log('[waitForMarket] Falling back to blockchain scan for questionHash:', questionHash);
+
+  // Wait a bit for the transaction to be included in a block
+  await new Promise(resolve => setTimeout(resolve, 20000));
+
+  for (let scanAttempt = 0; scanAttempt < 15; scanAttempt++) {
+    try {
+      const marketId = await scanBlockchainForMarket(questionHash);
+      if (marketId) {
+        console.log('[waitForMarket] Found market via blockchain scan! ID:', marketId);
+        addKnownMarketId(marketId);
+        registerQuestionText(marketId, questionText);
+        registerQuestionText(questionHash, questionText);
+        return marketId;
+      }
+    } catch (err) {
+      console.warn(`[waitForMarket] Scan attempt ${scanAttempt + 1} error:`, err);
+    }
+
+    // Wait 20 seconds between scan attempts
+    await new Promise(resolve => setTimeout(resolve, 20000));
+  }
+
+  console.warn('[waitForMarket] All strategies exhausted');
   return null;
+}
+
+/**
+ * Scan recent blocks for a create_market transaction matching the given question hash.
+ * Looks at the finalize arguments to find the market_id.
+ */
+async function scanBlockchainForMarket(questionHash: string): Promise<string | null> {
+  try {
+    const latestHeight = await getCurrentBlockHeight();
+    const blocksToScan = 30; // ~7.5 minutes of blocks at 15s/block
+
+    console.log(`[scanBlockchain] Scanning blocks ${latestHeight - BigInt(blocksToScan)} to ${latestHeight}`);
+
+    // Scan in parallel batches of 5 blocks
+    for (let offset = 0; offset < blocksToScan; offset += 5) {
+      const promises = [];
+      for (let i = 0; i < 5 && offset + i < blocksToScan; i++) {
+        const height = Number(latestHeight) - offset - i;
+        promises.push(scanBlockForCreateMarket(height, questionHash));
+      }
+
+      const results = await Promise.all(promises);
+      const found = results.find(r => r !== null);
+      if (found) return found;
+    }
+  } catch (err) {
+    console.warn('[scanBlockchain] Error:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Check a single block for a create_market transition matching the question hash.
+ */
+async function scanBlockForCreateMarket(blockHeight: number, questionHash: string): Promise<string | null> {
+  try {
+    const url = `${API_BASE_URL}/block/${blockHeight}`;
+    const response = await fetchWithTimeout(url, 10000);
+    if (!response.ok) return null;
+
+    const block = await response.json();
+    const transactions = block.transactions || [];
+
+    for (const txWrapper of transactions) {
+      const tx = txWrapper.transaction || txWrapper;
+      const transitions = tx.execution?.transitions || [];
+
+      for (const transition of transitions) {
+        if (transition.program !== PROGRAM_ID || transition.function !== 'create_market') continue;
+
+        // Check the future output for finalize arguments
+        for (const output of (transition.outputs || [])) {
+          if (output.type !== 'future') continue;
+
+          const value = output.value || '';
+          // The finalize arguments are: market_id, creator, question_hash, category, deadline, resolution_deadline, resolver, token_type
+          // question_hash is the 3rd argument (index 2)
+          const args = extractFinalizeArguments(value);
+          if (args.length >= 3) {
+            const foundQuestionHash = args[2]; // question_hash
+            const foundMarketId = args[0];     // market_id
+
+            if (foundQuestionHash === questionHash && foundMarketId) {
+              console.log(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}...`);
+              return foundMarketId;
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Silently skip failed blocks
+  }
+  return null;
+}
+
+/**
+ * Extract the arguments array from a finalize/future output value.
+ * The value looks like: { program_id: ..., function_name: ..., arguments: [arg0, arg1, ...] }
+ */
+function extractFinalizeArguments(value: string): string[] {
+  const args: string[] = [];
+
+  // Find the arguments array section
+  const argsMatch = value.match(/arguments:\s*\[([\s\S]*?)\]/);
+  if (!argsMatch) return args;
+
+  const argsContent = argsMatch[1];
+  // Split by comma, handling nested structures (like sub-futures with their own brackets)
+  // Simple approach: match field, address, u8, u64 values
+  const valuePattern = /(\d+field|\d+u\d+|aleo[a-z0-9]+)/g;
+  let match;
+  while ((match = valuePattern.exec(argsContent)) !== null) {
+    args.push(match[1]);
+  }
+
+  return args;
 }
 
 /**
@@ -313,6 +434,12 @@ function parseAleoValue(value: string): string | number | bigint | boolean {
   // Handle u64
   if (trimmed.endsWith('u64')) {
     const num = trimmed.replace('u64', '');
+    return BigInt(num);
+  }
+
+  // Handle u128
+  if (trimmed.endsWith('u128')) {
+    const num = trimmed.replace('u128', '');
     return BigInt(num);
   }
 
@@ -389,6 +516,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
   const parsedResolutionDeadline = parseAleoValue(data.resolution_deadline || '0u64');
   const parsedStatus = parseAleoValue(data.status || '1u8');
   const parsedCreatedAt = parseAleoValue(data.created_at || '0u64');
+  const parsedTokenType = parseAleoValue(data.token_type || '1u8');
 
   console.log('Parsed values:', {
     category: parsedCategory,
@@ -396,6 +524,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
     resolution_deadline: parsedResolutionDeadline,
     status: parsedStatus,
     created_at: parsedCreatedAt,
+    token_type: parsedTokenType,
   });
 
   const result = {
@@ -408,6 +537,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
     resolution_deadline: typeof parsedResolutionDeadline === 'bigint' ? parsedResolutionDeadline : 0n,
     status: typeof parsedStatus === 'number' ? parsedStatus : 1,
     created_at: typeof parsedCreatedAt === 'bigint' ? parsedCreatedAt : 0n,
+    token_type: typeof parsedTokenType === 'number' ? parsedTokenType : 1,
   };
 
   console.log('getMarket result:', result);
@@ -493,14 +623,17 @@ export function buildCreateMarketInputs(
   category: number,
   deadline: bigint,
   resolutionDeadline: bigint,
-  resolverAddress: string
+  resolverAddress: string,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO'
 ): string[] {
+  const tokenTypeValue = tokenType === 'USDCX' ? 2 : 1;
   return [
     questionHash,
     `${category}u8`,
     `${deadline}u64`,
     `${resolutionDeadline}u64`,
     resolverAddress,
+    `${tokenTypeValue}u8`,
   ];
 }
 
@@ -519,7 +652,8 @@ export function buildPlaceBetInputs(
   marketId: string,
   amount: bigint,
   outcome: 'yes' | 'no',
-): string[] {
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
   // Fix 7: Generate random bet_nonce for unique per-bet claim tracking
   const randomBytes = new Uint8Array(31); // 31 bytes = 248 bits, safely < field max (~253 bits)
   crypto.getRandomValues(randomBytes);
@@ -529,12 +663,18 @@ export function buildPlaceBetInputs(
   }
   const betNonceStr = `${betNonce}field`;
 
-  return [
+  // v11: All amounts are u128 internally
+  const inputs = [
     marketId,
-    `${amount}u64`,
+    `${amount}u128`,
     outcome === 'yes' ? '1u8' : '2u8',
     betNonceStr,
   ];
+
+  return {
+    functionName: tokenType === 'USDCX' ? 'place_bet_public_usdcx' : 'place_bet_public',
+    inputs,
+  };
 }
 
 /**
@@ -558,7 +698,7 @@ export function buildPlaceBetPrivateInputs(
 
   return [
     marketId,
-    `${amount}u64`,
+    `${amount}u128`,
     outcome === 'yes' ? '1u8' : '2u8',
     betNonceStr,
     creditsRecord,
@@ -1100,12 +1240,33 @@ export async function fetchMarketById(marketId: string) {
   }
 }
 
+// Token type constants (match contract TOKEN_ALEO=1, TOKEN_USDCX=2)
+export const TOKEN_TYPE = {
+  ALEO: 1,
+  USDCX: 2,
+} as const;
+
+export const TOKEN_SYMBOLS: Record<number, 'ALEO' | 'USDCX'> = {
+  1: 'ALEO',
+  2: 'USDCX',
+};
+
+/**
+ * Get the correct withdraw/refund function name based on token type
+ */
+export function getWithdrawFunction(tokenType?: 'ALEO' | 'USDCX'): string {
+  return tokenType === 'USDCX' ? 'withdraw_winnings_usdcx' : 'withdraw_winnings';
+}
+
+export function getRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
+  return tokenType === 'USDCX' ? 'claim_refund_usdcx' : 'claim_refund';
+}
+
 // Export a singleton instance info
 export const CONTRACT_INFO = {
-  programId: 'veiled_markets_v10.aleo',
-  deploymentTxId: 'at186jeh868hyrww5hltajpxvt6a2740ge7y6nfs078jfrcueqr8uqqugjtnq',
+  programId: config.programId,
+  usdcxProgramId: config.usdcxProgramId,
   network: 'testnet',
   explorerUrl: config.explorerUrl,
-  // Real on-chain data - markets are stored in localStorage and fetched from blockchain
   useMockData: false,
 };

@@ -457,10 +457,18 @@ export function MarketDetail() {
       }
 
       // Build inputs based on privacy mode
-      const functionName = usePrivateMode ? 'place_bet' : 'place_bet_public'
-      const inputs = usePrivateMode
-        ? buildPlaceBetPrivateInputs(market.id, amountMicro, selectedOutcome, creditsRecord!)
-        : buildPlaceBetInputs(market.id, amountMicro, selectedOutcome)
+      const tokenType = market.tokenType || 'ALEO'
+      let functionName: string
+      let inputs: string[]
+
+      if (usePrivateMode) {
+        functionName = 'place_bet'
+        inputs = buildPlaceBetPrivateInputs(market.id, amountMicro, selectedOutcome, creditsRecord!)
+      } else {
+        const betResult = buildPlaceBetInputs(market.id, amountMicro, selectedOutcome, tokenType as 'ALEO' | 'USDCX')
+        functionName = betResult.functionName
+        inputs = betResult.inputs
+      }
 
       console.warn('[Bet] Submitting transaction:', {
         program: CONTRACT_INFO.programId,
@@ -469,7 +477,7 @@ export function MarketDetail() {
         mode: usePrivateMode ? 'PRIVATE' : 'PUBLIC',
         inputCount: inputs.length,
       })
-      console.warn('[Bet] Inputs:', JSON.stringify(inputs.map((inp, i) =>
+      console.warn('[Bet] Inputs:', JSON.stringify(inputs.map((inp: string, i: number) =>
         `[${i}] ${inp.length > 40 ? inp.slice(0, 20) + '...' + inp.slice(-15) : inp}`
       )))
 
@@ -648,25 +656,42 @@ export function MarketDetail() {
       console.error('Wallet bet failed:', err)
       let errorMessage = err instanceof Error ? err.message : 'Failed to place bet'
 
-      // Detect common Leo Wallet prover failures and provide actionable guidance
       const lowerMsg = errorMessage.toLowerCase()
+
+      // Detect Leo Wallet "Invalid Aleo program" or "unknown error" — these mean the
+      // wallet cannot handle this program's nested signer authorization at all.
+      // Leo Wallet logs the real error in addToWindow.js but wraps it as AleoWalletError.
       if (
+        lowerMsg.includes('invalid aleo program') ||
+        lowerMsg.includes('invalid_params') ||
+        lowerMsg.includes('cannot validate program') ||
+        lowerMsg.includes('cannot execute') ||
+        lowerMsg.includes('nested signer')
+      ) {
+        errorMessage =
+          'Browser wallets cannot execute this program due to nested signer authorization ' +
+          '(transfer_public_as_signer inside place_bet_public).\n\n' +
+          'This is a known limitation of all current Aleo browser wallets. ' +
+          'Please try again or wait for wallet updates that support nested signer authorization.'
+      } else if (
         lowerMsg.includes('unknown error') ||
+        lowerMsg.includes('an unknown error occured')
+      ) {
+        errorMessage =
+          'Wallet returned an unknown error. This typically means it cannot validate ' +
+          'the program (nested imports that browser wallets cannot resolve).\n\n' +
+          'Please try again or check your wallet for more details.'
+      } else if (
         lowerMsg.includes('proving') ||
         lowerMsg.includes('prover') ||
         lowerMsg.includes('wasm') ||
         lowerMsg.includes('out of memory') ||
         lowerMsg.includes('timeout') ||
-        lowerMsg.includes('aborted') ||
-        (lowerMsg.includes('error') && !lowerMsg.includes('insufficient') && !lowerMsg.includes('reject') && !lowerMsg.includes('deadline'))
+        lowerMsg.includes('aborted')
       ) {
         errorMessage =
           `Wallet error: ${errorMessage}\n\n` +
-          'This program has many statements — the wallet prover may struggle with it.\n\n' +
-          'Try these solutions:\n' +
-          '1. Refresh the page and try again (prover key download may have failed)\n' +
-          '2. Ensure you have a stable internet connection (proving keys are ~5MB)\n' +
-          '3. Try with a smaller bet amount first'
+          'The wallet prover may struggle with this program size. Please try again.'
       }
 
       setError(errorMessage)
@@ -885,6 +910,7 @@ export function MarketDetail() {
                   totalBets={market.totalBets}
                   potentialYesPayout={market.potentialYesPayout}
                   potentialNoPayout={market.potentialNoPayout}
+                  tokenSymbol={market.tokenType || 'ALEO'}
                 />
               </motion.div>
 
@@ -1053,7 +1079,7 @@ export function MarketDetail() {
                       <AlertCircle className="w-8 h-8 text-no-400" />
                     </div>
                     <h3 className="text-xl font-bold text-white mb-2">Bet Failed</h3>
-                    <p className="text-surface-400 mb-6">{error}</p>
+                    <p className="text-surface-400 mb-6 whitespace-pre-line text-left text-sm">{error}</p>
                     <button onClick={resetBet} className="btn-primary w-full">
                       Try Again
                     </button>

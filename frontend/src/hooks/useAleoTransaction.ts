@@ -1,12 +1,15 @@
 // ============================================================================
 // useAleoTransaction - Wallet-agnostic transaction execution
 // ============================================================================
-// For Leo Wallet: Uses window.leoWallet.requestTransaction() directly.
-//   The ProvableHQ adapter wraps errors poorly, so we bypass it for Leo.
-//   Note: requestExecution() does NOT work for custom programs (returns
-//   "An unknown error occurred"). requestTransaction() is the correct API.
+// Strategy:
+//   1. For Leo Wallet: Call leoWallet.requestTransaction() DIRECTLY.
+//      The ProvableHQ adapter swallows Leo Wallet's real error messages,
+//      replacing them with generic "Failed to execute transaction". By calling
+//      directly, we get the actual error for debugging.
 //
-// For other wallets: Falls back to the adapter's executeTransaction().
+//   2. For other wallets: Use ProvableHQ adapter's executeTransaction().
+//
+//   3. For demo mode: Simulate transaction.
 // ============================================================================
 
 import { useCallback } from 'react'
@@ -17,7 +20,7 @@ interface TransactionOptions {
   program: string
   function: string
   inputs: string[]
-  fee: number
+  fee: number       // in ALEO (e.g., 0.5). Hook converts to microcredits.
   privateFee?: boolean
 }
 
@@ -70,83 +73,97 @@ export function useAleoTransaction() {
 
   const executeTransaction = useCallback(
     async (options: TransactionOptions): Promise<TransactionResult> => {
-      const isLeo = wallet.walletType === 'leo'
       const isShield = wallet.walletType === 'shield'
+      const isDemo = wallet.isDemoMode
 
       console.warn(`[TX] executeTransaction — walletType: ${wallet.walletType}`)
 
       try {
-        // Leo Wallet: Call requestTransaction directly (bypasses adapter error wrapping)
-        if (isLeo) {
-          const leoWallet = getLeoWallet()
-          if (leoWallet?.requestTransaction) {
-            // Leo Wallet expects fee in MICROCREDITS (integer), not ALEO (decimal).
-            // Callers pass fee in ALEO (e.g., 0.5 = 0.5 ALEO), so convert here.
-            const feeInMicrocredits = Math.round((options.fee || 0.5) * 1_000_000)
-
-            const txPayload = {
-              address: wallet.address!,
-              chainId: 'testnetbeta',
-              transitions: [
-                {
-                  program: options.program,
-                  functionName: options.function,
-                  inputs: options.inputs,
-                },
-              ],
-              fee: feeInMicrocredits,
-              feePrivate: options.privateFee ?? false,
-            }
-
-            console.warn('[TX] Calling Leo requestTransaction directly:', {
-              program: options.program,
-              function: options.function,
-              feeAleo: options.fee,
-              feeMicrocredits: feeInMicrocredits,
-              inputs: options.inputs,
-            })
-
-            const result = await leoWallet.requestTransaction(txPayload)
-            console.warn('[TX] Leo raw response:', typeof result, JSON.stringify(result)?.substring(0, 500))
-
-            const txId = extractTransactionId(result)
-            if (txId) {
-              console.warn('[TX] Submitted:', txId)
-              return { transactionId: txId }
-            }
-
-            throw new Error('No transaction ID returned from Leo Wallet. Raw response: ' + JSON.stringify(result)?.substring(0, 200))
-          }
-          console.warn('[TX] Leo Wallet not found on window, falling back to adapter')
+        // Demo mode: simulate transaction
+        if (isDemo) {
+          console.warn('[TX] Demo mode — simulating transaction')
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          return { transactionId: `demo_tx_${Date.now()}_${Math.random().toString(36).substring(7)}` }
         }
 
-        // Fallback: Use adapter's executeTransaction with correct AleoTransaction format
-        // The ProvableHQ adapter expects fee in microcredits (same as Leo Wallet).
-        const adapterFee = Math.round((options.fee || 0.5) * 1_000_000)
-        const aleoTx = {
-          address: wallet.address!,
-          chainId: 'testnetbeta',
-          transitions: [
-            {
-              program: options.program,
-              functionName: options.function,
-              inputs: options.inputs,
-            },
-          ],
-          fee: adapterFee,
-          feePrivate: options.privateFee ?? false,
-        }
+        // Convert fee from ALEO to microcredits
+        // Callers pass ALEO (e.g., 0.5), wallet expects microcredits (500000)
+        const feeAleo = options.fee || 0.5
+        const feeMicrocredits = Math.round(feeAleo * 1_000_000)
 
         console.warn('[TX] Calling adapter executeTransaction:', {
           program: options.program,
           function: options.function,
-          fee: options.fee,
+          fee: `${feeAleo} ALEO = ${feeMicrocredits} microcredits`,
+          inputCount: options.inputs.length,
+          inputs: options.inputs,
         })
 
-        // Cast to any: adapter types differ between ProvableHQ versions
-        const result = await (adapterExecute as any)(aleoTx)
-        const txId = extractTransactionId(result)
+        // Detect Leo Wallet — only use direct API if Leo is the CONNECTED wallet
+        const isLeoConnected = wallet.walletType === 'leo'
+        const leoWallet = isLeoConnected ? getLeoWallet() : undefined
 
+        // For Leo Wallet: ensure the wallet has the correct program permissions.
+        if (isLeoConnected && leoWallet && typeof leoWallet.connect === 'function') {
+          try {
+            const programs = [
+              options.program,
+              'credits.aleo',
+              // Include USDCX program and ALL its transitive dependencies
+              // Leo Wallet must resolve all imports to validate the program
+              'test_usdcx_stablecoin.aleo',
+              'merkle_tree.aleo',
+              'test_usdcx_multisig_core.aleo',
+              'test_usdcx_freezelist.aleo',
+            ]
+            console.warn('[TX] Refreshing Leo Wallet permissions for:', programs)
+            await leoWallet.connect('AutoDecrypt', 'testnetbeta', programs)
+            console.warn('[TX] Leo Wallet permissions refreshed')
+          } catch (connectErr) {
+            console.warn('[TX] Leo Wallet permission refresh (non-fatal):', (connectErr as any)?.message)
+          }
+        }
+
+        // === Leo Wallet: call requestTransaction() directly ===
+        // The adapter wraps Leo Wallet errors with generic messages, losing the
+        // real error. By calling directly, we get actionable error messages.
+        if (isLeoConnected && leoWallet && typeof leoWallet.requestTransaction === 'function') {
+          const requestData = {
+            address: wallet.address,
+            chainId: 'testnetbeta',
+            fee: feeMicrocredits,
+            feePrivate: options.privateFee ?? false,
+            transitions: [{
+              program: options.program,
+              functionName: options.function,
+              inputs: options.inputs,
+            }],
+          }
+
+          console.warn('[TX] Calling Leo Wallet requestTransaction directly:', JSON.stringify(requestData, null, 2))
+
+          const result = await leoWallet.requestTransaction(requestData)
+          console.warn('[TX] Leo Wallet response:', result)
+
+          const txId = extractTransactionId(result)
+          if (txId) {
+            console.warn('[TX] Submitted via Leo Wallet direct:', txId)
+            return { transactionId: txId }
+          }
+
+          throw new Error('No transaction ID returned from Leo Wallet')
+        }
+
+        // === Other wallets: use ProvableHQ adapter ===
+        const result = await (adapterExecute as any)({
+          program: options.program,
+          function: options.function,
+          inputs: options.inputs,
+          fee: feeMicrocredits,
+          privateFee: options.privateFee ?? false,
+        })
+
+        const txId = extractTransactionId(result)
         if (txId) {
           console.warn('[TX] Submitted via adapter:', txId)
           return { transactionId: txId }
@@ -154,8 +171,21 @@ export function useAleoTransaction() {
 
         throw new Error('No transaction ID returned from wallet')
       } catch (err: any) {
-        const msg = err?.message || String(err)
-        console.error('[TX] Failed:', msg)
+        // Extract the REAL error message — Leo Wallet errors may be nested
+        // AleoWalletError objects where the real message is buried
+        const msg = err?.message || err?.data?.message || String(err)
+        const errName = err?.name || ''
+        const errCode = err?.code || ''
+
+        // For AleoWalletError, try to extract the original INVALID_PARAMS message
+        // Leo Wallet wraps real errors with "An unknown error occured"
+        let realMessage = msg
+        if (errName === 'AleoWalletError' || msg.includes('unknown error')) {
+          realMessage = `Leo Wallet error: ${msg}. ` +
+            `Browser wallets cannot execute "${options.program}" due to nested signer authorization.`
+        }
+
+        console.error('[TX] Failed:', { name: errName, code: errCode, message: msg, realMessage, raw: err })
 
         if (msg.includes('reject') || msg.includes('denied') || msg.includes('cancel')) {
           throw new Error('Transaction rejected by user')
@@ -164,14 +194,30 @@ export function useAleoTransaction() {
         if (isShield && msg.includes('Invalid transaction payload')) {
           throw new Error(
             'Shield Wallet does not yet support custom program transactions. ' +
-            'Please use Leo Wallet to place bets, or use the CLI mode below.'
+            'Please use Puzzle Wallet or Leo Wallet instead.'
+          )
+        }
+
+        if (msg.includes('Invalid Aleo program') || msg.includes('INVALID_PARAMS')) {
+          throw new Error(
+            `Wallet cannot validate program "${options.program}". ` +
+            'This is a known wallet limitation with nested signer authorization. ' +
+            'Try using Puzzle Wallet, which handles complex programs via server-side proving.'
+          )
+        }
+
+        // For adapter-wrapped errors like "Failed to execute transaction"
+        if (msg.includes('Failed to execute') || msg.includes('unknown error')) {
+          throw new Error(
+            `Wallet cannot execute "${options.function}" on "${options.program}". ` +
+            'Please try again or try a different wallet (Puzzle Wallet recommended for complex programs).'
           )
         }
 
         throw err
       }
     },
-    [adapterExecute, wallet.walletType, wallet.address]
+    [adapterExecute, wallet.walletType, wallet.address, wallet.isDemoMode]
   )
 
   // Poll transaction status using DUAL strategy:
@@ -195,12 +241,11 @@ export function useAleoTransaction() {
         await new Promise(r => setTimeout(r, intervalMs))
 
         // === Strategy 1: On-chain verification (primary, most reliable) ===
-        // Check every 3rd poll (30 seconds) to avoid excessive API calls
         if (onChainVerify && i > 0 && i % 3 === 0) {
           try {
             const verified = await onChainVerify()
             if (verified) {
-              console.warn(`[TX] On-chain verification PASSED at poll ${i + 1}! Bet confirmed.`)
+              console.warn(`[TX] On-chain verification PASSED at poll ${i + 1}!`)
               onStatusChange('confirmed', walletTxId)
               return
             }
@@ -211,7 +256,8 @@ export function useAleoTransaction() {
 
         // === Strategy 2: Wallet status API (secondary, for txId) ===
         try {
-          const leoWallet = getLeoWallet()
+          const currentWalletType = useWalletStore.getState().wallet.walletType
+          const leoWallet = currentWalletType === 'leo' ? getLeoWallet() : undefined
           if (leoWallet?.transactionStatus) {
             const result = await leoWallet.transactionStatus(txId)
             console.warn(`[TX] Poll ${i + 1}/${maxAttempts}:`, JSON.stringify(result))
@@ -227,10 +273,8 @@ export function useAleoTransaction() {
               walletTxId = result?.transactionId || walletTxId
               walletFinalStatus = result?.status
 
-              // With a txId, the transaction WAS on-chain and genuinely failed
               if (result?.transactionId) {
                 console.warn('[TX] Transaction CONFIRMED FAILED on-chain:', result.transactionId)
-                // Do one final on-chain check (maybe pool changed anyway?)
                 if (onChainVerify) {
                   try {
                     const verified = await onChainVerify()
@@ -244,49 +288,37 @@ export function useAleoTransaction() {
                 return
               }
 
-              // Without txId, wait for more polls / on-chain check
-              console.warn(`[TX] "Failed" without txId (${walletFailedCount}). Continuing to poll on-chain...`)
+              console.warn(`[TX] "Failed" without txId (${walletFailedCount}). Continuing...`)
 
-              // After 4+ failures without txId, do an immediate on-chain check
               if (walletFailedCount >= 4 && onChainVerify) {
                 try {
-                  console.warn('[TX] Multiple wallet failures — checking on-chain NOW...')
                   const verified = await onChainVerify()
                   if (verified) {
-                    console.warn('[TX] On-chain verification PASSED despite wallet failures!')
                     onStatusChange('confirmed', undefined)
                     return
                   }
-                  // On-chain confirms no change → genuinely failed
-                  console.warn('[TX] On-chain confirms: bet did NOT go through.')
                   onStatusChange('failed', undefined)
                   return
                 } catch {
-                  // Network error on verification — continue polling
                   console.warn('[TX] On-chain check also failed (network). Will retry...')
                 }
               }
 
-              // After 6 failures without txId AND without on-chain verifier
               if (walletFailedCount >= 6 && !onChainVerify) {
                 onStatusChange('failed', undefined)
                 return
               }
-
               continue
             }
-            // 'Completed' = still processing (proving/broadcasting)
             walletFailedCount = 0
           } else {
-            // Non-Leo wallet: use adapter status
             const result = await adapterTxStatus(txId)
             console.warn(`[TX] Poll ${i + 1}/${maxAttempts}:`, result)
-
-            if (result?.status === 'accepted' || result?.status === 'Finalized') {
+            if (result?.status === 'accepted' || result?.status === 'Finalized' || result?.status === 'Settled') {
               onStatusChange('confirmed', result.transactionId || txId)
               return
             }
-            if (result?.status === 'failed' || result?.status === 'rejected') {
+            if (result?.status === 'failed' || result?.status === 'rejected' || result?.status === 'Failed') {
               if (onChainVerify) {
                 try {
                   const verified = await onChainVerify()
@@ -302,7 +334,6 @@ export function useAleoTransaction() {
           }
         } catch (err) {
           console.warn(`[TX] Poll ${i + 1} wallet error:`, err)
-          // On network error, still continue — on-chain check will handle it
           if (txId.startsWith('at1')) {
             try {
               const resp = await fetch(
@@ -317,25 +348,22 @@ export function useAleoTransaction() {
         }
       }
 
-      // Timeout — final on-chain verification with retries
+      // Timeout — final on-chain verification
       if (onChainVerify) {
         for (let retry = 0; retry < 3; retry++) {
           try {
-            console.warn(`[TX] Final on-chain check (attempt ${retry + 1}/3)...`)
             const verified = await onChainVerify()
             if (verified) {
-              console.warn('[TX] Final on-chain verification PASSED!')
               onStatusChange('confirmed', undefined)
               return
             }
-            break // Pool didn't change, no need to retry
+            break
           } catch {
             if (retry < 2) await new Promise(r => setTimeout(r, 3000))
           }
         }
       }
 
-      // If wallet reported failures, use 'failed'; otherwise 'unknown'
       if (walletFinalStatus === 'Failed' || walletFinalStatus === 'Rejected') {
         onStatusChange('failed', walletTxId)
       } else {

@@ -12,7 +12,8 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { type Bet, useBetsStore, CONTRACT_INFO } from '@/lib/store'
-import { cn, formatCredits } from '@/lib/utils'
+import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
+import { getWithdrawFunction, getRefundFunction } from '@/lib/aleo-client'
 
 interface ClaimWinningsModalProps {
   mode: 'winnings' | 'refund'
@@ -68,12 +69,18 @@ export function ClaimWinningsModal({
 
   if (!bet) return null
 
+  const tokenType = bet.tokenType || 'ALEO'
+  const tokenSymbol = getTokenSymbol(tokenType)
+  const refundFn = getRefundFunction(tokenType)
+  const withdrawFn = getWithdrawFunction(tokenType)
+  const amountSuffix = 'u128' // v11: all amounts are u128
+
   const payoutDisplay = isRefund
     ? formatCredits(bet.amount)
     : formatCredits(bet.payoutAmount || bet.amount)
 
   // Build CLI commands
-  const claimRefundCmd = `snarkos developer execute ${CONTRACT_INFO.programId} claim_refund \\
+  const claimRefundCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${refundFn} \\
   "<YOUR_BET_RECORD>" \\
   --private-key <YOUR_PRIVATE_KEY> \\
   --endpoint https://api.explorer.provable.com \\
@@ -85,8 +92,8 @@ export function ClaimWinningsModal({
   --endpoint https://api.explorer.provable.com \\
   --broadcast --network 1 --priority-fee 500000`
 
-  const withdrawWinningsCmd = `snarkos developer execute ${CONTRACT_INFO.programId} withdraw_winnings \\
-  "<WINNINGS_CLAIM_RECORD>" "${bet.payoutAmount || bet.amount}u64" \\
+  const withdrawWinningsCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${withdrawFn} \\
+  "<WINNINGS_CLAIM_RECORD>" "${bet.payoutAmount || bet.amount}${amountSuffix}" \\
   --private-key <YOUR_PRIVATE_KEY> \\
   --endpoint https://api.explorer.provable.com \\
   --broadcast --network 1 --priority-fee 500000`
@@ -168,7 +175,7 @@ export function ClaimWinningsModal({
                         {bet.outcome.toUpperCase()}
                       </span>
                       <span className="text-sm text-surface-400 ml-2">
-                        Bet: {formatCredits(bet.amount)} ALEO
+                        Bet: {formatCredits(bet.amount)} {tokenSymbol}
                       </span>
                     </div>
                     <div className="text-right">
@@ -178,7 +185,7 @@ export function ClaimWinningsModal({
                       )}>
                         {isRefund ? '' : '+'}{payoutDisplay}
                       </p>
-                      <p className="text-xs text-surface-500">ALEO</p>
+                      <p className="text-xs text-surface-500">{tokenSymbol}</p>
                     </div>
                   </div>
                 </div>

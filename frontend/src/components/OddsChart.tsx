@@ -11,6 +11,7 @@ interface OddsChartProps {
   totalBets: number
   potentialYesPayout: number
   potentialNoPayout: number
+  tokenSymbol?: string
   className?: string
 }
 
@@ -23,6 +24,7 @@ export function OddsChart({
   totalBets,
   potentialYesPayout,
   potentialNoPayout,
+  tokenSymbol = 'ALEO',
   className,
 }: OddsChartProps) {
   const totalPool = yesPool + noPool
@@ -56,7 +58,7 @@ export function OddsChart({
                 YES Pool
               </span>
               <span className="text-surface-300 font-mono">
-                {formatCredits(yesPool)} ALEO
+                {formatCredits(yesPool)} {tokenSymbol}
               </span>
             </div>
             <div className="h-6 rounded-lg overflow-hidden bg-surface-800 relative">
@@ -80,7 +82,7 @@ export function OddsChart({
                 NO Pool
               </span>
               <span className="text-surface-300 font-mono">
-                {formatCredits(noPool)} ALEO
+                {formatCredits(noPool)} {tokenSymbol}
               </span>
             </div>
             <div className="h-6 rounded-lg overflow-hidden bg-surface-800 relative">
@@ -104,7 +106,7 @@ export function OddsChart({
         <div className="flex justify-between items-center">
           <span className="text-surface-400 text-sm">Total Pool</span>
           <span className="text-white font-bold text-lg font-mono">
-            {formatCredits(totalVolume)} ALEO
+            {formatCredits(totalVolume)} {tokenSymbol}
           </span>
         </div>
       </div>

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import {
   walletManager,
   fetchPublicBalance,
+  fetchUsdcxPublicBalance,
   type WalletType,
   type NetworkType,
   type WalletAccount,
@@ -64,6 +65,7 @@ export interface Market {
   resolutionSource?: string
   tags?: string[]
   transactionId?: string // Creation transaction ID for verification
+  tokenType?: 'ALEO' | 'USDCX' // v11: token denomination for this market
 }
 
 export interface SharePosition {
@@ -90,6 +92,7 @@ export interface Bet {
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
   winningOutcome?: 'yes' | 'no' // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
+  tokenType?: 'ALEO' | 'USDCX' // v11: token denomination
 }
 
 // Phase 2: Commit-Reveal Scheme Records (SDK-based)
@@ -141,7 +144,7 @@ const initialWalletState: WalletState = {
   connecting: false,
   address: null,
   network: 'testnet',
-  balance: { public: 0n, private: 0n },
+  balance: { public: 0n, private: 0n, usdcxPublic: 0n },
   walletType: null,
   isDemoMode: false,
 }
@@ -511,11 +514,20 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         }
       }
 
-      const balance: WalletBalance = { public: publicBalance, private: privateBalance }
+      // Fetch USDCX public balance in parallel (non-blocking)
+      let usdcxPublic = 0n
+      try {
+        usdcxPublic = await fetchUsdcxPublicBalance(wallet.address)
+      } catch {
+        // USDCX balance is non-critical
+      }
+
+      const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic }
 
       console.log('[Balance] Final:', {
         public: `${Number(publicBalance) / 1_000_000} ALEO`,
         private: `${Number(privateBalance) / 1_000_000} ALEO`,
+        usdcxPublic: `${Number(usdcxPublic) / 1_000_000} USDCX`,
       })
 
       set({
@@ -1226,19 +1238,22 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v10.aleo contract
-      // place_bet_public(market_id: field, amount: u64, outcome: u8, bet_nonce: field)
+      // Build inputs for the veiled_markets_v11.aleo contract
+      // place_bet_public(market_id: field, amount: u128, outcome: u8, bet_nonce: field)
       // Fix 7: 4 private inputs - bet_nonce generated randomly for per-bet claim tracking
-      const inputs = buildPlaceBetInputs(
+      const tokenType = market?.tokenType || 'ALEO'
+      const { functionName: betFunctionName, inputs } = buildPlaceBetInputs(
         marketId,
         amount,
         outcome,
+        tokenType as 'ALEO' | 'USDCX',
       )
 
       console.log('=== PLACE BET DEBUG ===')
       console.log('Market ID:', marketId)
       console.log('Amount:', amount.toString())
       console.log('Outcome:', outcome)
+      console.log('Function:', betFunctionName)
       console.log('Program ID:', CONTRACT_INFO.programId)
 
       // Validate inputs
@@ -1257,7 +1272,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       // but Leo Wallet SDK doesn't expose private record plaintexts
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
-        functionName: 'place_bet_public',
+        functionName: betFunctionName,
         inputs,
         fee: 0.5, // 0.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
       })
@@ -1564,7 +1579,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       // Try to fetch from wallet records (may not work with all wallets)
       let walletBets: Bet[] = []
       try {
-        const records = await walletManager.getRecords('veiled_markets_v10.aleo')
+        const records = await walletManager.getRecords(CONTRACT_INFO.programId)
         walletBets = records
           .filter((r: any) => r.type === 'Bet')
           .map((r: any) => ({

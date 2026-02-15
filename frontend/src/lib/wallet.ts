@@ -33,6 +33,7 @@ export interface WalletAccount {
 export interface WalletBalance {
   public: bigint;
   private: bigint;
+  usdcxPublic: bigint;
 }
 
 export interface TransactionRequest {
@@ -157,6 +158,35 @@ export async function fetchPublicBalance(address: string): Promise<bigint> {
   return 0n;
 }
 
+/**
+ * Fetch USDCX public balance from test_usdcx_stablecoin.aleo balances mapping.
+ * Returns 0n for HTTP 404 (address has no USDCX balance).
+ */
+export async function fetchUsdcxPublicBalance(address: string): Promise<bigint> {
+  const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
+  const url = `${baseUrl}/program/${config.usdcxProgramId}/mapping/balances/${address}`;
+  try {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return 0n;
+      }
+      return 0n; // Silently return 0 for USDCX errors (non-critical)
+    }
+
+    const data = await response.text();
+    const cleanData = data.replace(/"/g, '').trim();
+    const match = cleanData.match(/(\d+)/);
+    if (match) {
+      return BigInt(match[1]);
+    }
+    return 0n;
+  } catch {
+    return 0n; // USDCX balance fetch failure is non-critical
+  }
+}
+
 // ============================================================================
 // PUZZLE WALLET ADAPTER
 // ============================================================================
@@ -189,8 +219,8 @@ export class PuzzleWalletAdapter {
         },
         permissions: {
           programIds: {
-            'AleoTestnet': ['veiled_markets_v10.aleo', 'credits.aleo'],
-            'AleoMainnet': ['veiled_markets_v10.aleo', 'credits.aleo'],
+            'AleoTestnet': [config.programId, 'credits.aleo', config.usdcxProgramId],
+            'AleoMainnet': [config.programId, 'credits.aleo', config.usdcxProgramId],
           }
         }
       });
@@ -307,18 +337,18 @@ export class PuzzleWalletAdapter {
         publicBalance = await fetchPublicBalance(this.account.address);
       }
 
-      return { public: publicBalance, private: privateBalance };
+      return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
     } catch (err) {
       console.warn('Puzzle Wallet: getBalance failed:', err);
       if (this.account?.address) {
         try {
           const publicBalance = await fetchPublicBalance(this.account.address);
-          return { public: publicBalance, private: 0n };
+          return { public: publicBalance, private: 0n, usdcxPublic: 0n };
         } catch {
           console.warn('Puzzle Wallet: fetchPublicBalance also failed');
         }
       }
-      return { public: 0n, private: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n };
     }
   }
 
@@ -513,7 +543,7 @@ export class LeoWalletAdapter {
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
         console.log('Leo Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v10.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
 
         if (this.adapter.account) {
           console.log('Leo Wallet: Connected successfully');
@@ -556,7 +586,7 @@ export class LeoWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n };
     }
 
     let publicBalance = 0n;
@@ -757,7 +787,7 @@ export class LeoWalletAdapter {
       console.warn('Leo Wallet: ⚠️ Private records are encrypted and may not be accessible via SDK');
     }
 
-    return { public: publicBalance, private: privateBalance };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -798,6 +828,11 @@ export class LeoWalletAdapter {
       let result: any = null;
 
       if (leoWallet) {
+        // Leo Wallet expects fee in MICROCREDITS (integer), not ALEO.
+        // Callers pass fee in ALEO (e.g., 0.5), so convert here.
+        const feeInAleo = request.fee || 0.5;
+        const feeInMicrocredits = Math.round(feeInAleo * 1_000_000);
+
         const txData = {
           address: this.adapter.account?.address || this.account.address,
           chainId: 'testnetbeta',
@@ -806,7 +841,7 @@ export class LeoWalletAdapter {
             functionName: request.functionName,
             inputs: request.inputs,
           }],
-          fee: request.fee || 0.5,
+          fee: feeInMicrocredits,
           feePrivate: false,
         };
 
@@ -854,11 +889,12 @@ export class LeoWalletAdapter {
       // Fallback: use the adapter's executeTransaction if direct calls all failed
       if (!result) {
         console.log('Leo Wallet: Falling back to adapter executeTransaction...');
+        const adapterFee = Math.round((request.fee || 0.5) * 1_000_000);
         result = await this.adapter.executeTransaction({
           program: request.programId,
           function: request.functionName,
           inputs: request.inputs,
-          fee: request.fee,
+          fee: adapterFee,
           privateFee: false,
         });
       }
@@ -1163,7 +1199,7 @@ export class FoxWalletAdapter {
 
       try {
         console.log('Fox Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v10.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
 
         if (this.adapter.account) {
           console.log('Fox Wallet: Connected successfully');
@@ -1206,7 +1242,7 @@ export class FoxWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n };
     }
 
     let publicBalance = 0n;
@@ -1233,7 +1269,7 @@ export class FoxWalletAdapter {
       // Private records might require decrypt permission
     }
 
-    return { public: publicBalance, private: privateBalance };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1350,7 +1386,7 @@ export class SoterWalletAdapter {
 
       try {
         console.log('Soter Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, ['veiled_markets_v10.aleo', 'credits.aleo']);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
 
         if (this.adapter.account) {
           console.log('Soter Wallet: Connected successfully');
@@ -1393,7 +1429,7 @@ export class SoterWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n };
     }
 
     let publicBalance = 0n;
@@ -1420,7 +1456,7 @@ export class SoterWalletAdapter {
       // Private records might require decrypt permission
     }
 
-    return { public: publicBalance, private: privateBalance };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1547,11 +1583,11 @@ export class ShieldWalletAdapter {
       if (typeof shieldWallet.connect === 'function') {
         // Try standard Aleo wallet connect pattern
         try {
-          await shieldWallet.connect('AutoDecrypt', 'testnetbeta', ['veiled_markets_v10.aleo', 'credits.aleo']);
+          await shieldWallet.connect('AutoDecrypt', 'testnetbeta', [config.programId, 'credits.aleo', config.usdcxProgramId]);
         } catch {
           // Try alternative connect signature
           try {
-            await shieldWallet.connect({ network: 'testnet', programs: ['veiled_markets_v10.aleo', 'credits.aleo'] });
+            await shieldWallet.connect({ network: 'testnet', programs: [config.programId, 'credits.aleo', config.usdcxProgramId] });
           } catch {
             await shieldWallet.connect();
           }
@@ -1609,7 +1645,7 @@ export class ShieldWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.connected || !this.account) {
-      return { public: 0n, private: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n };
     }
 
     let publicBalance = 0n;
@@ -1656,7 +1692,7 @@ export class ShieldWalletAdapter {
       }
     }
 
-    return { public: publicBalance, private: privateBalance };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1968,6 +2004,7 @@ export class WalletManager {
       return {
         public: 10000000000n, // 10,000 credits
         private: 5000000000n,  // 5,000 credits
+        usdcxPublic: 5000000000n, // 5,000 USDCX demo
       };
     }
 

@@ -11,7 +11,7 @@ import {
   Shield,
   Coins,
   Clock,
-  ExternalLink
+  ExternalLink,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useWalletStore } from '@/lib/store'
@@ -45,6 +45,7 @@ interface MarketFormData {
   resolutionDeadlineDate: string
   resolutionDeadlineTime: string
   resolutionSource: string
+  tokenType: 'ALEO' | 'USDCX'
 }
 
 const categories = [
@@ -66,11 +67,12 @@ const initialFormData: MarketFormData = {
   resolutionDeadlineDate: '',
   resolutionDeadlineTime: '23:59',
   resolutionSource: '',
+  tokenType: 'ALEO',
 }
 
 export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketModalProps) {
   const { wallet } = useWalletStore()
-  const { executeTransaction } = useAleoTransaction()
+  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
   const [step, setStep] = useState<CreateStep>('details')
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
@@ -198,8 +200,11 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const input2 = `${deadlineBlockHeight.toString()}u64`;
       const input3 = `${resolutionBlockHeight.toString()}u64`;
       const input4 = wallet.address!; // resolver = creator by default
-
-      const inputs = [input0, input1, input2, input3, input4];
+      const input5 = formData.tokenType === 'USDCX' ? '2u8' : '1u8'; // v11: token_type
+      const isV11Program = /_v11\.aleo$/i.test(CONTRACT_INFO.programId)
+      const inputs = isV11Program
+        ? [input0, input1, input2, input3, input4, input5]
+        : [input0, input1, input2, input3, input4]
 
       console.log('=== CREATE MARKET DEBUG ===')
       console.log('Question:', formData.question)
@@ -215,7 +220,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       console.log('Inputs array:', inputs)
       console.log('Inputs JSON:', JSON.stringify(inputs, null, 2))
       console.log('Program ID:', CONTRACT_INFO.programId)
-      console.log('Deployment TX:', CONTRACT_INFO.deploymentTxId)
+      console.log('Network:', CONTRACT_INFO.network)
 
       // Validate inputs before sending
       if (!questionHash || !questionHash.endsWith('field')) {
@@ -254,7 +259,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         program: CONTRACT_INFO.programId,
         function: 'create_market',
         inputs,
-        fee: 1.0, // 1 ALEO (hook converts to microcredits internally)
+        fee: 0.5, // minimum 0.5 ALEO
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -286,50 +291,122 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       setMarketId(transactionId)
       setStep('success')
 
-      // Start polling for the actual market ID in the background
-      waitForMarketCreation(transactionId, questionHash, formData.question)
-        .then((actualMarketId) => {
-          if (actualMarketId) {
-            console.log('Market ID retrieved:', actualMarketId)
+      // ============================================================
+      // IMMEDIATELY register in Supabase with tx ID (before market ID is known)
+      // This ensures the market is discoverable even if background resolution fails
+      // ============================================================
+      if (isSupabaseAvailable()) {
+        registerMarketInRegistry({
+          market_id: `pending_${transactionId}`,
+          question_hash: questionHash,
+          question_text: formData.question,
+          description: formData.description || undefined,
+          resolution_source: formData.resolutionSource || undefined,
+          category: formData.category,
+          creator_address: wallet.address!,
+          transaction_id: transactionId,
+          created_at: Date.now(),
+        }).catch(err => console.warn('[CreateMarket] Early Supabase register failed:', err))
+      }
 
-            // Auto-register in Supabase so all users can discover this market
-            if (isSupabaseAvailable()) {
-              registerMarketInRegistry({
-                market_id: actualMarketId,
-                question_hash: questionHash,
-                question_text: formData.question,
-                description: formData.description || undefined,
-                resolution_source: formData.resolutionSource || undefined,
-                category: formData.category,
-                creator_address: wallet.address!,
-                transaction_id: transactionId,
-                created_at: Date.now(),
-              }).catch(err => console.warn('Failed to register market in Supabase:', err))
-            }
+      // ============================================================
+      // Background: resolve market ID via TWO parallel strategies
+      // 1. Wallet polling (UUID → at1... → extract from TX)
+      // 2. Blockchain scan (search recent blocks for question hash)
+      // Whichever finds the market ID first wins.
+      // ============================================================
+      const resolveAndRegister = async () => {
+        let resolved = false
 
-            onSuccess?.(actualMarketId)
-          } else {
-            console.warn('Could not retrieve actual market ID')
-            onSuccess?.(questionHash)
+        const onMarketFound = (actualMarketId: string, onChainTxId: string) => {
+          if (resolved) return
+          resolved = true
+          console.log('[CreateMarket] Market ID found:', actualMarketId)
+
+          // Update Supabase with actual market ID
+          if (isSupabaseAvailable()) {
+            registerMarketInRegistry({
+              market_id: actualMarketId,
+              question_hash: questionHash,
+              question_text: formData.question,
+              description: formData.description || undefined,
+              resolution_source: formData.resolutionSource || undefined,
+              category: formData.category,
+              creator_address: wallet.address!,
+              transaction_id: onChainTxId || transactionId,
+              created_at: Date.now(),
+            }).catch(err => console.warn('[CreateMarket] Supabase update failed:', err))
           }
-        })
-        .catch((err) => {
-          console.error('Error waiting for market creation:', err)
+
+          onSuccess?.(actualMarketId)
+        }
+
+        // Strategy 1: If at1... tx ID, extract market ID directly from transaction
+        const strategy1 = async () => {
+          let onChainTxId = transactionId
+
+          if (!transactionId.startsWith('at1')) {
+            console.log('[CreateMarket] Polling wallet for on-chain tx ID...')
+            onChainTxId = await new Promise<string>((resolve) => {
+              pollTransactionStatus(
+                transactionId,
+                (status, txId) => {
+                  if (txId && txId.startsWith('at1')) resolve(txId)
+                  else if (status === 'confirmed') resolve(txId || transactionId)
+                  else if (status === 'failed' || status === 'unknown') resolve(transactionId)
+                },
+                30, 10_000,
+              )
+            })
+          }
+
+          if (resolved) return
+          if (onChainTxId.startsWith('at1')) {
+            const marketId = await waitForMarketCreation(onChainTxId, questionHash, formData.question)
+            if (marketId && !resolved) onMarketFound(marketId, onChainTxId)
+          }
+        }
+
+        // Strategy 2: Blockchain scan — search recent blocks for the question hash
+        // This works independently of wallet UUID resolution
+        const strategy2 = async () => {
+          // Wait 30s for the transaction to be included in a block
+          await new Promise(r => setTimeout(r, 30_000))
+          if (resolved) return
+
+          // Use waitForMarketCreation with a non-at1 ID to trigger blockchain scan
+          const marketId = await waitForMarketCreation('scan', questionHash, formData.question)
+          if (marketId && !resolved) onMarketFound(marketId, transactionId)
+        }
+
+        // Run both strategies in parallel
+        await Promise.allSettled([strategy1(), strategy2()])
+
+        if (!resolved) {
+          console.warn('[CreateMarket] Both strategies failed to find market ID')
           onSuccess?.(questionHash)
-        })
+        }
+      }
+
+      resolveAndRegister().catch((err) => {
+        console.error('[CreateMarket] Error in background registration:', err)
+        onSuccess?.(questionHash)
+      })
     } catch (err: unknown) {
       console.error('Failed to create market:', err)
-      let errorMsg = 'Failed to create market'
-      if (err instanceof Error) {
-        if (err.name === 'AbortError' || err.message.includes('abort')) {
-          errorMsg = 'Network request timed out. Please check your connection and try again.'
-        } else if (err.message.includes('Wallet did not respond')) {
-          errorMsg = err.message
-        } else if (err.message.includes('rejected') || err.message.includes('denied')) {
-          errorMsg = 'Transaction was rejected in your wallet.'
-        } else {
-          errorMsg = err.message
-        }
+      // Extract message from any error type (AleoWalletError may fail instanceof Error due to bundling)
+      const errObj = err as any
+      const msg = errObj?.message || errObj?.toString?.() || String(err)
+      const name = errObj?.name || ''
+      console.error('Error details:', { name, msg, type: typeof err })
+
+      let errorMsg = msg || 'Failed to create market'
+      if (name === 'AbortError' || msg.includes('abort')) {
+        errorMsg = 'Network request timed out. Please check your connection and try again.'
+      } else if (msg.includes('Wallet did not respond')) {
+        errorMsg = msg
+      } else if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancel')) {
+        errorMsg = 'Transaction was rejected in your wallet.'
       }
       setError(errorMsg)
       setStep('error')
@@ -508,6 +585,40 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           />
                         </div>
 
+                        {/* Token Type */}
+                        <div>
+                          <label className="flex items-center gap-2 text-sm font-medium text-white mb-2">
+                            <Coins className="w-4 h-4 text-surface-400" />
+                            Betting Token
+                          </label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              onClick={() => updateForm({ tokenType: 'ALEO' })}
+                              className={cn(
+                                "p-3 rounded-xl border-2 transition-all text-center",
+                                formData.tokenType === 'ALEO'
+                                  ? "border-brand-500 bg-brand-500/10"
+                                  : "border-surface-700 hover:border-surface-600"
+                              )}
+                            >
+                              <span className="text-lg font-semibold text-white block">ALEO</span>
+                              <span className="text-xs text-surface-400">Native credits</span>
+                            </button>
+                            <button
+                              onClick={() => updateForm({ tokenType: 'USDCX' })}
+                              className={cn(
+                                "p-3 rounded-xl border-2 transition-all text-center",
+                                formData.tokenType === 'USDCX'
+                                  ? "border-brand-500 bg-brand-500/10"
+                                  : "border-surface-700 hover:border-surface-600"
+                              )}
+                            >
+                              <span className="text-lg font-semibold text-white block">USDCX</span>
+                              <span className="text-xs text-surface-400">Stablecoin (testnet)</span>
+                            </button>
+                          </div>
+                        </div>
+
                         {error && (
                           <div className="flex items-center gap-2 p-3 rounded-lg bg-no-500/10 border border-no-500/20 text-no-400">
                             <AlertCircle className="w-5 h-5 flex-shrink-0" />
@@ -667,6 +778,13 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
                           <div className="grid grid-cols-2 gap-4">
                             <div>
+                              <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Betting Token</p>
+                              <p className="text-sm text-white font-semibold">{formData.tokenType}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
                               <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Betting Ends</p>
                               <p className="text-sm text-white">
                                 {deadline?.toLocaleString()}
@@ -785,7 +903,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                               <p className="text-sm text-surface-300 font-mono break-all">{marketId}</p>
                               <p className="text-xs text-surface-500 mt-2">
                                 Your wallet is processing this transaction. The on-chain transaction ID will appear once confirmed.
-                                Check your Leo Wallet extension for real-time status.
+                                Your wallet is processing this transaction. The on-chain ID will appear once confirmed.
                               </p>
                             </>
                           )}
@@ -840,6 +958,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         </div>
                       </motion.div>
                     )}
+
                   </AnimatePresence>
                 </div>
               </div>

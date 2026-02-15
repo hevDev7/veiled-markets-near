@@ -6,6 +6,7 @@ import { LeoWalletAdapter } from '@provablehq/aleo-wallet-adaptor-leo'
 import { FoxWalletAdapter } from '@provablehq/aleo-wallet-adaptor-fox'
 import { SoterWalletAdapter } from '@provablehq/aleo-wallet-adaptor-soter'
 import { ShieldWalletAdapter } from '@provablehq/aleo-wallet-adaptor-shield'
+import { PuzzleWalletAdapter } from '@provablehq/aleo-wallet-adaptor-puzzle'
 import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 import { Network } from '@provablehq/aleo-types'
 import App from './App'
@@ -23,6 +24,10 @@ initializeMarketIds()
 
 const wallets = [
   new LeoWalletAdapter({ appName: 'Veiled Markets' }),
+  new PuzzleWalletAdapter({
+    appName: 'Veiled Markets',
+    appDescription: 'Privacy-Preserving Prediction Markets on Aleo',
+  }),
   new FoxWalletAdapter({ appName: 'Veiled Markets' }),
   new SoterWalletAdapter({ appName: 'Veiled Markets' }),
   new ShieldWalletAdapter(),
@@ -35,7 +40,16 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       network={Network.TESTNET}
       autoConnect={true}
       decryptPermission={DecryptPermission.AutoDecrypt}
-      programs={[config.programId, 'credits.aleo']}
+      programs={[
+        config.programId,
+        'credits.aleo',
+        config.usdcxProgramId,
+        // Transitive dependencies of test_usdcx_stablecoin.aleo
+        // Leo Wallet needs ALL imported programs registered to resolve them
+        'merkle_tree.aleo',
+        'test_usdcx_multisig_core.aleo',
+        'test_usdcx_freezelist.aleo',
+      ]}
       onError={(error) => console.error('[Wallet Error]', error.message)}
     >
       <BrowserRouter>
