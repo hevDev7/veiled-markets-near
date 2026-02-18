@@ -1686,6 +1686,49 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   },
 
   syncBetStatuses: async () => {
+    // --- Auto-promote stale pending bets (>2 minutes old) ---
+    const pendingBets = get().pendingBets
+    const STALE_THRESHOLD = 2 * 60 * 1000 // 2 minutes
+    const stalePending = pendingBets.filter(b => Date.now() - b.placedAt > STALE_THRESHOLD)
+
+    if (stalePending.length > 0) {
+      const promoted: string[] = []
+
+      for (const bet of stalePending) {
+        if (bet.id.startsWith('at1')) {
+          // Verify on-chain via explorer API
+          try {
+            const resp = await fetch(
+              `https://api.explorer.provable.com/v1/testnet/transaction/${bet.id}`
+            )
+            if (resp.ok) {
+              console.warn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... confirmed on-chain → promoting`)
+              promoted.push(bet.id)
+            }
+          } catch { /* keep as pending */ }
+        } else {
+          // Shield wallet or other non-at1 IDs — auto-promote
+          // Shield transactions land on-chain even if ID format is shield_xxx
+          console.warn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... (non-at1, ${Math.round((Date.now() - bet.placedAt) / 1000)}s old) → auto-promoting`)
+          promoted.push(bet.id)
+        }
+      }
+
+      if (promoted.length > 0) {
+        const updatedPending = pendingBets.filter(b => !promoted.includes(b.id))
+        const newActive = stalePending
+          .filter(b => promoted.includes(b.id))
+          .map(b => ({ ...b, status: 'active' as const }))
+
+        const updatedUserBets = [...get().userBets, ...newActive]
+        set({ pendingBets: updatedPending, userBets: updatedUserBets })
+        savePendingBetsToStorage(updatedPending)
+        saveBetsToStorage(updatedUserBets)
+        console.warn(`[Bets] Promoted ${promoted.length} stale pending bet(s) to active`)
+      }
+    }
+
+    // --- Sync active bet statuses with market state ---
     const bets = get().userBets
     const activeBets = bets.filter(b => b.status === 'active')
     if (activeBets.length === 0) return
