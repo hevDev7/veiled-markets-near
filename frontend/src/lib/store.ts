@@ -10,7 +10,7 @@ import {
   type WalletBalance,
 } from './wallet'
 import {
-  buildPlaceBetInputs,
+  buildBuySharesInputs,
   CONTRACT_INFO,
   getMarket,
   getMarketResolution,
@@ -36,15 +36,22 @@ export interface Market {
   question: string
   description?: string
   category: number
+  numOutcomes: number        // v12: 2, 3, or 4
+  outcomeLabels: string[]    // v12: labels for each outcome
   deadline: bigint
   resolutionDeadline: bigint
-  status: number // 1 = active, 2 = resolved_yes, 3 = resolved_no, 4 = cancelled
+  status: number // 1=active, 2=closed, 3=resolved, 4=cancelled, 5=pending_resolution
 
-  // AMM Pool Data
-  yesReserve: bigint
-  noReserve: bigint
-  yesPrice: number      // Current YES price (0-1)
-  noPrice: number       // Current NO price (0-1)
+  // AMM Pool Data (v12 - multi-outcome reserves)
+  yesReserve: bigint         // reserve_1
+  noReserve: bigint          // reserve_2
+  reserve3: bigint           // reserve_3 (0 if binary)
+  reserve4: bigint           // reserve_4 (0 if binary)
+  totalLiquidity: bigint     // Total tokens in pool
+  totalLPShares: bigint      // LP tokens in circulation
+
+  yesPrice: number           // Outcome 1 price (0-1)
+  noPrice: number            // Outcome 2 price (0-1)
 
   // Legacy fields (for backward compatibility)
   yesPercentage: number
@@ -60,12 +67,16 @@ export interface Market {
   potentialYesPayout: number
   potentialNoPayout: number
 
+  // v12: Resolution with challenge window
+  challengeDeadline?: bigint
+  finalized?: boolean
+
   creator?: string
   timeRemaining?: string
   resolutionSource?: string
   tags?: string[]
-  transactionId?: string // Creation transaction ID for verification
-  tokenType?: 'ALEO' | 'USDCX' // v11: token denomination for this market
+  transactionId?: string
+  tokenType?: 'ALEO' | 'USDCX'
 }
 
 export interface SharePosition {
@@ -92,7 +103,7 @@ export interface Bet {
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
   winningOutcome?: 'yes' | 'no' // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
-  tokenType?: 'ALEO' | 'USDCX' // v11: token denomination
+  tokenType?: 'ALEO' | 'USDCX' // v12: token denomination
 }
 
 // Phase 2: Commit-Reveal Scheme Records (SDK-based)
@@ -623,8 +634,14 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
   return {
     yesReserve,
     noReserve,
+    reserve3: 0n,
+    reserve4: 0n,
+    totalLiquidity: yesReserve + noReserve,
+    totalLPShares: 0n,
     yesPrice,
     noPrice,
+    numOutcomes: 2,
+    outcomeLabels: ['Yes', 'No'],
     totalYesIssued: BigInt(Math.floor(Number(totalVolume) * yesPrice)),
     totalNoIssued: BigInt(Math.floor(Number(totalVolume) * noPrice)),
   }
@@ -635,7 +652,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v10.aleo program.
+// in the veiled_markets_v14.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1238,15 +1255,35 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v11.aleo contract
-      // place_bet_public(market_id: field, amount: u128, outcome: u8, bet_nonce: field)
-      // Fix 7: 4 private inputs - bet_nonce generated randomly for per-bet claim tracking
+      // Build inputs for the veiled_markets_v14.aleo contract
+      // ALEO: buy_shares_private (needs credits record)
+      // USDCX: buy_shares_usdcx (no record needed)
       const tokenType = market?.tokenType || 'ALEO'
-      const { functionName: betFunctionName, inputs } = buildPlaceBetInputs(
+      const outcomeNum = outcome === 'yes' ? 1 : 2
+
+      let creditsRecord: string | undefined
+      if (tokenType === 'ALEO') {
+        const { fetchCreditsRecord } = await import('./credits-record')
+        const gasBuffer = 500_000
+        const totalNeeded = Number(amount) + gasBuffer
+        const record = await fetchCreditsRecord(totalNeeded)
+        if (!record) {
+          throw new Error(
+            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+            `Private betting requires an unspent Credits record.`
+          )
+        }
+        creditsRecord = record
+      }
+
+      const { functionName: betFunctionName, inputs } = buildBuySharesInputs(
         marketId,
+        outcomeNum,
         amount,
-        outcome,
+        0n, // expectedShares
+        0n, // minSharesOut
         tokenType as 'ALEO' | 'USDCX',
+        creditsRecord,
       )
 
       console.log('=== PLACE BET DEBUG ===')
@@ -1267,9 +1304,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }
 
       // Request transaction through wallet
-      // Uses place_bet_public (wallet-compatible, uses transfer_public_as_signer)
-      // Contract also has place_bet (privacy-preserving with transfer_private_to_public)
-      // but Leo Wallet SDK doesn't expose private record plaintexts
+      // ALEO: buy_shares_private (privacy-preserving, transfer_private_to_public)
+      // USDCX: buy_shares_usdcx (transfer_public_as_signer)
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
         functionName: betFunctionName,
@@ -1676,11 +1712,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           if (!resolution || !pool) continue
 
           const winningOutcome: 'yes' | 'no' = resolution.winning_outcome === 1 ? 'yes' : 'no'
-          const winningPool = winningOutcome === 'yes' ? pool.total_yes_pool : pool.total_no_pool
+          const winningPool = winningOutcome === 'yes' ? pool.reserve_1 : pool.reserve_2
+          const totalPayoutPool = pool.total_liquidity
 
           for (const bet of marketBets) {
             if (bet.outcome === winningOutcome && winningPool > 0n) {
-              const payoutAmount = (bet.amount * resolution.total_payout_pool) / winningPool
+              const payoutAmount = (bet.amount * totalPayoutPool) / winningPool
               updates.push({ betId: bet.id, newStatus: 'won', payoutAmount, winningOutcome })
             } else {
               updates.push({ betId: bet.id, newStatus: 'lost', winningOutcome })

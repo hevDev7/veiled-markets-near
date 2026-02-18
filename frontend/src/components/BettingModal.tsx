@@ -5,7 +5,8 @@ import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildPlaceBetInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
+import { buildBuySharesInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
+import { fetchCreditsRecord } from '@/lib/credits-record'
 
 interface BettingModalProps {
   market: Market | null
@@ -27,6 +28,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const [isPlacing, setIsPlacing] = useState(false)
   const [transactionId, setTransactionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [privacyMode, setPrivacyMode] = useState<'private' | 'public' | null>(null)
 
   const handlePlaceBet = async () => {
     if (!market || !selectedOutcome || !betAmount) return
@@ -43,19 +45,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       }
 
       const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-
-      // Validate amount against public balance (place_bet_public uses public credits only)
       const tokenType = market.tokenType || 'ALEO'
-      const availableBalance = tokenType === 'USDCX' ? wallet.balance.usdcxPublic : wallet.balance.public
-      if (!wallet.isDemoMode && amountMicro > availableBalance) {
-        throw new Error(
-          `Insufficient public balance. You need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
-          `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} ${tokenType} public balance.` +
-          (tokenType === 'ALEO' && wallet.balance.private > 0n
-            ? ' Convert private to public in your wallet first.'
-            : '')
-        )
-      }
 
       // Pre-validate market status on-chain to avoid wasted gas
       try {
@@ -67,27 +57,67 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           )
         }
       } catch (validationErr) {
-        // Re-throw market status errors, but don't block on network errors
         if (validationErr instanceof Error && validationErr.message.includes('Market is')) {
           throw validationErr
         }
         console.warn('Pre-validation skipped (network error):', validationErr)
       }
 
-      const { functionName, inputs } = buildPlaceBetInputs(market.id, amountMicro, selectedOutcome, tokenType)
+      const outcomeNum = selectedOutcome === 'yes' ? 1 : 2
+      let functionName: string
+      let inputs: string[]
 
-      const result = await executeTransaction({
+      if (tokenType === 'USDCX') {
+        const availableBalance = wallet.balance.usdcxPublic
+        if (!wallet.isDemoMode && amountMicro > availableBalance) {
+          throw new Error(
+            `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
+            `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX public balance.`
+          )
+        }
+        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
+        functionName = betResult.functionName
+        inputs = betResult.inputs
+        setPrivacyMode('public')
+      } else {
+        // ALEO: buy_shares_private with credits record
+        const gasBuffer = 500_000
+        const totalNeeded = Number(amountMicro) + gasBuffer
+        const creditsRecord = await fetchCreditsRecord(totalNeeded)
+        if (!creditsRecord) {
+          throw new Error(
+            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+            `Private betting requires an unspent Credits record.`
+          )
+        }
+        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'ALEO', creditsRecord)
+        functionName = betResult.functionName
+        inputs = betResult.inputs
+        setPrivacyMode('private')
+      }
+
+      console.warn('[Bet] Using', functionName, '— public mode, inputs:', inputs)
+
+      // Add timeout — wallet can hang after confirmation (especially Shield)
+      const WALLET_TIMEOUT_MS = 120_000
+      const txPromise = executeTransaction({
         program: CONTRACT_INFO.programId,
         function: functionName,
-        inputs,
+        inputs: inputs,
         fee: 0.5,
       })
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(
+          'Wallet did not respond within 2 minutes. The transaction may still be processing. ' +
+          'Check your wallet extension for pending transactions.'
+        )), WALLET_TIMEOUT_MS)
+      })
+      const result = await Promise.race([txPromise, timeoutPromise])
 
       if (result?.transactionId) {
         setTransactionId(result.transactionId)
         setStep('success')
 
-        // Save bet to store (localStorage + Supabase)
         addPendingBet({
           id: result.transactionId,
           marketId: market.id,
@@ -118,6 +148,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     setStep('select')
     setTransactionId(null)
     setError(null)
+    setPrivacyMode(null)
     onClose()
   }
 
@@ -166,7 +197,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                   <span className="category-badge">{getCategoryName(market.category)}</span>
                   <div className="privacy-indicator ml-auto">
                     <Shield className="w-3 h-3" />
-                    <span>Private Bet</span>
+                    <span>ZK Verified</span>
                   </div>
                 </div>
 
@@ -317,29 +348,26 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                             <span className="text-surface-500">
                               {isUsdcx
                                 ? `Balance: ${formatCredits(wallet.balance.usdcxPublic)} USDCX`
-                                : `Public Balance: ${formatCredits(wallet.balance.public)} ALEO`
+                                : `Public: ${formatCredits(wallet.balance.public)} ALEO`
                               }
                             </span>
                             <button
                               onClick={() => {
-                                // place_bet_public uses transfer_public_as_signer — only public balance is usable
-                                const maxBalance = isUsdcx ? wallet.balance.usdcxPublic : wallet.balance.public
-                                // Reserve 0.6 ALEO for gas fee when using ALEO
-                                const reserveForGas = isUsdcx ? 0n : 600_000n
-                                const usable = maxBalance > reserveForGas ? maxBalance - reserveForGas : 0n
-                                setBetAmount((Number(usable) / 1_000_000).toString())
+                                // All bets use public balance (private mode disabled)
+                                if (isUsdcx) {
+                                  const usable = wallet.balance.usdcxPublic
+                                  setBetAmount((Number(usable) / 1_000_000).toString())
+                                } else {
+                                  // Public balance minus gas reserve (~0.7 ALEO for tx fee)
+                                  const usable = wallet.balance.public > 700_000n ? wallet.balance.public - 700_000n : 0n
+                                  setBetAmount((Number(usable) / 1_000_000).toString())
+                                }
                               }}
                               className="text-brand-400 hover:text-brand-300"
                             >
                               Max
                             </button>
                           </div>
-                          {!isUsdcx && wallet.balance.private > 0n && (
-                            <div className="text-xs text-surface-600">
-                              <span>Private: {formatCredits(wallet.balance.private)} ALEO</span>
-                              <span className="ml-2 text-yellow-500/80">(not usable for betting)</span>
-                            </div>
-                          )}
                         </div>
                       </div>
 
@@ -363,37 +391,41 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         </div>
                       )}
 
-                      {/* Privacy Notice */}
+                      {/* Public Mode Notice */}
                       <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 mb-4">
                         <Shield className="w-5 h-5 text-brand-400 mt-0.5" />
                         <div>
-                          <p className="text-sm font-medium text-brand-300">Your bet is private</p>
+                          <p className="text-sm font-medium text-brand-300">Secure Transaction</p>
                           <p className="text-xs text-surface-400 mt-1">
-                            Your wallet generates a zero-knowledge proof locally.
-                            Transition inputs are encrypted on-chain.
-                            Uses public credits — no shielding required.
+                            {isUsdcx
+                              ? 'USDCX market — bet uses public USDCX transfer.'
+                              : 'Bet uses transfer_public_as_signer. ZK proofs verify your transaction on-chain.'
+                            }
                           </p>
                         </div>
                       </div>
 
-                      {/* Warning: insufficient public balance */}
-                      {(isUsdcx ? wallet.balance.usdcxPublic : wallet.balance.public) < 1_000_000n && !wallet.isDemoMode && (
-                        <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-6">
-                          <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient public balance</p>
-                            <p className="text-xs text-surface-400 leading-relaxed">
-                              Betting uses <span className="text-white">public</span> {tokenSymbol} only (via transfer_public_as_signer).
-                              {!isUsdcx && wallet.balance.private > 0n && (
-                                <> You have {formatCredits(wallet.balance.private)} ALEO in private balance — convert to public first in Leo Wallet (Send &gt; Public transfer to yourself).</>
-                              )}
-                              {(isUsdcx ? wallet.balance.usdcxPublic : wallet.balance.public) === 0n && (
-                                <> Current public balance: <span className="text-white">0 {tokenSymbol}</span></>
-                              )}
-                            </p>
+                      {/* Warning: insufficient balance */}
+                      {!wallet.isDemoMode && (() => {
+                        const hasNoFunds = isUsdcx
+                          ? wallet.balance.usdcxPublic < 1_000_000n
+                          : wallet.balance.public < 1_000_000n
+                        if (!hasNoFunds) return null
+                        return (
+                          <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-6">
+                            <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient balance</p>
+                              <p className="text-xs text-surface-400 leading-relaxed">
+                                {isUsdcx
+                                  ? `You need USDCX public balance to bet on this market.`
+                                  : `You need ALEO (public or private) to place a bet. Public balance is needed for the transaction fee.`
+                                }
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )
+                      })()}
 
                       {/* Error Display */}
                       {error && (
@@ -523,7 +555,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
                       <div className="flex items-center justify-center gap-2 text-sm text-brand-400 mb-6">
                         <Shield className="w-4 h-4" />
-                        <span>ZK Proof Generated • Fully Private</span>
+                        <span>ZK Proof Generated {privacyMode === 'private' ? '• Fully Private' : '• Public Mode'}</span>
                       </div>
 
                       <button onClick={handleClose} className="btn-primary w-full">

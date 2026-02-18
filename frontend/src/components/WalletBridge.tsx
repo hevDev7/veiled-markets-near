@@ -33,11 +33,15 @@ export function WalletBridge() {
     if (connected && address) {
       // Map provider wallet name to our WalletType
       const walletName = wallet?.adapter?.name || ''
+      console.warn('[WalletBridge] adapter name:', JSON.stringify(walletName), '| wallet:', wallet ? 'present' : 'null', '| adapter:', wallet?.adapter ? 'present' : 'null')
       let walletType: 'leo' | 'fox' | 'soter' | 'puzzle' | 'shield' | 'demo' = 'leo'
       if (walletName.toLowerCase().includes('fox')) walletType = 'fox'
       else if (walletName.toLowerCase().includes('soter')) walletType = 'soter'
       else if (walletName.toLowerCase().includes('puzzle')) walletType = 'puzzle'
       else if (walletName.toLowerCase().includes('shield')) walletType = 'shield'
+      // Also detect Shield via window.shield if adapter name detection fails
+      else if (!walletName && (window as any).shield) walletType = 'shield'
+      console.warn('[WalletBridge] detected walletType:', walletType)
 
       useWalletStore.setState({
         wallet: {

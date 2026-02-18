@@ -1,34 +1,40 @@
 // ============================================================================
-// VEILED MARKETS SDK - Aleo Client
+// VEILED MARKETS SDK - Aleo Client (v12)
 // ============================================================================
-// Main client for interacting with the veiled_markets_v9.aleo program
+// Main client for interacting with the veiled_markets_v13.aleo program
+// AMM-based multi-outcome prediction markets
 // ============================================================================
 
 import {
   type Market,
-  type MarketPool,
+  type AMMPool,
   type MarketResolution,
+  type MarketFees,
+  type DisputeData,
   type MarketWithStats,
   type CreateMarketParams,
-  type PlaceBetParams,
+  type BuySharesParams,
+  type SellSharesParams,
+  type AddLiquidityParams,
+  type RemoveLiquidityParams,
   type TransactionResult,
   type VeiledMarketsConfig,
-  type Bet,
-  type WinningsClaim,
+  type OutcomeShare,
+  type LPToken,
   type RefundClaim,
   type NetworkType,
   MarketStatus,
-  Outcome,
+  TokenType,
   NETWORK_CONFIG,
   PROTOCOL_FEE_BPS,
   CREATOR_FEE_BPS,
+  LP_FEE_BPS,
   FEE_DENOMINATOR,
 } from './types';
 
 import {
-  calculateYesProbability,
-  calculateNoProbability,
-  calculatePotentialPayout,
+  calculateOutcomePrice,
+  calculateAllPrices,
   hashToField,
   formatTimeRemaining,
 } from './utils';
@@ -38,7 +44,7 @@ import {
  */
 const DEFAULT_CONFIG: VeiledMarketsConfig = {
   network: 'testnet',
-  programId: 'veiled_markets_v9.aleo',
+  programId: 'veiled_markets_v13.aleo',
 };
 
 /**
@@ -53,30 +59,18 @@ export class VeiledMarketsClient {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
-  /**
-   * Get the program ID
-   */
   get programId(): string {
     return this.config.programId;
   }
 
-  /**
-   * Get the network
-   */
   get network(): NetworkType {
     return this.config.network;
   }
 
-  /**
-   * Get the RPC URL
-   */
   get rpcUrl(): string {
     return this.config.rpcUrl || NETWORK_CONFIG[this.config.network].rpcUrl;
   }
 
-  /**
-   * Get the explorer URL
-   */
   get explorerUrl(): string {
     return this.config.explorerUrl || NETWORK_CONFIG[this.config.network].explorerUrl;
   }
@@ -85,9 +79,6 @@ export class VeiledMarketsClient {
   // NETWORK QUERIES
   // ========================================================================
 
-  /**
-   * Fetch current block height from network
-   */
   async getCurrentBlockHeight(): Promise<bigint> {
     try {
       const response = await fetch(`${this.rpcUrl}/latest/height`);
@@ -97,14 +88,10 @@ export class VeiledMarketsClient {
       return this.currentBlockHeight;
     } catch (error) {
       console.error('Failed to fetch block height:', error);
-      // Return cached or estimate
       return this.currentBlockHeight || BigInt(Math.floor(Date.now() / 15000));
     }
   }
 
-  /**
-   * Fetch a mapping value from the program
-   */
   async getMappingValue<T>(mappingName: string, key: string): Promise<T | null> {
     try {
       const url = `${this.rpcUrl}/program/${this.programId}/mapping/${mappingName}/${key}`;
@@ -122,26 +109,26 @@ export class VeiledMarketsClient {
   // MARKET QUERIES
   // ========================================================================
 
-  /**
-   * Fetch a market by ID
-   */
   async getMarket(marketId: string): Promise<MarketWithStats | null> {
     try {
-      // Check cache first
       const cached = this.cachedMarkets.get(marketId);
       if (cached) return cached;
 
-      // Fetch market data from mappings
-      const [marketData, poolData, resolutionData] = await Promise.all([
+      const [marketData, poolData, resolutionData, feesData] = await Promise.all([
         this.getMappingValue<Market>('markets', marketId),
-        this.getMappingValue<MarketPool>('market_pools', marketId),
+        this.getMappingValue<AMMPool>('amm_pools', marketId),
         this.getMappingValue<MarketResolution>('market_resolutions', marketId),
+        this.getMappingValue<MarketFees>('market_fees', marketId),
       ]);
 
       if (!marketData || !poolData) return null;
 
-      // Calculate statistics
-      const market = this.enrichMarketData(marketData, poolData, resolutionData || undefined);
+      const market = this.enrichMarketData(
+        marketData,
+        poolData,
+        resolutionData || undefined,
+        feesData || undefined,
+      );
       this.cachedMarkets.set(marketId, market);
       return market;
     } catch (error) {
@@ -150,27 +137,36 @@ export class VeiledMarketsClient {
     }
   }
 
-  /**
-   * Enrich market with calculated statistics
-   */
+  async getAMMPool(marketId: string): Promise<AMMPool | null> {
+    return this.getMappingValue<AMMPool>('amm_pools', marketId);
+  }
+
+  async getMarketFees(marketId: string): Promise<MarketFees | null> {
+    return this.getMappingValue<MarketFees>('market_fees', marketId);
+  }
+
+  async getMarketDispute(marketId: string): Promise<DisputeData | null> {
+    return this.getMappingValue<DisputeData>('market_disputes', marketId);
+  }
+
   private enrichMarketData(
     market: Market,
-    pool: MarketPool,
-    resolution?: MarketResolution
+    pool: AMMPool,
+    resolution?: MarketResolution,
+    fees?: MarketFees,
   ): MarketWithStats {
-    const yesPercentage = calculateYesProbability(pool.totalYesPool, pool.totalNoPool);
-    const noPercentage = calculateNoProbability(pool.totalYesPool, pool.totalNoPool);
-    const totalVolume = pool.totalYesPool + pool.totalNoPool;
+    const numOutcomes = market.numOutcomes || 2;
+    const prices = calculateAllPrices(
+      pool.reserve1,
+      pool.reserve2,
+      pool.reserve3,
+      pool.reserve4,
+      numOutcomes,
+    );
 
-    // Calculate potential payouts (multipliers)
-    const yesPayout = totalVolume > 0n && pool.totalYesPool > 0n
-      ? Number((totalVolume * (FEE_DENOMINATOR - PROTOCOL_FEE_BPS - CREATOR_FEE_BPS)) / pool.totalYesPool / FEE_DENOMINATOR)
-      : 0;
-    const noPayout = totalVolume > 0n && pool.totalNoPool > 0n
-      ? Number((totalVolume * (FEE_DENOMINATOR - PROTOCOL_FEE_BPS - CREATOR_FEE_BPS)) / pool.totalNoPool / FEE_DENOMINATOR)
-      : 0;
+    // In v12 AMM, winning shares redeem 1:1, so payout = 1/price
+    const potentialPayouts = prices.map(p => p > 0 ? 1 / p : 0);
 
-    // Calculate time remaining
     const deadline = new Date(Number(market.deadline) * 15000 + Date.now());
     const timeRemaining = formatTimeRemaining(deadline);
 
@@ -178,40 +174,29 @@ export class VeiledMarketsClient {
       ...market,
       pool,
       resolution,
-      yesPercentage,
-      noPercentage,
-      totalVolume,
-      potentialYesPayout: yesPayout,
-      potentialNoPayout: noPayout,
+      fees,
+      prices,
+      totalVolume: pool.totalVolume,
+      totalLiquidity: pool.totalLiquidity,
+      potentialPayouts,
+      yesPercentage: prices[0] * 100,
+      noPercentage: (prices[1] ?? 0) * 100,
+      potentialYesPayout: potentialPayouts[0],
+      potentialNoPayout: potentialPayouts[1] ?? 0,
       timeRemaining,
     };
   }
 
-  /**
-   * Fetch all active markets (uses mock data for demo)
-   */
   async getActiveMarkets(): Promise<MarketWithStats[]> {
-    try {
-      // In production, this would scan the network or use an indexer
-      // For now, return mock data
-      return this.getMockMarkets().filter(m => m.status === MarketStatus.Active);
-    } catch (error) {
-      console.error('Failed to fetch active markets:', error);
-      return [];
-    }
+    // In production, this would use an indexer
+    return [];
   }
 
-  /**
-   * Fetch markets by category
-   */
   async getMarketsByCategory(category: number): Promise<MarketWithStats[]> {
     const markets = await this.getActiveMarkets();
     return markets.filter(m => m.category === category);
   }
 
-  /**
-   * Fetch trending markets (by volume)
-   */
   async getTrendingMarkets(limit: number = 10): Promise<MarketWithStats[]> {
     const markets = await this.getActiveMarkets();
     return markets
@@ -219,13 +204,10 @@ export class VeiledMarketsClient {
       .slice(0, limit);
   }
 
-  /**
-   * Search markets by question text
-   */
   async searchMarkets(query: string): Promise<MarketWithStats[]> {
     const markets = await this.getActiveMarkets();
     const lowerQuery = query.toLowerCase();
-    return markets.filter(m => 
+    return markets.filter(m =>
       m.question?.toLowerCase().includes(lowerQuery)
     );
   }
@@ -234,285 +216,242 @@ export class VeiledMarketsClient {
   // TRANSACTION BUILDERS
   // ========================================================================
 
-  /**
-   * Build create_market transaction inputs
-   */
-  async buildCreateMarketInputs(params: CreateMarketParams): Promise<string[]> {
+  async buildCreateMarketInputs(params: CreateMarketParams): Promise<{
+    functionName: string;
+    inputs: string[];
+  }> {
     const questionHash = await hashToField(params.question);
     const currentBlock = await this.getCurrentBlockHeight();
-    
-    // Convert dates to block heights (assuming ~15s blocks)
+
     const deadlineBlocks = BigInt(Math.floor((params.deadline.getTime() - Date.now()) / 15000));
     const resolutionBlocks = BigInt(Math.floor((params.resolutionDeadline.getTime() - Date.now()) / 15000));
+    const tokenType = params.tokenType ?? TokenType.ALEO;
 
-    return [
-      questionHash,
-      `${params.category}u8`,
-      `${currentBlock + deadlineBlocks}u64`,
-      `${currentBlock + resolutionBlocks}u64`,
-    ];
+    const functionName = tokenType === TokenType.USDCX ? 'create_market_usdcx' : 'create_market';
+
+    return {
+      functionName,
+      inputs: [
+        questionHash,
+        `${params.category}u8`,
+        `${params.numOutcomes}u8`,
+        `${currentBlock + deadlineBlocks}u64`,
+        `${currentBlock + resolutionBlocks}u64`,
+        params.resolver || 'self.caller',
+        `${tokenType}u8`,
+        `${params.initialLiquidity}u128`,
+      ],
+    };
   }
 
-  /**
-   * Build place_bet transaction inputs
-   */
-  buildPlaceBetInputs(params: PlaceBetParams, creditsRecord: string): string[] {
+  buildBuySharesInputs(params: BuySharesParams, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'buy_shares_public_usdcx'
+      : 'buy_shares_public';
+
+    const nonce = `${BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))}field`;
+
+    return {
+      functionName,
+      inputs: [
+        params.marketId,
+        `${params.outcome}u8`,
+        `${params.amountIn}u128`,
+        `${params.minSharesOut ?? 0n}u128`,
+        nonce,
+      ],
+    };
+  }
+
+  buildSellSharesInputs(params: SellSharesParams, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'sell_shares_usdcx'
+      : 'sell_shares';
+
+    return {
+      functionName,
+      inputs: [
+        params.shareRecord,
+        `${params.sharesToSell}u128`,
+        `${params.minTokensOut ?? 0n}u128`,
+      ],
+    };
+  }
+
+  buildAddLiquidityInputs(params: AddLiquidityParams, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'add_liquidity_usdcx'
+      : 'add_liquidity';
+
+    return {
+      functionName,
+      inputs: [
+        params.marketId,
+        `${params.amount}u128`,
+      ],
+    };
+  }
+
+  buildRemoveLiquidityInputs(params: RemoveLiquidityParams, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'remove_liquidity_usdcx'
+      : 'remove_liquidity';
+
+    return {
+      functionName,
+      inputs: [
+        params.lpTokenRecord,
+        `${params.sharesToRemove}u128`,
+      ],
+    };
+  }
+
+  buildCloseMarketInputs(marketId: string): string[] {
+    return [marketId];
+  }
+
+  buildResolveMarketInputs(marketId: string, outcome: number): string[] {
+    return [marketId, `${outcome}u8`];
+  }
+
+  buildFinalizeResolutionInputs(marketId: string): string[] {
+    return [marketId];
+  }
+
+  buildDisputeResolutionInputs(
+    marketId: string,
+    proposedOutcome: number,
+    tokenType: TokenType = TokenType.ALEO,
+  ): { functionName: string; inputs: string[] } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'dispute_resolution_usdcx'
+      : 'dispute_resolution';
+    return {
+      functionName,
+      inputs: [marketId, `${proposedOutcome}u8`],
+    };
+  }
+
+  buildRedeemSharesInputs(shareRecord: string, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'redeem_shares_usdcx'
+      : 'redeem_shares';
+    return { functionName, inputs: [shareRecord] };
+  }
+
+  buildClaimRefundInputs(shareRecord: string, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'claim_refund_usdcx'
+      : 'claim_refund';
+    return { functionName, inputs: [shareRecord] };
+  }
+
+  buildWithdrawCreatorFeesInputs(marketId: string, tokenType: TokenType = TokenType.ALEO): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const functionName = tokenType === TokenType.USDCX
+      ? 'withdraw_creator_fees_usdcx'
+      : 'withdraw_creator_fees';
+    return { functionName, inputs: [marketId] };
+  }
+
+  // Legacy aliases
+  buildPlaceBetInputs(params: BuySharesParams, creditsRecord: string): string[] {
     return [
       params.marketId,
-      `${params.amount}u64`,
+      `${params.amountIn}u128`,
       `${params.outcome}u8`,
       creditsRecord,
     ];
   }
 
-  /**
-   * Build close_market transaction inputs
-   */
-  buildCloseMarketInputs(marketId: string): string[] {
-    return [marketId];
-  }
-
-  /**
-   * Build resolve_market transaction inputs
-   */
-  buildResolveMarketInputs(marketId: string, outcome: Outcome): string[] {
-    return [marketId, `${outcome}u8`];
-  }
-
-  /**
-   * Build claim_winnings transaction inputs
-   */
-  buildClaimWinningsInputs(betRecord: string): string[] {
-    return [betRecord];
-  }
-
-  /**
-   * Build claim_refund transaction inputs
-   */
-  buildClaimRefundInputs(betRecord: string): string[] {
-    return [betRecord];
+  buildClaimWinningsInputs(shareRecord: string): string[] {
+    return [shareRecord];
   }
 
   // ========================================================================
-  // USER DATA (requires wallet integration)
+  // RECORD PARSERS
   // ========================================================================
 
-  /**
-   * Get user's bet records (requires view key)
-   * This would be called with decrypted records from the wallet
-   */
-  parseBetRecord(recordData: Record<string, unknown>): Bet {
+  parseOutcomeShareRecord(recordData: Record<string, unknown>): OutcomeShare {
     return {
       owner: recordData.owner as string,
       marketId: recordData.market_id as string,
-      amount: BigInt(recordData.amount as string),
-      outcome: parseInt(recordData.outcome as string) as Outcome,
-      placedAt: BigInt(recordData.placed_at as string),
+      outcome: parseInt(recordData.outcome as string),
+      quantity: BigInt((recordData.quantity as string).replace(/u\d+$/, '')),
+      shareNonce: recordData.share_nonce as string,
+      tokenType: parseInt(recordData.token_type as string) as TokenType,
+    };
+  }
+
+  parseLPTokenRecord(recordData: Record<string, unknown>): LPToken {
+    return {
+      owner: recordData.owner as string,
+      marketId: recordData.market_id as string,
+      lpShares: BigInt((recordData.lp_shares as string).replace(/u\d+$/, '')),
+      lpNonce: recordData.lp_nonce as string,
+      tokenType: parseInt(recordData.token_type as string) as TokenType,
     };
   }
 
   /**
-   * Parse winnings claim record
+   * Calculate payout for winning shares (v12: 1:1 redemption)
    */
-  parseWinningsClaimRecord(recordData: Record<string, unknown>): WinningsClaim {
-    return {
-      owner: recordData.owner as string,
-      marketId: recordData.market_id as string,
-      betAmount: BigInt(recordData.bet_amount as string),
-      winningOutcome: parseInt(recordData.winning_outcome as string) as Outcome,
-    };
-  }
-
-  /**
-   * Calculate user's potential winnings
-   */
-  calculateWinnings(bet: Bet, resolution: MarketResolution, pool: MarketPool): bigint {
-    if (bet.outcome !== resolution.winningOutcome) return 0n;
-
-    const winningPool = bet.outcome === Outcome.Yes 
-      ? pool.totalYesPool 
-      : pool.totalNoPool;
-
-    if (winningPool === 0n) return 0n;
-
-    // Payout = (bet_amount / winning_pool) * total_payout_pool
-    return (bet.amount * resolution.totalPayoutPool) / winningPool;
+  calculateWinnings(share: OutcomeShare, resolution: MarketResolution): bigint {
+    if (share.outcome !== resolution.winningOutcome) return 0n;
+    return share.quantity; // 1:1 redemption in v12
   }
 
   // ========================================================================
   // HELPERS
   // ========================================================================
 
-  /**
-   * Parse Aleo value format to JavaScript type
-   */
   private parseAleoValue(value: string): unknown {
     if (!value) return null;
 
-    // Remove type suffix and parse
-    if (value.endsWith('field')) {
-      return value;
-    }
+    if (value.endsWith('field')) return value;
     if (value.endsWith('u8') || value.endsWith('u16') || value.endsWith('u32')) {
       return parseInt(value);
     }
     if (value.endsWith('u64') || value.endsWith('u128')) {
       return BigInt(value.replace(/u\d+$/, ''));
     }
-    if (value.startsWith('aleo1')) {
-      return value;
-    }
+    if (value.startsWith('aleo1')) return value;
     if (value === 'true') return true;
     if (value === 'false') return false;
 
     return value;
   }
 
-  /**
-   * Get transaction URL on explorer
-   */
   getTransactionUrl(transactionId: string): string {
     return `${this.explorerUrl}/transaction/${transactionId}`;
   }
 
-  /**
-   * Get address URL on explorer
-   */
   getAddressUrl(address: string): string {
     return `${this.explorerUrl}/address/${address}`;
   }
 
-  /**
-   * Clear cached data
-   */
   clearCache(): void {
     this.cachedMarkets.clear();
-  }
-
-  // ========================================================================
-  // MOCK DATA (for demo/development)
-  // ========================================================================
-
-  /**
-   * Get mock markets for demo
-   */
-  getMockMarkets(): MarketWithStats[] {
-    const now = Date.now();
-    const day = 24 * 60 * 60 * 1000;
-
-    const mockData = [
-      {
-        id: '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdefield',
-        creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
-        questionHash: 'hash1field',
-        question: 'Will Bitcoin reach $150,000 by end of Q1 2026?',
-        category: 3,
-        deadline: BigInt(Math.floor((now + 30 * day) / 1000)),
-        resolutionDeadline: BigInt(Math.floor((now + 35 * day) / 1000)),
-        status: MarketStatus.Active,
-        createdAt: BigInt(Math.floor((now - 5 * day) / 1000)),
-        pool: {
-          marketId: '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdefield',
-          totalYesPool: 125000000000n,
-          totalNoPool: 75000000000n,
-          totalBets: 342n,
-          totalUniqueBettors: 189n,
-        },
-      },
-      {
-        id: '2345678901bcdef12345678901bcdef12345678901bcdef12345678901bcdefield',
-        creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
-        questionHash: 'hash2field',
-        question: 'Will the next US Fed rate decision be a rate cut?',
-        category: 6,
-        deadline: BigInt(Math.floor((now + 14 * day) / 1000)),
-        resolutionDeadline: BigInt(Math.floor((now + 16 * day) / 1000)),
-        status: MarketStatus.Active,
-        createdAt: BigInt(Math.floor((now - 3 * day) / 1000)),
-        pool: {
-          marketId: '2345678901bcdef12345678901bcdef12345678901bcdef12345678901bcdefield',
-          totalYesPool: 89000000000n,
-          totalNoPool: 156000000000n,
-          totalBets: 567n,
-          totalUniqueBettors: 312n,
-        },
-      },
-      {
-        id: '3456789012cdef123456789012cdef123456789012cdef123456789012cdefield',
-        creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
-        questionHash: 'hash3field',
-        question: 'Will Ethereum ETF see net inflows in February 2026?',
-        category: 3,
-        deadline: BigInt(Math.floor((now + 7 * day) / 1000)),
-        resolutionDeadline: BigInt(Math.floor((now + 10 * day) / 1000)),
-        status: MarketStatus.Active,
-        createdAt: BigInt(Math.floor((now - 2 * day) / 1000)),
-        pool: {
-          marketId: '3456789012cdef123456789012cdef123456789012cdef123456789012cdefield',
-          totalYesPool: 67000000000n,
-          totalNoPool: 45000000000n,
-          totalBets: 234n,
-          totalUniqueBettors: 156n,
-        },
-      },
-      {
-        id: '4567890123def1234567890123def1234567890123def1234567890123defield',
-        creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
-        questionHash: 'hash4field',
-        question: 'Will Apple announce a new AI product at WWDC 2026?',
-        category: 5,
-        deadline: BigInt(Math.floor((now + 120 * day) / 1000)),
-        resolutionDeadline: BigInt(Math.floor((now + 125 * day) / 1000)),
-        status: MarketStatus.Active,
-        createdAt: BigInt(Math.floor((now - 1 * day) / 1000)),
-        pool: {
-          marketId: '4567890123def1234567890123def1234567890123def1234567890123defield',
-          totalYesPool: 234000000000n,
-          totalNoPool: 89000000000n,
-          totalBets: 456n,
-          totalUniqueBettors: 278n,
-        },
-      },
-      {
-        id: '5678901234ef12345678901234ef12345678901234ef12345678901234efield',
-        creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
-        questionHash: 'hash5field',
-        question: 'Will Champions League 2026 Final have more than 3 goals?',
-        category: 2,
-        deadline: BigInt(Math.floor((now + 45 * day) / 1000)),
-        resolutionDeadline: BigInt(Math.floor((now + 46 * day) / 1000)),
-        status: MarketStatus.Active,
-        createdAt: BigInt(Math.floor((now - 10 * day) / 1000)),
-        pool: {
-          marketId: '5678901234ef12345678901234ef12345678901234ef12345678901234efield',
-          totalYesPool: 56000000000n,
-          totalNoPool: 78000000000n,
-          totalBets: 189n,
-          totalUniqueBettors: 134n,
-        },
-      },
-      {
-        id: '6789012345f123456789012345f123456789012345f123456789012345field',
-        creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
-        questionHash: 'hash6field',
-        question: 'Will SpaceX successfully land Starship on Mars by 2030?',
-        category: 5,
-        deadline: BigInt(Math.floor((now + 180 * day) / 1000)),
-        resolutionDeadline: BigInt(Math.floor((now + 185 * day) / 1000)),
-        status: MarketStatus.Active,
-        createdAt: BigInt(Math.floor((now - 20 * day) / 1000)),
-        pool: {
-          marketId: '6789012345f123456789012345f123456789012345f123456789012345field',
-          totalYesPool: 45000000000n,
-          totalNoPool: 155000000000n,
-          totalBets: 892n,
-          totalUniqueBettors: 567n,
-        },
-      },
-    ];
-
-    // Enrich with stats
-    return mockData.map(m => this.enrichMarketData(m as Market, m.pool));
   }
 }
 

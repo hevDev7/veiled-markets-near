@@ -265,3 +265,40 @@ export async function updateMarketRegistry(
     console.warn('[Supabase] updateMarketRegistry exception:', e)
   }
 }
+
+/**
+ * Clear all data from Supabase tables (used when switching program versions).
+ * Deletes: market_registry, user_bets, pending_bets, commitment_records
+ */
+export async function clearAllSupabaseData(): Promise<{ deleted: string[]; errors: string[] }> {
+  const deleted: string[] = []
+  const errors: string[] = []
+  if (!supabase) {
+    errors.push('Supabase not available')
+    return { deleted, errors }
+  }
+
+  const tables = ['market_registry', 'user_bets', 'pending_bets', 'commitment_records']
+  for (const table of tables) {
+    try {
+      // Delete all rows (neq '' matches all non-null primary keys)
+      const { error } = await supabase.from(table).delete().neq('id', '')
+      if (error) {
+        // Try alternate approach for tables with different PK
+        const { error: err2 } = await supabase.from(table).delete().neq('market_id', '')
+        if (err2) {
+          errors.push(`${table}: ${error.message}`)
+        } else {
+          deleted.push(table)
+        }
+      } else {
+        deleted.push(table)
+      }
+    } catch (e) {
+      errors.push(`${table}: ${e}`)
+    }
+  }
+
+  console.log('[Supabase] Cleared tables:', deleted, 'Errors:', errors)
+  return { deleted, errors }
+}

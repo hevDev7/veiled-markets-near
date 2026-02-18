@@ -21,7 +21,7 @@ export interface WorkerRequest {
   privateKey: string
   priorityFee: number // in microcredits
   rpcUrl: string
-  usePrivateCredits?: boolean // If true, scan for Credits record and use place_bet (privacy-preserving)
+  usePrivateCredits?: boolean // If true, scan for Credits record and use buy_shares_private (privacy-preserving)
   creditsRecordPlaintext?: string // Pre-fetched Credits record from wallet (skips block scanning)
   // commit_bet specific
   marketId?: string
@@ -251,14 +251,14 @@ async function handleExecute(req: WorkerRequest) {
     const address = account.address().to_string()
     console.warn('[Worker] Account address:', address)
 
-    // If privacy mode requested, try to find a Credits record for place_bet
+    // If privacy mode requested, try to find a Credits record for buy_shares_private
     let finalInputs = [...inputs]
     let usedPrivateCredits = false
 
-    if (usePrivateCredits && functionName === 'place_bet_public') {
-      // Extract amount from inputs (2nd input, format: "1000000u64")
-      const amountStr = inputs[1]
-      const amountMicro = parseInt(amountStr.replace('u64', ''), 10)
+    if (usePrivateCredits && (functionName === 'buy_shares_public' || functionName === 'place_bet_public')) {
+      // Extract amount from inputs (3rd input for v12: market_id, outcome, amount_in, ...)
+      const amountStr = functionName === 'buy_shares_public' ? inputs[2] : inputs[1]
+      const amountMicro = parseInt(amountStr.replace(/u\d+$/, ''), 10)
 
       let recordPlaintext: string | null = null
 
@@ -275,15 +275,15 @@ async function handleExecute(req: WorkerRequest) {
       }
 
       if (recordPlaintext) {
-        // Switch to privacy-preserving place_bet
-        // place_bet inputs: market_id, amount, outcome, bet_nonce, credits_in
-        functionName = 'place_bet'
+        // Switch to privacy-preserving buy_shares_private
+        // buy_shares_private inputs: market_id, outcome, amount_in, min_shares_out, share_nonce, credits_in
+        functionName = 'buy_shares_private'
         finalInputs = [...inputs, recordPlaintext]
         usedPrivateCredits = true
-        console.warn('[Worker] Privacy mode: using place_bet with Credits record')
+        console.warn('[Worker] Privacy mode: using buy_shares_private with Credits record')
         send({ type: 'progress', id, phase: 'initializing', message: 'Using privacy-preserving mode (private Credits)' })
       } else {
-        console.warn('[Worker] Privacy mode: no Credits record found, falling back to place_bet_public')
+        console.warn('[Worker] Privacy mode: no Credits record found, falling back to buy_shares_public')
         send({ type: 'progress', id, phase: 'initializing', message: 'No private Credits found, using standard mode' })
       }
     }

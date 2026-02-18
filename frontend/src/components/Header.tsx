@@ -12,13 +12,13 @@ import {
 import { useState } from 'react'
 import { useWalletStore } from '@/lib/store'
 import { cn, shortenAddress, formatCredits } from '@/lib/utils'
-import { WalletModal } from './WalletModal'
+import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
 
 export function Header() {
   const { wallet, disconnect } = useWalletStore()
   const [showDropdown, setShowDropdown] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [showWalletModal, setShowWalletModal] = useState(false)
+  const { setVisible } = useWalletModal()
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -180,7 +180,7 @@ export function Header() {
               </div>
             ) : (
               <button
-                onClick={() => setShowWalletModal(true)}
+                onClick={() => setVisible(true)}
                 className={cn(
                   'flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm',
                   'bg-gradient-to-r from-brand-600 to-brand-500',
@@ -198,12 +198,6 @@ export function Header() {
         </div>
       </div>
 
-      {/* Wallet Modal */}
-      <WalletModal
-        isOpen={showWalletModal}
-        onClose={() => setShowWalletModal(false)}
-        onConnect={() => setShowWalletModal(false)}
-      />
     </header>
   )
 }

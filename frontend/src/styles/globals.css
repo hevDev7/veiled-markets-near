@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Wallet adapter UI theme overrides */
+:root {
+  --wallet-adapter-primary: #8b5cf6;
+  --wallet-adapter-primary-hover: #7c3aed;
+  --wallet-adapter-primary-foreground: #ffffff;
+  --wallet-adapter-background: #0c0a12;
+  --wallet-adapter-surface: #151320;
+  --wallet-adapter-surface-hover: #1e1b2e;
+  --wallet-adapter-surface-light: #2a2640;
+  --wallet-adapter-text: #f0e9f6;
+  --wallet-adapter-text-secondary: #9ca3af;
+  --wallet-adapter-border: #2a2640;
+  --wallet-adapter-border-light: #3a3650;
+  --wallet-adapter-secondary: #8b5cf6;
+  --wallet-adapter-secondary-hover: #7c3aed;
+  --wallet-adapter-accent-green: #10b981;
+  --wallet-adapter-accent-red: #f43e5e;
+}
+
 @layer base {
   :root {
     --color-brand: 139 92 246;

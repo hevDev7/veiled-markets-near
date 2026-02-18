@@ -38,7 +38,7 @@ interface ExecuteOptions {
   inputs: string[]
   privateKey: string
   priorityFee?: number   // in microcredits (default 500_000 = 0.5 ALEO)
-  usePrivateCredits?: boolean // If true, scan for Credits record and use place_bet (privacy mode)
+  usePrivateCredits?: boolean // If true, scan for Credits record and use buy_shares_private (privacy mode)
 }
 
 interface CommitBetOptions {
@@ -181,7 +181,7 @@ export function useSDKTransaction() {
 
     // If privacy mode, try to get Credits record from wallet BEFORE spawning worker
     let creditsRecordPlaintext: string | undefined
-    if (options.usePrivateCredits && options.functionName === 'place_bet_public') {
+    if (options.usePrivateCredits && (options.functionName === 'buy_shares_public' || options.functionName === 'place_bet_public')) {
       setState(s => ({ ...s, progress: 'Checking wallet for private Credits records...' }))
       const amountStr = options.inputs[1] // format: "1000000u64"
       const amountMicro = parseInt(amountStr.replace('u64', ''), 10)
@@ -319,7 +319,7 @@ export function useSDKTransaction() {
     }
   }, [])
 
-  // Generate a 248-bit random field nonce (same approach as buildPlaceBetInputs)
+  // Generate a 248-bit random field nonce (same approach as buildBuySharesInputs)
   const generateNonce = (): string => {
     const randomBytes = new Uint8Array(31) // 248 bits, safely < field max
     crypto.getRandomValues(randomBytes)

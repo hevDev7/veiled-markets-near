@@ -2,9 +2,7 @@ import { motion } from 'framer-motion'
 import {
   ArrowLeft,
   Clock,
-  Users,
   TrendingUp,
-  TrendingDown,
   ExternalLink,
   Share2,
   Bookmark,
@@ -14,18 +12,45 @@ import {
   Info,
   Copy,
   Check,
+  Droplets,
+  ShieldAlert,
+  Coins,
+  ShoppingCart,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
-import { buildPlaceBetInputs, buildPlaceBetPrivateInputs, getCurrentBlockHeight, getMarketPool, diagnoseTransaction } from '@/lib/aleo-client'
-import { fetchPublicBalance } from '@/lib/wallet'
+import {
+  buildBuySharesInputs,
+  getCurrentBlockHeight,
+  getMarketResolution,
+  getMarketFees,
+  getMarketDispute,
+  diagnoseTransaction,
+  MARKET_STATUS,
+  type MarketResolutionData,
+  type MarketFeesData,
+  type DisputeDataResult,
+} from '@/lib/aleo-client'
+// fetchCreditsRecord dynamically imported where needed for buy_shares_private
+import {
+  calculateBuySharesOut,
+  calculateBuyPriceImpact,
+  calculateFees,
+  calculateMinSharesOut,
+  calculateAllPrices,
+  type AMMReserves,
+} from '@/lib/amm'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { OddsChart } from '@/components/OddsChart'
-import { cn, formatCredits } from '@/lib/utils'
+import { OutcomeSelector } from '@/components/OutcomeSelector'
+import { LiquidityPanel } from '@/components/LiquidityPanel'
+import { DisputePanel } from '@/components/DisputePanel'
+import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
+import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 
 const categoryNames: Record<number, string> = {
   1: 'Politics',
@@ -47,169 +72,9 @@ const categoryColors: Record<number, string> = {
   7: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
 }
 
-type BetStep = 'select' | 'amount' | 'confirm' | 'processing' | 'pending' | 'success' | 'error'
+type TradeStep = 'select' | 'processing' | 'pending' | 'success' | 'error'
 
-/**
- * Find a suitable unspent Credits record from an array of wallet records.
- * Handles multiple formats: plaintext strings, objects with .plaintext, JSON objects.
- */
-function findSuitableRecord(records: any[], minAmountMicro: number): string | null {
-  for (const record of records) {
-    if (!record) continue
-    // Skip spent records
-    if (record.spent === true || record.is_spent === true) continue
-    if (record.status === 'spent' || record.status === 'Spent') continue
-
-    // Try to extract plaintext from various record formats
-    let plaintext: string | null = null
-
-    if (typeof record === 'string' && record.includes('microcredits')) {
-      plaintext = record
-    } else if (record.plaintext && typeof record.plaintext === 'string') {
-      plaintext = record.plaintext
-    } else if (record.data && typeof record.data === 'string' && record.data.includes('microcredits')) {
-      plaintext = record.data
-    } else if (record.content && typeof record.content === 'string' && record.content.includes('microcredits')) {
-      plaintext = record.content
-    }
-
-    if (!plaintext) {
-      console.warn('[Bet] Record has no parseable plaintext:', JSON.stringify(record)?.slice(0, 200))
-      continue
-    }
-
-    // Parse microcredits value
-    const mcMatch = plaintext.match(/microcredits\s*:\s*(\d+)u64/)
-    if (!mcMatch) continue
-
-    const mc = parseInt(mcMatch[1], 10)
-    if (mc >= minAmountMicro) {
-      // Verify it looks like a valid Leo record plaintext
-      if (plaintext.includes('{') && plaintext.includes('owner') && plaintext.includes('_nonce')) {
-        console.warn(`[Bet] Found suitable Credits record: ${mc} microcredits (need ${minAmountMicro})`)
-        return plaintext
-      }
-    }
-  }
-  return null
-}
-
-/**
- * Fetch a Credits record plaintext from the connected wallet.
- * Tries multiple strategies in order of reliability:
- * 1. Native Leo Wallet API: requestRecordPlaintexts (returns .plaintext field)
- * 2. Native Leo Wallet API: requestRecords (may include plaintext)
- * 3. Adapter: requestRecordPlaintexts (via WalletBridge)
- * 4. Adapter: requestRecords (via WalletBridge)
- * 5. Adapter: requestRecords + decrypt fallback
- */
-async function fetchCreditsRecord(minAmountMicro: number): Promise<string | null> {
-  console.warn('[Bet] === Fetching Credits record for private betting ===')
-  console.warn(`[Bet] Need record with >= ${minAmountMicro} microcredits (${minAmountMicro / 1_000_000} ALEO)`)
-
-  // Strategy 1: Native Leo Wallet API directly (bypasses adapter, most reliable)
-  const leoWallet = (window as any).leoWallet || (window as any).leo
-  if (leoWallet) {
-    // 1a. requestRecordPlaintexts — returns records with .plaintext field
-    if (typeof leoWallet.requestRecordPlaintexts === 'function') {
-      try {
-        console.warn('[Bet] Strategy 1a: leoWallet.requestRecordPlaintexts("credits.aleo")')
-        const result = await leoWallet.requestRecordPlaintexts('credits.aleo')
-        const records = result?.records || (Array.isArray(result) ? result : [])
-        console.warn(`[Bet] → Got ${records.length} record(s)`)
-        if (records.length > 0) {
-          console.warn('[Bet] → First record sample:', JSON.stringify(records[0])?.slice(0, 300))
-        }
-        const found = findSuitableRecord(records, minAmountMicro)
-        if (found) return found
-      } catch (err) {
-        console.warn('[Bet] Strategy 1a failed:', err)
-      }
-    }
-
-    // 1b. requestRecords — may include plaintext depending on wallet version
-    if (typeof leoWallet.requestRecords === 'function') {
-      try {
-        console.warn('[Bet] Strategy 1b: leoWallet.requestRecords("credits.aleo")')
-        const result = await leoWallet.requestRecords('credits.aleo')
-        const records = result?.records || (Array.isArray(result) ? result : [])
-        console.warn(`[Bet] → Got ${records.length} record(s)`)
-        if (records.length > 0) {
-          console.warn('[Bet] → First record sample:', JSON.stringify(records[0])?.slice(0, 300))
-        }
-        const found = findSuitableRecord(records, minAmountMicro)
-        if (found) return found
-      } catch (err) {
-        console.warn('[Bet] Strategy 1b failed:', err)
-      }
-    }
-  } else {
-    console.warn('[Bet] No native Leo Wallet found on window')
-  }
-
-  // Strategy 2: Adapter's requestRecordPlaintexts (exposed by WalletBridge)
-  const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
-  if (typeof adapterPlaintexts === 'function') {
-    try {
-      console.warn('[Bet] Strategy 2: adapter requestRecordPlaintexts("credits.aleo")')
-      const records = await adapterPlaintexts('credits.aleo')
-      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      console.warn(`[Bet] → Got ${recordsArr.length} record(s)`)
-      if (recordsArr.length > 0) {
-        console.warn('[Bet] → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
-      }
-      const found = findSuitableRecord(recordsArr, minAmountMicro)
-      if (found) return found
-    } catch (err) {
-      console.warn('[Bet] Strategy 2 failed:', err)
-    }
-  }
-
-  // Strategy 3: Adapter's requestRecords (one parameter only, no boolean!)
-  const adapterRecords = (window as any).__aleoRequestRecords
-  if (typeof adapterRecords === 'function') {
-    try {
-      console.warn('[Bet] Strategy 3: adapter requestRecords("credits.aleo")')
-      const records = await adapterRecords('credits.aleo')
-      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      console.warn(`[Bet] → Got ${recordsArr.length} record(s)`)
-      if (recordsArr.length > 0) {
-        console.warn('[Bet] → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
-      }
-      const found = findSuitableRecord(recordsArr, minAmountMicro)
-      if (found) return found
-
-      // Strategy 4: Try decrypting ciphertext records from Strategy 3
-      const decryptFn = (window as any).__aleoDecrypt
-      if (typeof decryptFn === 'function' && recordsArr.length > 0) {
-        console.warn('[Bet] Strategy 4: decrypt ciphertext records...')
-        for (const record of recordsArr) {
-          if (!record) continue
-          if (record.spent === true || record.is_spent === true) continue
-          const ciphertext = record.ciphertext || record.record_ciphertext || record.data
-          if (!ciphertext || typeof ciphertext !== 'string') continue
-          try {
-            const decrypted = await decryptFn(ciphertext)
-            const textStr = String(decrypted)
-            const mcMatch = textStr.match(/microcredits\s*:\s*(\d+)u64/)
-            if (mcMatch) {
-              const mc = parseInt(mcMatch[1], 10)
-              if (mc >= minAmountMicro && textStr.includes('{') && textStr.includes('owner')) {
-                console.warn(`[Bet] Strategy 4: decrypted record with ${mc} microcredits`)
-                return textStr
-              }
-            }
-          } catch { /* decrypt failed */ }
-        }
-      }
-    } catch (err) {
-      console.warn('[Bet] Strategy 3/4 failed:', err)
-    }
-  }
-
-  console.warn('[Bet] All strategies exhausted — no Credits record found, will use place_bet_public')
-  return null
-}
+const SLIPPAGE_PRESETS = [0.5, 1, 2, 5]
 
 // Copyable Text Component
 function CopyableText({ text, displayText }: { text: string; displayText?: string }) {
@@ -245,6 +110,23 @@ function CopyableText({ text, displayText }: { text: string; displayText?: strin
   )
 }
 
+// Status label component
+function MarketStatusBadge({ status }: { status: number }) {
+  const labels: Record<number, { text: string; color: string }> = {
+    1: { text: 'Active', color: 'bg-yes-500/10 text-yes-400 border-yes-500/20' },
+    2: { text: 'Closed', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
+    3: { text: 'Resolved', color: 'bg-brand-500/10 text-brand-400 border-brand-500/20' },
+    4: { text: 'Cancelled', color: 'bg-no-500/10 text-no-400 border-no-500/20' },
+    5: { text: 'Pending Resolution', color: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+  }
+  const label = labels[status] || labels[1]
+  return (
+    <span className={cn('px-2 py-0.5 text-xs font-medium rounded-full border', label.color)}>
+      {label.text}
+    </span>
+  )
+}
+
 export function MarketDetail() {
   const navigate = useNavigate()
   const { marketId } = useParams<{ marketId: string }>()
@@ -254,12 +136,21 @@ export function MarketDetail() {
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [market, setMarket] = useState<Market | null>(null)
-  const [selectedOutcome, setSelectedOutcome] = useState<'yes' | 'no' | null>(null)
-  const [betAmount, setBetAmount] = useState('')
-  const [step, setStep] = useState<BetStep>('select')
+  const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
+  const [buyAmount, setBuyAmount] = useState('')
+  const [slippage, setSlippage] = useState(1) // 1%
+  const [step, setStep] = useState<TradeStep>('select')
   const [error, setError] = useState<string | null>(null)
   const [txId, setTxId] = useState<string | null>(null)
   const [liveExpired, setLiveExpired] = useState(false)
+
+  // Additional data fetched on-demand
+  const [resolution, setResolution] = useState<MarketResolutionData | null>(null)
+  const [fees, setFees] = useState<MarketFeesData | null>(null)
+  const [, setDispute] = useState<DisputeDataResult | null>(null)
+
+  // Active tab for extra panels
+  const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees'>('trade')
 
   // Redirect to landing if not connected
   useEffect(() => {
@@ -276,7 +167,27 @@ export function MarketDetail() {
     }
   }, [marketId, markets])
 
-  // Live expiry check: periodically verify against current block height
+  // Fetch additional data (resolution, fees, dispute) when market loads
+  useEffect(() => {
+    if (!market?.id) return
+    const fetchExtras = async () => {
+      try {
+        const [res, feesData, disputeData] = await Promise.all([
+          getMarketResolution(market.id),
+          getMarketFees(market.id),
+          getMarketDispute(market.id),
+        ])
+        if (res) setResolution(res)
+        if (feesData) setFees(feesData)
+        if (disputeData) setDispute(disputeData)
+      } catch (err) {
+        console.warn('[MarketDetail] Failed to fetch extras:', err)
+      }
+    }
+    fetchExtras()
+  }, [market?.id])
+
+  // Live expiry check
   useEffect(() => {
     if (!market || market.status !== 1 || market.timeRemaining === 'Ended') return
 
@@ -293,15 +204,58 @@ export function MarketDetail() {
     }
 
     checkExpiry()
-    const interval = setInterval(checkExpiry, 30_000) // Check every 30s
+    const interval = setInterval(checkExpiry, 30_000)
     return () => { cancelled = true; clearInterval(interval) }
   }, [market?.id, market?.deadline, market?.status])
 
   const isExpired = market ? (liveExpired || market.timeRemaining === 'Ended' || market.status !== 1) : false
 
-  if (!wallet.connected) {
-    return null
-  }
+  // AMM price calculations
+  const reserves: AMMReserves | null = useMemo(() => {
+    if (!market) return null
+    return {
+      reserve_1: market.yesReserve,
+      reserve_2: market.noReserve,
+      reserve_3: market.reserve3 ?? 0n,
+      reserve_4: market.reserve4 ?? 0n,
+      num_outcomes: market.numOutcomes ?? 2,
+    }
+  }, [market])
+
+  const prices = useMemo(() => {
+    if (!reserves) return []
+    return calculateAllPrices(reserves)
+  }, [reserves])
+
+  // Trade preview calculations
+  const buyAmountMicro = useMemo(() => {
+    const num = parseFloat(buyAmount) || 0
+    return BigInt(Math.floor(num * 1_000_000))
+  }, [buyAmount])
+
+  const tradePreview = useMemo(() => {
+    if (!reserves || !selectedOutcome || buyAmountMicro <= 0n) {
+      return null
+    }
+
+    const sharesOut = calculateBuySharesOut(reserves, selectedOutcome, buyAmountMicro)
+    const minShares = calculateMinSharesOut(sharesOut, slippage)
+    const priceImpact = calculateBuyPriceImpact(reserves, selectedOutcome, buyAmountMicro)
+    const feeBreakdown = calculateFees(buyAmountMicro)
+
+    // Potential payout: winning shares redeem 1:1
+    const potentialPayout = Number(sharesOut) / 1_000_000
+
+    return {
+      sharesOut,
+      minShares,
+      priceImpact,
+      fees: feeBreakdown,
+      potentialPayout,
+    }
+  }, [reserves, selectedOutcome, buyAmountMicro, slippage])
+
+  if (!wallet.connected) return null
 
   if (!market) {
     return (
@@ -322,206 +276,97 @@ export function MarketDetail() {
     )
   }
 
-  const potentialPayout = selectedOutcome === 'yes'
-    ? market.potentialYesPayout
-    : market.potentialNoPayout
+  const tokenSymbol = getTokenSymbol(market.tokenType)
+  const isUsdcx = market.tokenType === 'USDCX'
+  const numOutcomes = market.numOutcomes ?? 2
+  const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
 
-  const betAmountNum = parseFloat(betAmount) || 0
-  const betAmountMicro = BigInt(Math.floor(betAmountNum * 1_000_000))
-  const potentialWin = betAmountNum * potentialPayout
-
-  // Place bet via wallet provider's executeTransaction
-  const handleWalletBet = async () => {
-    if (!market || !selectedOutcome || betAmountMicro <= 0n || isExpired) return
+  // Buy shares via wallet
+  const handleBuyShares = async () => {
+    if (!market || !selectedOutcome || buyAmountMicro <= 0n || isExpired || !tradePreview) return
 
     setStep('processing')
     setError(null)
 
     try {
       if (!market.id.endsWith('field')) {
-        throw new Error(
-          'This market cannot accept bets yet. The market ID must be in blockchain field format.'
-        )
+        throw new Error('This market cannot accept trades yet. The market ID must be in blockchain field format.')
       }
 
-      const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-
-      console.warn('[Bet] === PRE-FLIGHT CHECKS ===')
-      console.warn('[Bet] Market ID:', market.id)
-      console.warn('[Bet] Market question:', market.question)
-      console.warn('[Bet] Market deadline:', String(market.deadline))
-      console.warn('[Bet] Market status:', market.status)
-      console.warn('[Bet] Bet amount:', String(amountMicro), 'microcredits =', parseFloat(betAmount), 'ALEO')
-      console.warn('[Bet] Outcome:', selectedOutcome)
-
-      // Pre-flight check 1: Verify market deadline hasn't passed
+      // Pre-flight: Verify market deadline
       let currentBlock: bigint
       try {
         currentBlock = await getCurrentBlockHeight()
       } catch {
-        throw new Error(
-          'Cannot verify market deadline — network error fetching block height. ' +
-          'Please check your internet connection and try again.'
-        )
+        throw new Error('Cannot verify market deadline - network error fetching block height.')
       }
-      console.warn(`[Bet] Current block: ${currentBlock}, Deadline: ${market.deadline}, Remaining: ${Number(market.deadline - currentBlock)} blocks`)
       if (market.deadline > 0n && currentBlock > market.deadline) {
-        throw new Error(
-          `Market betting deadline has passed (current block: ${currentBlock}, deadline: ${market.deadline}). ` +
-          'No new bets can be placed on this market.'
-        )
+        throw new Error(`Market trading deadline has passed (current block: ${currentBlock}, deadline: ${market.deadline}).`)
       }
-      console.warn(`[Bet] Pre-flight: block ${currentBlock} <= deadline ${market.deadline} ✓`)
 
-      // Pre-flight check 1b: Verify market status is ACTIVE (1)
+      // Pre-flight: Verify market status is ACTIVE
       if (market.status !== 1) {
-        const statusNames: Record<number, string> = { 2: 'Closed', 3: 'Resolved', 4: 'Cancelled' }
-        throw new Error(
-          `Market is ${statusNames[market.status] || 'not active'} (status: ${market.status}). Only active markets accept bets.`
-        )
+        const statusNames: Record<number, string> = { 2: 'Closed', 3: 'Resolved', 4: 'Cancelled', 5: 'Pending Resolution' }
+        throw new Error(`Market is ${statusNames[market.status] || 'not active'} (status: ${market.status}).`)
       }
 
-      // Pre-flight check 2: Minimum bet amount (1000 microcredits = 0.001 ALEO)
-      if (amountMicro < 1000n) {
-        throw new Error('Minimum bet amount is 0.001 ALEO (1000 microcredits).')
+      // Pre-flight: Minimum trade amount
+      if (buyAmountMicro < 1000n) {
+        throw new Error('Minimum trade amount is 0.001 tokens (1000 microcredits).')
       }
 
-      // === PRIVACY MODE ===
-      // Judge feedback: place_bet_public uses transfer_public_as_signer which leaks
-      // the bettor's address and amount on-chain. place_bet uses transfer_private_to_public
-      // with a Credits record, hiding the bettor's identity.
-      //
-      // Strategy: Try to fetch a Credits record from the wallet.
-      // If found → use place_bet (private, 5 inputs)
-      // If not → fall back to place_bet_public (public, 4 inputs)
-      let creditsRecord: string | null = null
-      try {
-        creditsRecord = await fetchCreditsRecord(Number(amountMicro))
-      } catch (err) {
-        console.warn('[Bet] Credits record fetch failed, will use public mode:', err)
-      }
-
-      const usePrivateMode = !!creditsRecord
-      console.warn(`[Bet] Mode: ${usePrivateMode ? 'PRIVATE (place_bet — hides bettor identity)' : 'PUBLIC (place_bet_public — address visible)'}`)
-
-      // Pre-flight check 3: Balance verification
-      const feeInMicro = 700_000n // 0.5 ALEO fee + 0.2 ALEO safety buffer
-      let freshPublicBalance: bigint | null = null
-      let balanceFetchFailed = false
-
-      if (wallet.address) {
-        try {
-          freshPublicBalance = await fetchPublicBalance(wallet.address)
-          console.warn(`[Bet] On-chain public balance: ${freshPublicBalance} microcredits (${Number(freshPublicBalance) / 1_000_000} ALEO)`)
-        } catch {
-          balanceFetchFailed = true
-          console.warn('[Bet] Could not fetch public balance from API')
+      // Pre-flight: Balance verification
+      const feeInMicro = 700_000n
+      if (isUsdcx) {
+        if (buyAmountMicro > wallet.balance.usdcxPublic) {
+          throw new Error(`Insufficient USDCX balance. You need ${buyAmount} USDCX but only have ${(Number(wallet.balance.usdcxPublic) / 1_000_000).toFixed(2)} USDCX.`)
         }
-      }
-
-      const publicBalance = freshPublicBalance ?? wallet.balance.public
-
-      if (usePrivateMode) {
-        // Private mode: bet amount comes from Credits record, only need public balance for tx fee
+        // Gas fees always in ALEO
+        const publicBalance = wallet.balance.public
         if (publicBalance < feeInMicro) {
-          const feeNeeded = Number(feeInMicro) / 1_000_000
-          const available = Number(publicBalance) / 1_000_000
-          throw new Error(
-            `Insufficient PUBLIC balance for transaction fee. You need ~${feeNeeded.toFixed(2)} ALEO ` +
-            `for the fee but only have ${available.toFixed(2)} ALEO in public balance.\n\n` +
-            'Your bet will use a private Credits record, but the transaction fee still requires public credits.\n\n' +
-            'To add public credits:\n' +
-            '1. Open Leo Wallet → Send → select "Public" as destination\n' +
-            '2. Send a small amount of ALEO to your own address'
-          )
+          throw new Error(`Insufficient ALEO for transaction fee. Gas fees are always paid in ALEO.`)
         }
-        console.warn(`[Bet] Pre-flight: public balance ${publicBalance} >= fee ${feeInMicro} (private mode)`)
-      } else {
-        // Public mode: need public balance for bet amount + fee
-        const totalNeeded = amountMicro + feeInMicro
-        if (publicBalance < totalNeeded) {
-          const needed = Number(totalNeeded) / 1_000_000
-          const available = Number(publicBalance) / 1_000_000
-          const networkNote = balanceFetchFailed ? '\n\n(Note: Could not verify balance on-chain due to network issues. Cached balance shown.)' : ''
-          throw new Error(
-            `Insufficient PUBLIC balance. You need ~${needed.toFixed(2)} ALEO ` +
-            `(${betAmount} bet + ~0.7 fee+buffer) but only have ${available.toFixed(2)} ALEO in public balance.${networkNote}\n\n` +
-            'Important: Each failed bet attempt costs ~0.5 ALEO in fees even though the bet itself fails!\n\n' +
-            'Leo Wallet shows your TOTAL balance (public + private), but betting requires PUBLIC credits.\n\n' +
-            'To convert private → public:\n' +
-            '1. Open Leo Wallet → Send → select "Public" as destination\n' +
-            '2. Send ALEO to your own address as a public transfer'
-          )
-        }
-        console.warn(`[Bet] Pre-flight: public balance ${publicBalance} >= needed ${totalNeeded} (public mode)`)
       }
 
-      // Build inputs based on privacy mode
+      // Build inputs
       const tokenType = market.tokenType || 'ALEO'
       let functionName: string
       let inputs: string[]
 
-      if (usePrivateMode) {
-        functionName = 'place_bet'
-        inputs = buildPlaceBetPrivateInputs(market.id, amountMicro, selectedOutcome, creditsRecord!)
-      } else {
-        const betResult = buildPlaceBetInputs(market.id, amountMicro, selectedOutcome, tokenType as 'ALEO' | 'USDCX')
-        functionName = betResult.functionName
-        inputs = betResult.inputs
-      }
+      {
+        // expectedShares = minShares (conservative) so record quantity <= actual shares_out
+        const expectedShares = tradePreview.minShares
+        let creditsRecord: string | undefined
 
-      console.warn('[Bet] Submitting transaction:', {
-        program: CONTRACT_INFO.programId,
-        function: functionName,
-        fee: 0.5,
-        mode: usePrivateMode ? 'PRIVATE' : 'PUBLIC',
-        inputCount: inputs.length,
-      })
-      console.warn('[Bet] Inputs:', JSON.stringify(inputs.map((inp: string, i: number) =>
-        `[${i}] ${inp.length > 40 ? inp.slice(0, 20) + '...' + inp.slice(-15) : inp}`
-      )))
-
-      // Record pool state BEFORE bet for on-chain verification
-      let poolBefore: { totalBets: bigint; totalYes: bigint; totalNo: bigint } | null = null
-      try {
-        const pool = await getMarketPool(market.id)
-        if (pool) {
-          poolBefore = {
-            totalBets: pool.total_bets,
-            totalYes: pool.total_yes_pool,
-            totalNo: pool.total_no_pool,
+        if (tokenType !== 'USDCX') {
+          // ALEO: buy_shares_private needs credits record
+          const { fetchCreditsRecord } = await import('@/lib/credits-record')
+          const gasBuffer = 500_000
+          const totalNeeded = Number(buyAmountMicro) + gasBuffer
+          const record = await fetchCreditsRecord(totalNeeded)
+          if (!record) {
+            throw new Error(
+              `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+              `Private betting requires an unspent Credits record.`
+            )
           }
-          console.warn('[Bet] Pool state BEFORE bet:', {
-            totalBets: String(poolBefore.totalBets),
-            totalYes: String(poolBefore.totalYes),
-            totalNo: String(poolBefore.totalNo),
-          })
+          creditsRecord = record
         }
-      } catch {
-        console.warn('[Bet] Could not snapshot pool state before bet')
+
+        const result = buildBuySharesInputs(
+          market.id,
+          selectedOutcome,
+          buyAmountMicro,
+          expectedShares,
+          tradePreview.minShares,
+          tokenType as 'ALEO' | 'USDCX',
+          creditsRecord,
+        )
+        functionName = result.functionName
+        inputs = result.inputs
       }
 
-      // On-chain verifier: checks if market pool changed since we placed the bet
-      const onChainVerify = async (): Promise<boolean> => {
-        if (!poolBefore) return false
-        try {
-          const poolAfter = await getMarketPool(market.id)
-          if (!poolAfter) return false
-          const betsIncreased = poolAfter.total_bets > poolBefore.totalBets
-          const poolIncreased = (poolAfter.total_yes_pool + poolAfter.total_no_pool) >
-            (poolBefore.totalYes + poolBefore.totalNo)
-          console.warn('[Bet] On-chain verify:', {
-            before: { bets: String(poolBefore.totalBets), yes: String(poolBefore.totalYes), no: String(poolBefore.totalNo) },
-            after: { bets: String(poolAfter.total_bets), yes: String(poolAfter.total_yes_pool), no: String(poolAfter.total_no_pool) },
-            betsIncreased,
-            poolIncreased,
-          })
-          return betsIncreased && poolIncreased
-        } catch (err) {
-          console.warn('[Bet] On-chain verify fetch failed:', err)
-          return false
-        }
-      }
+      console.warn('[Trade] Submitting:', { function: functionName, mode: tokenType === 'USDCX' ? 'PUBLIC' : 'PRIVATE', inputs })
 
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
@@ -532,29 +377,22 @@ export function MarketDetail() {
 
       if (result?.transactionId) {
         const submittedTxId = result.transactionId
-        const lockedMultiplier = selectedOutcome === 'yes'
-          ? market.potentialYesPayout
-          : market.potentialNoPayout
 
         addPendingBet({
           id: submittedTxId,
           marketId: market.id,
-          amount: amountMicro,
-          outcome: selectedOutcome,
+          amount: buyAmountMicro,
+          outcome: selectedOutcome === 1 ? 'yes' : 'no',
           placedAt: Date.now(),
           status: 'pending',
           marketQuestion: market.question,
-          lockedMultiplier,
+          lockedMultiplier: tradePreview.potentialPayout / (Number(buyAmountMicro) / 1_000_000),
         })
 
         setTxId(result.transactionId)
-        // Show pending state — poll wallet adapter for real status
         setStep('pending')
 
-        // Poll in background using the adapter's transactionStatus API
-        // Pass onChainVerify as fallback when wallet reports failure
         pollTransactionStatus(submittedTxId, async (status, onChainTxId) => {
-          console.warn('[Bet] Final status:', status, onChainTxId)
           if (onChainTxId) setTxId(onChainTxId)
 
           if (status === 'confirmed') {
@@ -562,152 +400,52 @@ export function MarketDetail() {
             setStep('success')
           } else if (status === 'failed') {
             removePendingBet(submittedTxId)
-            // Transaction failed — comprehensive diagnosis
             let diagMsg = 'Transaction failed.'
             try {
-              const diagBlock = await getCurrentBlockHeight()
-              const deadlinePassed = market.deadline > 0n && diagBlock > market.deadline
-
-              // Re-check public balance to diagnose balance-related failures
-              let postBalance: bigint | null = null
-              if (wallet.address) {
-                try {
-                  postBalance = await fetchPublicBalance(wallet.address)
-                } catch { /* ignore */ }
-              }
-
-              // Look up transaction on-chain for definitive status
               let txDiagnosis: { found: boolean; status: string; message?: string } | null = null
               if (onChainTxId) {
-                try {
-                  txDiagnosis = await diagnoseTransaction(onChainTxId)
-                  console.warn('[Bet] On-chain tx diagnosis:', txDiagnosis)
-                } catch { /* ignore */ }
+                try { txDiagnosis = await diagnoseTransaction(onChainTxId) } catch {}
               }
-
-              console.warn('[Bet] Post-failure diagnostics:', {
-                currentBlock: String(diagBlock),
-                marketDeadline: String(market.deadline),
-                deadlinePassed,
-                marketStatus: market.status,
-                betAmount: String(amountMicro),
-                onChainTxId,
-                txDiagnosis: txDiagnosis?.status || 'not checked',
-                preBalance: String(publicBalance),
-                postBalance: postBalance !== null ? String(postBalance) : 'unknown',
-                balanceDrop: postBalance !== null ? String(publicBalance - postBalance) : 'unknown',
-              })
-
               const txNote = onChainTxId ? `\n\nTransaction: ${onChainTxId}` : ''
-
-              // Check if balance dropped (fee was consumed even though bet failed)
-              const feeConsumed = postBalance !== null && postBalance < publicBalance
-              const feeNote = feeConsumed
-                ? `\n\nNote: ~${((Number(publicBalance) - Number(postBalance)) / 1_000_000).toFixed(3)} ALEO was consumed in fees for this failed attempt.`
-                : ''
-
-              if (deadlinePassed) {
-                diagMsg = `Market deadline has passed (block ${diagBlock} > deadline ${market.deadline}). This market is no longer accepting bets.${txNote}`
-              } else if (onChainTxId) {
-                // Transaction was on-chain — check if it was rejected (finalize abort)
-                const isRejected = txDiagnosis?.status === 'rejected'
-                const statusLabel = isRejected ? 'REJECTED (finalize aborted)' : 'failed'
-
-                const transferType = usePrivateMode ? 'transfer_private_to_public (Credits record)' : 'transfer_public_as_signer'
-                diagMsg =
-                  `Your transaction was included on-chain but was ${statusLabel}.\n\n` +
-                  'The ZK proof was valid, but an on-chain assertion failed. Most likely cause:\n' +
-                  (usePrivateMode
-                    ? '• Credits record may have been already spent or insufficient\n'
-                    : '• Insufficient PUBLIC balance after fee deduction\n' +
-                      '  (Fee ~0.51 ALEO is deducted FIRST, then bet amount is transferred)\n') +
-                  `\nTransfer method: ${transferType}\n` +
-                  `Pre-bet public balance: ${(Number(publicBalance) / 1_000_000).toFixed(3)} ALEO\n` +
-                  `Post-failure balance: ${postBalance !== null ? (Number(postBalance) / 1_000_000).toFixed(3) : 'unknown'} ALEO\n` +
-                  `Bet amount: ${(Number(amountMicro) / 1_000_000).toFixed(3)} ALEO` +
-                  feeNote +
-                  '\n\nYour bet credits were NOT deducted (only the fee was).' + txNote
+              if (onChainTxId && txDiagnosis) {
+                diagMsg = `Transaction was ${txDiagnosis.status === 'rejected' ? 'REJECTED (finalize aborted)' : 'failed'}.${txNote}`
               } else {
-                // Transaction never made it on-chain
-                diagMsg =
-                  'Leo Wallet could not complete this transaction.\n\n' +
-                  'The wallet proved your bet but could not successfully broadcast or finalize it.\n\n' +
-                  `Pre-bet balance: ${(Number(publicBalance) / 1_000_000).toFixed(3)} ALEO` +
-                  feeNote +
-                  '\n\nPlease try again or check your wallet balance.'
+                diagMsg = 'Wallet could not complete this transaction. Please try again.' + txNote
               }
             } catch {
-              diagMsg =
-                'Transaction failed. Could not diagnose the exact cause.\n\n' +
-                'Please try again.'
+              diagMsg = 'Transaction failed. Could not diagnose the exact cause.'
             }
             setError(diagMsg)
             setStep('error')
           } else {
-            // unknown/timeout — show success with note to check wallet
             confirmPendingBet(submittedTxId, onChainTxId)
             setStep('success')
           }
-        }, 30, 10_000, onChainVerify)
+        }, 30, 10_000)
       } else {
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
-      console.error('Wallet bet failed:', err)
-      let errorMessage = err instanceof Error ? err.message : 'Failed to place bet'
-
-      const lowerMsg = errorMessage.toLowerCase()
-
-      // Detect Leo Wallet "Invalid Aleo program" or "unknown error" — these mean the
-      // wallet cannot handle this program's nested signer authorization at all.
-      // Leo Wallet logs the real error in addToWindow.js but wraps it as AleoWalletError.
-      if (
-        lowerMsg.includes('invalid aleo program') ||
-        lowerMsg.includes('invalid_params') ||
-        lowerMsg.includes('cannot validate program') ||
-        lowerMsg.includes('cannot execute') ||
-        lowerMsg.includes('nested signer')
-      ) {
-        errorMessage =
-          'Browser wallets cannot execute this program due to nested signer authorization ' +
-          '(transfer_public_as_signer inside place_bet_public).\n\n' +
-          'This is a known limitation of all current Aleo browser wallets. ' +
-          'Please try again or wait for wallet updates that support nested signer authorization.'
-      } else if (
-        lowerMsg.includes('unknown error') ||
-        lowerMsg.includes('an unknown error occured')
-      ) {
-        errorMessage =
-          'Wallet returned an unknown error. This typically means it cannot validate ' +
-          'the program (nested imports that browser wallets cannot resolve).\n\n' +
-          'Please try again or check your wallet for more details.'
-      } else if (
-        lowerMsg.includes('proving') ||
-        lowerMsg.includes('prover') ||
-        lowerMsg.includes('wasm') ||
-        lowerMsg.includes('out of memory') ||
-        lowerMsg.includes('timeout') ||
-        lowerMsg.includes('aborted')
-      ) {
-        errorMessage =
-          `Wallet error: ${errorMessage}\n\n` +
-          'The wallet prover may struggle with this program size. Please try again.'
-      }
-
-      setError(errorMessage)
+      console.error('Trade failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to buy shares')
       setStep('error')
     }
   }
 
-  const resetBet = () => {
+  const resetTrade = () => {
     setSelectedOutcome(null)
-    setBetAmount('')
+    setBuyAmount('')
     setStep('select')
     setError(null)
     setTxId(null)
   }
 
   const quickAmounts = [1, 5, 10, 25, 50, 100]
+
+  // Determine which panels to show based on market status
+  const showDispute = market.status === MARKET_STATUS.PENDING_RESOLUTION && resolution
+  const showCreatorFees = market.status === MARKET_STATUS.RESOLVED && fees && wallet.address === market.creator
+  const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired
 
   return (
     <div className="min-h-screen bg-surface-950 flex flex-col">
@@ -743,6 +481,7 @@ export function MarketDetail() {
                     )}>
                       {categoryNames[market.category]}
                     </span>
+                    <MarketStatusBadge status={market.status} />
                     {market.tags?.map(tag => (
                       <span
                         key={tag}
@@ -767,9 +506,7 @@ export function MarketDetail() {
                 </h1>
 
                 {market.description && (
-                  <p className="text-surface-400 mb-6">
-                    {market.description}
-                  </p>
+                  <p className="text-surface-400 mb-6">{market.description}</p>
                 )}
 
                 {/* Stats */}
@@ -780,16 +517,16 @@ export function MarketDetail() {
                       <span>Volume</span>
                     </div>
                     <p className="text-lg font-bold text-white">
-                      {formatCredits(market.totalVolume)} ALEO
+                      {formatCredits(market.totalVolume)} {tokenSymbol}
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-surface-800/30">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
-                      <Users className="w-4 h-4" />
-                      <span>Total Bets</span>
+                      <Droplets className="w-4 h-4" />
+                      <span>Liquidity</span>
                     </div>
                     <p className="text-lg font-bold text-white">
-                      {market.totalBets}
+                      {formatCredits(market.totalLiquidity ?? 0n)} {tokenSymbol}
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-surface-800/30">
@@ -804,94 +541,67 @@ export function MarketDetail() {
                   <div className="p-4 rounded-xl bg-surface-800/30">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
                       <Info className="w-4 h-4" />
-                      <span>Resolution</span>
+                      <span>Outcomes</span>
                     </div>
-                    {market.resolutionSource?.startsWith('http') ? (
-                      <a
-                        href={market.resolutionSource}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-brand-400 hover:text-brand-300 flex items-center gap-1 truncate"
-                      >
-                        {new URL(market.resolutionSource).hostname.replace('www.', '')}
-                        <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                      </a>
-                    ) : (
-                      <p className="text-sm font-medium text-white truncate">
-                        {market.resolutionSource || 'On-chain'}
-                      </p>
-                    )}
+                    <p className="text-lg font-bold text-white">
+                      {numOutcomes}
+                    </p>
                   </div>
                 </div>
               </motion.div>
 
-              {/* Probability Chart */}
+              {/* Multi-outcome Probability Display */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
                 className="glass-card p-6"
               >
-                <h2 className="text-lg font-semibold text-white mb-4">Current Probability</h2>
+                <h2 className="text-lg font-semibold text-white mb-4">Current Prices</h2>
 
-                {/* Probability Bar */}
+                {/* Multi-outcome probability bar */}
                 <div className="mb-6">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="text-yes-400 font-medium">YES {market.yesPercentage.toFixed(1)}%</span>
-                    <span className="text-no-400 font-medium">{market.noPercentage.toFixed(1)}% NO</span>
+                    {outcomeLabels.map((label, i) => {
+                      const pct = (prices[i] ?? 0) * 100
+                      const colors = ['text-yes-400', 'text-no-400', 'text-purple-400', 'text-yellow-400']
+                      return (
+                        <span key={i} className={cn(colors[i], 'font-medium')}>
+                          {label} {pct.toFixed(1)}%
+                        </span>
+                      )
+                    })}
                   </div>
                   <div className="h-4 rounded-full overflow-hidden bg-surface-800 flex">
-                    <div
-                      className="h-full bg-gradient-to-r from-yes-600 to-yes-500 transition-all duration-500"
-                      style={{ width: `${market.yesPercentage}%` }}
-                    />
-                    <div
-                      className="h-full bg-gradient-to-r from-no-500 to-no-600 transition-all duration-500"
-                      style={{ width: `${market.noPercentage}%` }}
-                    />
+                    {prices.map((price, i) => {
+                      const gradients = [
+                        'bg-gradient-to-r from-yes-600 to-yes-500',
+                        'bg-gradient-to-r from-no-500 to-no-600',
+                        'bg-gradient-to-r from-purple-600 to-purple-500',
+                        'bg-gradient-to-r from-yellow-600 to-yellow-500',
+                      ]
+                      return (
+                        <div
+                          key={i}
+                          className={cn(gradients[i], 'h-full transition-all duration-500')}
+                          style={{ width: `${price * 100}%` }}
+                        />
+                      )
+                    })}
                   </div>
                 </div>
 
-                {/* Payout Info */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className={cn(
-                    "p-4 rounded-xl border transition-all cursor-pointer",
-                    selectedOutcome === 'yes'
-                      ? "bg-yes-500/10 border-yes-500/50"
-                      : "bg-surface-800/30 border-surface-700/50 hover:border-yes-500/30"
-                  )}
-                    onClick={() => {
-                      setSelectedOutcome('yes')
-                      if (step === 'select') setStep('amount')
-                    }}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-yes-400 font-bold text-lg">YES</span>
-                      <TrendingUp className="w-5 h-5 text-yes-400" />
-                    </div>
-                    <p className="text-2xl font-bold text-white">{market.potentialYesPayout.toFixed(2)}x</p>
-                    <p className="text-sm text-surface-400">Potential payout</p>
-                  </div>
-
-                  <div className={cn(
-                    "p-4 rounded-xl border transition-all cursor-pointer",
-                    selectedOutcome === 'no'
-                      ? "bg-no-500/10 border-no-500/50"
-                      : "bg-surface-800/30 border-surface-700/50 hover:border-no-500/30"
-                  )}
-                    onClick={() => {
-                      setSelectedOutcome('no')
-                      if (step === 'select') setStep('amount')
-                    }}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-no-400 font-bold text-lg">NO</span>
-                      <TrendingDown className="w-5 h-5 text-no-400" />
-                    </div>
-                    <p className="text-2xl font-bold text-white">{market.potentialNoPayout.toFixed(2)}x</p>
-                    <p className="text-sm text-surface-400">Potential payout</p>
-                  </div>
-                </div>
+                {/* Outcome price cards (using OutcomeSelector for consistency) */}
+                <OutcomeSelector
+                  numOutcomes={numOutcomes}
+                  outcomeLabels={outcomeLabels}
+                  prices={prices}
+                  selectedOutcome={selectedOutcome}
+                  onSelect={(o) => {
+                    setSelectedOutcome(o)
+                  }}
+                  disabled={!canTrade}
+                />
               </motion.div>
 
               {/* Odds History Chart */}
@@ -914,11 +624,75 @@ export function MarketDetail() {
                 />
               </motion.div>
 
-              {/* Market Info */}
+              {/* Tab panels: Liquidity, Dispute, Creator Fees */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
+              >
+                {/* Tab buttons */}
+                <div className="flex gap-2 mb-4">
+                  {canTrade && (
+                    <button
+                      onClick={() => setActiveTab('liquidity')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                        activeTab === 'liquidity'
+                          ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                      )}
+                    >
+                      <Droplets className="w-4 h-4" />
+                      Liquidity
+                    </button>
+                  )}
+                  {showDispute && (
+                    <button
+                      onClick={() => setActiveTab('dispute')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                        activeTab === 'dispute'
+                          ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                      )}
+                    >
+                      <ShieldAlert className="w-4 h-4" />
+                      Dispute
+                    </button>
+                  )}
+                  {showCreatorFees && (
+                    <button
+                      onClick={() => setActiveTab('fees')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                        activeTab === 'fees'
+                          ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                      )}
+                    >
+                      <Coins className="w-4 h-4" />
+                      Creator Fees
+                    </button>
+                  )}
+                </div>
+
+                {/* Tab content */}
+                {activeTab === 'liquidity' && canTrade && (
+                  <LiquidityPanel market={market} />
+                )}
+                {activeTab === 'dispute' && showDispute && resolution && (
+                  <DisputePanel market={market} resolution={resolution} />
+                )}
+                {activeTab === 'fees' && showCreatorFees && fees && (
+                  <CreatorFeesPanel market={market} fees={fees} />
+                )}
+              </motion.div>
+
+              {/* Market Info */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
                 className="glass-card p-6"
               >
                 <h2 className="text-lg font-semibold text-white mb-4">Market Information</h2>
@@ -929,6 +703,10 @@ export function MarketDetail() {
                       text={market.id}
                       displayText={`${market.id.slice(0, 10)}...${market.id.slice(-8)}`}
                     />
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
+                    <span className="text-surface-400">Token</span>
+                    <span className="text-white font-medium">{tokenSymbol}</span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Creator</span>
@@ -962,6 +740,10 @@ export function MarketDetail() {
                       <span className="text-white">{market.resolutionSource || 'On-chain'}</span>
                     )}
                   </div>
+                  <div className="flex justify-between py-3 border-b border-surface-800/50">
+                    <span className="text-surface-400">Trading Fees</span>
+                    <span className="text-white text-sm">2% (0.5% protocol + 0.5% creator + 1% LP)</span>
+                  </div>
                   <div className="flex justify-between py-3">
                     <span className="text-surface-400">Contract</span>
                     <a
@@ -978,7 +760,7 @@ export function MarketDetail() {
               </motion.div>
             </div>
 
-            {/* Betting Panel */}
+            {/* Trading Panel (Right Sidebar) */}
             <div className="lg:col-span-1">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -987,7 +769,7 @@ export function MarketDetail() {
                 className="glass-card p-6 sticky top-24"
               >
                 <h2 className="text-lg font-semibold text-white mb-4">
-                  {isExpired ? 'Market Expired' : 'Place Your Bet'}
+                  {isExpired ? 'Market Expired' : 'Buy Shares'}
                 </h2>
 
                 {/* Expired State */}
@@ -996,9 +778,9 @@ export function MarketDetail() {
                     <div className="w-16 h-16 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-4">
                       <Clock className="w-8 h-8 text-surface-500" />
                     </div>
-                    <h3 className="text-lg font-bold text-white mb-2">Betting Closed</h3>
+                    <h3 className="text-lg font-bold text-white mb-2">Trading Closed</h3>
                     <p className="text-surface-400 text-sm mb-4">
-                      The betting deadline for this market has passed. No new bets can be placed.
+                      The trading deadline for this market has passed.
                     </p>
                     <button onClick={() => navigate('/dashboard')} className="btn-secondary w-full">
                       Browse Active Markets
@@ -1006,27 +788,19 @@ export function MarketDetail() {
                   </div>
                 )}
 
-                {/* Pending State — transaction submitted, waiting for confirmation */}
+                {/* Pending State */}
                 {step === 'pending' && (
                   <div className="text-center py-8">
                     <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
                     <h3 className="text-xl font-bold text-white mb-2">Transaction Pending</h3>
                     <p className="text-surface-400 mb-2">
-                      Your {selectedOutcome?.toUpperCase()} bet of {betAmount} ALEO has been submitted.
+                      Your trade of {buyAmount} {tokenSymbol} has been submitted.
                     </p>
                     <p className="text-surface-400 text-sm mb-4">
                       Waiting for on-chain confirmation. This may take 1-3 minutes.
                     </p>
-                    <div className="p-3 rounded-xl bg-surface-800/50 mb-4">
-                      <p className="text-xs text-surface-500">
-                        Check your Leo Wallet extension for real-time status.
-                      </p>
-                    </div>
-                    <button
-                      onClick={resetBet}
-                      className="btn-secondary w-full text-sm"
-                    >
-                      Close & Place Another Bet
+                    <button onClick={resetTrade} className="btn-secondary w-full text-sm">
+                      Close & Place Another Trade
                     </button>
                   </div>
                 )}
@@ -1037,9 +811,9 @@ export function MarketDetail() {
                     <div className="w-16 h-16 rounded-full bg-yes-500/10 flex items-center justify-center mx-auto mb-4">
                       <CheckCircle2 className="w-8 h-8 text-yes-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Bet Placed!</h3>
+                    <h3 className="text-xl font-bold text-white mb-2">Shares Purchased!</h3>
                     <p className="text-surface-400 mb-4">
-                      Your {selectedOutcome?.toUpperCase()} bet of {betAmount} ALEO has been submitted.
+                      You bought {outcomeLabels[(selectedOutcome ?? 1) - 1]} shares with {buyAmount} {tokenSymbol}.
                     </p>
                     {txId && txId.startsWith('at1') ? (
                       <>
@@ -1061,13 +835,10 @@ export function MarketDetail() {
                         <p className="text-xs text-surface-500 mb-2">
                           Transaction is being processed on the blockchain.
                         </p>
-                        <p className="text-xs text-brand-400">
-                          Check your Leo Wallet extension for the transaction status and explorer link.
-                        </p>
                       </div>
                     ) : null}
-                    <button onClick={resetBet} className="btn-primary w-full">
-                      Place Another Bet
+                    <button onClick={resetTrade} className="btn-primary w-full">
+                      Buy More Shares
                     </button>
                   </div>
                 )}
@@ -1078,9 +849,9 @@ export function MarketDetail() {
                     <div className="w-16 h-16 rounded-full bg-no-500/10 flex items-center justify-center mx-auto mb-4">
                       <AlertCircle className="w-8 h-8 text-no-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Bet Failed</h3>
+                    <h3 className="text-xl font-bold text-white mb-2">Trade Failed</h3>
                     <p className="text-surface-400 mb-6 whitespace-pre-line text-left text-sm">{error}</p>
-                    <button onClick={resetBet} className="btn-primary w-full">
+                    <button onClick={resetTrade} className="btn-primary w-full">
                       Try Again
                     </button>
                   </div>
@@ -1097,46 +868,19 @@ export function MarketDetail() {
                   </div>
                 )}
 
-                {/* Betting Form */}
-                {!isExpired && (step === 'select' || step === 'amount' || step === 'confirm') && (
+                {/* Trading Form */}
+                {canTrade && step === 'select' && (
                   <>
                     {/* Outcome Selection */}
                     <div className="mb-6">
                       <label className="text-sm text-surface-400 mb-2 block">Select Outcome</label>
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => {
-                            setSelectedOutcome('yes')
-                            setStep('amount')
-                          }}
-                          className={cn(
-                            "p-4 rounded-xl border-2 transition-all",
-                            selectedOutcome === 'yes'
-                              ? "bg-yes-500/10 border-yes-500 text-yes-400"
-                              : "bg-surface-800/30 border-surface-700 text-surface-400 hover:border-yes-500/50"
-                          )}
-                        >
-                          <TrendingUp className="w-6 h-6 mx-auto mb-2" />
-                          <span className="font-bold">YES</span>
-                          <p className="text-xs mt-1">{market.potentialYesPayout.toFixed(2)}x</p>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedOutcome('no')
-                            setStep('amount')
-                          }}
-                          className={cn(
-                            "p-4 rounded-xl border-2 transition-all",
-                            selectedOutcome === 'no'
-                              ? "bg-no-500/10 border-no-500 text-no-400"
-                              : "bg-surface-800/30 border-surface-700 text-surface-400 hover:border-no-500/50"
-                          )}
-                        >
-                          <TrendingDown className="w-6 h-6 mx-auto mb-2" />
-                          <span className="font-bold">NO</span>
-                          <p className="text-xs mt-1">{market.potentialNoPayout.toFixed(2)}x</p>
-                        </button>
-                      </div>
+                      <OutcomeSelector
+                        numOutcomes={numOutcomes}
+                        outcomeLabels={outcomeLabels}
+                        prices={prices}
+                        selectedOutcome={selectedOutcome}
+                        onSelect={setSelectedOutcome}
+                      />
                     </div>
 
                     {/* Amount Input */}
@@ -1146,19 +890,19 @@ export function MarketDetail() {
                         animate={{ opacity: 1, height: 'auto' }}
                         className="mb-6"
                       >
-                        <label className="text-sm text-surface-400 mb-2 block">Bet Amount (ALEO)</label>
+                        <label className="text-sm text-surface-400 mb-2 block">Amount ({tokenSymbol})</label>
                         <div className="relative">
                           <input
                             type="number"
-                            value={betAmount}
-                            onChange={(e) => setBetAmount(e.target.value)}
+                            value={buyAmount}
+                            onChange={(e) => setBuyAmount(e.target.value)}
                             placeholder="0.00"
                             className="input-field w-full pr-16 text-lg"
                             min="0"
                             step="0.1"
                           />
                           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400">
-                            ALEO
+                            {tokenSymbol}
                           </span>
                         </div>
 
@@ -1167,10 +911,10 @@ export function MarketDetail() {
                           {quickAmounts.map(amount => (
                             <button
                               key={amount}
-                              onClick={() => setBetAmount(amount.toString())}
+                              onClick={() => setBuyAmount(amount.toString())}
                               className={cn(
                                 "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                                parseFloat(betAmount) === amount
+                                parseFloat(buyAmount) === amount
                                   ? "bg-brand-500 text-white"
                                   : "bg-surface-800/50 text-surface-400 hover:text-white"
                               )}
@@ -1180,21 +924,41 @@ export function MarketDetail() {
                           ))}
                         </div>
 
+                        {/* Slippage Tolerance */}
+                        <div className="mt-4">
+                          <label className="text-xs text-surface-500 mb-1.5 block">Slippage Tolerance</label>
+                          <div className="flex gap-2">
+                            {SLIPPAGE_PRESETS.map(s => (
+                              <button
+                                key={s}
+                                onClick={() => setSlippage(s)}
+                                className={cn(
+                                  'px-3 py-1 rounded-lg text-xs font-medium transition-all',
+                                  slippage === s
+                                    ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                                    : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                                )}
+                              >
+                                {s}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
                         <div className="mt-2 space-y-1">
-                          {wallet.balance.public === 0n && (
+                          {!isUsdcx && wallet.balance.public === 0n && (
                             <div className="flex items-start gap-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 mb-1">
                               <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
                               <p className="text-xs text-yellow-300 leading-relaxed">
-                                You have <strong>0 public ALEO</strong>. Betting requires public credits.
-                                Open Leo Wallet → Send → transfer ALEO to your own address as <strong>"Public"</strong> first.
+                                You have <strong>0 public ALEO</strong>. Trading requires public credits.
                               </p>
                             </div>
                           )}
                           <p className="text-xs text-surface-500">
-                            Public Balance: {formatCredits(wallet.balance.public)} ALEO
-                            {wallet.balance.private > 0n && (
-                              <span className="text-surface-600"> (Private: {formatCredits(wallet.balance.private)})</span>
-                            )}
+                            {isUsdcx
+                              ? `USDCX Balance: ${formatCredits(wallet.balance.usdcxPublic)} USDCX`
+                              : <>Public Balance: {formatCredits(wallet.balance.public)} ALEO</>
+                            }
                           </p>
                           <p className="text-xs text-surface-600">
                             Transaction fee: 0.5 ALEO (from public balance)
@@ -1203,54 +967,70 @@ export function MarketDetail() {
                       </motion.div>
                     )}
 
-                    {/* Payout Preview */}
-                    {selectedOutcome && betAmountNum > 0 && (
+                    {/* Trade Preview */}
+                    {tradePreview && selectedOutcome && (
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="p-4 rounded-xl bg-surface-800/30 mb-6"
                       >
                         <div className="flex justify-between mb-2">
-                          <span className="text-surface-400">Your Bet</span>
-                          <span className="text-white font-medium">
-                            {betAmount} ALEO on {selectedOutcome.toUpperCase()}
+                          <span className="text-surface-400 text-sm">Shares Received</span>
+                          <span className="text-white font-medium text-sm">
+                            {formatCredits(tradePreview.sharesOut)}
                           </span>
                         </div>
                         <div className="flex justify-between mb-2">
-                          <span className="text-surface-400">Transaction Fee</span>
-                          <span className="text-surface-300 font-medium">0.5 ALEO</span>
+                          <span className="text-surface-400 text-sm">Min Shares (slippage)</span>
+                          <span className="text-surface-300 font-medium text-sm">
+                            {formatCredits(tradePreview.minShares)}
+                          </span>
                         </div>
                         <div className="flex justify-between mb-2">
-                          <span className="text-surface-400">Payout Multiplier</span>
-                          <span className="text-white font-medium">{potentialPayout.toFixed(2)}x</span>
+                          <span className="text-surface-400 text-sm">Price Impact</span>
+                          <span className={cn(
+                            'font-medium text-sm',
+                            Math.abs(tradePreview.priceImpact) > 5 ? 'text-no-400' : 'text-surface-300'
+                          )}>
+                            {tradePreview.priceImpact > 0 ? '+' : ''}{tradePreview.priceImpact.toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between mb-2">
+                          <span className="text-surface-400 text-sm">Trading Fee (2%)</span>
+                          <span className="text-surface-300 font-medium text-sm">
+                            {formatCredits(tradePreview.fees.totalFees)} {tokenSymbol}
+                          </span>
                         </div>
                         <div className="flex justify-between pt-2 border-t border-surface-700/50">
-                          <span className="text-surface-400">Potential Win</span>
-                          <span className={cn(
-                            "font-bold",
-                            selectedOutcome === 'yes' ? "text-yes-400" : "text-no-400"
-                          )}>
-                            {potentialWin.toFixed(2)} ALEO
+                          <span className="text-surface-400 text-sm">Potential Payout (if wins)</span>
+                          <span className="text-yes-400 font-bold text-sm">
+                            {tradePreview.potentialPayout.toFixed(2)} {tokenSymbol}
                           </span>
                         </div>
+                        {Math.abs(tradePreview.priceImpact) > 5 && (
+                          <div className="mt-3 p-2 rounded-lg bg-no-500/10 border border-no-500/20">
+                            <p className="text-xs text-no-400">
+                              High price impact! Consider reducing trade size.
+                            </p>
+                          </div>
+                        )}
                       </motion.div>
                     )}
 
-                    {/* Place Bet Button */}
+                    {/* Buy Shares Button */}
                     <button
-                      onClick={handleWalletBet}
-                      disabled={!selectedOutcome || betAmountNum <= 0}
+                      onClick={handleBuyShares}
+                      disabled={!selectedOutcome || buyAmountMicro <= 0n}
                       className={cn(
-                        "w-full py-4 rounded-xl font-bold text-lg transition-all",
-                        selectedOutcome && betAmountNum > 0
-                          ? selectedOutcome === 'yes'
-                            ? "bg-yes-500 hover:bg-yes-400 text-white"
-                            : "bg-no-500 hover:bg-no-400 text-white"
+                        "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
+                        selectedOutcome && buyAmountMicro > 0n
+                          ? "bg-brand-500 hover:bg-brand-400 text-white"
                           : "bg-surface-800 text-surface-500 cursor-not-allowed"
                       )}
                     >
-                      {selectedOutcome && betAmountNum > 0 ? (
-                        `Place ${selectedOutcome.toUpperCase()} Bet`
+                      <ShoppingCart className="w-5 h-5" />
+                      {selectedOutcome && buyAmountMicro > 0n ? (
+                        `Buy ${outcomeLabels[selectedOutcome - 1]} Shares`
                       ) : (
                         'Select Outcome & Amount'
                       )}
@@ -1258,7 +1038,7 @@ export function MarketDetail() {
 
                     {/* Privacy Notice */}
                     <p className="text-xs text-surface-500 text-center mt-4">
-                      Your bet is encrypted with zero-knowledge proofs.
+                      Your trade is encrypted with zero-knowledge proofs.
                       Only you can see your position.
                     </p>
                   </>

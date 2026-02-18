@@ -1,94 +1,90 @@
 // ============================================================================
-// VEILED MARKETS v11 - Privacy-Preserving Prediction Market Protocol
+// VEILED MARKETS v14 - Privacy-Preserving Prediction Market Protocol
 // ============================================================================
-// Built on Aleo blockchain leveraging zero-knowledge proofs for complete
-// betting privacy while maintaining market transparency and fairness.
+// Fixed FPMM (Fixed Product Market Maker) with correct complete-set
+// minting/burning formulas. Private betting as primary path.
+// USDCX supported via transfer_public_as_signer (all private inputs).
+// Dispute bond always in ALEO regardless of market token type.
 //
-// v11: Multi-token support (ALEO credits + USDCX stablecoin)
-// - All internal amounts unified to u128
-// - Markets are token-specific (token_type field)
-// - Separate bet/payout transitions per token type
-// - USDCX uses test_usdcx_stablecoin.aleo for transfers
+// v14 fixes from v13:
+// - FPMM buy formula: complete-set minting with step division
+// - OutcomeShare.quantity set via expected_shares pattern (was 0)
+// - sell_shares: tokens_desired approach with actual transfer
+// - add_liquidity: expected_lp_shares pattern (was 0)
+// - remove_liquidity: actual transfer
+// - withdraw_creator_fees: actual transfer
+// - claim_dispute_bond: actual transfer (ALEO only)
+// - claim_lp_refund: actual transfer
+// - execute_proposal: actual transfer
 //
-// Architecture:
-// - Records (Private State): Bet, WinningsClaim for user-specific data
-// - Mappings (Public State): markets, market_pools for aggregate data
-// - Async Transitions: For on-chain state mutations
-//
-// Privacy Model:
-// - Individual bet amounts and outcomes are private (stored in Records)
-// - Market totals are public (stored in Mappings) for odds calculation
-// - ZK proofs verify bet validity without revealing position
-//
-// Credits Handling:
-// - place_bet: Uses credits.aleo/transfer_private_to_public (hides bettor identity)
-// - place_bet_public: Uses credits.aleo/transfer_public_as_signer (wallet-compatible)
-// - place_bet_public_usdcx: Uses test_usdcx_stablecoin.aleo/transfer_public_as_signer
-// - Winnings/refunds transferred back via respective token program's transfer_public
-//
-// v10 Audit Fixes (carried forward):
-// - C-01: Unique bettor tracking via market_bettors mapping
-// - C-02: Per-market credit isolation via market_credits mapping
-// - C-03: Designated resolver (separate from creator)
-// - H-01: Removed noise/delay mechanism
-// - H-02: User-provided nonce for commit-reveal + reveal deadline enforcement
+// 31 transitions (max allowed)
 // ============================================================================
 
 import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 
-program veiled_markets_v11.aleo {
+program veiled_markets_v14.aleo {
 
     // ========================================================================
     // CONSTANTS
     // ========================================================================
 
-    // Market status constants
     const MARKET_STATUS_ACTIVE: u8 = 1u8;
     const MARKET_STATUS_CLOSED: u8 = 2u8;
     const MARKET_STATUS_RESOLVED: u8 = 3u8;
     const MARKET_STATUS_CANCELLED: u8 = 4u8;
+    const STATUS_PENDING_RESOLUTION: u8 = 5u8;
 
-    // Outcome constants
-    const OUTCOME_YES: u8 = 1u8;
-    const OUTCOME_NO: u8 = 2u8;
+    const OUTCOME_1: u8 = 1u8;
+    const OUTCOME_2: u8 = 2u8;
+    const OUTCOME_3: u8 = 3u8;
+    const OUTCOME_4: u8 = 4u8;
 
-    // Token type constants
     const TOKEN_ALEO: u8 = 1u8;
     const TOKEN_USDCX: u8 = 2u8;
 
     // Fee configuration (basis points: 100 = 1%)
-    const PROTOCOL_FEE_BPS: u128 = 100u128;      // 1% protocol fee
-    const CREATOR_FEE_BPS: u128 = 100u128;        // 1% creator fee
+    const PROTOCOL_FEE_BPS: u128 = 50u128;
+    const CREATOR_FEE_BPS: u128 = 50u128;
+    const LP_FEE_BPS: u128 = 100u128;
     const FEE_DENOMINATOR: u128 = 10000u128;
 
-    // Minimum bet amount (1000 micro-units = 0.001 tokens)
-    const MIN_BET_AMOUNT: u128 = 1000u128;
+    // Challenge window (~12 hours at ~15s blocks)
+    const CHALLENGE_WINDOW_BLOCKS: u64 = 2880u64;
+
+    const MIN_TRADE_AMOUNT: u128 = 1000u128;
+    const MIN_DISPUTE_BOND: u128 = 1000000u128;
+    const MIN_LIQUIDITY: u128 = 10000u128;
+
+    const MULTISIG_CONFIG_KEY: u8 = 0u8;
+    const ACTION_WITHDRAW: u8 = 1u8;
 
     // ========================================================================
-    // RECORDS (Private State)
+    // RECORDS
     // ========================================================================
 
-    record Bet {
+    record OutcomeShare {
         owner: address,
         market_id: field,
-        amount: u128,
         outcome: u8,
-        bet_nonce: field,
-        placed_at: u64,
-        locked_yes_pool: u128,
-        locked_no_pool: u128,
+        quantity: u128,
+        share_nonce: field,
         token_type: u8,
     }
 
-    record WinningsClaim {
+    record LPToken {
         owner: address,
         market_id: field,
-        bet_amount: u128,
-        winning_outcome: u8,
-        bet_nonce: field,
-        locked_yes_pool: u128,
-        locked_no_pool: u128,
+        lp_shares: u128,
+        lp_nonce: field,
+        token_type: u8,
+    }
+
+    record DisputeBondReceipt {
+        owner: address,
+        market_id: field,
+        bond_amount: u128,
+        dispute_nonce: field,
         token_type: u8,
     }
 
@@ -96,39 +92,9 @@ program veiled_markets_v11.aleo {
         owner: address,
         market_id: field,
         amount: u128,
-        bet_nonce: field,
+        claim_nonce: field,
         token_type: u8,
     }
-
-    // ========================================================================
-    // MAPPINGS (Public State)
-    // ========================================================================
-
-    mapping markets: field => Market;
-    mapping market_pools: field => MarketPool;
-    mapping market_resolutions: field => MarketResolution;
-
-    // Prevents double claims (key: hash(market_id, user_address, bet_nonce))
-    mapping user_claims: field => bool;
-
-    // Protocol treasury: key 0 = ALEO fees, key 1 = USDCX fees
-    mapping protocol_treasury: u8 => u128;
-
-    // Program's held tokens - global tracking
-    // key 0 = total ALEO held, key 1 = total USDCX held
-    mapping program_credits: u8 => u128;
-
-    // Per-market token isolation (C-02 fix)
-    // Key: market_id, Value: tokens held for this specific market
-    // Works for both ALEO and USDCX since markets are token-specific
-    mapping market_credits: field => u128;
-
-    // Unique bettor tracking per market (C-01 fix)
-    mapping market_bettors: field => bool;
-
-    // Commit-Reveal Scheme Mappings
-    mapping bet_commitments: field => Commitment;
-    mapping revealed_bets: field => bool;
 
     // ========================================================================
     // STRUCTS
@@ -140,6 +106,7 @@ program veiled_markets_v11.aleo {
         resolver: address,
         question_hash: field,
         category: u8,
+        num_outcomes: u8,
         deadline: u64,
         resolution_deadline: u64,
         status: u8,
@@ -147,12 +114,15 @@ program veiled_markets_v11.aleo {
         token_type: u8,
     }
 
-    struct MarketPool {
+    struct AMMPool {
         market_id: field,
-        total_yes_pool: u128,
-        total_no_pool: u128,
-        total_bets: u64,
-        total_unique_bettors: u64,
+        reserve_1: u128,
+        reserve_2: u128,
+        reserve_3: u128,
+        reserve_4: u128,
+        total_liquidity: u128,
+        total_lp_shares: u128,
+        total_volume: u128,
     }
 
     struct MarketResolution {
@@ -160,12 +130,38 @@ program veiled_markets_v11.aleo {
         winning_outcome: u8,
         resolver: address,
         resolved_at: u64,
-        total_payout_pool: u128,
+        challenge_deadline: u64,
+        finalized: bool,
     }
 
-    // ========================================================================
-    // HELPER STRUCTS
-    // ========================================================================
+    struct MarketFees {
+        market_id: field,
+        protocol_fees: u128,
+        creator_fees: u128,
+    }
+
+    struct DisputeData {
+        market_id: field,
+        disputer: address,
+        proposed_outcome: u8,
+        bond_amount: u128,
+        disputed_at: u64,
+    }
+
+    struct SignerConfig {
+        signer_1: address,
+        signer_2: address,
+        signer_3: address,
+        threshold: u8,
+    }
+
+    struct MultiSigProposal {
+        proposal_id: field,
+        action: u8,
+        amount: u128,
+        recipient: address,
+        proposed_at: u64,
+    }
 
     struct MarketSeed {
         creator: address,
@@ -174,80 +170,88 @@ program veiled_markets_v11.aleo {
         nonce: u64,
     }
 
-    struct ClaimKey {
+    struct ShareClaimKey {
         market_id: field,
         claimer: address,
+        share_nonce: field,
     }
 
-    struct BetClaimKey {
+    struct LPClaimKey {
         market_id: field,
         claimer: address,
-        bet_nonce: field,
+        lp_nonce: field,
     }
 
-    struct PendingBet {
+    struct DisputeClaimKey {
         market_id: field,
-        bettor: address,
-        commitment: field,
-        block_height: u64,
+        claimer: address,
+        dispute_nonce: field,
     }
 
-    struct BetCommitment {
+    struct ProposalSeed {
+        proposer: address,
+        action: u8,
         amount: u128,
-        outcome: u8,
-        nonce: field,
+        nonce: u64,
     }
 
-    // ========================================================================
-    // COMMIT-REVEAL SCHEME STRUCTS
-    // ========================================================================
+    struct ApprovalKey {
+        proposal_id: field,
+        signer: address,
+    }
 
-    struct Commitment {
-        hash: field,
-        nonce: field,
+    struct BettorKey {
         market_id: field,
         bettor: address,
-        committed_at: u64,
-    }
-
-    struct CommitmentData {
-        amount: u128,
-        outcome: u8,
-        nonce: field,
-        bettor: address,
-        market_id: field,
-    }
-
-    struct StorageKey {
-        market_id: field,
-        bettor: address,
-        nonce: field,
     }
 
     // ========================================================================
-    // TRANSITIONS
+    // MAPPINGS (15 total)
     // ========================================================================
 
-    // ------------------------------------------------------------------------
+    mapping markets: field => Market;
+    mapping amm_pools: field => AMMPool;
+    mapping market_resolutions: field => MarketResolution;
+    mapping market_fees: field => MarketFees;
+    mapping market_disputes: field => DisputeData;
+    mapping share_redeemed: field => bool;
+    mapping creator_fees_claimed: field => bool;
+    mapping program_credits: u8 => u128;       // 0u8=ALEO, 1u8=USDCX
+    mapping market_credits: field => u128;
+    mapping protocol_treasury: u8 => u128;     // 0u8=ALEO, 1u8=USDCX
+    mapping multisig_config: u8 => SignerConfig;
+    mapping multisig_proposals: field => MultiSigProposal;
+    mapping multisig_approvals: field => bool;
+    mapping lp_positions: field => bool;
+    mapping market_bettors: field => bool;
+
+    // ========================================================================
     // CONSTRUCTOR
-    // ------------------------------------------------------------------------
+    // ========================================================================
+
     @noupgrade
     async constructor() {
     }
 
-    // ------------------------------------------------------------------------
-    // CREATE MARKET
-    // v11: Added token_type parameter (6th input)
-    // ------------------------------------------------------------------------
+    // ########################################################################
+    //                      ALEO MARKET OPERATIONS
+    // ########################################################################
+
+    // ========================================================================
+    // 1. CREATE MARKET (ALEO)
+    // ========================================================================
+
     async transition create_market(
         public question_hash: field,
         public category: u8,
+        public num_outcomes: u8,
         public deadline: u64,
         public resolution_deadline: u64,
         public resolver: address,
-        public token_type: u8,
-    ) -> (field, Future) {
-        assert(token_type == TOKEN_ALEO || token_type == TOKEN_USDCX);
+        private initial_liquidity: u128,
+    ) -> (field, LPToken, Future) {
+        assert(num_outcomes >= 2u8 && num_outcomes <= 4u8);
+        assert(initial_liquidity >= MIN_LIQUIDITY);
 
         let market_id: field = BHP256::hash_to_field(
             MarketSeed {
@@ -258,28 +262,56 @@ program veiled_markets_v11.aleo {
             }
         );
 
-        return (market_id, create_market_onchain(
+        let lp_nonce: field = BHP256::hash_to_field(LPClaimKey {
+            market_id: market_id,
+            claimer: self.caller,
+            lp_nonce: 0field,
+        });
+
+        let lp_token: LPToken = LPToken {
+            owner: self.caller,
+            market_id: market_id,
+            lp_shares: initial_liquidity,
+            lp_nonce: lp_nonce,
+            token_type: TOKEN_ALEO,
+        };
+
+        let amount_u64: u64 = initial_liquidity as u64;
+        let transfer_future: Future = credits.aleo/transfer_public_as_signer(
+            self.address,
+            amount_u64
+        );
+
+        return (market_id, lp_token, create_market_finalize(
+            transfer_future,
             market_id,
             self.caller,
             question_hash,
             category,
+            num_outcomes,
             deadline,
             resolution_deadline,
             resolver,
-            token_type
+            initial_liquidity,
+            TOKEN_ALEO
         ));
     }
 
-    async function create_market_onchain(
+    async function create_market_finalize(
+        transfer_future: Future,
         market_id: field,
         creator: address,
         question_hash: field,
         category: u8,
+        num_outcomes: u8,
         deadline: u64,
         resolution_deadline: u64,
         resolver: address,
+        initial_liquidity: u128,
         token_type: u8,
     ) {
+        transfer_future.await();
+
         let market_exists: bool = markets.contains(market_id);
         assert(!market_exists);
 
@@ -293,6 +325,7 @@ program veiled_markets_v11.aleo {
             resolver: resolver,
             question_hash: question_hash,
             category: category,
+            num_outcomes: num_outcomes,
             deadline: deadline,
             resolution_deadline: resolution_deadline,
             status: MARKET_STATUS_ACTIVE,
@@ -300,209 +333,877 @@ program veiled_markets_v11.aleo {
             token_type: token_type,
         };
 
-        let initial_pool: MarketPool = MarketPool {
+        let per_outcome: u128 = initial_liquidity / (num_outcomes as u128);
+        let r3: u128 = num_outcomes >= 3u8 ? per_outcome : 0u128;
+        let r4: u128 = num_outcomes >= 4u8 ? per_outcome : 0u128;
+
+        let initial_pool: AMMPool = AMMPool {
             market_id: market_id,
-            total_yes_pool: 0u128,
-            total_no_pool: 0u128,
-            total_bets: 0u64,
-            total_unique_bettors: 0u64,
+            reserve_1: per_outcome,
+            reserve_2: per_outcome,
+            reserve_3: r3,
+            reserve_4: r4,
+            total_liquidity: initial_liquidity,
+            total_lp_shares: initial_liquidity,
+            total_volume: 0u128,
         };
 
         markets.set(market_id, new_market);
-        market_pools.set(market_id, initial_pool);
+        amm_pools.set(market_id, initial_pool);
+        market_fees.set(market_id, MarketFees {
+            market_id: market_id,
+            protocol_fees: 0u128,
+            creator_fees: 0u128,
+        });
+
+        // Credit key: 0u8 for ALEO, 1u8 for USDCX
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        program_credits.set(credit_key, current_held + initial_liquidity);
+        market_credits.set(market_id, initial_liquidity);
     }
 
-    // ------------------------------------------------------------------------
-    // PLACE BET (PRIVACY-PRESERVING, ALEO ONLY)
-    // Uses credits.aleo/transfer_private_to_public to HIDE bettor's identity
-    // v11: amounts are u128, cast to u64 for credits.aleo call
-    // ------------------------------------------------------------------------
-    async transition place_bet(
-        public market_id: field,
-        public amount: u128,
-        public outcome: u8,
-        private bet_nonce: field,
+    // ========================================================================
+    // 2. BUY SHARES PRIVATE (ALEO) - Primary path with credits record
+    // ========================================================================
+    // FPMM complete-set minting:
+    //   shares_out = (r_i + a) - r_i * prod(r_k/(r_k+a)) for active k!=i
+    // Reserve update: r_k += a for all active k, then r_i = r_i_new
+
+    async transition buy_shares_private(
+        private market_id: field,
+        private outcome: u8,
+        private amount_in: u128,
+        private expected_shares: u128,
+        private min_shares_out: u128,
+        private share_nonce: field,
         private credits_in: credits.aleo/credits,
-    ) -> (Bet, credits.aleo/credits, Future) {
-        assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
-        assert(amount >= MIN_BET_AMOUNT);
+    ) -> (OutcomeShare, credits.aleo/credits, Future) {
+        assert(outcome >= OUTCOME_1 && outcome <= OUTCOME_4);
+        assert(amount_in >= MIN_TRADE_AMOUNT);
 
-        let amount_u64: u64 = amount as u64;
-
-        let bet: Bet = Bet {
+        let share: OutcomeShare = OutcomeShare {
             owner: self.caller,
             market_id: market_id,
-            amount: amount,
             outcome: outcome,
-            bet_nonce: bet_nonce,
-            placed_at: 0u64,
-            locked_yes_pool: 0u128,
-            locked_no_pool: 0u128,
+            quantity: expected_shares,
+            share_nonce: share_nonce,
             token_type: TOKEN_ALEO,
         };
 
+        let amount_u64: u64 = amount_in as u64;
         let (change, transfer_future): (credits.aleo/credits, Future) = credits.aleo/transfer_private_to_public(
             credits_in,
             self.address,
             amount_u64
         );
 
-        let bettor_key: field = BHP256::hash_to_field(ClaimKey {
+        let bettor_key: field = BHP256::hash_to_field(BettorKey {
             market_id: market_id,
-            claimer: self.caller,
+            bettor: self.caller,
         });
 
-        return (bet, change, finalize_place_bet_private(transfer_future, market_id, amount, outcome, bettor_key));
+        return (share, change, buy_shares_priv_fin(
+            transfer_future, market_id, outcome, amount_in,
+            expected_shares, min_shares_out, bettor_key, TOKEN_ALEO
+        ));
     }
 
-    async function finalize_place_bet_private(
+    async function buy_shares_priv_fin(
         transfer_future: Future,
         market_id: field,
-        amount: u128,
         outcome: u8,
+        amount_in: u128,
+        expected_shares: u128,
+        min_shares_out: u128,
         bettor_key: field,
+        token_type: u8,
     ) {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_ALEO);
+        assert(market.token_type == token_type);
+        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
         assert(current_height <= market.deadline);
 
-        // C-02: Update global (key 0 = ALEO) and per-market credit tracking
-        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
-        program_credits.set(0u8, current_held + amount);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held + amount);
+        // Fees
+        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (amount_in * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let amount_to_pool: u128 = amount_in - protocol_fee - creator_fee;
 
-        // C-01: Track unique bettors
-        let is_existing_bettor: bool = market_bettors.get_or_use(bettor_key, false);
-        let new_bettor_increment: u64 = is_existing_bettor ? 0u64 : 1u64;
-        market_bettors.set(bettor_key, true);
-
-        let pool: MarketPool = market_pools.get(market_id);
-        let yes_add: u128 = outcome == OUTCOME_YES ? amount : 0u128;
-        let no_add: u128 = outcome == OUTCOME_NO ? amount : 0u128;
-
-        let updated_pool: MarketPool = MarketPool {
+        let fees: MarketFees = market_fees.get(market_id);
+        market_fees.set(market_id, MarketFees {
             market_id: market_id,
-            total_yes_pool: pool.total_yes_pool + yes_add,
-            total_no_pool: pool.total_no_pool + no_add,
-            total_bets: pool.total_bets + 1u64,
-            total_unique_bettors: pool.total_unique_bettors + new_bettor_increment,
-        };
+            protocol_fees: fees.protocol_fees + protocol_fee,
+            creator_fees: fees.creator_fees + creator_fee,
+        });
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let current_treasury: u128 = protocol_treasury.get_or_use(credit_key, 0u128);
+        protocol_treasury.set(credit_key, current_treasury + protocol_fee);
 
-        market_pools.set(market_id, updated_pool);
+        // FPMM calculation (step division)
+        let pool: AMMPool = amm_pools.get(market_id);
+        let n: u8 = market.num_outcomes;
+        let r1: u128 = pool.reserve_1;
+        let r2: u128 = pool.reserve_2;
+        let r3: u128 = pool.reserve_3;
+        let r4: u128 = pool.reserve_4;
+        let a: u128 = amount_to_pool;
+
+        let r_i: u128 = outcome == 1u8 ? r1 :
+                         (outcome == 2u8 ? r2 :
+                         (outcome == 3u8 ? r3 : r4));
+
+        // r_i_new = r_i * prod(r_k / (r_k + a)) for active k != i
+        let step0: u128 = r_i;
+        let step1: u128 = outcome != 1u8 ? (step0 * r1) / (r1 + a) : step0;
+        let step2: u128 = outcome != 2u8 ? (step1 * r2) / (r2 + a) : step1;
+        let step3: u128 = (outcome != 3u8 && n >= 3u8) ? (step2 * r3) / (r3 + a) : step2;
+        let step4: u128 = (outcome != 4u8 && n >= 4u8) ? (step3 * r4) / (r4 + a) : step3;
+
+        let r_i_new: u128 = step4;
+        let shares_out: u128 = (r_i + a) - r_i_new;
+
+        assert(shares_out >= min_shares_out);
+        assert(shares_out >= expected_shares);
+        assert(shares_out > 0u128);
+
+        // Reserve update: non-target += a, target = r_i_new
+        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 + a);
+        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 + a);
+        let nr3_active: u128 = outcome == 3u8 ? r_i_new : (r3 + a);
+        let new_r3: u128 = n >= 3u8 ? nr3_active : 0u128;
+        let nr4_active: u128 = outcome == 4u8 ? r_i_new : (r4 + a);
+        let new_r4: u128 = n >= 4u8 ? nr4_active : 0u128;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: new_r1,
+            reserve_2: new_r2,
+            reserve_3: new_r3,
+            reserve_4: new_r4,
+            total_liquidity: pool.total_liquidity + amount_to_pool,
+            total_lp_shares: pool.total_lp_shares,
+            total_volume: pool.total_volume + amount_in,
+        });
+
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        program_credits.set(credit_key, current_held + amount_in);
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        market_credits.set(market_id, market_held + amount_in);
+
+        market_bettors.set(bettor_key, true);
     }
 
-    // ------------------------------------------------------------------------
-    // PLACE BET PUBLIC (ALEO, Wallet-Compatible)
-    // Uses credits.aleo/transfer_public_as_signer
-    // v11: amounts are u128, cast to u64 for credits.aleo call
-    // ------------------------------------------------------------------------
-    async transition place_bet_public(
-        private market_id: field,
-        private amount: u128,
-        private outcome: u8,
-        private bet_nonce: field,
-    ) -> (Bet, Future) {
-        assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
-        assert(amount >= MIN_BET_AMOUNT);
+    // ========================================================================
+    // 3. SELL SHARES (ALEO) - tokens_desired approach with actual transfer
+    // ========================================================================
+    // FPMM complete-set burning:
+    //   r_i_new = r_i * prod(r_k / (r_k - pool_out)) for active k != i
+    //   shares_needed = r_i_new - r_i + pool_out
+    // User specifies tokens_desired (gross). Net after fees transferred.
 
-        let amount_u64: u64 = amount as u64;
+    async transition sell_shares(
+        private shares: OutcomeShare,
+        private tokens_desired: u128,
+        private max_shares_used: u128,
+    ) -> (OutcomeShare, Future) {
+        assert(shares.owner == self.caller);
+        assert(shares.token_type == TOKEN_ALEO);
+        assert(tokens_desired >= MIN_TRADE_AMOUNT);
+        assert(max_shares_used > 0u128);
+        assert(max_shares_used <= shares.quantity);
 
-        let bet: Bet = Bet {
+        // Compute fees (constants, no mapping needed)
+        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
+
+        // Transfer net tokens to seller
+        let net_u64: u64 = net_tokens as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, net_u64);
+
+        let remainder: OutcomeShare = OutcomeShare {
             owner: self.caller,
-            market_id: market_id,
-            amount: amount,
-            outcome: outcome,
-            bet_nonce: bet_nonce,
-            placed_at: 0u64,
-            locked_yes_pool: 0u128,
-            locked_no_pool: 0u128,
+            market_id: shares.market_id,
+            outcome: shares.outcome,
+            quantity: shares.quantity - max_shares_used,
+            share_nonce: shares.share_nonce,
             token_type: TOKEN_ALEO,
         };
 
+        return (remainder, sell_shares_finalize(
+            transfer_future, shares.market_id, shares.outcome,
+            tokens_desired, max_shares_used, TOKEN_ALEO
+        ));
+    }
+
+    async function sell_shares_finalize(
+        transfer_future: Future,
+        market_id: field,
+        outcome: u8,
+        tokens_desired: u128,
+        max_shares_used: u128,
+        token_type: u8,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
+        assert(market.token_type == token_type);
+        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= market.deadline);
+
+        // Recompute fees
+        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
+        let pool_tokens_out: u128 = tokens_desired - lp_fee;
+
+        // Fee tracking
+        let fees: MarketFees = market_fees.get(market_id);
+        market_fees.set(market_id, MarketFees {
+            market_id: market_id,
+            protocol_fees: fees.protocol_fees + protocol_fee,
+            creator_fees: fees.creator_fees + creator_fee,
+        });
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let current_treasury: u128 = protocol_treasury.get_or_use(credit_key, 0u128);
+        protocol_treasury.set(credit_key, current_treasury + protocol_fee);
+
+        // FPMM sell calculation
+        let pool: AMMPool = amm_pools.get(market_id);
+        let n: u8 = market.num_outcomes;
+        let r1: u128 = pool.reserve_1;
+        let r2: u128 = pool.reserve_2;
+        let r3: u128 = pool.reserve_3;
+        let r4: u128 = pool.reserve_4;
+        let p: u128 = pool_tokens_out;
+
+        let r_i: u128 = outcome == 1u8 ? r1 :
+                         (outcome == 2u8 ? r2 :
+                         (outcome == 3u8 ? r3 : r4));
+
+        // Step division: r_i_new = r_i * prod(r_k / (r_k - p)) for active k != i
+        // Safe subtraction: sub=0 when not applied (avoids ternary underflow)
+        let sub1: u128 = outcome != 1u8 ? p : 0u128;
+        let den1: u128 = r1 - sub1;
+        let step0: u128 = r_i;
+        let step1: u128 = outcome != 1u8 ? (step0 * r1) / den1 : step0;
+
+        let sub2: u128 = outcome != 2u8 ? p : 0u128;
+        let den2: u128 = r2 - sub2;
+        let step2: u128 = outcome != 2u8 ? (step1 * r2) / den2 : step1;
+
+        // For r3/r4: safe denominator when inactive (r=0, sub=0 -> den=0)
+        let apply3: bool = outcome != 3u8 && n >= 3u8;
+        let sub3: u128 = apply3 ? p : 0u128;
+        let den3_raw: u128 = r3 - sub3;
+        let safe_den3: u128 = den3_raw == 0u128 ? 1u128 : den3_raw;
+        let step3: u128 = apply3 ? (step2 * r3) / safe_den3 : step2;
+
+        let apply4: bool = outcome != 4u8 && n >= 4u8;
+        let sub4: u128 = apply4 ? p : 0u128;
+        let den4_raw: u128 = r4 - sub4;
+        let safe_den4: u128 = den4_raw == 0u128 ? 1u128 : den4_raw;
+        let step4: u128 = apply4 ? (step3 * r4) / safe_den4 : step3;
+
+        let r_i_new: u128 = step4;
+        let shares_needed: u128 = r_i_new - r_i + p;
+        assert(shares_needed <= max_shares_used);
+        assert(shares_needed > 0u128);
+
+        // Reserve update: non-target -= p, target = r_i_new
+        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 - sub1);
+        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 - sub2);
+        let nr3_act: u128 = outcome == 3u8 ? r_i_new : (r3 - sub3);
+        let new_r3: u128 = n >= 3u8 ? nr3_act : 0u128;
+        let nr4_act: u128 = outcome == 4u8 ? r_i_new : (r4 - sub4);
+        let new_r4: u128 = n >= 4u8 ? nr4_act : 0u128;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: new_r1,
+            reserve_2: new_r2,
+            reserve_3: new_r3,
+            reserve_4: new_r4,
+            total_liquidity: pool.total_liquidity - pool_tokens_out,
+            total_lp_shares: pool.total_lp_shares,
+            total_volume: pool.total_volume + tokens_desired,
+        });
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= pool_tokens_out);
+        market_credits.set(market_id, market_held - pool_tokens_out);
+
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= net_tokens);
+        program_credits.set(credit_key, current_held - net_tokens);
+    }
+
+    // ========================================================================
+    // 5. ADD LIQUIDITY (ALEO) - with expected_lp_shares
+    // ========================================================================
+
+    async transition add_liquidity(
+        private market_id: field,
+        private amount: u128,
+        private expected_lp_shares: u128,
+        private lp_nonce: field,
+    ) -> (LPToken, Future) {
+        assert(amount >= MIN_LIQUIDITY);
+
+        let lp_token: LPToken = LPToken {
+            owner: self.caller,
+            market_id: market_id,
+            lp_shares: expected_lp_shares,
+            lp_nonce: lp_nonce,
+            token_type: TOKEN_ALEO,
+        };
+
+        let amount_u64: u64 = amount as u64;
         let transfer_future: Future = credits.aleo/transfer_public_as_signer(
             self.address,
             amount_u64
         );
 
-        let bettor_key: field = BHP256::hash_to_field(ClaimKey {
-            market_id: market_id,
-            claimer: self.caller,
-        });
-
-        return (bet, finalize_place_bet_public(transfer_future, market_id, amount, outcome, bettor_key));
+        return (lp_token, add_liq_finalize(
+            transfer_future, market_id, amount, expected_lp_shares, self.caller, TOKEN_ALEO
+        ));
     }
 
-    async function finalize_place_bet_public(
+    async function add_liq_finalize(
         transfer_future: Future,
         market_id: field,
         amount: u128,
+        expected_lp_shares: u128,
+        provider: address,
+        token_type: u8,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
+        assert(market.token_type == token_type);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= market.deadline);
+
+        let pool: AMMPool = amm_pools.get(market_id);
+
+        let computed_shares: u128 = (amount * pool.total_lp_shares) / pool.total_liquidity;
+        assert(computed_shares >= expected_lp_shares);
+        assert(expected_lp_shares > 0u128);
+
+        // Add proportionally to all reserves
+        let total_reserves: u128 = pool.reserve_1 + pool.reserve_2 + pool.reserve_3 + pool.reserve_4;
+        let add_1: u128 = (amount * pool.reserve_1) / total_reserves;
+        let add_2: u128 = (amount * pool.reserve_2) / total_reserves;
+        let add_3: u128 = (amount * pool.reserve_3) / total_reserves;
+        let add_4: u128 = amount - add_1 - add_2 - add_3;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: pool.reserve_1 + add_1,
+            reserve_2: pool.reserve_2 + add_2,
+            reserve_3: pool.reserve_3 + add_3,
+            reserve_4: pool.reserve_4 + add_4,
+            total_liquidity: pool.total_liquidity + amount,
+            total_lp_shares: pool.total_lp_shares + expected_lp_shares,
+            total_volume: pool.total_volume,
+        });
+
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        program_credits.set(credit_key, current_held + amount);
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        market_credits.set(market_id, market_held + amount);
+    }
+
+    // ========================================================================
+    // 6. REMOVE LIQUIDITY (ALEO) - with actual transfer
+    // ========================================================================
+
+    async transition remove_liquidity(
+        private lp_token: LPToken,
+        private shares_to_remove: u128,
+        private min_tokens_out: u128,
+    ) -> (LPToken, Future) {
+        assert(lp_token.owner == self.caller);
+        assert(lp_token.token_type == TOKEN_ALEO);
+        assert(shares_to_remove > 0u128);
+        assert(shares_to_remove <= lp_token.lp_shares);
+
+        let remainder: LPToken = LPToken {
+            owner: self.caller,
+            market_id: lp_token.market_id,
+            lp_shares: lp_token.lp_shares - shares_to_remove,
+            lp_nonce: lp_token.lp_nonce,
+            token_type: TOKEN_ALEO,
+        };
+
+        let min_u64: u64 = min_tokens_out as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, min_u64);
+
+        return (remainder, remove_liq_finalize(
+            transfer_future, lp_token.market_id, shares_to_remove,
+            min_tokens_out, self.caller, TOKEN_ALEO
+        ));
+    }
+
+    async function remove_liq_finalize(
+        transfer_future: Future,
+        market_id: field,
+        shares_to_remove: u128,
+        min_tokens_out: u128,
+        provider: address,
+        token_type: u8,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
+        assert(market.token_type == token_type);
+
+        let pool: AMMPool = amm_pools.get(market_id);
+
+        let tokens_out: u128 = (shares_to_remove * pool.total_liquidity) / pool.total_lp_shares;
+        assert(tokens_out >= min_tokens_out);
+        assert(tokens_out > 0u128);
+
+        let total_reserves: u128 = pool.reserve_1 + pool.reserve_2 + pool.reserve_3 + pool.reserve_4;
+        let sub_1: u128 = (tokens_out * pool.reserve_1) / total_reserves;
+        let sub_3: u128 = (tokens_out * pool.reserve_3) / total_reserves;
+        let sub_4: u128 = (tokens_out * pool.reserve_4) / total_reserves;
+        let sub_2: u128 = tokens_out - sub_1 - sub_3 - sub_4;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: pool.reserve_1 - sub_1,
+            reserve_2: pool.reserve_2 - sub_2,
+            reserve_3: pool.reserve_3 - sub_3,
+            reserve_4: pool.reserve_4 - sub_4,
+            total_liquidity: pool.total_liquidity - tokens_out,
+            total_lp_shares: pool.total_lp_shares - shares_to_remove,
+            total_volume: pool.total_volume,
+        });
+
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= tokens_out);
+        market_credits.set(market_id, market_held - tokens_out);
+
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= min_tokens_out);
+        program_credits.set(credit_key, current_held - min_tokens_out);
+    }
+
+    // ########################################################################
+    //                      USDCX MARKET OPERATIONS
+    // ########################################################################
+
+    // ========================================================================
+    // 7. CREATE MARKET (USDCX)
+    // ========================================================================
+
+    async transition create_market_usdcx(
+        public question_hash: field,
+        public category: u8,
+        public num_outcomes: u8,
+        public deadline: u64,
+        public resolution_deadline: u64,
+        public resolver: address,
+        private initial_liquidity: u128,
+    ) -> (field, LPToken, Future) {
+        assert(num_outcomes >= 2u8 && num_outcomes <= 4u8);
+        assert(initial_liquidity >= MIN_LIQUIDITY);
+
+        let market_id: field = BHP256::hash_to_field(
+            MarketSeed {
+                creator: self.caller,
+                question_hash: question_hash,
+                deadline: deadline,
+                nonce: resolution_deadline,
+            }
+        );
+
+        let lp_nonce: field = BHP256::hash_to_field(LPClaimKey {
+            market_id: market_id,
+            claimer: self.caller,
+            lp_nonce: 0field,
+        });
+
+        let lp_token: LPToken = LPToken {
+            owner: self.caller,
+            market_id: market_id,
+            lp_shares: initial_liquidity,
+            lp_nonce: lp_nonce,
+            token_type: TOKEN_USDCX,
+        };
+
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
+            self.address,
+            initial_liquidity
+        );
+
+        return (market_id, lp_token, create_mkt_usdcx_fin(
+            transfer_future,
+            market_id,
+            self.caller,
+            question_hash,
+            category,
+            num_outcomes,
+            deadline,
+            resolution_deadline,
+            resolver,
+            initial_liquidity
+        ));
+    }
+
+    async function create_mkt_usdcx_fin(
+        transfer_future: Future,
+        market_id: field,
+        creator: address,
+        question_hash: field,
+        category: u8,
+        num_outcomes: u8,
+        deadline: u64,
+        resolution_deadline: u64,
+        resolver: address,
+        initial_liquidity: u128,
+    ) {
+        transfer_future.await();
+
+        let market_exists: bool = markets.contains(market_id);
+        assert(!market_exists);
+
+        let current_height: u64 = block.height as u64;
+        assert(deadline > current_height);
+        assert(resolution_deadline > deadline);
+
+        let new_market: Market = Market {
+            id: market_id,
+            creator: creator,
+            resolver: resolver,
+            question_hash: question_hash,
+            category: category,
+            num_outcomes: num_outcomes,
+            deadline: deadline,
+            resolution_deadline: resolution_deadline,
+            status: MARKET_STATUS_ACTIVE,
+            created_at: current_height,
+            token_type: TOKEN_USDCX,
+        };
+
+        let per_outcome: u128 = initial_liquidity / (num_outcomes as u128);
+        let r3: u128 = num_outcomes >= 3u8 ? per_outcome : 0u128;
+        let r4: u128 = num_outcomes >= 4u8 ? per_outcome : 0u128;
+
+        let initial_pool: AMMPool = AMMPool {
+            market_id: market_id,
+            reserve_1: per_outcome,
+            reserve_2: per_outcome,
+            reserve_3: r3,
+            reserve_4: r4,
+            total_liquidity: initial_liquidity,
+            total_lp_shares: initial_liquidity,
+            total_volume: 0u128,
+        };
+
+        markets.set(market_id, new_market);
+        amm_pools.set(market_id, initial_pool);
+        market_fees.set(market_id, MarketFees {
+            market_id: market_id,
+            protocol_fees: 0u128,
+            creator_fees: 0u128,
+        });
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        program_credits.set(1u8, current_held + initial_liquidity);
+        market_credits.set(market_id, initial_liquidity);
+    }
+
+    // ========================================================================
+    // 8. BUY SHARES (USDCX) - All private inputs, transfer_public_as_signer
+    // ========================================================================
+
+    async transition buy_shares_usdcx(
+        private market_id: field,
+        private outcome: u8,
+        private amount_in: u128,
+        private expected_shares: u128,
+        private min_shares_out: u128,
+        private share_nonce: field,
+    ) -> (OutcomeShare, Future) {
+        assert(outcome >= OUTCOME_1 && outcome <= OUTCOME_4);
+        assert(amount_in >= MIN_TRADE_AMOUNT);
+
+        let share: OutcomeShare = OutcomeShare {
+            owner: self.caller,
+            market_id: market_id,
+            outcome: outcome,
+            quantity: expected_shares,
+            share_nonce: share_nonce,
+            token_type: TOKEN_USDCX,
+        };
+
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
+            self.address,
+            amount_in
+        );
+
+        let bettor_key: field = BHP256::hash_to_field(BettorKey {
+            market_id: market_id,
+            bettor: self.caller,
+        });
+
+        return (share, buy_shares_usdcx_fin(
+            transfer_future, market_id, outcome, amount_in,
+            expected_shares, min_shares_out, bettor_key
+        ));
+    }
+
+    async function buy_shares_usdcx_fin(
+        transfer_future: Future,
+        market_id: field,
         outcome: u8,
+        amount_in: u128,
+        expected_shares: u128,
+        min_shares_out: u128,
         bettor_key: field,
     ) {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_ALEO);
+        assert(market.token_type == TOKEN_USDCX);
+        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
         assert(current_height <= market.deadline);
 
-        // C-02: Update global (key 0 = ALEO) and per-market credit tracking
-        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
-        program_credits.set(0u8, current_held + amount);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held + amount);
+        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (amount_in * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let amount_to_pool: u128 = amount_in - protocol_fee - creator_fee;
 
-        // C-01: Track unique bettors
-        let is_existing_bettor: bool = market_bettors.get_or_use(bettor_key, false);
-        let new_bettor_increment: u64 = is_existing_bettor ? 0u64 : 1u64;
-        market_bettors.set(bettor_key, true);
-
-        let pool: MarketPool = market_pools.get(market_id);
-        let yes_add: u128 = outcome == OUTCOME_YES ? amount : 0u128;
-        let no_add: u128 = outcome == OUTCOME_NO ? amount : 0u128;
-
-        let updated_pool: MarketPool = MarketPool {
+        let fees: MarketFees = market_fees.get(market_id);
+        market_fees.set(market_id, MarketFees {
             market_id: market_id,
-            total_yes_pool: pool.total_yes_pool + yes_add,
-            total_no_pool: pool.total_no_pool + no_add,
-            total_bets: pool.total_bets + 1u64,
-            total_unique_bettors: pool.total_unique_bettors + new_bettor_increment,
-        };
+            protocol_fees: fees.protocol_fees + protocol_fee,
+            creator_fees: fees.creator_fees + creator_fee,
+        });
+        let current_treasury: u128 = protocol_treasury.get_or_use(1u8, 0u128);
+        protocol_treasury.set(1u8, current_treasury + protocol_fee);
 
-        market_pools.set(market_id, updated_pool);
+        let pool: AMMPool = amm_pools.get(market_id);
+        let n: u8 = market.num_outcomes;
+        let r1: u128 = pool.reserve_1;
+        let r2: u128 = pool.reserve_2;
+        let r3: u128 = pool.reserve_3;
+        let r4: u128 = pool.reserve_4;
+        let a: u128 = amount_to_pool;
+
+        let r_i: u128 = outcome == 1u8 ? r1 :
+                         (outcome == 2u8 ? r2 :
+                         (outcome == 3u8 ? r3 : r4));
+
+        let step0: u128 = r_i;
+        let step1: u128 = outcome != 1u8 ? (step0 * r1) / (r1 + a) : step0;
+        let step2: u128 = outcome != 2u8 ? (step1 * r2) / (r2 + a) : step1;
+        let step3: u128 = (outcome != 3u8 && n >= 3u8) ? (step2 * r3) / (r3 + a) : step2;
+        let step4: u128 = (outcome != 4u8 && n >= 4u8) ? (step3 * r4) / (r4 + a) : step3;
+
+        let r_i_new: u128 = step4;
+        let shares_out: u128 = (r_i + a) - r_i_new;
+
+        assert(shares_out >= min_shares_out);
+        assert(shares_out >= expected_shares);
+        assert(shares_out > 0u128);
+
+        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 + a);
+        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 + a);
+        let nr3_active: u128 = outcome == 3u8 ? r_i_new : (r3 + a);
+        let new_r3: u128 = n >= 3u8 ? nr3_active : 0u128;
+        let nr4_active: u128 = outcome == 4u8 ? r_i_new : (r4 + a);
+        let new_r4: u128 = n >= 4u8 ? nr4_active : 0u128;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: new_r1,
+            reserve_2: new_r2,
+            reserve_3: new_r3,
+            reserve_4: new_r4,
+            total_liquidity: pool.total_liquidity + amount_to_pool,
+            total_lp_shares: pool.total_lp_shares,
+            total_volume: pool.total_volume + amount_in,
+        });
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        program_credits.set(1u8, current_held + amount_in);
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        market_credits.set(market_id, market_held + amount_in);
+
+        market_bettors.set(bettor_key, true);
     }
 
-    // ------------------------------------------------------------------------
-    // PLACE BET PUBLIC USDCX (Wallet-Compatible)
-    // Uses test_usdcx_stablecoin.aleo/transfer_public_as_signer
-    // v11: NEW - USDCX native u128 amounts
-    // ------------------------------------------------------------------------
-    async transition place_bet_public_usdcx(
+    // ========================================================================
+    // 9. SELL SHARES (USDCX)
+    // ========================================================================
+
+    async transition sell_shares_usdcx(
+        private shares: OutcomeShare,
+        private tokens_desired: u128,
+        private max_shares_used: u128,
+    ) -> (OutcomeShare, Future) {
+        assert(shares.owner == self.caller);
+        assert(shares.token_type == TOKEN_USDCX);
+        assert(tokens_desired >= MIN_TRADE_AMOUNT);
+        assert(max_shares_used > 0u128);
+        assert(max_shares_used <= shares.quantity);
+
+        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
+
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(self.caller, net_tokens);
+
+        let remainder: OutcomeShare = OutcomeShare {
+            owner: self.caller,
+            market_id: shares.market_id,
+            outcome: shares.outcome,
+            quantity: shares.quantity - max_shares_used,
+            share_nonce: shares.share_nonce,
+            token_type: TOKEN_USDCX,
+        };
+
+        return (remainder, sell_shares_usdcx_fin(
+            transfer_future, shares.market_id, shares.outcome,
+            tokens_desired, max_shares_used
+        ));
+    }
+
+    async function sell_shares_usdcx_fin(
+        transfer_future: Future,
+        market_id: field,
+        outcome: u8,
+        tokens_desired: u128,
+        max_shares_used: u128,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
+        assert(market.token_type == TOKEN_USDCX);
+        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= market.deadline);
+
+        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
+        let pool_tokens_out: u128 = tokens_desired - lp_fee;
+
+        let fees: MarketFees = market_fees.get(market_id);
+        market_fees.set(market_id, MarketFees {
+            market_id: market_id,
+            protocol_fees: fees.protocol_fees + protocol_fee,
+            creator_fees: fees.creator_fees + creator_fee,
+        });
+        let current_treasury: u128 = protocol_treasury.get_or_use(1u8, 0u128);
+        protocol_treasury.set(1u8, current_treasury + protocol_fee);
+
+        let pool: AMMPool = amm_pools.get(market_id);
+        let n: u8 = market.num_outcomes;
+        let r1: u128 = pool.reserve_1;
+        let r2: u128 = pool.reserve_2;
+        let r3: u128 = pool.reserve_3;
+        let r4: u128 = pool.reserve_4;
+        let p: u128 = pool_tokens_out;
+
+        let r_i: u128 = outcome == 1u8 ? r1 :
+                         (outcome == 2u8 ? r2 :
+                         (outcome == 3u8 ? r3 : r4));
+
+        let sub1: u128 = outcome != 1u8 ? p : 0u128;
+        let den1: u128 = r1 - sub1;
+        let step0: u128 = r_i;
+        let step1: u128 = outcome != 1u8 ? (step0 * r1) / den1 : step0;
+
+        let sub2: u128 = outcome != 2u8 ? p : 0u128;
+        let den2: u128 = r2 - sub2;
+        let step2: u128 = outcome != 2u8 ? (step1 * r2) / den2 : step1;
+
+        let apply3: bool = outcome != 3u8 && n >= 3u8;
+        let sub3: u128 = apply3 ? p : 0u128;
+        let den3_raw: u128 = r3 - sub3;
+        let safe_den3: u128 = den3_raw == 0u128 ? 1u128 : den3_raw;
+        let step3: u128 = apply3 ? (step2 * r3) / safe_den3 : step2;
+
+        let apply4: bool = outcome != 4u8 && n >= 4u8;
+        let sub4: u128 = apply4 ? p : 0u128;
+        let den4_raw: u128 = r4 - sub4;
+        let safe_den4: u128 = den4_raw == 0u128 ? 1u128 : den4_raw;
+        let step4: u128 = apply4 ? (step3 * r4) / safe_den4 : step3;
+
+        let r_i_new: u128 = step4;
+        let shares_needed: u128 = r_i_new - r_i + p;
+        assert(shares_needed <= max_shares_used);
+        assert(shares_needed > 0u128);
+
+        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 - sub1);
+        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 - sub2);
+        let nr3_act: u128 = outcome == 3u8 ? r_i_new : (r3 - sub3);
+        let new_r3: u128 = n >= 3u8 ? nr3_act : 0u128;
+        let nr4_act: u128 = outcome == 4u8 ? r_i_new : (r4 - sub4);
+        let new_r4: u128 = n >= 4u8 ? nr4_act : 0u128;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: new_r1,
+            reserve_2: new_r2,
+            reserve_3: new_r3,
+            reserve_4: new_r4,
+            total_liquidity: pool.total_liquidity - pool_tokens_out,
+            total_lp_shares: pool.total_lp_shares,
+            total_volume: pool.total_volume + tokens_desired,
+        });
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= pool_tokens_out);
+        market_credits.set(market_id, market_held - pool_tokens_out);
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        assert(current_held >= net_tokens);
+        program_credits.set(1u8, current_held - net_tokens);
+    }
+
+    // ========================================================================
+    // 10. ADD LIQUIDITY (USDCX)
+    // ========================================================================
+
+    async transition add_liquidity_usdcx(
         private market_id: field,
         private amount: u128,
-        private outcome: u8,
-        private bet_nonce: field,
-    ) -> (Bet, Future) {
-        assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
-        assert(amount >= MIN_BET_AMOUNT);
+        private expected_lp_shares: u128,
+        private lp_nonce: field,
+    ) -> (LPToken, Future) {
+        assert(amount >= MIN_LIQUIDITY);
 
-        let bet: Bet = Bet {
+        let lp_token: LPToken = LPToken {
             owner: self.caller,
             market_id: market_id,
-            amount: amount,
-            outcome: outcome,
-            bet_nonce: bet_nonce,
-            placed_at: 0u64,
-            locked_yes_pool: 0u128,
-            locked_no_pool: 0u128,
+            lp_shares: expected_lp_shares,
+            lp_nonce: lp_nonce,
             token_type: TOKEN_USDCX,
         };
 
@@ -511,20 +1212,17 @@ program veiled_markets_v11.aleo {
             amount
         );
 
-        let bettor_key: field = BHP256::hash_to_field(ClaimKey {
-            market_id: market_id,
-            claimer: self.caller,
-        });
-
-        return (bet, finalize_place_bet_public_usdcx(transfer_future, market_id, amount, outcome, bettor_key));
+        return (lp_token, add_liq_usdcx_fin(
+            transfer_future, market_id, amount, expected_lp_shares, self.caller
+        ));
     }
 
-    async function finalize_place_bet_public_usdcx(
+    async function add_liq_usdcx_fin(
         transfer_future: Future,
         market_id: field,
         amount: u128,
-        outcome: u8,
-        bettor_key: field,
+        expected_lp_shares: u128,
+        provider: address,
     ) {
         transfer_future.await();
 
@@ -535,636 +1233,535 @@ program veiled_markets_v11.aleo {
         let current_height: u64 = block.height as u64;
         assert(current_height <= market.deadline);
 
-        // C-02: Update global (key 1 = USDCX) and per-market credit tracking
+        let pool: AMMPool = amm_pools.get(market_id);
+
+        let computed_shares: u128 = (amount * pool.total_lp_shares) / pool.total_liquidity;
+        assert(computed_shares >= expected_lp_shares);
+        assert(expected_lp_shares > 0u128);
+
+        let total_reserves: u128 = pool.reserve_1 + pool.reserve_2 + pool.reserve_3 + pool.reserve_4;
+        let add_1: u128 = (amount * pool.reserve_1) / total_reserves;
+        let add_2: u128 = (amount * pool.reserve_2) / total_reserves;
+        let add_3: u128 = (amount * pool.reserve_3) / total_reserves;
+        let add_4: u128 = amount - add_1 - add_2 - add_3;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: pool.reserve_1 + add_1,
+            reserve_2: pool.reserve_2 + add_2,
+            reserve_3: pool.reserve_3 + add_3,
+            reserve_4: pool.reserve_4 + add_4,
+            total_liquidity: pool.total_liquidity + amount,
+            total_lp_shares: pool.total_lp_shares + expected_lp_shares,
+            total_volume: pool.total_volume,
+        });
+
         let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
         program_credits.set(1u8, current_held + amount);
         let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
         market_credits.set(market_id, market_held + amount);
-
-        // C-01: Track unique bettors
-        let is_existing_bettor: bool = market_bettors.get_or_use(bettor_key, false);
-        let new_bettor_increment: u64 = is_existing_bettor ? 0u64 : 1u64;
-        market_bettors.set(bettor_key, true);
-
-        let pool: MarketPool = market_pools.get(market_id);
-        let yes_add: u128 = outcome == OUTCOME_YES ? amount : 0u128;
-        let no_add: u128 = outcome == OUTCOME_NO ? amount : 0u128;
-
-        let updated_pool: MarketPool = MarketPool {
-            market_id: market_id,
-            total_yes_pool: pool.total_yes_pool + yes_add,
-            total_no_pool: pool.total_no_pool + no_add,
-            total_bets: pool.total_bets + 1u64,
-            total_unique_bettors: pool.total_unique_bettors + new_bettor_increment,
-        };
-
-        market_pools.set(market_id, updated_pool);
     }
 
-    // ------------------------------------------------------------------------
-    // COMMIT BET (Phase 2: Commit-Reveal Scheme, ALEO only)
-    // ------------------------------------------------------------------------
-    async transition commit_bet(
-        public market_id: field,
-        private amount: u128,
-        private outcome: u8,
-        private user_nonce: field,
-        private credits_in: credits.aleo/credits,
-    ) -> (Commitment, credits.aleo/credits, Future) {
-        assert(outcome == OUTCOME_YES || outcome == OUTCOME_NO);
+    // ========================================================================
+    // 11. REMOVE LIQUIDITY (USDCX)
+    // ========================================================================
 
-        let bet_amount: u64 = credits_in.microcredits;
-        let bet_amount_u128: u128 = bet_amount as u128;
-        assert(bet_amount_u128 >= MIN_BET_AMOUNT);
-        assert(bet_amount_u128 == amount);
+    async transition remove_liquidity_usdcx(
+        private lp_token: LPToken,
+        private shares_to_remove: u128,
+        private min_tokens_out: u128,
+    ) -> (LPToken, Future) {
+        assert(lp_token.owner == self.caller);
+        assert(lp_token.token_type == TOKEN_USDCX);
+        assert(shares_to_remove > 0u128);
+        assert(shares_to_remove <= lp_token.lp_shares);
 
-        let commitment_hash: field = BHP256::hash_to_field(
-            CommitmentData {
-                amount: amount,
-                outcome: outcome,
-                nonce: user_nonce,
-                bettor: self.caller,
-                market_id: market_id,
-            }
-        );
-
-        let (bet_amount_record, change_record) = credits.aleo/split(
-            credits_in,
-            bet_amount
-        );
-
-        let commitment: Commitment = Commitment {
-            hash: commitment_hash,
-            nonce: user_nonce,
-            market_id: market_id,
-            bettor: self.caller,
-            committed_at: 0u64,
-        };
-
-        return (
-            commitment,
-            bet_amount_record,
-            finalize_commit_bet(commitment_hash, commitment, market_id)
-        );
-    }
-
-    async function finalize_commit_bet(
-        commitment_hash: field,
-        commitment: Commitment,
-        market_id: field,
-    ) {
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_ALEO);
-
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= market.deadline);
-
-        let commitment_exists: bool = bet_commitments.contains(commitment_hash);
-        assert(!commitment_exists);
-
-        let updated_commitment: Commitment = Commitment {
-            hash: commitment.hash,
-            nonce: commitment.nonce,
-            market_id: commitment.market_id,
-            bettor: commitment.bettor,
-            committed_at: current_height,
-        };
-
-        bet_commitments.set(commitment_hash, updated_commitment);
-    }
-
-    // ------------------------------------------------------------------------
-    // REVEAL BET (Phase 2: Commit-Reveal Scheme, ALEO only)
-    // ------------------------------------------------------------------------
-    async transition reveal_bet(
-        private commitment: Commitment,
-        private credits_record: credits.aleo/credits,
-        private amount: u128,
-        private outcome: u8,
-    ) -> (Bet, Future) {
-        let expected_hash: field = BHP256::hash_to_field(
-            CommitmentData {
-                amount: amount,
-                outcome: outcome,
-                nonce: commitment.nonce,
-                bettor: self.caller,
-                market_id: commitment.market_id,
-            }
-        );
-        assert(expected_hash == commitment.hash);
-
-        let amount_u64: u64 = amount as u64;
-        assert(credits_record.microcredits == amount_u64);
-        assert(commitment.bettor == self.caller);
-
-        let bet_nonce: field = BHP256::hash_to_field(StorageKey {
-            market_id: commitment.market_id,
-            bettor: self.caller,
-            nonce: commitment.nonce,
-        });
-        let bet: Bet = Bet {
+        let remainder: LPToken = LPToken {
             owner: self.caller,
-            market_id: commitment.market_id,
-            amount: amount,
-            outcome: outcome,
-            bet_nonce: bet_nonce,
-            placed_at: 0u64,
-            locked_yes_pool: 0u128,
-            locked_no_pool: 0u128,
-            token_type: TOKEN_ALEO,
+            market_id: lp_token.market_id,
+            lp_shares: lp_token.lp_shares - shares_to_remove,
+            lp_nonce: lp_token.lp_nonce,
+            token_type: TOKEN_USDCX,
         };
 
-        let transfer_result: (credits.aleo/credits, Future) = credits.aleo/transfer_private_to_public(
-            credits_record,
-            self.address,
-            amount_u64
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
+            self.caller, min_tokens_out
         );
 
-        return (bet, finalize_reveal_bet(
-            transfer_result.1,
-            commitment.hash,
-            commitment.market_id,
-            amount,
-            outcome,
-            self.caller
+        return (remainder, remove_liq_usdcx_fin(
+            transfer_future, lp_token.market_id, shares_to_remove,
+            min_tokens_out, self.caller
         ));
     }
 
-    async function finalize_reveal_bet(
+    async function remove_liq_usdcx_fin(
         transfer_future: Future,
-        commitment_hash: field,
         market_id: field,
-        amount: u128,
-        outcome: u8,
-        bettor: address,
+        shares_to_remove: u128,
+        min_tokens_out: u128,
+        provider: address,
     ) {
         transfer_future.await();
 
-        let commitment: Commitment = bet_commitments.get(commitment_hash);
-        assert(commitment.market_id == market_id);
-        assert(commitment.bettor == bettor);
-
-        let already_revealed: bool = revealed_bets.get_or_use(commitment_hash, false);
-        assert(!already_revealed);
-        revealed_bets.set(commitment_hash, true);
-
-        let market: Market = markets.get(market_id);
-        let current_height: u64 = block.height as u64;
-
-        assert(market.status != MARKET_STATUS_RESOLVED);
-        assert(current_height <= market.resolution_deadline);
-
-        let is_closed: bool = market.status == MARKET_STATUS_CLOSED;
-        let is_past_deadline: bool = current_height > market.deadline;
-        assert(is_closed || is_past_deadline);
-
-        // C-02: Update global (key 0 = ALEO) and per-market credit tracking
-        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
-        program_credits.set(0u8, current_held + amount);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held + amount);
-
-        // C-01: Track unique bettors
-        let bettor_key: field = BHP256::hash_to_field(ClaimKey {
-            market_id: market_id,
-            claimer: bettor,
-        });
-        let is_existing_bettor: bool = market_bettors.get_or_use(bettor_key, false);
-        let new_bettor_increment: u64 = is_existing_bettor ? 0u64 : 1u64;
-        market_bettors.set(bettor_key, true);
-
-        let pool: MarketPool = market_pools.get(market_id);
-        let yes_add: u128 = outcome == OUTCOME_YES ? amount : 0u128;
-        let no_add: u128 = outcome == OUTCOME_NO ? amount : 0u128;
-
-        let updated_pool: MarketPool = MarketPool {
-            market_id: market_id,
-            total_yes_pool: pool.total_yes_pool + yes_add,
-            total_no_pool: pool.total_no_pool + no_add,
-            total_bets: pool.total_bets + 1u64,
-            total_unique_bettors: pool.total_unique_bettors + new_bettor_increment,
-        };
-
-        market_pools.set(market_id, updated_pool);
-    }
-
-    // ------------------------------------------------------------------------
-    // CLOSE MARKET
-    // ------------------------------------------------------------------------
-    async transition close_market(public market_id: field) -> Future {
-        return close_market_onchain(market_id);
-    }
-
-    async function close_market_onchain(market_id: field) {
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
+        assert(market.token_type == TOKEN_USDCX);
 
+        let pool: AMMPool = amm_pools.get(market_id);
+
+        let tokens_out: u128 = (shares_to_remove * pool.total_liquidity) / pool.total_lp_shares;
+        assert(tokens_out >= min_tokens_out);
+        assert(tokens_out > 0u128);
+
+        let total_reserves: u128 = pool.reserve_1 + pool.reserve_2 + pool.reserve_3 + pool.reserve_4;
+        let sub_1: u128 = (tokens_out * pool.reserve_1) / total_reserves;
+        let sub_3: u128 = (tokens_out * pool.reserve_3) / total_reserves;
+        let sub_4: u128 = (tokens_out * pool.reserve_4) / total_reserves;
+        let sub_2: u128 = tokens_out - sub_1 - sub_3 - sub_4;
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: pool.reserve_1 - sub_1,
+            reserve_2: pool.reserve_2 - sub_2,
+            reserve_3: pool.reserve_3 - sub_3,
+            reserve_4: pool.reserve_4 - sub_4,
+            total_liquidity: pool.total_liquidity - tokens_out,
+            total_lp_shares: pool.total_lp_shares - shares_to_remove,
+            total_volume: pool.total_volume,
+        });
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= tokens_out);
+        market_credits.set(market_id, market_held - tokens_out);
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        assert(current_held >= min_tokens_out);
+        program_credits.set(1u8, current_held - min_tokens_out);
+    }
+
+    // ########################################################################
+    //                      SHARED MARKET LIFECYCLE
+    // ########################################################################
+
+    // ========================================================================
+    // 12. CLOSE MARKET
+    // ========================================================================
+
+    async transition close_market(public market_id: field) -> Future {
+        return close_market_finalize(market_id);
+    }
+
+    async function close_market_finalize(market_id: field) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_ACTIVE);
         let current_height: u64 = block.height as u64;
         assert(current_height > market.deadline);
 
-        let closed_market: Market = Market {
+        markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
             resolver: market.resolver,
             question_hash: market.question_hash,
             category: market.category,
+            num_outcomes: market.num_outcomes,
             deadline: market.deadline,
             resolution_deadline: market.resolution_deadline,
             status: MARKET_STATUS_CLOSED,
             created_at: market.created_at,
             token_type: market.token_type,
-        };
-
-        markets.set(market_id, closed_market);
+        });
     }
 
-    // ------------------------------------------------------------------------
-    // RESOLVE MARKET
-    // v11: u128 fee math, token-type-aware treasury/credit tracking
-    // ------------------------------------------------------------------------
+    // ========================================================================
+    // 13. RESOLVE MARKET
+    // ========================================================================
+
     async transition resolve_market(
         public market_id: field,
         public winning_outcome: u8,
     ) -> Future {
-        assert(winning_outcome == OUTCOME_YES || winning_outcome == OUTCOME_NO);
-        return resolve_market_onchain(market_id, winning_outcome, self.caller);
+        return resolve_market_finalize(market_id, winning_outcome, self.caller);
     }
 
-    async function resolve_market_onchain(
+    async function resolve_market_finalize(
         market_id: field,
         winning_outcome: u8,
         resolver: address,
     ) {
         let market: Market = markets.get(market_id);
-        let pool: MarketPool = market_pools.get(market_id);
-
         assert(market.resolver == resolver);
+        assert(winning_outcome >= 1u8 && winning_outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
-
         let is_closed: bool = market.status == MARKET_STATUS_CLOSED;
         let is_past_deadline: bool = market.status == MARKET_STATUS_ACTIVE && current_height > market.deadline;
         assert(is_closed || is_past_deadline);
-
         assert(current_height <= market.resolution_deadline);
 
-        let total_pool: u128 = pool.total_yes_pool + pool.total_no_pool;
-        let protocol_fee: u128 = (total_pool * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (total_pool * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let payout_pool: u128 = total_pool - protocol_fee - creator_fee;
+        let challenge_deadline: u64 = current_height + CHALLENGE_WINDOW_BLOCKS;
 
-        let resolution: MarketResolution = MarketResolution {
+        market_resolutions.set(market_id, MarketResolution {
             market_id: market_id,
             winning_outcome: winning_outcome,
             resolver: resolver,
             resolved_at: current_height,
-            total_payout_pool: payout_pool,
-        };
+            challenge_deadline: challenge_deadline,
+            finalized: false,
+        });
 
-        let resolved_market: Market = Market {
+        markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
             resolver: market.resolver,
             question_hash: market.question_hash,
             category: market.category,
+            num_outcomes: market.num_outcomes,
+            deadline: market.deadline,
+            resolution_deadline: market.resolution_deadline,
+            status: STATUS_PENDING_RESOLUTION,
+            created_at: market.created_at,
+            token_type: market.token_type,
+        });
+    }
+
+    // ========================================================================
+    // 14. FINALIZE RESOLUTION
+    // ========================================================================
+
+    async transition finalize_resolution(public market_id: field) -> Future {
+        return finalize_resolution_fin(market_id);
+    }
+
+    async function finalize_resolution_fin(market_id: field) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == STATUS_PENDING_RESOLUTION);
+
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(!resolution.finalized);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height > resolution.challenge_deadline);
+
+        let has_dispute: bool = market_disputes.contains(market_id);
+        assert(!has_dispute);
+
+        market_resolutions.set(market_id, MarketResolution {
+            market_id: market_id,
+            winning_outcome: resolution.winning_outcome,
+            resolver: resolution.resolver,
+            resolved_at: resolution.resolved_at,
+            challenge_deadline: resolution.challenge_deadline,
+            finalized: true,
+        });
+
+        markets.set(market_id, Market {
+            id: market.id,
+            creator: market.creator,
+            resolver: market.resolver,
+            question_hash: market.question_hash,
+            category: market.category,
+            num_outcomes: market.num_outcomes,
             deadline: market.deadline,
             resolution_deadline: market.resolution_deadline,
             status: MARKET_STATUS_RESOLVED,
             created_at: market.created_at,
             token_type: market.token_type,
-        };
-
-        // Token-type-aware treasury and credit tracking
-        let treasury_key: u8 = market.token_type == TOKEN_ALEO ? 0u8 : 1u8;
-        let current_treasury: u128 = protocol_treasury.get_or_use(treasury_key, 0u128);
-        protocol_treasury.set(treasury_key, current_treasury + protocol_fee);
-
-        // C-02: Deduct fees from per-market credits
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held - protocol_fee - creator_fee);
-
-        markets.set(market_id, resolved_market);
-        market_resolutions.set(market_id, resolution);
-    }
-
-    // ------------------------------------------------------------------------
-    // CLAIM WINNINGS (Private, token-agnostic - just sets claim flag)
-    // ------------------------------------------------------------------------
-    async transition claim_winnings(
-        private bet: Bet,
-    ) -> (WinningsClaim, Future) {
-        let claim_key: field = BHP256::hash_to_field(BetClaimKey {
-            market_id: bet.market_id,
-            claimer: bet.owner,
-            bet_nonce: bet.bet_nonce,
         });
-
-        let claim: WinningsClaim = WinningsClaim {
-            owner: bet.owner,
-            market_id: bet.market_id,
-            bet_amount: bet.amount,
-            winning_outcome: bet.outcome,
-            bet_nonce: bet.bet_nonce,
-            locked_yes_pool: bet.locked_yes_pool,
-            locked_no_pool: bet.locked_no_pool,
-            token_type: bet.token_type,
-        };
-
-        return (claim, claim_winnings_onchain(claim_key, bet.market_id, bet.outcome));
     }
 
-    async function claim_winnings_onchain(
-        claim_key: field,
-        market_id: field,
-        bet_outcome: u8,
-    ) {
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(bet_outcome == resolution.winning_outcome);
+    // ========================================================================
+    // 15. CANCEL MARKET (creator only, no volume)
+    // ========================================================================
 
-        let already_claimed: bool = user_claims.get_or_use(claim_key, false);
-        assert(!already_claimed);
-        user_claims.set(claim_key, true);
-    }
-
-    // ------------------------------------------------------------------------
-    // WITHDRAW WINNINGS (ALEO)
-    // v11: u128 amounts, assert token_type matches
-    // ------------------------------------------------------------------------
-    async transition withdraw_winnings(
-        private claim: WinningsClaim,
-        public payout_amount: u128,
-    ) -> Future {
-        assert(claim.owner == self.caller);
-        assert(claim.token_type == TOKEN_ALEO);
-
-        let claim_key: field = BHP256::hash_to_field(BetClaimKey {
-            market_id: claim.market_id,
-            claimer: claim.owner,
-            bet_nonce: claim.bet_nonce,
-        });
-
-        let payout_u64: u64 = payout_amount as u64;
-        let transfer_future: Future = credits.aleo/transfer_public(self.caller, payout_u64);
-
-        return finalize_withdraw_winnings(
-            transfer_future,
-            claim_key,
-            claim.market_id,
-            claim.bet_amount,
-            claim.winning_outcome,
-            payout_amount,
-            TOKEN_ALEO
-        );
-    }
-
-    // ------------------------------------------------------------------------
-    // WITHDRAW WINNINGS USDCX
-    // v11: NEW - USDCX payout
-    // ------------------------------------------------------------------------
-    async transition withdraw_winnings_usdcx(
-        private claim: WinningsClaim,
-        public payout_amount: u128,
-    ) -> Future {
-        assert(claim.owner == self.caller);
-        assert(claim.token_type == TOKEN_USDCX);
-
-        let claim_key: field = BHP256::hash_to_field(BetClaimKey {
-            market_id: claim.market_id,
-            claimer: claim.owner,
-            bet_nonce: claim.bet_nonce,
-        });
-
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(self.caller, payout_amount);
-
-        return finalize_withdraw_win_usdcx(
-            transfer_future,
-            claim_key,
-            claim.market_id,
-            claim.bet_amount,
-            claim.winning_outcome,
-            payout_amount,
-            TOKEN_USDCX
-        );
-    }
-
-    async function finalize_withdraw_winnings(
-        transfer_future: Future,
-        claim_key: field,
-        market_id: field,
-        bet_amount: u128,
-        bet_outcome: u8,
-        payout_amount: u128,
-        token_type: u8,
-    ) {
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(bet_outcome == resolution.winning_outcome);
-
-        let was_claimed: bool = user_claims.get(claim_key);
-        assert(was_claimed);
-
-        let pool: MarketPool = market_pools.get(market_id);
-        let winning_pool: u128 = bet_outcome == OUTCOME_YES ? pool.total_yes_pool : pool.total_no_pool;
-
-        let expected_payout: u128 = (bet_amount * resolution.total_payout_pool) / winning_pool;
-        assert(payout_amount <= expected_payout);
-
-        // C-02: Check per-market credits
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= payout_amount);
-        market_credits.set(market_id, market_held - payout_amount);
-
-        // Update global tracking (key 0 = ALEO)
-        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
-        assert(current_held >= payout_amount);
-        program_credits.set(0u8, current_held - payout_amount);
-
-        transfer_future.await();
-    }
-
-    async function finalize_withdraw_win_usdcx(
-        transfer_future: Future,
-        claim_key: field,
-        market_id: field,
-        bet_amount: u128,
-        bet_outcome: u8,
-        payout_amount: u128,
-        token_type: u8,
-    ) {
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(bet_outcome == resolution.winning_outcome);
-
-        let was_claimed: bool = user_claims.get(claim_key);
-        assert(was_claimed);
-
-        let pool: MarketPool = market_pools.get(market_id);
-        let winning_pool: u128 = bet_outcome == OUTCOME_YES ? pool.total_yes_pool : pool.total_no_pool;
-
-        let expected_payout: u128 = (bet_amount * resolution.total_payout_pool) / winning_pool;
-        assert(payout_amount <= expected_payout);
-
-        // C-02: Check per-market credits
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= payout_amount);
-        market_credits.set(market_id, market_held - payout_amount);
-
-        // Update global tracking (key 1 = USDCX)
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= payout_amount);
-        program_credits.set(1u8, current_held - payout_amount);
-
-        transfer_future.await();
-    }
-
-    // ------------------------------------------------------------------------
-    // CANCEL MARKET
-    // ------------------------------------------------------------------------
     async transition cancel_market(public market_id: field) -> Future {
-        return cancel_market_onchain(market_id, self.caller);
+        return cancel_market_finalize(market_id, self.caller);
     }
 
-    async function cancel_market_onchain(market_id: field, caller: address) {
+    async function cancel_market_finalize(market_id: field, caller: address) {
         let market: Market = markets.get(market_id);
-        let pool: MarketPool = market_pools.get(market_id);
-
+        let pool: AMMPool = amm_pools.get(market_id);
         assert(market.creator == caller);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(pool.total_bets == 0u64);
+        assert(pool.total_volume == 0u128);
 
-        let cancelled_market: Market = Market {
+        markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
             resolver: market.resolver,
             question_hash: market.question_hash,
             category: market.category,
+            num_outcomes: market.num_outcomes,
             deadline: market.deadline,
             resolution_deadline: market.resolution_deadline,
             status: MARKET_STATUS_CANCELLED,
             created_at: market.created_at,
             token_type: market.token_type,
-        };
-
-        markets.set(market_id, cancelled_market);
+        });
     }
 
-    // ------------------------------------------------------------------------
-    // EMERGENCY CANCEL
-    // ------------------------------------------------------------------------
+    // ========================================================================
+    // 16. EMERGENCY CANCEL (anyone, past resolution_deadline)
+    // ========================================================================
+
     async transition emergency_cancel(public market_id: field) -> Future {
-        return emergency_cancel_onchain(market_id);
+        return emergency_cancel_finalize(market_id);
     }
 
-    async function emergency_cancel_onchain(market_id: field) {
+    async function emergency_cancel_finalize(market_id: field) {
         let market: Market = markets.get(market_id);
         let current_height: u64 = block.height as u64;
-
         assert(current_height > market.resolution_deadline);
         assert(market.status != MARKET_STATUS_RESOLVED);
         assert(market.status != MARKET_STATUS_CANCELLED);
 
-        let cancelled_market: Market = Market {
+        markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
             resolver: market.resolver,
             question_hash: market.question_hash,
             category: market.category,
+            num_outcomes: market.num_outcomes,
             deadline: market.deadline,
             resolution_deadline: market.resolution_deadline,
             status: MARKET_STATUS_CANCELLED,
             created_at: market.created_at,
             token_type: market.token_type,
-        };
-
-        markets.set(market_id, cancelled_market);
+        });
     }
 
-    // ------------------------------------------------------------------------
-    // CLAIM REFUND (ALEO)
-    // v11: u128 amounts, assert token_type matches
-    // ------------------------------------------------------------------------
-    async transition claim_refund(
-        private bet: Bet,
-    ) -> (RefundClaim, Future) {
-        assert(bet.owner == self.caller);
-        assert(bet.token_type == TOKEN_ALEO);
+    // ########################################################################
+    //                      DISPUTE / CHALLENGE
+    // ########################################################################
+    // Dispute bond is ALWAYS in ALEO regardless of market token type.
 
-        let claim_key: field = BHP256::hash_to_field(BetClaimKey {
-            market_id: bet.market_id,
-            claimer: bet.owner,
-            bet_nonce: bet.bet_nonce,
-        });
+    // ========================================================================
+    // 17. DISPUTE RESOLUTION (bond in ALEO, works for all markets)
+    // ========================================================================
 
-        let refund: RefundClaim = RefundClaim {
-            owner: bet.owner,
-            market_id: bet.market_id,
-            amount: bet.amount,
-            bet_nonce: bet.bet_nonce,
+    async transition dispute_resolution(
+        private market_id: field,
+        private proposed_outcome: u8,
+        private dispute_nonce: field,
+    ) -> (DisputeBondReceipt, Future) {
+        let receipt: DisputeBondReceipt = DisputeBondReceipt {
+            owner: self.caller,
+            market_id: market_id,
+            bond_amount: MIN_DISPUTE_BOND,
+            dispute_nonce: dispute_nonce,
             token_type: TOKEN_ALEO,
         };
 
-        let refund_u64: u64 = bet.amount as u64;
-        let transfer_future: Future = credits.aleo/transfer_public(self.caller, refund_u64);
+        let bond_u64: u64 = MIN_DISPUTE_BOND as u64;
+        let transfer_future: Future = credits.aleo/transfer_public_as_signer(
+            self.address,
+            bond_u64
+        );
 
-        return (refund, finalize_claim_refund(transfer_future, claim_key, bet.market_id, bet.amount, TOKEN_ALEO));
+        return (receipt, dispute_resolution_fin(
+            transfer_future, market_id, proposed_outcome, self.caller
+        ));
     }
 
-    // ------------------------------------------------------------------------
-    // CLAIM REFUND USDCX
-    // v11: NEW - USDCX refund
-    // ------------------------------------------------------------------------
-    async transition claim_refund_usdcx(
-        private bet: Bet,
-    ) -> (RefundClaim, Future) {
-        assert(bet.owner == self.caller);
-        assert(bet.token_type == TOKEN_USDCX);
+    async function dispute_resolution_fin(
+        transfer_future: Future,
+        market_id: field,
+        proposed_outcome: u8,
+        disputer: address,
+    ) {
+        transfer_future.await();
 
-        let claim_key: field = BHP256::hash_to_field(BetClaimKey {
-            market_id: bet.market_id,
-            claimer: bet.owner,
-            bet_nonce: bet.bet_nonce,
+        let market: Market = markets.get(market_id);
+        assert(market.status == STATUS_PENDING_RESOLUTION);
+
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(!resolution.finalized);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= resolution.challenge_deadline);
+
+        assert(proposed_outcome != resolution.winning_outcome);
+        assert(proposed_outcome >= 1u8 && proposed_outcome <= market.num_outcomes);
+
+        let has_dispute: bool = market_disputes.contains(market_id);
+        assert(!has_dispute);
+
+        market_disputes.set(market_id, DisputeData {
+            market_id: market_id,
+            disputer: disputer,
+            proposed_outcome: proposed_outcome,
+            bond_amount: MIN_DISPUTE_BOND,
+            disputed_at: current_height,
         });
 
-        let refund: RefundClaim = RefundClaim {
-            owner: bet.owner,
-            market_id: bet.market_id,
-            amount: bet.amount,
-            bet_nonce: bet.bet_nonce,
-            token_type: TOKEN_USDCX,
-        };
+        markets.set(market_id, Market {
+            id: market.id,
+            creator: market.creator,
+            resolver: market.resolver,
+            question_hash: market.question_hash,
+            category: market.category,
+            num_outcomes: market.num_outcomes,
+            deadline: market.deadline,
+            resolution_deadline: market.resolution_deadline,
+            status: MARKET_STATUS_CLOSED,
+            created_at: market.created_at,
+            token_type: market.token_type,
+        });
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(self.caller, bet.amount);
+        market_resolutions.remove(market_id);
 
-        return (refund, finalize_claim_refund_usdcx(transfer_future, claim_key, bet.market_id, bet.amount, TOKEN_USDCX));
+        // Bond tracked in ALEO credits (0u8) regardless of market type
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        program_credits.set(0u8, current_held + MIN_DISPUTE_BOND);
     }
 
-    async function finalize_claim_refund(
+    // ========================================================================
+    // 18. CLAIM DISPUTE BOND (ALEO transfer)
+    // ========================================================================
+
+    async transition claim_dispute_bond(
+        private receipt: DisputeBondReceipt,
+    ) -> Future {
+        assert(receipt.owner == self.caller);
+        assert(receipt.token_type == TOKEN_ALEO);
+
+        let claim_key: field = BHP256::hash_to_field(DisputeClaimKey {
+            market_id: receipt.market_id,
+            claimer: self.caller,
+            dispute_nonce: receipt.dispute_nonce,
+        });
+
+        let bond_u64: u64 = receipt.bond_amount as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, bond_u64);
+
+        return claim_dispute_bond_fin(
+            transfer_future, claim_key, receipt.market_id,
+            receipt.bond_amount, self.caller
+        );
+    }
+
+    async function claim_dispute_bond_fin(
         transfer_future: Future,
         claim_key: field,
         market_id: field,
-        amount: u128,
+        bond_amount: u128,
+        claimer: address,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_RESOLVED || market.status == STATUS_PENDING_RESOLUTION);
+
+        let dispute: DisputeData = market_disputes.get(market_id);
+        assert(dispute.disputer == claimer);
+
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(resolution.winning_outcome == dispute.proposed_outcome);
+
+        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        share_redeemed.set(claim_key, true);
+
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        assert(current_held >= bond_amount);
+        program_credits.set(0u8, current_held - bond_amount);
+    }
+
+    // ########################################################################
+    //                      REDEMPTION / REFUND (ALEO)
+    // ########################################################################
+
+    // ========================================================================
+    // 19. REDEEM SHARES (ALEO) - Winning shares 1:1
+    // ========================================================================
+
+    async transition redeem_shares(
+        private shares: OutcomeShare,
+    ) -> Future {
+        assert(shares.owner == self.caller);
+        assert(shares.token_type == TOKEN_ALEO);
+        assert(shares.quantity > 0u128);
+
+        let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
+            market_id: shares.market_id,
+            claimer: self.caller,
+            share_nonce: shares.share_nonce,
+        });
+
+        let payout_u64: u64 = shares.quantity as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, payout_u64);
+
+        return redeem_shares_finalize(
+            transfer_future, claim_key, shares.market_id,
+            shares.outcome, shares.quantity, TOKEN_ALEO
+        );
+    }
+
+    async function redeem_shares_finalize(
+        transfer_future: Future,
+        claim_key: field,
+        market_id: field,
+        outcome: u8,
+        quantity: u128,
         token_type: u8,
     ) {
         let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_CANCELLED);
+        assert(market.status == MARKET_STATUS_RESOLVED);
+        assert(market.token_type == token_type);
 
-        let already_claimed: bool = user_claims.get_or_use(claim_key, false);
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(resolution.finalized);
+        assert(outcome == resolution.winning_outcome);
+
+        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
         assert(!already_claimed);
-        user_claims.set(claim_key, true);
+        share_redeemed.set(claim_key, true);
 
-        // C-02: Check per-market credits
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
         let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= amount);
-        market_credits.set(market_id, market_held - amount);
+        assert(market_held >= quantity);
+        market_credits.set(market_id, market_held - quantity);
 
-        // Update global tracking (key 0 = ALEO)
-        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
-        assert(current_held >= amount);
-        program_credits.set(0u8, current_held - amount);
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= quantity);
+        program_credits.set(credit_key, current_held - quantity);
 
         transfer_future.await();
     }
 
-    async function finalize_claim_refund_usdcx(
+    // ========================================================================
+    // 20. CLAIM REFUND (ALEO) - Cancelled markets
+    // ========================================================================
+
+    async transition claim_refund(
+        private shares: OutcomeShare,
+    ) -> (RefundClaim, Future) {
+        assert(shares.owner == self.caller);
+        assert(shares.token_type == TOKEN_ALEO);
+        assert(shares.quantity > 0u128);
+
+        let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
+            market_id: shares.market_id,
+            claimer: self.caller,
+            share_nonce: shares.share_nonce,
+        });
+
+        let refund: RefundClaim = RefundClaim {
+            owner: self.caller,
+            market_id: shares.market_id,
+            amount: shares.quantity,
+            claim_nonce: shares.share_nonce,
+            token_type: TOKEN_ALEO,
+        };
+
+        let refund_u64: u64 = shares.quantity as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, refund_u64);
+
+        return (refund, claim_refund_finalize(
+            transfer_future, claim_key, shares.market_id, shares.quantity, TOKEN_ALEO
+        ));
+    }
+
+    async function claim_refund_finalize(
         transfer_future: Future,
         claim_key: field,
         market_id: field,
@@ -1173,17 +1770,268 @@ program veiled_markets_v11.aleo {
     ) {
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_CANCELLED);
+        assert(market.token_type == token_type);
 
-        let already_claimed: bool = user_claims.get_or_use(claim_key, false);
+        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
         assert(!already_claimed);
-        user_claims.set(claim_key, true);
+        share_redeemed.set(claim_key, true);
 
-        // C-02: Check per-market credits
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
         let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
         assert(market_held >= amount);
         market_credits.set(market_id, market_held - amount);
 
-        // Update global tracking (key 1 = USDCX)
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= amount);
+        program_credits.set(credit_key, current_held - amount);
+
+        transfer_future.await();
+    }
+
+    // ========================================================================
+    // 21. CLAIM LP REFUND (ALEO) - LP tokens on cancelled markets
+    // ========================================================================
+
+    async transition claim_lp_refund(
+        private lp_token: LPToken,
+        private min_tokens_out: u128,
+    ) -> (RefundClaim, Future) {
+        assert(lp_token.owner == self.caller);
+        assert(lp_token.token_type == TOKEN_ALEO);
+        assert(lp_token.lp_shares > 0u128);
+
+        let claim_key: field = BHP256::hash_to_field(LPClaimKey {
+            market_id: lp_token.market_id,
+            claimer: self.caller,
+            lp_nonce: lp_token.lp_nonce,
+        });
+
+        let refund: RefundClaim = RefundClaim {
+            owner: self.caller,
+            market_id: lp_token.market_id,
+            amount: min_tokens_out,
+            claim_nonce: lp_token.lp_nonce,
+            token_type: TOKEN_ALEO,
+        };
+
+        let min_u64: u64 = min_tokens_out as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, min_u64);
+
+        return (refund, claim_lp_refund_finalize(
+            transfer_future, claim_key, lp_token.market_id,
+            lp_token.lp_shares, min_tokens_out, self.caller, TOKEN_ALEO
+        ));
+    }
+
+    async function claim_lp_refund_finalize(
+        transfer_future: Future,
+        claim_key: field,
+        market_id: field,
+        lp_shares: u128,
+        min_tokens_out: u128,
+        claimer: address,
+        token_type: u8,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_CANCELLED);
+        assert(market.token_type == token_type);
+
+        let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        lp_positions.set(claim_key, true);
+
+        let pool: AMMPool = amm_pools.get(market_id);
+        let tokens_out: u128 = (lp_shares * pool.total_liquidity) / pool.total_lp_shares;
+        assert(tokens_out >= min_tokens_out);
+
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= tokens_out);
+        market_credits.set(market_id, market_held - tokens_out);
+
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= min_tokens_out);
+        program_credits.set(credit_key, current_held - min_tokens_out);
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: pool.reserve_1,
+            reserve_2: pool.reserve_2,
+            reserve_3: pool.reserve_3,
+            reserve_4: pool.reserve_4,
+            total_liquidity: pool.total_liquidity - tokens_out,
+            total_lp_shares: pool.total_lp_shares - lp_shares,
+            total_volume: pool.total_volume,
+        });
+    }
+
+    // ========================================================================
+    // 22. WITHDRAW CREATOR FEES (ALEO)
+    // ========================================================================
+
+    async transition withdraw_creator_fees(
+        public market_id: field,
+        public expected_amount: u128,
+    ) -> Future {
+        assert(expected_amount > 0u128);
+
+        let amount_u64: u64 = expected_amount as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(self.caller, amount_u64);
+
+        return withdraw_fees_finalize(
+            transfer_future, market_id, self.caller, expected_amount, TOKEN_ALEO
+        );
+    }
+
+    async function withdraw_fees_finalize(
+        transfer_future: Future,
+        market_id: field,
+        caller: address,
+        expected_amount: u128,
+        token_type: u8,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_RESOLVED);
+        assert(market.creator == caller);
+        assert(market.token_type == token_type);
+
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(resolution.finalized);
+
+        let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
+        assert(!already_claimed);
+        creator_fees_claimed.set(market_id, true);
+
+        let fees: MarketFees = market_fees.get(market_id);
+        assert(fees.creator_fees >= expected_amount);
+
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= expected_amount);
+        market_credits.set(market_id, market_held - expected_amount);
+
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= expected_amount);
+        program_credits.set(credit_key, current_held - expected_amount);
+    }
+
+    // ########################################################################
+    //                      REDEMPTION / REFUND (USDCX)
+    // ########################################################################
+
+    // ========================================================================
+    // 23. REDEEM SHARES (USDCX)
+    // ========================================================================
+
+    async transition redeem_shares_usdcx(
+        private shares: OutcomeShare,
+    ) -> Future {
+        assert(shares.owner == self.caller);
+        assert(shares.token_type == TOKEN_USDCX);
+        assert(shares.quantity > 0u128);
+
+        let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
+            market_id: shares.market_id,
+            claimer: self.caller,
+            share_nonce: shares.share_nonce,
+        });
+
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
+            self.caller, shares.quantity
+        );
+
+        return redeem_shares_usdcx_fin(
+            transfer_future, claim_key, shares.market_id,
+            shares.outcome, shares.quantity
+        );
+    }
+
+    async function redeem_shares_usdcx_fin(
+        transfer_future: Future,
+        claim_key: field,
+        market_id: field,
+        outcome: u8,
+        quantity: u128,
+    ) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_RESOLVED);
+        assert(market.token_type == TOKEN_USDCX);
+
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(resolution.finalized);
+        assert(outcome == resolution.winning_outcome);
+
+        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        share_redeemed.set(claim_key, true);
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= quantity);
+        market_credits.set(market_id, market_held - quantity);
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        assert(current_held >= quantity);
+        program_credits.set(1u8, current_held - quantity);
+
+        transfer_future.await();
+    }
+
+    // ========================================================================
+    // 24. CLAIM REFUND (USDCX)
+    // ========================================================================
+
+    async transition claim_refund_usdcx(
+        private shares: OutcomeShare,
+    ) -> (RefundClaim, Future) {
+        assert(shares.owner == self.caller);
+        assert(shares.token_type == TOKEN_USDCX);
+        assert(shares.quantity > 0u128);
+
+        let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
+            market_id: shares.market_id,
+            claimer: self.caller,
+            share_nonce: shares.share_nonce,
+        });
+
+        let refund: RefundClaim = RefundClaim {
+            owner: self.caller,
+            market_id: shares.market_id,
+            amount: shares.quantity,
+            claim_nonce: shares.share_nonce,
+            token_type: TOKEN_USDCX,
+        };
+
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
+            self.caller, shares.quantity
+        );
+
+        return (refund, claim_refund_usdcx_fin(
+            transfer_future, claim_key, shares.market_id, shares.quantity
+        ));
+    }
+
+    async function claim_refund_usdcx_fin(
+        transfer_future: Future,
+        claim_key: field,
+        market_id: field,
+        amount: u128,
+    ) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_CANCELLED);
+        assert(market.token_type == TOKEN_USDCX);
+
+        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        share_redeemed.set(claim_key, true);
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= amount);
+        market_credits.set(market_id, market_held - amount);
+
         let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
         assert(current_held >= amount);
         program_credits.set(1u8, current_held - amount);
@@ -1192,49 +2040,384 @@ program veiled_markets_v11.aleo {
     }
 
     // ========================================================================
-    // INLINE FUNCTIONS (Compile-time Helpers)
+    // 25. CLAIM LP REFUND (USDCX)
     // ========================================================================
 
-    inline calculate_yes_probability(yes_pool: u128, no_pool: u128) -> u128 {
-        let total: u128 = yes_pool + no_pool;
-        if (total == 0u128) {
-            return 5000u128;
-        }
-        return (yes_pool * 10000u128) / total;
+    async transition claim_lp_refund_usdcx(
+        private lp_token: LPToken,
+        private min_tokens_out: u128,
+    ) -> (RefundClaim, Future) {
+        assert(lp_token.owner == self.caller);
+        assert(lp_token.token_type == TOKEN_USDCX);
+        assert(lp_token.lp_shares > 0u128);
+
+        let claim_key: field = BHP256::hash_to_field(LPClaimKey {
+            market_id: lp_token.market_id,
+            claimer: self.caller,
+            lp_nonce: lp_token.lp_nonce,
+        });
+
+        let refund: RefundClaim = RefundClaim {
+            owner: self.caller,
+            market_id: lp_token.market_id,
+            amount: min_tokens_out,
+            claim_nonce: lp_token.lp_nonce,
+            token_type: TOKEN_USDCX,
+        };
+
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
+            self.caller, min_tokens_out
+        );
+
+        return (refund, claim_lp_ref_usdcx_fin(
+            transfer_future, claim_key, lp_token.market_id,
+            lp_token.lp_shares, min_tokens_out, self.caller
+        ));
     }
 
-    inline calculate_potential_payout(
-        bet_amount: u128,
-        bet_on_yes: bool,
-        yes_pool: u128,
-        no_pool: u128,
-    ) -> u128 {
-        let total_pool: u128 = yes_pool + no_pool;
-        let winning_pool: u128 = bet_on_yes ? yes_pool : no_pool;
+    async function claim_lp_ref_usdcx_fin(
+        transfer_future: Future,
+        claim_key: field,
+        market_id: field,
+        lp_shares: u128,
+        min_tokens_out: u128,
+        claimer: address,
+    ) {
+        transfer_future.await();
 
-        if (winning_pool == 0u128) {
-            return 0u128;
-        }
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_CANCELLED);
+        assert(market.token_type == TOKEN_USDCX);
 
-        let gross_payout: u128 = (bet_amount * total_pool) / winning_pool;
-        let total_fee_bps: u128 = PROTOCOL_FEE_BPS + CREATOR_FEE_BPS;
-        let fees: u128 = (gross_payout * total_fee_bps) / FEE_DENOMINATOR;
+        let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        lp_positions.set(claim_key, true);
 
-        return gross_payout - fees;
+        let pool: AMMPool = amm_pools.get(market_id);
+        let tokens_out: u128 = (lp_shares * pool.total_liquidity) / pool.total_lp_shares;
+        assert(tokens_out >= min_tokens_out);
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= tokens_out);
+        market_credits.set(market_id, market_held - tokens_out);
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        assert(current_held >= min_tokens_out);
+        program_credits.set(1u8, current_held - min_tokens_out);
+
+        amm_pools.set(market_id, AMMPool {
+            market_id: market_id,
+            reserve_1: pool.reserve_1,
+            reserve_2: pool.reserve_2,
+            reserve_3: pool.reserve_3,
+            reserve_4: pool.reserve_4,
+            total_liquidity: pool.total_liquidity - tokens_out,
+            total_lp_shares: pool.total_lp_shares - lp_shares,
+            total_volume: pool.total_volume,
+        });
     }
 
-    inline calculate_odds(
-        bet_on_yes: bool,
-        yes_pool: u128,
-        no_pool: u128,
-    ) -> u128 {
-        let total_pool: u128 = yes_pool + no_pool;
-        let winning_pool: u128 = bet_on_yes ? yes_pool : no_pool;
+    // ========================================================================
+    // 26. WITHDRAW CREATOR FEES (USDCX)
+    // ========================================================================
 
-        if (winning_pool == 0u128) {
-            return 0u128;
-        }
+    async transition withdraw_fees_usdcx(
+        public market_id: field,
+        public expected_amount: u128,
+    ) -> Future {
+        assert(expected_amount > 0u128);
 
-        return (total_pool * 10000u128) / winning_pool;
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
+            self.caller, expected_amount
+        );
+
+        return withdraw_fees_usdcx_fin(
+            transfer_future, market_id, self.caller, expected_amount
+        );
+    }
+
+    async function withdraw_fees_usdcx_fin(
+        transfer_future: Future,
+        market_id: field,
+        caller: address,
+        expected_amount: u128,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == MARKET_STATUS_RESOLVED);
+        assert(market.creator == caller);
+        assert(market.token_type == TOKEN_USDCX);
+
+        let resolution: MarketResolution = market_resolutions.get(market_id);
+        assert(resolution.finalized);
+
+        let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
+        assert(!already_claimed);
+        creator_fees_claimed.set(market_id, true);
+
+        let fees: MarketFees = market_fees.get(market_id);
+        assert(fees.creator_fees >= expected_amount);
+
+        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
+        assert(market_held >= expected_amount);
+        market_credits.set(market_id, market_held - expected_amount);
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        assert(current_held >= expected_amount);
+        program_credits.set(1u8, current_held - expected_amount);
+    }
+
+    // ########################################################################
+    //                      MULTI-SIG TREASURY WITHDRAWAL
+    // ########################################################################
+
+    // ========================================================================
+    // 27. INIT MULTISIG
+    // ========================================================================
+
+    async transition init_multisig(
+        public signer_1: address,
+        public signer_2: address,
+        public signer_3: address,
+        public threshold: u8,
+    ) -> Future {
+        assert(threshold >= 2u8 && threshold <= 3u8);
+        return init_multisig_finalize(signer_1, signer_2, signer_3, threshold, self.caller);
+    }
+
+    async function init_multisig_finalize(
+        signer_1: address,
+        signer_2: address,
+        signer_3: address,
+        threshold: u8,
+        caller: address,
+    ) {
+        let config_exists: bool = multisig_config.contains(MULTISIG_CONFIG_KEY);
+        assert(!config_exists);
+
+        multisig_config.set(MULTISIG_CONFIG_KEY, SignerConfig {
+            signer_1: signer_1,
+            signer_2: signer_2,
+            signer_3: signer_3,
+            threshold: threshold,
+        });
+    }
+
+    // ========================================================================
+    // 28. PROPOSE TREASURY WITHDRAWAL
+    // ========================================================================
+
+    async transition propose_treasury_withdrawal(
+        public amount: u128,
+        public recipient: address,
+    ) -> (field, Future) {
+        assert(amount > 0u128);
+
+        let proposal_id: field = BHP256::hash_to_field(ProposalSeed {
+            proposer: self.caller,
+            action: ACTION_WITHDRAW,
+            amount: amount,
+            nonce: 0u64,
+        });
+
+        return (proposal_id, propose_withdrawal_fin(
+            proposal_id, amount, recipient, self.caller
+        ));
+    }
+
+    async function propose_withdrawal_fin(
+        proposal_id: field,
+        amount: u128,
+        recipient: address,
+        proposer: address,
+    ) {
+        let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
+        let is_signer: bool = proposer == config.signer_1 || proposer == config.signer_2 || proposer == config.signer_3;
+        assert(is_signer);
+
+        let exists: bool = multisig_proposals.contains(proposal_id);
+        assert(!exists);
+
+        let treasury_balance: u128 = protocol_treasury.get_or_use(0u8, 0u128);
+        assert(treasury_balance >= amount);
+
+        let current_height: u64 = block.height as u64;
+
+        multisig_proposals.set(proposal_id, MultiSigProposal {
+            proposal_id: proposal_id,
+            action: ACTION_WITHDRAW,
+            amount: amount,
+            recipient: recipient,
+            proposed_at: current_height,
+        });
+
+        let approval_key: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: proposer,
+        });
+        multisig_approvals.set(approval_key, true);
+    }
+
+    // ========================================================================
+    // 29. APPROVE PROPOSAL
+    // ========================================================================
+
+    async transition approve_proposal(
+        public proposal_id: field,
+    ) -> Future {
+        return approve_proposal_finalize(proposal_id, self.caller);
+    }
+
+    async function approve_proposal_finalize(
+        proposal_id: field,
+        signer: address,
+    ) {
+        let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
+        let is_signer: bool = signer == config.signer_1 || signer == config.signer_2 || signer == config.signer_3;
+        assert(is_signer);
+
+        let proposal: MultiSigProposal = multisig_proposals.get(proposal_id);
+
+        let approval_key: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: signer,
+        });
+        let already_approved: bool = multisig_approvals.get_or_use(approval_key, false);
+        assert(!already_approved);
+        multisig_approvals.set(approval_key, true);
+    }
+
+    // ========================================================================
+    // 30. EXECUTE PROPOSAL (ALEO treasury)
+    // ========================================================================
+
+    async transition execute_proposal(
+        public proposal_id: field,
+        public amount: u128,
+        public recipient: address,
+    ) -> Future {
+        let amount_u64: u64 = amount as u64;
+        let transfer_future: Future = credits.aleo/transfer_public(recipient, amount_u64);
+
+        return execute_proposal_finalize(
+            transfer_future, proposal_id, amount, recipient, 0u8
+        );
+    }
+
+    async function execute_proposal_finalize(
+        transfer_future: Future,
+        proposal_id: field,
+        amount: u128,
+        recipient: address,
+        credit_key: u8,
+    ) {
+        transfer_future.await();
+
+        let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
+        let proposal: MultiSigProposal = multisig_proposals.get(proposal_id);
+
+        assert(proposal.amount == amount);
+        assert(proposal.recipient == recipient);
+
+        // Count approvals
+        let key_1: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: config.signer_1,
+        });
+        let key_2: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: config.signer_2,
+        });
+        let key_3: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: config.signer_3,
+        });
+
+        let a1: bool = multisig_approvals.get_or_use(key_1, false);
+        let a2: bool = multisig_approvals.get_or_use(key_2, false);
+        let a3: bool = multisig_approvals.get_or_use(key_3, false);
+
+        let c0: u8 = 0u8;
+        let c1: u8 = a1 ? c0 + 1u8 : c0;
+        let c2: u8 = a2 ? c1 + 1u8 : c1;
+        let count: u8 = a3 ? c2 + 1u8 : c2;
+        assert(count >= config.threshold);
+
+        let treasury_balance: u128 = protocol_treasury.get(credit_key);
+        assert(treasury_balance >= amount);
+        protocol_treasury.set(credit_key, treasury_balance - amount);
+
+        let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
+        assert(current_held >= amount);
+        program_credits.set(credit_key, current_held - amount);
+
+        multisig_proposals.remove(proposal_id);
+    }
+
+    // ========================================================================
+    // 31. EXECUTE PROPOSAL (USDCX treasury)
+    // ========================================================================
+
+    async transition exec_proposal_usdcx(
+        public proposal_id: field,
+        public amount: u128,
+        public recipient: address,
+    ) -> Future {
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
+            recipient, amount
+        );
+
+        return exec_proposal_usdcx_fin(
+            transfer_future, proposal_id, amount, recipient
+        );
+    }
+
+    async function exec_proposal_usdcx_fin(
+        transfer_future: Future,
+        proposal_id: field,
+        amount: u128,
+        recipient: address,
+    ) {
+        transfer_future.await();
+
+        let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
+        let proposal: MultiSigProposal = multisig_proposals.get(proposal_id);
+
+        assert(proposal.amount == amount);
+        assert(proposal.recipient == recipient);
+
+        let key_1: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: config.signer_1,
+        });
+        let key_2: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: config.signer_2,
+        });
+        let key_3: field = BHP256::hash_to_field(ApprovalKey {
+            proposal_id: proposal_id,
+            signer: config.signer_3,
+        });
+
+        let a1: bool = multisig_approvals.get_or_use(key_1, false);
+        let a2: bool = multisig_approvals.get_or_use(key_2, false);
+        let a3: bool = multisig_approvals.get_or_use(key_3, false);
+
+        let c0: u8 = 0u8;
+        let c1: u8 = a1 ? c0 + 1u8 : c0;
+        let c2: u8 = a2 ? c1 + 1u8 : c1;
+        let count: u8 = a3 ? c2 + 1u8 : c2;
+        assert(count >= config.threshold);
+
+        let treasury_balance: u128 = protocol_treasury.get(1u8);
+        assert(treasury_balance >= amount);
+        protocol_treasury.set(1u8, treasury_balance - amount);
+
+        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
+        assert(current_held >= amount);
+        program_credits.set(1u8, current_held - amount);
+
+        multisig_proposals.remove(proposal_id);
     }
 }

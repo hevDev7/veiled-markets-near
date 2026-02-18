@@ -9,6 +9,8 @@ import { ShieldWalletAdapter } from '@provablehq/aleo-wallet-adaptor-shield'
 import { PuzzleWalletAdapter } from '@provablehq/aleo-wallet-adaptor-puzzle'
 import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 import { Network } from '@provablehq/aleo-types'
+import { WalletModalProvider } from '@provablehq/aleo-wallet-adaptor-react-ui'
+import '@provablehq/aleo-wallet-adaptor-react-ui/dist/styles.css'
 import App from './App'
 import { WalletBridge } from './components/WalletBridge'
 import './styles/globals.css'
@@ -52,10 +54,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       ]}
       onError={(error) => console.error('[Wallet Error]', error.message)}
     >
-      <BrowserRouter>
-        <WalletBridge />
-        <App />
-      </BrowserRouter>
+      <WalletModalProvider>
+        <BrowserRouter>
+          <WalletBridge />
+          <App />
+        </BrowserRouter>
+      </WalletModalProvider>
     </AleoWalletProvider>
   </React.StrictMode>,
 )

@@ -24,7 +24,9 @@ import {
   getTransactionUrl,
   registerQuestionText,
   registerMarketTransaction,
-  waitForMarketCreation
+  waitForMarketCreation,
+  savePendingMarket,
+  updatePendingMarketTxId,
 } from '@/lib/aleo-client'
 import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
 
@@ -40,6 +42,9 @@ interface MarketFormData {
   question: string
   description: string
   category: number
+  numOutcomes: number
+  outcomeLabels: string[]
+  initialLiquidity: string
   deadlineDate: string
   deadlineTime: string
   resolutionDeadlineDate: string
@@ -62,6 +67,9 @@ const initialFormData: MarketFormData = {
   question: '',
   description: '',
   category: 3,
+  numOutcomes: 2,
+  outcomeLabels: ['Yes', 'No', '', ''],
+  initialLiquidity: '10',
   deadlineDate: '',
   deadlineTime: '23:59',
   resolutionDeadlineDate: '',
@@ -69,6 +77,9 @@ const initialFormData: MarketFormData = {
   resolutionSource: '',
   tokenType: 'ALEO',
 }
+
+// Use the centralized config program ID — do NOT hardcode version here
+const CREATE_MARKET_PROGRAM_ID = CONTRACT_INFO.programId
 
 export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketModalProps) {
   const { wallet } = useWalletStore()
@@ -78,6 +89,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
   const [error, setError] = useState<string | null>(null)
   const [marketId, setMarketId] = useState<string | null>(null)
   const [isSlowTransaction, setIsSlowTransaction] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const updateForm = (updates: Partial<MarketFormData>) => {
     setFormData(prev => ({ ...prev, ...updates }))
@@ -88,6 +100,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
     setFormData(initialFormData)
     setError(null)
     setMarketId(null)
+    setIsSubmitting(false)
     onClose()
   }
 
@@ -147,6 +160,8 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
   }
 
   const handleCreate = async () => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
     setStep('creating')
     setError(null)
 
@@ -190,21 +205,28 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       console.log('Deadline block height:', deadlineBlockHeight.toString())
       console.log('Resolution block height:', resolutionBlockHeight.toString())
 
-      // Build transaction inputs for create_market
-      // create_market(question_hash: field, category: u8, deadline: u64, resolution_deadline: u64, resolver: address)
-      // v10: resolver defaults to creator's own address (can be changed for delegation)
-
-      // Ensure all values are properly converted to strings
+      // Build transaction inputs for v14 create_market
+      // create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
+      // Token type is determined by function name: create_market (ALEO) vs create_market_usdcx (USDCX)
       const input0 = String(questionHash);
       const input1 = `${Number(formData.category)}u8`;
-      const input2 = `${deadlineBlockHeight.toString()}u64`;
-      const input3 = `${resolutionBlockHeight.toString()}u64`;
-      const input4 = wallet.address!; // resolver = creator by default
-      const input5 = formData.tokenType === 'USDCX' ? '2u8' : '1u8'; // v11: token_type
-      const isV11Program = /_v11\.aleo$/i.test(CONTRACT_INFO.programId)
-      const inputs = isV11Program
-        ? [input0, input1, input2, input3, input4, input5]
-        : [input0, input1, input2, input3, input4]
+      const input2 = `${Number(formData.numOutcomes)}u8`;
+      const input3 = `${deadlineBlockHeight.toString()}u64`;
+      const input4 = `${resolutionBlockHeight.toString()}u64`;
+      const input5 = wallet.address!; // resolver = creator by default
+      const liquidityMicro = BigInt(Math.floor(parseFloat(formData.initialLiquidity || '10') * 1_000_000));
+      const input6 = `${liquidityMicro}u128`;
+      const inputs = [input0, input1, input2, input3, input4, input5, input6]
+      const createProgramId = CREATE_MARKET_PROGRAM_ID
+
+      if (CONTRACT_INFO.programId !== createProgramId) {
+        console.warn(
+          '[CreateMarket] config program mismatch:',
+          CONTRACT_INFO.programId,
+          '→ forcing',
+          createProgramId,
+        )
+      }
 
       console.log('=== CREATE MARKET DEBUG ===')
       console.log('Question:', formData.question)
@@ -213,13 +235,16 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       console.log('Current Block:', currentBlock.toString())
       console.log('Deadline Block:', deadlineBlockHeight.toString())
       console.log('Resolution Block:', resolutionBlockHeight.toString())
-      console.log('Input 0 (hash):', input0, '| type:', typeof input0)
-      console.log('Input 1 (category):', input1, '| type:', typeof input1)
-      console.log('Input 2 (deadline):', input2, '| type:', typeof input2)
-      console.log('Input 3 (resolution):', input3, '| type:', typeof input3)
-      console.log('Inputs array:', inputs)
-      console.log('Inputs JSON:', JSON.stringify(inputs, null, 2))
-      console.log('Program ID:', CONTRACT_INFO.programId)
+      console.log('Input 0 (hash):', input0)
+      console.log('Input 1 (category):', input1)
+      console.log('Input 2 (num_outcomes):', input2)
+      console.log('Input 3 (deadline):', input3)
+      console.log('Input 4 (resolution):', input4)
+      console.log('Input 5 (resolver):', input5)
+      console.log('Input 6 (liquidity):', input6)
+      console.log('Inputs array (7):', inputs)
+      console.log('Program ID (configured):', CONTRACT_INFO.programId)
+      console.log('Program ID (create market):', createProgramId)
       console.log('Network:', CONTRACT_INFO.network)
 
       // Validate inputs before sending
@@ -255,11 +280,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
 
       const WALLET_TIMEOUT_MS = 120_000 // 2 minutes
+      const createFunctionName = formData.tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market';
       const txPromise = executeTransaction({
-        program: CONTRACT_INFO.programId,
-        function: 'create_market',
+        program: createProgramId,
+        function: createFunctionName,
         inputs,
-        fee: 0.5, // minimum 0.5 ALEO
+        fee: 3.0, // 3.0 ALEO for create_market (v14: 1974 stmts, complex finalize + nested transfer)
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -290,6 +316,17 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       // Use transaction ID as market ID reference for UI
       setMarketId(transactionId)
       setStep('success')
+
+      // ============================================================
+      // IMMEDIATELY save as pending market in localStorage
+      // Dashboard will auto-resolve this on next load/refresh
+      // ============================================================
+      savePendingMarket({
+        questionHash,
+        questionText: formData.question,
+        transactionId,
+        createdAt: Date.now(),
+      })
 
       // ============================================================
       // IMMEDIATELY register in Supabase with tx ID (before market ID is known)
@@ -323,7 +360,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           resolved = true
           console.log('[CreateMarket] Market ID found:', actualMarketId)
 
-          // Update Supabase with actual market ID
+          // Update Supabase: register real market ID AND delete stale pending_ entry
           if (isSupabaseAvailable()) {
             registerMarketInRegistry({
               market_id: actualMarketId,
@@ -336,61 +373,185 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               transaction_id: onChainTxId || transactionId,
               created_at: Date.now(),
             }).catch(err => console.warn('[CreateMarket] Supabase update failed:', err))
+
+            // Delete the pending_ placeholder entry created earlier
+            import('@/lib/supabase').then(({ supabase: sb }) => {
+              if (sb) {
+                Promise.resolve(
+                  sb.from('market_registry')
+                    .delete()
+                    .eq('market_id', `pending_${transactionId}`)
+                ).then(() => console.log('[CreateMarket] Deleted pending Supabase entry'))
+                  .catch(() => {})
+              }
+            }).catch(() => {})
           }
 
           onSuccess?.(actualMarketId)
         }
 
-        // Strategy 1: If at1... tx ID, extract market ID directly from transaction
+        // Strategy 1: Wallet polling — try adapter for all wallets (including Shield)
+        // Shield wallet MAY expose the real at1... TX ID via adapter polling
         const strategy1 = async () => {
+          // Demo mode: nothing to poll
+          if (transactionId.startsWith('demo_')) return
+
           let onChainTxId = transactionId
+          const isShieldId = transactionId.startsWith('shield_')
 
           if (!transactionId.startsWith('at1')) {
-            console.log('[CreateMarket] Polling wallet for on-chain tx ID...')
+            console.log(`[CreateMarket] Polling wallet for on-chain tx ID...${isShieldId ? ' (Shield — adapter may resolve)' : ''}`)
             onChainTxId = await new Promise<string>((resolve) => {
+              let didResolve = false
+              const finish = (id: string) => { if (!didResolve) { didResolve = true; resolve(id) } }
+
+              // Safety timeout — don't block forever
+              setTimeout(() => finish(transactionId), isShieldId ? 90_000 : 300_000)
+
               pollTransactionStatus(
                 transactionId,
                 (status, txId) => {
-                  if (txId && txId.startsWith('at1')) resolve(txId)
-                  else if (status === 'confirmed') resolve(txId || transactionId)
-                  else if (status === 'failed' || status === 'unknown') resolve(transactionId)
+                  if (txId && txId.startsWith('at1')) finish(txId)
+                  else if (status === 'confirmed') finish(txId || transactionId)
+                  else if (status === 'failed' || status === 'unknown') finish(transactionId)
                 },
-                30, 10_000,
+                isShieldId ? 8 : 30,       // Fewer attempts for Shield (Strategy 2 is primary)
+                isShieldId ? 10_000 : 10_000,
               )
             })
           }
 
           if (resolved) return
           if (onChainTxId.startsWith('at1')) {
-            const marketId = await waitForMarketCreation(onChainTxId, questionHash, formData.question)
+            // Save resolved at1... TX ID to pending entry so resolvePendingMarkets
+            // can use resolveMarketFromTransaction directly on next Dashboard load
+            updatePendingMarketTxId(questionHash, onChainTxId)
+
+            const marketId = await waitForMarketCreation(
+              onChainTxId,
+              questionHash,
+              formData.question,
+              20,
+              15000,
+              createProgramId,
+            )
             if (marketId && !resolved) onMarketFound(marketId, onChainTxId)
           }
         }
 
         // Strategy 2: Blockchain scan — search recent blocks for the question hash
-        // This works independently of wallet UUID resolution
+        // PRIMARY strategy for Shield wallet (and fallback for others)
         const strategy2 = async () => {
-          // Wait 30s for the transaction to be included in a block
-          await new Promise(r => setTimeout(r, 30_000))
+          const isShieldOrDemo = transactionId.startsWith('shield_') || transactionId.startsWith('demo_')
+          // Shield: start scanning quickly — TX already submitted
+          // Others: give wallet polling more time first
+          const initialDelay = isShieldOrDemo ? 5_000 : 30_000
+          await new Promise(r => setTimeout(r, initialDelay))
           if (resolved) return
 
-          // Use waitForMarketCreation with a non-at1 ID to trigger blockchain scan
-          const marketId = await waitForMarketCreation('scan', questionHash, formData.question)
+          // Deep blockchain scan with progressive depth
+          const marketId = await waitForMarketCreation(
+            'scan',
+            questionHash,
+            formData.question,
+            20,
+            15000,
+            createProgramId,
+          )
           if (marketId && !resolved) onMarketFound(marketId, transactionId)
+
+          // For Shield: if first round didn't find it, wait and try again
+          // Aleo testnet can take 2-5 minutes for finalization
+          if (!resolved && isShieldOrDemo) {
+            console.log('[CreateMarket] Shield scan round 1 complete — waiting 60s for round 2...')
+            await new Promise(r => setTimeout(r, 60_000))
+            if (resolved) return
+            const marketId2 = await waitForMarketCreation(
+              'scan',
+              questionHash,
+              formData.question,
+              20,
+              15000,
+              createProgramId,
+            )
+            if (marketId2 && !resolved) onMarketFound(marketId2, transactionId)
+          }
         }
 
-        // Run both strategies in parallel
-        await Promise.allSettled([strategy1(), strategy2()])
+        // Strategy 3: Shield-specific — try to get real TX ID from wallet directly
+        const strategy3 = async () => {
+          if (!transactionId.startsWith('shield_')) return
+
+          // Wait a bit for the transaction to be processed
+          await new Promise(r => setTimeout(r, 10_000))
+          if (resolved) return
+
+          const w = window as any
+          const shield = w.shield
+
+          // Try to get TX ID via Shield wallet's JS API methods
+          if (shield) {
+            for (const method of ['getTransactionId', 'transactionStatus', 'getTransaction', 'getRecentTransactions']) {
+              if (resolved) return
+              if (typeof shield[method] === 'function') {
+                try {
+                  const result = await shield[method](transactionId)
+                  const txId = typeof result === 'string' ? result :
+                    (result?.transactionId || result?.txId || result?.id)
+                  if (txId && typeof txId === 'string' && txId.startsWith('at1')) {
+                    console.log(`[CreateMarket] Shield.${method} returned at1 ID:`, txId)
+                    const marketId = await waitForMarketCreation(
+                      txId,
+                      questionHash,
+                      formData.question,
+                      20,
+                      15000,
+                      createProgramId,
+                    )
+                    if (marketId && !resolved) onMarketFound(marketId, txId)
+                    return
+                  }
+                } catch { /* method not available or failed */ }
+              }
+            }
+          }
+
+          // Also try the ProvableHQ adapter's transactionStatus directly
+          // (different from pollTransactionStatus which has timeouts)
+          if (!resolved) {
+            try {
+              // The adapter wraps Shield — it might track the TX internally
+              const adapterResult = await (window as any).__provable_adapter__?.transactionStatus?.(transactionId)
+              if (adapterResult?.transactionId?.startsWith('at1')) {
+                const txId = adapterResult.transactionId
+                console.log('[CreateMarket] Adapter resolved Shield TX to:', txId)
+                const marketId = await waitForMarketCreation(
+                  txId,
+                  questionHash,
+                  formData.question,
+                  20,
+                  15000,
+                  createProgramId,
+                )
+                if (marketId && !resolved) onMarketFound(marketId, txId)
+              }
+            } catch { /* adapter not available */ }
+          }
+        }
+
+        // Run all strategies in parallel — first to find market wins
+        await Promise.allSettled([strategy1(), strategy2(), strategy3()])
 
         if (!resolved) {
-          console.warn('[CreateMarket] Both strategies failed to find market ID')
-          onSuccess?.(questionHash)
+          console.warn('[CreateMarket] Both strategies failed to find market ID — will retry via Dashboard periodic scan')
+          // Don't call onSuccess with questionHash — it's not a valid market ID
+          // The pending market is saved in localStorage and will be resolved by Dashboard's periodic resolvePendingMarkets()
         }
       }
 
       resolveAndRegister().catch((err) => {
         console.error('[CreateMarket] Error in background registration:', err)
-        onSuccess?.(questionHash)
+        // Don't call onSuccess — pending market in localStorage will be resolved later
       })
     } catch (err: unknown) {
       console.error('Failed to create market:', err)
@@ -410,6 +571,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       }
       setError(errorMsg)
       setStep('error')
+      setIsSubmitting(false)
     }
   }
 
@@ -583,6 +745,79 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             placeholder="e.g., CoinGecko API, Official announcement, etc."
                             className="input-field w-full"
                           />
+                        </div>
+
+                        {/* Number of Outcomes */}
+                        <div>
+                          <label className="flex items-center gap-2 text-sm font-medium text-white mb-2">
+                            <Hash className="w-4 h-4 text-surface-400" />
+                            Number of Outcomes
+                          </label>
+                          <div className="grid grid-cols-3 gap-3">
+                            {[2, 3, 4].map((n) => (
+                              <button
+                                key={n}
+                                onClick={() => {
+                                  const labels = [...formData.outcomeLabels]
+                                  if (n === 2) { labels[0] = labels[0] || 'Yes'; labels[1] = labels[1] || 'No' }
+                                  if (n >= 3 && !labels[2]) labels[2] = 'Option C'
+                                  if (n >= 4 && !labels[3]) labels[3] = 'Option D'
+                                  updateForm({ numOutcomes: n, outcomeLabels: labels })
+                                }}
+                                className={cn(
+                                  "p-3 rounded-xl border-2 transition-all text-center",
+                                  formData.numOutcomes === n
+                                    ? "border-brand-500 bg-brand-500/10"
+                                    : "border-surface-700 hover:border-surface-600"
+                                )}
+                              >
+                                <span className="text-lg font-semibold text-white block">{n}</span>
+                                <span className="text-xs text-surface-400">{n === 2 ? 'Binary' : `${n}-way`}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Outcome Labels */}
+                        <div>
+                          <label className="text-sm font-medium text-white mb-2 block">Outcome Labels</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {Array.from({ length: formData.numOutcomes }, (_, i) => (
+                              <input
+                                key={i}
+                                type="text"
+                                value={formData.outcomeLabels[i] || ''}
+                                onChange={(e) => {
+                                  const labels = [...formData.outcomeLabels]
+                                  labels[i] = e.target.value
+                                  updateForm({ outcomeLabels: labels })
+                                }}
+                                placeholder={`Outcome ${i + 1}`}
+                                className="input-field text-sm"
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Initial Liquidity */}
+                        <div>
+                          <label className="flex items-center gap-2 text-sm font-medium text-white mb-2">
+                            <Coins className="w-4 h-4 text-surface-400" />
+                            Initial Liquidity (required)
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              value={formData.initialLiquidity}
+                              onChange={(e) => updateForm({ initialLiquidity: e.target.value })}
+                              placeholder="10"
+                              min="0.01"
+                              step="1"
+                              className="input-field pr-16"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 text-sm">{formData.tokenType}</span>
+                          </div>
+                          <p className="text-xs text-surface-500 mt-1">Seeds the AMM pool. Split equally across outcomes. Min: 0.01 {formData.tokenType}</p>
                         </div>
 
                         {/* Token Type */}
@@ -806,8 +1041,8 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             <div>
                               <p className="text-sm font-medium text-brand-300">Creator Rewards</p>
                               <p className="text-xs text-surface-400 mt-1">
-                                As the market creator, you'll earn 1% of all betting volume as a fee.
-                                Protocol takes an additional 1%.
+                                As the market creator, you'll earn 0.5% of all trading volume.
+                                Protocol takes 0.5% and LPs earn 1% — total 2% fee per trade.
                               </p>
                             </div>
                           </div>
@@ -827,7 +1062,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           <button onClick={handleBack} className="flex-1 btn-secondary">
                             Back
                           </button>
-                          <button onClick={handleCreate} className="flex-1 btn-primary">
+                          <button onClick={handleCreate} disabled={isSubmitting} className="flex-1 btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
                             Create Market
                           </button>
                         </div>
@@ -850,9 +1085,18 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         {isSlowTransaction && (
                           <div className="mt-4 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                             <p className="text-sm text-yellow-400">
-                              This is taking longer than expected. Please check that your wallet extension
-                              is open and unlocked. The wallet may be generating a zero-knowledge proof,
-                              which can take 30-60 seconds.
+                              {wallet.walletType === 'shield' ? (
+                                <>
+                                  Shield Wallet is processing... If you don't see activity in your Shield extension,
+                                  it may not support this transaction type. Consider using <strong>Puzzle Wallet</strong> as an alternative.
+                                </>
+                              ) : (
+                                <>
+                                  This is taking longer than expected. Please check that your wallet extension
+                                  is open and unlocked. The wallet may be generating a zero-knowledge proof,
+                                  which can take 30-60 seconds.
+                                </>
+                              )}
                             </p>
                           </div>
                         )}
@@ -910,7 +1154,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         </div>
 
                         {/* Polling for on-chain confirmation */}
-                        <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-6 text-left">
+                        <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-4 text-left">
                           <div className="flex items-start gap-3">
                             <Loader2 className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
                             <div>

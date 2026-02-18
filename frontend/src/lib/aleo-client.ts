@@ -1,51 +1,85 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v10.aleo program
+// Client for interacting with the deployed veiled_markets_v14.aleo program
 // ============================================================================
 
 import { config } from './config';
-import { fetchMarketRegistry, isSupabaseAvailable } from './supabase';
+import { fetchMarketRegistry, isSupabaseAvailable, clearAllSupabaseData } from './supabase';
 
-// Contract constants (matching main.leo)
+// Contract constants (matching main.leo v14)
 export const MARKET_STATUS = {
   ACTIVE: 1,
   CLOSED: 2,
   RESOLVED: 3,
   CANCELLED: 4,
+  PENDING_RESOLUTION: 5,
 } as const;
 
 export const OUTCOME = {
+  ONE: 1,
+  TWO: 2,
+  THREE: 3,
+  FOUR: 4,
+  // Legacy aliases
   YES: 1,
   NO: 2,
 } as const;
 
+export const TOKEN_TYPE = {
+  ALEO: 1,
+  USDCX: 2,
+} as const;
+
+export const TOKEN_SYMBOLS: Record<number, string> = {
+  1: 'ALEO',
+  2: 'USDCX',
+};
+
 export const FEES = {
-  PROTOCOL_FEE_BPS: 100n, // 1%
-  CREATOR_FEE_BPS: 100n,  // 1%
+  PROTOCOL_FEE_BPS: 50n,  // 0.5% per trade
+  CREATOR_FEE_BPS: 50n,   // 0.5% per trade
+  LP_FEE_BPS: 100n,       // 1.0% per trade
+  TOTAL_FEE_BPS: 200n,    // 2.0% total
   FEE_DENOMINATOR: 10000n,
 };
 
-// Types matching the contract structures
+export const CHALLENGE_WINDOW_BLOCKS = 2880n; // ~12 hours
+
+const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx']);
+
+function isCreateMarketFunction(functionName: unknown): boolean {
+  return typeof functionName === 'string' && CREATE_MARKET_FUNCTIONS.has(functionName);
+}
+
+export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
+export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
+export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
+
+// Types matching the contract structures (v14)
 export interface MarketData {
   id: string;
   creator: string;
   resolver: string;
   question_hash: string;
   category: number;
+  num_outcomes: number;     // v12: 2, 3, or 4
   deadline: bigint;
   resolution_deadline: bigint;
   status: number;
   created_at: bigint;
-  token_type: number; // 1=ALEO, 2=USDCX
+  token_type: number;       // 1=ALEO, 2=USDCX
 }
 
-export interface MarketPoolData {
+export interface AMMPoolData {
   market_id: string;
-  total_yes_pool: bigint;
-  total_no_pool: bigint;
-  total_bets: bigint;
-  total_unique_bettors: bigint;
+  reserve_1: bigint;
+  reserve_2: bigint;
+  reserve_3: bigint;
+  reserve_4: bigint;
+  total_liquidity: bigint;
+  total_lp_shares: bigint;
+  total_volume: bigint;
 }
 
 export interface MarketResolutionData {
@@ -53,8 +87,26 @@ export interface MarketResolutionData {
   winning_outcome: number;
   resolver: string;
   resolved_at: bigint;
-  total_payout_pool: bigint;
+  challenge_deadline: bigint;  // v12: challenge window
+  finalized: boolean;          // v12: finalization flag
 }
+
+export interface MarketFeesData {
+  market_id: string;
+  protocol_fees: bigint;
+  creator_fees: bigint;
+}
+
+export interface DisputeDataResult {
+  market_id: string;
+  disputer: string;
+  proposed_outcome: number;
+  bond_amount: bigint;
+  disputed_at: bigint;
+}
+
+// Legacy alias
+export type MarketPoolData = AMMPoolData;
 
 // API configuration
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
@@ -221,9 +273,10 @@ export async function waitForMarketCreation(
   questionHash: string,
   questionText: string,
   maxAttempts: number = 20,
-  intervalMs: number = 15000
+  intervalMs: number = 15000,
+  programId: string = PROGRAM_ID
 ): Promise<string | null> {
-  console.log('[waitForMarket] Waiting for market creation:', transactionId);
+  console.log('[waitForMarket] Waiting for market creation:', transactionId, '| program:', programId);
 
   // Strategy 1: If we have an on-chain tx ID, poll the RPC directly
   if (transactionId.startsWith('at1')) {
@@ -258,12 +311,23 @@ export async function waitForMarketCreation(
   // This works for ALL wallets (Shield, Puzzle, Leo, etc.) regardless of event ID format.
   console.log('[waitForMarket] Falling back to blockchain scan for questionHash:', questionHash);
 
-  // Wait a bit for the transaction to be included in a block
-  await new Promise(resolve => setTimeout(resolve, 20000));
+  // Wait for the transaction to be included in a block, then do progressively deeper scans
+  // Quick first scan (30 blocks ~7.5 min), then deeper scans with longer delays
+  const scanSchedule = [
+    { delayMs: 10_000, blocks: 30 },    // After 10s: quick scan of very recent blocks
+    { delayMs: 15_000, blocks: 100 },   // After 15s: scan last 100 blocks (~25 min)
+    { delayMs: 30_000, blocks: 300 },   // After 30s: scan last 300 blocks (~75 min)
+    { delayMs: 45_000, blocks: 500 },   // After 45s: scan last 500 blocks (~2 hours)
+    { delayMs: 60_000, blocks: 800 },   // After 60s: scan last 800 blocks (~3 hours)
+  ];
 
-  for (let scanAttempt = 0; scanAttempt < 15; scanAttempt++) {
+  for (let i = 0; i < scanSchedule.length; i++) {
+    const { delayMs, blocks } = scanSchedule[i];
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+
     try {
-      const marketId = await scanBlockchainForMarket(questionHash);
+      console.log(`[waitForMarket] Scan attempt ${i + 1}/${scanSchedule.length} (${blocks} blocks)...`);
+      const marketId = await scanBlockchainForMarket(questionHash, blocks, programId);
       if (marketId) {
         console.log('[waitForMarket] Found market via blockchain scan! ID:', marketId);
         addKnownMarketId(marketId);
@@ -272,11 +336,8 @@ export async function waitForMarketCreation(
         return marketId;
       }
     } catch (err) {
-      console.warn(`[waitForMarket] Scan attempt ${scanAttempt + 1} error:`, err);
+      console.warn(`[waitForMarket] Scan attempt ${i + 1} error:`, err);
     }
-
-    // Wait 20 seconds between scan attempts
-    await new Promise(resolve => setTimeout(resolve, 20000));
   }
 
   console.warn('[waitForMarket] All strategies exhausted');
@@ -286,26 +347,52 @@ export async function waitForMarketCreation(
 /**
  * Scan recent blocks for a create_market transaction matching the given question hash.
  * Looks at the finalize arguments to find the market_id.
+ *
+ * Uses small parallel batches (3) to avoid API rate limiting, with retries for failed blocks.
  */
-async function scanBlockchainForMarket(questionHash: string): Promise<string | null> {
+async function scanBlockchainForMarket(
+  questionHash: string,
+  blocksToScan: number = 500,
+  programId: string = PROGRAM_ID
+): Promise<string | null> {
   try {
     const latestHeight = await getCurrentBlockHeight();
-    const blocksToScan = 30; // ~7.5 minutes of blocks at 15s/block
+    const startHeight = Number(latestHeight);
 
-    console.log(`[scanBlockchain] Scanning blocks ${latestHeight - BigInt(blocksToScan)} to ${latestHeight}`);
+    console.log(`[scanBlockchain] Scanning blocks ${startHeight - blocksToScan} to ${startHeight} for hash ${questionHash.slice(0, 20)}...`);
 
-    // Scan in parallel batches of 5 blocks
-    for (let offset = 0; offset < blocksToScan; offset += 5) {
-      const promises = [];
-      for (let i = 0; i < 5 && offset + i < blocksToScan; i++) {
-        const height = Number(latestHeight) - offset - i;
-        promises.push(scanBlockForCreateMarket(height, questionHash));
+    let scannedCount = 0;
+    let failedCount = 0;
+
+    // Scan in parallel batches of 3 blocks (newest first) to avoid API rate limiting
+    const BATCH_SIZE = 3;
+    for (let offset = 0; offset < blocksToScan; offset += BATCH_SIZE) {
+      const heights: number[] = [];
+      for (let i = 0; i < BATCH_SIZE && offset + i < blocksToScan; i++) {
+        const height = startHeight - offset - i;
+        if (height >= 0) heights.push(height);
       }
 
-      const results = await Promise.all(promises);
-      const found = results.find(r => r !== null);
-      if (found) return found;
+      const results = await Promise.all(
+        heights.map(h => scanBlockForCreateMarketWithRetry(h, questionHash, programId))
+      );
+
+      scannedCount += heights.length;
+      failedCount += results.filter(r => r === undefined).length; // undefined = failed after retries
+
+      const found = results.find(r => r !== null && r !== undefined);
+      if (found) {
+        console.log(`[scanBlockchain] Found market after scanning ${scannedCount} blocks (${failedCount} failed)`);
+        return found;
+      }
+
+      // Delay between batches to avoid API rate limiting
+      if (offset + BATCH_SIZE < blocksToScan) {
+        await new Promise(r => setTimeout(r, 200));
+      }
     }
+
+    console.log(`[scanBlockchain] Not found after ${scannedCount} blocks (${failedCount} blocks failed to fetch)`);
   } catch (err) {
     console.warn('[scanBlockchain] Error:', err);
   }
@@ -314,46 +401,72 @@ async function scanBlockchainForMarket(questionHash: string): Promise<string | n
 }
 
 /**
- * Check a single block for a create_market transition matching the question hash.
+ * Scan a single block with 1 retry on failure.
+ * Returns: string (market_id) if found, null if scanned but not found, undefined if fetch failed.
  */
-async function scanBlockForCreateMarket(blockHeight: number, questionHash: string): Promise<string | null> {
-  try {
-    const url = `${API_BASE_URL}/block/${blockHeight}`;
-    const response = await fetchWithTimeout(url, 10000);
-    if (!response.ok) return null;
+async function scanBlockForCreateMarketWithRetry(
+  blockHeight: number,
+  questionHash: string,
+  programId: string = PROGRAM_ID
+): Promise<string | null | undefined> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await scanBlockForCreateMarket(blockHeight, questionHash, programId);
+      return result; // null (not found) or string (found)
+    } catch {
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 500)); // Brief pause before retry
+      }
+    }
+  }
+  return undefined; // Both attempts failed
+}
 
-    const block = await response.json();
-    const transactions = block.transactions || [];
+/**
+ * Check a single block for a create_market transition matching the question hash.
+ * Throws on fetch failure (caller handles retry). Returns null if block was fetched but no match.
+ */
+async function scanBlockForCreateMarket(
+  blockHeight: number,
+  questionHash: string,
+  programId: string = PROGRAM_ID
+): Promise<string | null> {
+  const url = `${API_BASE_URL}/block/${blockHeight}`;
+  const response = await fetchWithTimeout(url, 10000);
+  if (!response.ok) {
+    if (response.status === 404) return null; // Block doesn't exist
+    throw new Error(`Block ${blockHeight}: HTTP ${response.status}`);
+  }
 
-    for (const txWrapper of transactions) {
-      const tx = txWrapper.transaction || txWrapper;
-      const transitions = tx.execution?.transitions || [];
+  const block = await response.json();
+  const transactions = block.transactions || [];
 
-      for (const transition of transitions) {
-        if (transition.program !== PROGRAM_ID || transition.function !== 'create_market') continue;
+  for (const txWrapper of transactions) {
+    const tx = txWrapper.transaction || txWrapper;
+    const transitions = tx.execution?.transitions || [];
 
-        // Check the future output for finalize arguments
-        for (const output of (transition.outputs || [])) {
-          if (output.type !== 'future') continue;
+    for (const transition of transitions) {
+      if (transition.program !== programId || !isCreateMarketFunction(transition.function)) continue;
 
-          const value = output.value || '';
-          // The finalize arguments are: market_id, creator, question_hash, category, deadline, resolution_deadline, resolver, token_type
-          // question_hash is the 3rd argument (index 2)
-          const args = extractFinalizeArguments(value);
-          if (args.length >= 3) {
-            const foundQuestionHash = args[2]; // question_hash
-            const foundMarketId = args[0];     // market_id
+      // Check the future output for finalize arguments
+      for (const output of (transition.outputs || [])) {
+        if (output.type !== 'future') continue;
 
-            if (foundQuestionHash === questionHash && foundMarketId) {
-              console.log(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}...`);
-              return foundMarketId;
-            }
+        const value = output.value || '';
+        // The finalize arguments are: market_id, creator, question_hash, category, deadline, resolution_deadline, resolver, token_type
+        // question_hash is the 3rd argument (index 2)
+        const args = extractFinalizeArguments(value);
+        if (args.length >= 3) {
+          const foundQuestionHash = args[2]; // question_hash
+          const foundMarketId = args[0];     // market_id
+
+          if (foundQuestionHash === questionHash && foundMarketId) {
+            console.log(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}...`);
+            return foundMarketId;
           }
         }
       }
     }
-  } catch {
-    // Silently skip failed blocks
   }
   return null;
 }
@@ -365,16 +478,46 @@ async function scanBlockForCreateMarket(blockHeight: number, questionHash: strin
 function extractFinalizeArguments(value: string): string[] {
   const args: string[] = [];
 
-  // Find the arguments array section
-  const argsMatch = value.match(/arguments:\s*\[([\s\S]*?)\]/);
-  if (!argsMatch) return args;
+  // Find the OUTER arguments array using bracket counting.
+  // The old non-greedy regex /([\s\S]*?)\]/ stopped at the FIRST ']' which
+  // is the inner child future's bracket (e.g., credits.aleo/transfer_public_as_signer).
+  // This caused market_id and question_hash to never be extracted.
+  const outerIdx = value.indexOf('arguments:');
+  if (outerIdx === -1) return args;
 
-  const argsContent = argsMatch[1];
-  // Split by comma, handling nested structures (like sub-futures with their own brackets)
-  // Simple approach: match field, address, u8, u64 values
+  const bracketStart = value.indexOf('[', outerIdx);
+  if (bracketStart === -1) return args;
+
+  // Find matching closing bracket using depth counting
+  let depth = 0;
+  let bracketEnd = -1;
+  for (let i = bracketStart; i < value.length; i++) {
+    if (value[i] === '[') depth++;
+    else if (value[i] === ']') {
+      depth--;
+      if (depth === 0) {
+        bracketEnd = i;
+        break;
+      }
+    }
+  }
+  if (bracketEnd === -1) return args;
+
+  const argsContent = value.substring(bracketStart + 1, bracketEnd);
+
+  // Strip nested { } content (child futures) to only extract top-level argument values
+  let topLevel = '';
+  let braceDepth = 0;
+  for (let i = 0; i < argsContent.length; i++) {
+    if (argsContent[i] === '{') braceDepth++;
+    else if (argsContent[i] === '}') braceDepth--;
+    else if (braceDepth === 0) topLevel += argsContent[i];
+  }
+
+  // Match field, address, u8, u64, u128 values from top-level arguments only
   const valuePattern = /(\d+field|\d+u\d+|aleo[a-z0-9]+)/g;
   let match;
-  while ((match = valuePattern.exec(argsContent)) !== null) {
+  while ((match = valuePattern.exec(topLevel)) !== null) {
     args.push(match[1]);
   }
 
@@ -512,20 +655,12 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
 
   // Parse each field explicitly
   const parsedCategory = parseAleoValue(data.category || '0u8');
+  const parsedNumOutcomes = parseAleoValue(data.num_outcomes || '2u8');
   const parsedDeadline = parseAleoValue(data.deadline || '0u64');
   const parsedResolutionDeadline = parseAleoValue(data.resolution_deadline || '0u64');
   const parsedStatus = parseAleoValue(data.status || '1u8');
   const parsedCreatedAt = parseAleoValue(data.created_at || '0u64');
   const parsedTokenType = parseAleoValue(data.token_type || '1u8');
-
-  console.log('Parsed values:', {
-    category: parsedCategory,
-    deadline: parsedDeadline,
-    resolution_deadline: parsedResolutionDeadline,
-    status: parsedStatus,
-    created_at: parsedCreatedAt,
-    token_type: parsedTokenType,
-  });
 
   const result = {
     id: data.id || marketId,
@@ -533,6 +668,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
     resolver: data.resolver || data.creator || '',
     question_hash: data.question_hash || '',
     category: typeof parsedCategory === 'number' ? parsedCategory : 0,
+    num_outcomes: typeof parsedNumOutcomes === 'number' ? parsedNumOutcomes : 2,
     deadline: typeof parsedDeadline === 'bigint' ? parsedDeadline : 0n,
     resolution_deadline: typeof parsedResolutionDeadline === 'bigint' ? parsedResolutionDeadline : 0n,
     status: typeof parsedStatus === 'number' ? parsedStatus : 1,
@@ -545,23 +681,29 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
 }
 
 /**
- * Fetch market pool data
+ * Fetch AMM pool data (v12 - replaces market_pools)
  */
-export async function getMarketPool(marketId: string): Promise<MarketPoolData | null> {
-  const data = await getMappingValue<Record<string, string>>('market_pools', marketId);
+export async function getAMMPool(marketId: string): Promise<AMMPoolData | null> {
+  const data = await getMappingValue<Record<string, string>>('amm_pools', marketId);
   if (!data) return null;
 
   return {
     market_id: String(data.market_id || marketId),
-    total_yes_pool: BigInt(parseAleoValue(data.total_yes_pool || '0u64') as bigint),
-    total_no_pool: BigInt(parseAleoValue(data.total_no_pool || '0u64') as bigint),
-    total_bets: BigInt(parseAleoValue(data.total_bets || '0u64') as bigint),
-    total_unique_bettors: BigInt(parseAleoValue(data.total_unique_bettors || '0u64') as bigint),
+    reserve_1: BigInt(parseAleoValue(data.reserve_1 || '0u128') as bigint),
+    reserve_2: BigInt(parseAleoValue(data.reserve_2 || '0u128') as bigint),
+    reserve_3: BigInt(parseAleoValue(data.reserve_3 || '0u128') as bigint),
+    reserve_4: BigInt(parseAleoValue(data.reserve_4 || '0u128') as bigint),
+    total_liquidity: BigInt(parseAleoValue(data.total_liquidity || '0u128') as bigint),
+    total_lp_shares: BigInt(parseAleoValue(data.total_lp_shares || '0u128') as bigint),
+    total_volume: BigInt(parseAleoValue(data.total_volume || '0u128') as bigint),
   };
 }
 
+// Legacy alias
+export const getMarketPool = getAMMPool;
+
 /**
- * Fetch market resolution data
+ * Fetch market resolution data (v12 - with challenge window fields)
  */
 export async function getMarketResolution(marketId: string): Promise<MarketResolutionData | null> {
   const data = await getMappingValue<Record<string, string>>('market_resolutions', marketId);
@@ -572,7 +714,38 @@ export async function getMarketResolution(marketId: string): Promise<MarketResol
     winning_outcome: Number(parseAleoValue(data.winning_outcome || '0u8')),
     resolver: String(data.resolver || ''),
     resolved_at: BigInt(parseAleoValue(data.resolved_at || '0u64') as bigint),
-    total_payout_pool: BigInt(parseAleoValue(data.total_payout_pool || '0u64') as bigint),
+    challenge_deadline: BigInt(parseAleoValue(data.challenge_deadline || '0u64') as bigint),
+    finalized: String(parseAleoValue(data.finalized || 'false')) === 'true',
+  };
+}
+
+/**
+ * Fetch market fees data (v12 - per-market fee tracking)
+ */
+export async function getMarketFees(marketId: string): Promise<MarketFeesData | null> {
+  const data = await getMappingValue<Record<string, string>>('market_fees', marketId);
+  if (!data) return null;
+
+  return {
+    market_id: String(data.market_id || marketId),
+    protocol_fees: BigInt(parseAleoValue(data.protocol_fees || '0u128') as bigint),
+    creator_fees: BigInt(parseAleoValue(data.creator_fees || '0u128') as bigint),
+  };
+}
+
+/**
+ * Fetch dispute data for a market
+ */
+export async function getMarketDispute(marketId: string): Promise<DisputeDataResult | null> {
+  const data = await getMappingValue<Record<string, string>>('market_disputes', marketId);
+  if (!data) return null;
+
+  return {
+    market_id: String(data.market_id || marketId),
+    disputer: String(data.disputer || ''),
+    proposed_outcome: Number(parseAleoValue(data.proposed_outcome || '0u8')),
+    bond_amount: BigInt(parseAleoValue(data.bond_amount || '0u128') as bigint),
+    disputed_at: BigInt(parseAleoValue(data.disputed_at || '0u64') as bigint),
   };
 }
 
@@ -587,164 +760,283 @@ export async function hasUserClaimed(_marketId: string, _userAddress: string): P
 }
 
 /**
- * Calculate YES probability from pool data
+ * Generate a random nonce field value (248 bits, safely < field max ~253 bits)
  */
-export function calculateYesProbability(yesPool: bigint, noPool: bigint): number {
-  const total = yesPool + noPool;
-  if (total === 0n) return 50; // Default 50% when no bets
-  return Number((yesPool * 10000n) / total) / 100;
+function generateRandomNonce(): string {
+  const randomBytes = new Uint8Array(31);
+  crypto.getRandomValues(randomBytes);
+  let nonce = BigInt(0);
+  for (let i = 0; i < randomBytes.length; i++) {
+    nonce = (nonce << BigInt(8)) | BigInt(randomBytes[i]);
+  }
+  return `${nonce}field`;
 }
 
 /**
- * Calculate potential payout multiplier
- */
-export function calculatePotentialPayout(
-  betOnYes: boolean,
-  yesPool: bigint,
-  noPool: bigint
-): number {
-  const totalPool = yesPool + noPool;
-  const winningPool = betOnYes ? yesPool : noPool;
-
-  if (winningPool === 0n) return 0;
-
-  // Payout = (total_pool / winning_pool) * (1 - fees)
-  const grossMultiplier = Number(totalPool * 10000n / winningPool) / 10000;
-  const feeMultiplier = Number(FEES.FEE_DENOMINATOR - FEES.PROTOCOL_FEE_BPS - FEES.CREATOR_FEE_BPS) / Number(FEES.FEE_DENOMINATOR);
-
-  return grossMultiplier * feeMultiplier;
-}
-
-/**
- * Build inputs for create_market transaction
+ * Build inputs for create_market transaction (v14)
+ * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
+ * Token type is determined by function name (create_market vs create_market_usdcx)
  */
 export function buildCreateMarketInputs(
   questionHash: string,
   category: number,
+  numOutcomes: number,
   deadline: bigint,
   resolutionDeadline: bigint,
   resolverAddress: string,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO'
-): string[] {
-  const tokenTypeValue = tokenType === 'USDCX' ? 2 : 1;
-  return [
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  initialLiquidity: bigint,
+): { functionName: string; inputs: string[] } {
+  const inputs = [
     questionHash,
     `${category}u8`,
+    `${numOutcomes}u8`,
     `${deadline}u64`,
     `${resolutionDeadline}u64`,
     resolverAddress,
-    `${tokenTypeValue}u8`,
-  ];
-}
-
-/**
- * Build inputs for place_bet transaction (v5)
- * place_bet(market_id: field, amount: u64, outcome: u8)
- * Uses transfer_public_as_signer for wallet SDK compatibility
- */
-/**
- * Build inputs for place_bet transaction (Privacy-Preserving)
- * Contract signature: place_bet(market_id: field, amount: u64, outcome: u8, credits_in: credits.aleo/credits)
- * We pass only the 3 public inputs - the wallet auto-selects the private credits record
- * This keeps the bettor's identity hidden via transfer_private_to_public
- */
-export function buildPlaceBetInputs(
-  marketId: string,
-  amount: bigint,
-  outcome: 'yes' | 'no',
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
-): { functionName: string; inputs: string[] } {
-  // Fix 7: Generate random bet_nonce for unique per-bet claim tracking
-  const randomBytes = new Uint8Array(31); // 31 bytes = 248 bits, safely < field max (~253 bits)
-  crypto.getRandomValues(randomBytes);
-  let betNonce = BigInt(0);
-  for (let i = 0; i < randomBytes.length; i++) {
-    betNonce = (betNonce << BigInt(8)) | BigInt(randomBytes[i]);
-  }
-  const betNonceStr = `${betNonce}field`;
-
-  // v11: All amounts are u128 internally
-  const inputs = [
-    marketId,
-    `${amount}u128`,
-    outcome === 'yes' ? '1u8' : '2u8',
-    betNonceStr,
+    `${initialLiquidity}u128`,
   ];
 
   return {
-    functionName: tokenType === 'USDCX' ? 'place_bet_public_usdcx' : 'place_bet_public',
+    functionName: tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market',
     inputs,
   };
 }
 
 /**
- * Build inputs for place_bet (PRIVATE version) - uses a Credits record
- * place_bet(market_id: field, amount: u64, outcome: u8, bet_nonce: field, credits_in: credits.aleo/credits)
- * This version uses transfer_private_to_public, hiding the bettor's identity.
+ * Build inputs for buy_shares (v14 AMM trading)
+ * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
+ *   Uses transfer_private_to_public with credits record for privacy.
+ * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
+ *   Uses transfer_public_as_signer (no record needed).
+ * Frontend pre-computes expected_shares from AMM formula. Record gets this value.
+ * Finalize validates shares_out >= expected_shares.
  */
+export function buildBuySharesInputs(
+  marketId: string,
+  outcome: number,
+  amountIn: bigint,
+  expectedShares: bigint,
+  minSharesOut: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  creditsRecord?: string,
+): { functionName: string; inputs: string[] } {
+  const shareNonce = generateRandomNonce();
+
+  const inputs = [
+    marketId,
+    `${outcome}u8`,
+    `${amountIn}u128`,
+    `${expectedShares}u128`,
+    `${minSharesOut}u128`,
+    shareNonce,
+  ];
+
+  if (tokenType === 'USDCX') {
+    return {
+      functionName: 'buy_shares_usdcx',
+      inputs,
+    };
+  }
+
+  // ALEO: buy_shares_private requires credits record
+  if (!creditsRecord) {
+    throw new Error('Credits record is required for ALEO buy_shares_private. Fetch a record via fetchCreditsRecord() first.');
+  }
+  inputs.push(creditsRecord);
+  return {
+    functionName: 'buy_shares_private',
+    inputs,
+  };
+}
+
+/**
+ * Build inputs for buy_shares_private (v14 privacy-preserving, ALEO only)
+ * Alias for buildBuySharesInputs with tokenType='ALEO'.
+ */
+export function buildBuySharesPrivateInputs(
+  marketId: string,
+  outcome: number,
+  amountIn: bigint,
+  expectedShares: bigint,
+  minSharesOut: bigint,
+  creditsRecord: string,
+): { functionName: string; inputs: string[] } {
+  return buildBuySharesInputs(marketId, outcome, amountIn, expectedShares, minSharesOut, 'ALEO', creditsRecord);
+}
+
+/**
+ * Build inputs for sell_shares (v14 tokens_desired approach)
+ * sell_shares(shares: OutcomeShare, tokens_desired, max_shares_used)
+ * User specifies how many tokens to withdraw. Contract computes shares needed.
+ * Transition calls credits.aleo/transfer_public for the net payout.
+ */
+export function buildSellSharesInputs(
+  sharesRecord: string,
+  tokensDesired: bigint,
+  maxSharesUsed: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
+  const inputs = [
+    sharesRecord,
+    `${tokensDesired}u128`,
+    `${maxSharesUsed}u128`,
+  ];
+
+  return {
+    functionName: tokenType === 'USDCX' ? 'sell_shares_usdcx' : 'sell_shares',
+    inputs,
+  };
+}
+
+/**
+ * Build inputs for add_liquidity (v14 LP provision)
+ * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
+ * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
+ */
+export function buildAddLiquidityInputs(
+  marketId: string,
+  amount: bigint,
+  expectedLpShares: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
+  const lpNonce = generateRandomNonce();
+
+  const inputs = [
+    marketId,
+    `${amount}u128`,
+    `${expectedLpShares}u128`,
+    lpNonce,
+  ];
+
+  return {
+    functionName: tokenType === 'USDCX' ? 'add_liquidity_usdcx' : 'add_liquidity',
+    inputs,
+  };
+}
+
+/**
+ * Build inputs for remove_liquidity (v14 LP withdrawal)
+ * remove_liquidity(lp_token: LPToken, shares_to_remove, min_tokens_out)
+ */
+export function buildRemoveLiquidityInputs(
+  lpTokenRecord: string,
+  sharesToRemove: bigint,
+  minTokensOut: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
+  const inputs = [
+    lpTokenRecord,
+    `${sharesToRemove}u128`,
+    `${minTokensOut}u128`,
+  ];
+
+  return {
+    functionName: tokenType === 'USDCX' ? 'remove_liquidity_usdcx' : 'remove_liquidity',
+    inputs,
+  };
+}
+
+/**
+ * Build inputs for dispute_resolution (v14 - bond always in ALEO)
+ * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
+ * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
+ */
+export function buildDisputeResolutionInputs(
+  marketId: string,
+  proposedOutcome: number,
+): { functionName: string; inputs: string[] } {
+  const disputeNonce = generateRandomNonce();
+
+  const inputs = [
+    marketId,
+    `${proposedOutcome}u8`,
+    disputeNonce,
+  ];
+
+  return {
+    functionName: 'dispute_resolution',
+    inputs,
+  };
+}
+
+// Legacy aliases for backward compatibility
+export function buildPlaceBetInputs(
+  marketId: string,
+  amount: bigint,
+  outcome: 'yes' | 'no',
+  expectedShares: bigint = 0n,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  creditsRecord?: string,
+): { functionName: string; inputs: string[] } {
+  return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, tokenType, creditsRecord);
+}
+
 export function buildPlaceBetPrivateInputs(
   marketId: string,
   amount: bigint,
   outcome: 'yes' | 'no',
+  expectedShares: bigint,
   creditsRecord: string,
-): string[] {
-  const randomBytes = new Uint8Array(31);
-  crypto.getRandomValues(randomBytes);
-  let betNonce = BigInt(0);
-  for (let i = 0; i < randomBytes.length; i++) {
-    betNonce = (betNonce << BigInt(8)) | BigInt(randomBytes[i]);
+): { functionName: string; inputs: string[] } {
+  return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, 'ALEO', creditsRecord);
+}
+
+/**
+ * Calculate outcome price from AMM pool (v14 FPMM)
+ * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
+ * Binary simplification: price_i = r_other / (r1 + r2)
+ */
+export function calculateOutcomePrice(pool: AMMPoolData, outcome: number): number {
+  const reserves = [pool.reserve_1, pool.reserve_2, pool.reserve_3, pool.reserve_4];
+  // Determine active reserves (non-zero or first 2 for binary)
+  const numOutcomes = pool.reserve_3 > 0n ? (pool.reserve_4 > 0n ? 4 : 3) : 2;
+  const active = reserves.slice(0, numOutcomes);
+  const total = active.reduce((a, b) => a + b, 0n);
+  if (total === 0n) return 50;
+
+  if (numOutcomes === 2) {
+    // Binary: price_i = r_other / total
+    const idx = outcome - 1;
+    const otherIdx = idx === 0 ? 1 : 0;
+    return Number((active[otherIdx] * 10000n) / total) / 100;
   }
-  const betNonceStr = `${betNonce}field`;
 
-  return [
-    marketId,
-    `${amount}u128`,
-    outcome === 'yes' ? '1u8' : '2u8',
-    betNonceStr,
-    creditsRecord,
-  ];
+  // N-outcome: price_i = product(r_j, j!=i) / sum(product(r_j, j!=k) for each k)
+  const products: bigint[] = [];
+  for (let k = 0; k < numOutcomes; k++) {
+    let prod = 1n;
+    for (let j = 0; j < numOutcomes; j++) {
+      if (j !== k) prod = prod * active[j];
+    }
+    products.push(prod);
+  }
+  const sumProducts = products.reduce((a, b) => a + b, 0n);
+  if (sumProducts === 0n) return 100 / numOutcomes;
+  const idx = outcome - 1;
+  return Number((products[idx] * 10000n) / sumProducts) / 100;
 }
 
-/**
- * Build inputs for commit_bet transaction (Phase 2: Commit-Reveal Scheme)
- * commit_bet(market_id: field, amount: u64, outcome: u8, user_nonce: field, credits_in: credits.aleo/credits)
- * Fix 2: No longer returns a Bet record (only Commitment + credits change)
- * H-02: user_nonce is user-provided for commitment uniqueness
- */
-export function buildCommitBetInputs(
-  marketId: string,
-  amount: bigint,
-  outcome: 'yes' | 'no',
-  userNonce: string,       // User-provided random nonce (H-02)
-  creditsRecord: string,   // Private credits record ciphertext
-): string[] {
-  return [
-    marketId,
-    `${amount}u64`,  // Private parameter
-    outcome === 'yes' ? '1u8' : '2u8',  // Private parameter
-    userNonce,       // Private user nonce
-    creditsRecord,   // Private credits record
-  ];
+// Legacy aliases
+export function calculateYesProbability(yesPool: bigint, noPool: bigint): number {
+  const total = yesPool + noPool;
+  if (total === 0n) return 50;
+  return Number((yesPool * 10000n) / total) / 100;
 }
 
-/**
- * Build inputs for reveal_bet transaction (Phase 2: Commit-Reveal Scheme)
- * reveal_bet(commitment: Commitment, credits_record: credits.aleo/credits, amount: u64, outcome: u8)
- * Fix 2: No longer takes a Bet record (Bet is created at reveal time)
- * Fix 3: Single hash verification (matches simplified commit_bet)
- */
-export function buildRevealBetInputs(
-  commitmentRecord: string,  // Private Commitment record ciphertext
-  creditsRecord: string,  // Private credits record ciphertext
-  amount: bigint,  // Private amount
-  outcome: 'yes' | 'no',  // Private outcome
-): string[] {
-  return [
-    commitmentRecord,  // Private
-    creditsRecord,  // Private
-    `${amount}u64`,  // Private
-    outcome === 'yes' ? '1u8' : '2u8',  // Private
-  ];
+export function calculatePotentialPayout(
+  betOnYes: boolean,
+  yesPool: bigint,
+  noPool: bigint
+): number {
+  // In v12 AMM model, winning shares redeem 1:1.
+  // This legacy function returns a rough multiplier.
+  const totalPool = yesPool + noPool;
+  const winningPool = betOnYes ? yesPool : noPool;
+  if (winningPool === 0n) return 0;
+  const grossMultiplier = Number(totalPool * 10000n / winningPool) / 10000;
+  const feeMultiplier = Number(FEES.FEE_DENOMINATOR - FEES.TOTAL_FEE_BPS) / Number(FEES.FEE_DENOMINATOR);
+  return grossMultiplier * feeMultiplier;
 }
 
 /**
@@ -782,16 +1074,44 @@ export function buildCloseMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for resolve_market transaction
+ * Build inputs for resolve_market transaction (v12 - multi-outcome)
  */
 export function buildResolveMarketInputs(
   marketId: string,
-  winningOutcome: 'yes' | 'no'
+  winningOutcome: number | 'yes' | 'no',
 ): string[] {
+  // Support legacy 'yes'/'no' strings and numeric outcomes
+  const outcomeNum = typeof winningOutcome === 'string'
+    ? (winningOutcome === 'yes' ? 1 : 2)
+    : winningOutcome;
   return [
     marketId,
-    winningOutcome === 'yes' ? '1u8' : '2u8',
+    `${outcomeNum}u8`,
   ];
+}
+
+/**
+ * Build inputs for finalize_resolution (v12 - after challenge window)
+ */
+export function buildFinalizeResolutionInputs(marketId: string): string[] {
+  return [marketId];
+}
+
+/**
+ * Build inputs for withdraw_creator_fees (v14)
+ * withdraw_creator_fees(market_id, expected_amount) — ALEO
+ * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
+ * Transition calls transfer_public with expected_amount, finalize validates.
+ */
+export function buildWithdrawCreatorFeesInputs(
+  marketId: string,
+  expectedAmount: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
+  return {
+    functionName: tokenType === 'USDCX' ? 'withdraw_fees_usdcx' : 'withdraw_creator_fees',
+    inputs: [marketId, `${expectedAmount}u128`],
+  };
 }
 
 /**
@@ -968,6 +1288,286 @@ export function addKnownMarketId(marketId: string): void {
 }
 
 /**
+ * Resolve a market from a known on-chain transaction ID.
+ * Fetches the TX, extracts market_id from the future output, registers everything.
+ * Returns the market_id or null.
+ */
+export async function resolveMarketFromTransaction(
+  transactionId: string,
+  questionText?: string,
+): Promise<string | null> {
+  if (!transactionId.startsWith('at1')) return null;
+
+  try {
+    const url = `${API_BASE_URL}/transaction/${transactionId}`;
+    const response = await fetchWithRetry(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const transitions = data.execution?.transitions || [];
+
+    for (const transition of transitions) {
+      if (transition.program !== PROGRAM_ID || !isCreateMarketFunction(transition.function)) continue;
+
+      for (const output of (transition.outputs || [])) {
+        if (output.type !== 'future') continue;
+
+        const args = extractFinalizeArguments(output.value || '');
+        if (args.length >= 3) {
+          const marketId = args[0];
+          const questionHash = args[2];
+
+          if (marketId) {
+            console.log('[resolveFromTx] Found market_id:', marketId.slice(0, 30) + '...');
+            addKnownMarketId(marketId);
+            if (questionText) {
+              registerQuestionText(marketId, questionText);
+              registerQuestionText(questionHash, questionText);
+            }
+            registerMarketTransaction(marketId, transactionId);
+            return marketId;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[resolveFromTx] Error:', err);
+  }
+
+  return null;
+}
+
+// ============================================================================
+// PENDING MARKETS — Auto-resolve on Dashboard load
+// ============================================================================
+// When a market is created via wallet, the market ID isn't known immediately.
+// We save the question hash + tx ID as "pending". On next page load,
+// the Dashboard resolves pending markets via blockchain scan.
+// ============================================================================
+
+interface PendingMarket {
+  questionHash: string
+  questionText: string
+  transactionId: string   // wallet event ID (shield_, UUID, or at1...)
+  createdAt: number
+}
+
+export function savePendingMarket(pending: PendingMarket): void {
+  if (typeof window === 'undefined') return
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending')
+    const list: PendingMarket[] = saved ? JSON.parse(saved) : []
+    // Avoid duplicates by question hash
+    if (!list.some(p => p.questionHash === pending.questionHash)) {
+      list.push(pending)
+      localStorage.setItem('veiled_markets_pending', JSON.stringify(list))
+      console.log('[Pending] Saved pending market:', pending.questionHash.slice(0, 20) + '...')
+    }
+  } catch (e) {
+    console.warn('[Pending] Failed to save:', e)
+  }
+}
+
+function removePendingMarket(questionHash: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending')
+    if (!saved) return
+    const list: PendingMarket[] = JSON.parse(saved)
+    const filtered = list.filter(p => p.questionHash !== questionHash)
+    localStorage.setItem('veiled_markets_pending', JSON.stringify(filtered))
+  } catch { /* ignore */ }
+}
+
+/**
+ * Update a pending market's transaction ID (e.g., when wallet polling resolves the at1... ID).
+ * This allows resolvePendingMarkets to use resolveMarketFromTransaction directly.
+ */
+export function updatePendingMarketTxId(questionHash: string, resolvedTxId: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending')
+    if (!saved) return
+    const list: PendingMarket[] = JSON.parse(saved)
+    const entry = list.find(p => p.questionHash === questionHash)
+    if (entry && !entry.transactionId.startsWith('at1') && resolvedTxId.startsWith('at1')) {
+      entry.transactionId = resolvedTxId
+      localStorage.setItem('veiled_markets_pending', JSON.stringify(list))
+      console.log('[Pending] Updated TX ID:', questionHash.slice(0, 20), '→', resolvedTxId.slice(0, 20))
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Clear all pending markets (used when switching program versions)
+ */
+export function clearPendingMarkets(): void {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem('veiled_markets_pending')
+}
+
+/**
+ * Clear ALL stale data from localStorage and Supabase.
+ * Used when upgrading to a new program version (e.g., v12 → v13).
+ * Clears: pending markets, cached market IDs, question texts, TX mappings,
+ * and all Supabase tables (market_registry, user_bets, pending_bets, commitment_records).
+ */
+export async function clearAllStaleData(): Promise<string> {
+  const cleared: string[] = []
+
+  // Clear localStorage
+  if (typeof window !== 'undefined') {
+    const keys = [
+      'veiled_markets_pending',
+      'veiled_markets_ids',
+      'veiled_markets_questions',
+      'veiled_markets_txs',
+    ]
+    for (const key of keys) {
+      if (localStorage.getItem(key)) {
+        localStorage.removeItem(key)
+        cleared.push(`localStorage:${key}`)
+      }
+    }
+  }
+
+  // Clear in-memory caches
+  KNOWN_MARKET_IDS = []
+  Object.keys(QUESTION_TEXT_MAP).forEach(k => delete QUESTION_TEXT_MAP[k])
+  Object.keys(MARKET_TX_MAP).forEach(k => delete MARKET_TX_MAP[k])
+  Object.keys(MARKET_METADATA_MAP).forEach(k => delete MARKET_METADATA_MAP[k])
+  cleared.push('in-memory caches')
+
+  // Clear Supabase
+  const { deleted, errors } = await clearAllSupabaseData()
+  cleared.push(...deleted.map(t => `supabase:${t}`))
+
+  const summary = `Cleared: ${cleared.join(', ')}${errors.length > 0 ? `. Errors: ${errors.join(', ')}` : ''}`
+  console.log('[ClearStaleData]', summary)
+  return summary
+}
+
+/**
+ * Check if there are any pending markets waiting for resolution
+ */
+export function hasPendingMarkets(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending')
+    if (!saved) return false
+    const list: PendingMarket[] = JSON.parse(saved)
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000 // 7 days
+    return list.some(p => p.createdAt > cutoff)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Get count and details of pending markets
+ */
+export function getPendingMarketsInfo(): { count: number; questions: string[] } {
+  if (typeof window === 'undefined') return { count: 0, questions: [] }
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending')
+    if (!saved) return { count: 0, questions: [] }
+    const list: PendingMarket[] = JSON.parse(saved)
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000 // 7 days
+    const active = list.filter(p => p.createdAt > cutoff)
+    return {
+      count: active.length,
+      questions: active.map(p => p.questionText),
+    }
+  } catch {
+    return { count: 0, questions: [] }
+  }
+}
+
+/**
+ * Resolve all pending markets via blockchain scan.
+ * Called on Dashboard load and periodically. Returns resolved market IDs.
+ */
+export async function resolvePendingMarkets(): Promise<string[]> {
+  if (typeof window === 'undefined') return []
+  try {
+    const saved = localStorage.getItem('veiled_markets_pending')
+    if (!saved) return []
+    const list: PendingMarket[] = JSON.parse(saved)
+    if (list.length === 0) return []
+
+    // Remove entries older than 7 days (likely failed)
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    const active = list.filter(p => p.createdAt > cutoff)
+    if (active.length !== list.length) {
+      localStorage.setItem('veiled_markets_pending', JSON.stringify(active))
+    }
+    if (active.length === 0) return []
+
+    console.log(`[Pending] Resolving ${active.length} pending market(s)...`)
+    const resolved: string[] = []
+
+    for (const pending of active) {
+      try {
+        // First: if pending already has an on-chain tx ID, resolve directly from tx.
+        // This is faster and more reliable than block scanning.
+        let marketId: string | null = null
+        if (pending.transactionId.startsWith('at1')) {
+          marketId = await resolveMarketFromTransaction(pending.transactionId, pending.questionText)
+        }
+
+        // Fallback: blockchain scan by question hash.
+        if (!marketId) {
+          // Use deeper scan for older pending markets
+          const ageMs = Date.now() - pending.createdAt
+          const blocksToScan = Math.min(2000, Math.max(500, Math.floor(ageMs / 15000) + 200))
+          marketId = await scanBlockchainForMarket(pending.questionHash, blocksToScan)
+        }
+
+        if (marketId) {
+          console.log('[Pending] Resolved:', pending.questionHash.slice(0, 20), '→', marketId.slice(0, 20))
+          addKnownMarketId(marketId)
+          registerQuestionText(marketId, pending.questionText)
+          registerQuestionText(pending.questionHash, pending.questionText)
+          removePendingMarket(pending.questionHash)
+          resolved.push(marketId)
+
+          // Update Supabase: register with real market ID and clean up pending entry
+          try {
+            const supabaseMod = await import('./supabase')
+            if (supabaseMod.isSupabaseAvailable()) {
+              // Register with real market ID
+              await supabaseMod.registerMarketInRegistry({
+                market_id: marketId,
+                question_hash: pending.questionHash,
+                question_text: pending.questionText,
+                category: 0, // Unknown from pending context
+                creator_address: '',
+                transaction_id: pending.transactionId,
+                created_at: pending.createdAt,
+              })
+              // Delete stale pending_ entry if it exists
+              if (supabaseMod.supabase) {
+                await supabaseMod.supabase.from('market_registry')
+                  .delete()
+                  .like('market_id', 'pending_%')
+                  .eq('question_hash', pending.questionHash)
+              }
+            }
+          } catch { /* ignore Supabase errors */ }
+        }
+      } catch (err) {
+        console.warn('[Pending] Failed to resolve:', pending.questionHash.slice(0, 20), err)
+      }
+    }
+
+    return resolved
+  } catch (e) {
+    console.warn('[Pending] Failed to load pending markets:', e)
+    return []
+  }
+}
+
+/**
  * Question text mapping (temporary - in production would use IPFS/storage)
  * Maps question_hash OR market_id to actual question text
  * Loaded from localStorage
@@ -1123,6 +1723,9 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
 
     const ids: string[] = [];
     for (const entry of entries) {
+      // Skip pending entries — they have placeholder IDs like "pending_shield_xxx"
+      // that will fail when fetched from blockchain
+      if (entry.market_id.startsWith('pending_')) continue;
       ids.push(entry.market_id);
       // Populate question text mappings
       if (entry.question_text) {
@@ -1240,27 +1843,38 @@ export async function fetchMarketById(marketId: string) {
   }
 }
 
-// Token type constants (match contract TOKEN_ALEO=1, TOKEN_USDCX=2)
-export const TOKEN_TYPE = {
-  ALEO: 1,
-  USDCX: 2,
-} as const;
-
-export const TOKEN_SYMBOLS: Record<number, 'ALEO' | 'USDCX'> = {
-  1: 'ALEO',
-  2: 'USDCX',
-};
-
 /**
- * Get the correct withdraw/refund function name based on token type
+ * Get the correct redeem/refund function name based on token type (v14)
  */
-export function getWithdrawFunction(tokenType?: 'ALEO' | 'USDCX'): string {
-  return tokenType === 'USDCX' ? 'withdraw_winnings_usdcx' : 'withdraw_winnings';
+export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX'): string {
+  return tokenType === 'USDCX' ? 'redeem_shares_usdcx' : 'redeem_shares';
 }
 
 export function getRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
   return tokenType === 'USDCX' ? 'claim_refund_usdcx' : 'claim_refund';
 }
+
+export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
+  return tokenType === 'USDCX' ? 'claim_lp_refund_usdcx' : 'claim_lp_refund';
+}
+
+/**
+ * Build inputs for claim_lp_refund (v14 - LP refund on cancelled market)
+ * claim_lp_refund(lp_token: LPToken, min_tokens_out)
+ */
+export function buildClaimLpRefundInputs(
+  lpTokenRecord: string,
+  minTokensOut: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
+  return {
+    functionName: getLpRefundFunction(tokenType),
+    inputs: [lpTokenRecord, `${minTokensOut}u128`],
+  };
+}
+
+// Legacy alias
+export const getWithdrawFunction = getRedeemFunction;
 
 // Export a singleton instance info
 export const CONTRACT_INFO = {

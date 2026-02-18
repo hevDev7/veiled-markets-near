@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets_v10.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v14.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 
@@ -18,8 +18,10 @@ import {
     getMarketResolutionSource,
     TOKEN_SYMBOLS,
     type MarketData,
-    type MarketPoolData,
+    type AMMPoolData,
+    type MarketResolutionData,
 } from './aleo-client'
+import { calculateAllPrices, type AMMReserves } from './amm'
 
 interface MarketsState {
     markets: Market[]
@@ -37,32 +39,37 @@ interface MarketsActions {
 
 type MarketsStore = MarketsState & MarketsActions
 
-// Helper: Transform blockchain data to Market format
+// Helper: Transform blockchain data to Market format (v12 AMM)
 async function transformMarketData(
     market: MarketData,
-    pool: MarketPoolData,
-    currentBlock: bigint
+    pool: AMMPoolData,
+    currentBlock: bigint,
+    resolution?: MarketResolutionData,
 ): Promise<Market> {
-    console.log('=== TRANSFORM MARKET DATA ===');
-    console.log('Market:', market);
-    console.log('Pool:', pool);
-    console.log('Current block:', currentBlock);
-    console.log('Deadline:', market.deadline);
-    console.log('Blocks remaining:', Number(market.deadline - currentBlock));
+    const numOutcomes = market.num_outcomes || 2
 
-    // Calculate percentages (both from BigInt to avoid JS floating-point subtraction)
-    const totalPool = pool.total_yes_pool + pool.total_no_pool
-    const yesPercentage = totalPool > 0n
-        ? Math.round(Number((pool.total_yes_pool * 10000n) / totalPool)) / 100
-        : 50
-    const noPercentage = totalPool > 0n
-        ? Math.round(Number((pool.total_no_pool * 10000n) / totalPool)) / 100
-        : 50
+    // Build AMM reserves for price calculation
+    const reserves: AMMReserves = {
+        reserve_1: pool.reserve_1,
+        reserve_2: pool.reserve_2,
+        reserve_3: pool.reserve_3,
+        reserve_4: pool.reserve_4,
+        num_outcomes: numOutcomes,
+    }
+
+    // Calculate AMM prices for all outcomes
+    const prices = calculateAllPrices(reserves)
+    const yesPrice = prices[0] ?? 0.5
+    const noPrice = prices[1] ?? 0.5
+    const yesPercentage = yesPrice * 100
+    const noPercentage = noPrice * 100
+
+    // In v12 AMM, winning shares redeem 1:1, so payout = 1/price
+    const potentialYesPayout = yesPrice > 0 ? 1 / yesPrice : 2.0
+    const potentialNoPayout = noPrice > 0 ? 1 / noPrice : 2.0
 
     // Calculate time remaining
     const blocksRemaining = Number(market.deadline - currentBlock)
-    console.log('Blocks remaining (calculated):', blocksRemaining);
-
     const secondsRemaining = blocksRemaining * 15
     const daysRemaining = Math.floor(secondsRemaining / 86400)
     const hoursRemaining = Math.floor((secondsRemaining % 86400) / 3600)
@@ -79,67 +86,63 @@ async function transformMarketData(
         timeRemaining = `${minutesRemaining}m`
     }
 
-    console.log('Time remaining:', timeRemaining);
+    // Default outcome labels
+    const defaultLabels = numOutcomes === 2
+        ? ['Yes', 'No']
+        : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`)
 
-    // Calculate Parimutuel Pool fields
-    // In parimutuel betting, all bets go into pools and winners split the total pool
-    const yesPool = pool.total_yes_pool || 1000000n // Default 1 ALEO if empty for display
-    const noPool = pool.total_no_pool || 1000000n
-    // totalPool already calculated above
-
-    // Implied probability based on pool sizes
-    const yesPrice = totalPool > 0n
-        ? Number(yesPool * 10000n / totalPool) / 10000
-        : 0.5
-    const noPrice = totalPool > 0n
-        ? Number(noPool * 10000n / totalPool) / 10000
-        : 0.5
-
-    // Calculate potential payouts (parimutuel formula)
-    // Payout = (total_pool / winning_pool) * (1 - fees)
-    // If you bet 1 ALEO on YES and YES wins, you get: (total_pool / yes_pool) * 0.98 ALEO
-    const potentialYesPayout = pool.total_yes_pool > 0n
-        ? Number(totalPool * 9800n / pool.total_yes_pool) / 10000 // 98% after 2% fees
-        : 2.0 // Default 2x when no bets
-    const potentialNoPayout = pool.total_no_pool > 0n
-        ? Number(totalPool * 9800n / pool.total_no_pool) / 10000
-        : 2.0
-
-    const questionText = getQuestionText(market.question_hash);
-    const transactionId = getMarketTransactionId(market.id);
-    const registryDescription = getMarketDescription(market.id);
-    const registryResolutionSource = getMarketResolutionSource(market.id);
-    console.log('Question hash:', market.question_hash);
-    console.log('Question text:', questionText);
-    console.log('Category:', market.category);
-    console.log('Transaction ID:', transactionId);
+    const questionText = getQuestionText(market.question_hash)
+    const transactionId = getMarketTransactionId(market.id)
+    const registryDescription = getMarketDescription(market.id)
+    const registryResolutionSource = getMarketResolutionSource(market.id)
 
     return {
         id: market.id,
         question: questionText,
         description: registryDescription || undefined,
         category: market.category,
+        numOutcomes,
+        outcomeLabels: defaultLabels,
         deadline: market.deadline,
         resolutionDeadline: market.resolution_deadline,
         status: market.status,
-        yesPercentage,
-        noPercentage,
-        totalVolume: totalPool,
-        totalBets: Number(pool.total_bets),
-        yesReserve: yesPool,
-        noReserve: noPool,
+
+        // AMM reserves
+        yesReserve: pool.reserve_1,
+        noReserve: pool.reserve_2,
+        reserve3: pool.reserve_3,
+        reserve4: pool.reserve_4,
+        totalLiquidity: pool.total_liquidity,
+        totalLPShares: pool.total_lp_shares,
+
+        // Prices
         yesPrice,
         noPrice,
-        totalYesIssued: pool.total_yes_pool,
-        totalNoIssued: pool.total_no_pool,
+        yesPercentage,
+        noPercentage,
+
+        // Volume & trades
+        totalVolume: pool.total_volume,
+        totalBets: 0, // v12 tracks volume, not bet count
+
+        // Shares issued (legacy - not tracked separately in v12)
+        totalYesIssued: pool.reserve_1,
+        totalNoIssued: pool.reserve_2,
+
+        // Payouts (1/price for AMM)
         potentialYesPayout,
         potentialNoPayout,
+
+        // Resolution / dispute
+        challengeDeadline: resolution?.challenge_deadline,
+        finalized: resolution?.finalized,
+
         creator: market.creator,
         timeRemaining,
         resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,
-        tokenType: TOKEN_SYMBOLS[market.token_type] || 'ALEO',
+        tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX',
     }
 }
 
@@ -189,10 +192,10 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 currentBlock = 0n
             }
 
-            // Transform to Market format
+            // Transform to Market format (v12: pass resolution for challenge window)
             const markets: Market[] = await Promise.all(
-                blockchainMarkets.map(({ market, pool }) =>
-                    transformMarketData(market, pool, currentBlock)
+                blockchainMarkets.map(({ market, pool, resolution }) =>
+                    transformMarketData(market, pool, currentBlock, resolution)
                 )
             )
 
@@ -227,7 +230,8 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
             const market = await transformMarketData(
                 marketData.market,
                 marketData.pool,
-                currentBlock
+                currentBlock,
+                marketData.resolution,
             )
 
             set((state) => ({
@@ -249,7 +253,8 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
             const updatedMarket = await transformMarketData(
                 marketData.market,
                 marketData.pool,
-                currentBlock
+                currentBlock,
+                marketData.resolution,
             )
 
             set((state) => ({

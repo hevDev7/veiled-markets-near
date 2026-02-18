@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { 
+import {
   Bell,
   Shield,
   Palette,
@@ -8,27 +8,37 @@ import {
   Copy,
   Check,
   RefreshCw,
-  Wallet
+  Wallet,
+  Trash2,
+  Database,
+  Loader2,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
+import { WalletCompatibilityLab } from '@/components/WalletCompatibilityLab'
 import { cn, formatCredits } from '@/lib/utils'
+import { clearAllStaleData } from '@/lib/aleo-client'
 
 export function Settings() {
   const navigate = useNavigate()
   const { wallet, refreshBalance } = useWalletStore()
+  const { connected: providerConnected, connecting: providerConnecting } = useWallet()
   const [copied, setCopied] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
+  const [clearResult, setClearResult] = useState<string | null>(null)
+  const isConnected = wallet.connected || providerConnected
 
   // Redirect to landing if not connected
   useEffect(() => {
-    if (!wallet.connected) {
+    if (!isConnected && !providerConnecting) {
       navigate('/')
     }
-  }, [wallet.connected, navigate])
+  }, [isConnected, providerConnecting, navigate])
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -44,7 +54,20 @@ export function Settings() {
     setIsRefreshing(false)
   }
 
-  if (!wallet.connected) {
+  const handleClearData = async () => {
+    setIsClearing(true)
+    setClearResult(null)
+    try {
+      const result = await clearAllStaleData()
+      setClearResult(result)
+    } catch (e) {
+      setClearResult(`Error: ${e}`)
+    } finally {
+      setIsClearing(false)
+    }
+  }
+
+  if (!isConnected) {
     return null
   }
 
@@ -274,6 +297,63 @@ export function Settings() {
                   </div>
                 </div>
               </div>
+            </motion.div>
+
+            {/* Data Management Section */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="glass-card p-6"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center">
+                  <Database className="w-5 h-5 text-yellow-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Data Management</h2>
+                  <p className="text-sm text-surface-400">Clear cached data from previous program versions</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-surface-800/30">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-white font-medium">Clear All Stale Data</p>
+                      <p className="text-sm text-surface-400 mt-1">
+                        Removes cached market IDs, pending markets, question mappings, and Supabase entries from previous program versions.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleClearData}
+                      disabled={isClearing}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-no-500/10 border border-no-500/30 text-no-400 hover:bg-no-500/20 transition-all text-sm whitespace-nowrap"
+                    >
+                      {isClearing ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                      <span>{isClearing ? 'Clearing...' : 'Clear Data'}</span>
+                    </button>
+                  </div>
+                  {clearResult && (
+                    <div className="mt-3 p-3 rounded-lg bg-surface-900/50 text-xs font-mono text-surface-400">
+                      {clearResult}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+
+            {/* Wallet A/B Lab */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 }}
+            >
+              <WalletCompatibilityLab />
             </motion.div>
           </div>
         </div>

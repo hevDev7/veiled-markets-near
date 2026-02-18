@@ -3,7 +3,7 @@ import { Shield, Eye, Lock, ArrowRight, Wallet, Terminal, Code, Zap } from 'luci
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useWalletStore } from '@/lib/store'
-import { WalletModal } from '@/components/WalletModal'
+import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
 import { cn } from '@/lib/utils'
 
 // Sequential typing animation hook
@@ -135,7 +135,7 @@ function SequentialTerminal({
 export function Landing() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
-  const [isWalletModalOpen, setIsWalletModalOpen] = useState(false)
+  const { setVisible } = useWalletModal()
 
   // Sequential typing animation for hero text
   const heroTexts = ['Predict.', 'Bet.', 'Stay Hidden.']
@@ -160,11 +160,7 @@ export function Landing() {
   }, [wallet.connected, navigate])
 
   const handleConnectClick = () => {
-    setIsWalletModalOpen(true)
-  }
-
-  const handleWalletConnected = () => {
-    navigate('/dashboard')
+    setVisible(true)
   }
 
   // Don't render if already connected (will redirect)
@@ -277,7 +273,7 @@ export function Landing() {
                     <div className="w-3 h-3 rounded-full bg-amber-500" />
                     <div className="w-3 h-3 rounded-full bg-yes-500" />
                   </div>
-                  <span className="text-xs text-surface-400 font-mono ml-2">veiled_markets_v9.aleo</span>
+                  <span className="text-xs text-surface-400 font-mono ml-2">veiled_markets_v14.aleo</span>
                 </div>
 
                 {/* Terminal Content */}
@@ -461,12 +457,6 @@ export function Landing() {
         </div>
       </footer>
 
-      {/* Wallet Modal */}
-      <WalletModal
-        isOpen={isWalletModalOpen}
-        onClose={() => setIsWalletModalOpen(false)}
-        onConnect={handleWalletConnected}
-      />
     </div>
   )
 }

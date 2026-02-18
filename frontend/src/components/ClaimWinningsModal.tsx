@@ -13,7 +13,7 @@ import {
 import { useState } from 'react'
 import { type Bet, useBetsStore, CONTRACT_INFO } from '@/lib/store'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { getWithdrawFunction, getRefundFunction } from '@/lib/aleo-client'
+import { getRedeemFunction, getRefundFunction } from '@/lib/aleo-client'
 
 interface ClaimWinningsModalProps {
   mode: 'winnings' | 'refund'
@@ -72,28 +72,23 @@ export function ClaimWinningsModal({
   const tokenType = bet.tokenType || 'ALEO'
   const tokenSymbol = getTokenSymbol(tokenType)
   const refundFn = getRefundFunction(tokenType)
-  const withdrawFn = getWithdrawFunction(tokenType)
-  const amountSuffix = 'u128' // v11: all amounts are u128
+  const redeemFn = getRedeemFunction(tokenType)
 
   const payoutDisplay = isRefund
     ? formatCredits(bet.amount)
     : formatCredits(bet.payoutAmount || bet.amount)
 
-  // Build CLI commands
+  // Build CLI commands for v12
+  // v12: claim_refund(share: OutcomeShare) — single step for cancelled markets
   const claimRefundCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${refundFn} \\
-  "<YOUR_BET_RECORD>" \\
+  "<YOUR_OUTCOME_SHARE_RECORD>" \\
   --private-key <YOUR_PRIVATE_KEY> \\
   --endpoint https://api.explorer.provable.com \\
   --broadcast --network 1 --priority-fee 500000`
 
-  const claimWinningsCmd = `snarkos developer execute ${CONTRACT_INFO.programId} claim_winnings \\
-  "<YOUR_BET_RECORD>" \\
-  --private-key <YOUR_PRIVATE_KEY> \\
-  --endpoint https://api.explorer.provable.com \\
-  --broadcast --network 1 --priority-fee 500000`
-
-  const withdrawWinningsCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${withdrawFn} \\
-  "<WINNINGS_CLAIM_RECORD>" "${bet.payoutAmount || bet.amount}${amountSuffix}" \\
+  // v12: redeem_shares(share: OutcomeShare) — single step for winning shares (1:1 redemption)
+  const redeemSharesCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${redeemFn} \\
+  "<YOUR_OUTCOME_SHARE_RECORD>" \\
   --private-key <YOUR_PRIVATE_KEY> \\
   --endpoint https://api.explorer.provable.com \\
   --broadcast --network 1 --priority-fee 500000`
@@ -143,10 +138,10 @@ export function ClaimWinningsModal({
                   </div>
                   <div>
                     <h2 className="text-xl font-semibold text-white">
-                      {isRefund ? 'Claim Refund' : 'Claim Winnings'}
+                      {isRefund ? 'Claim Refund' : 'Redeem Winnings'}
                     </h2>
                     <p className="text-sm text-surface-400">
-                      {isRefund ? 'Market was cancelled — get your bet back' : 'Withdraw your winnings'}
+                      {isRefund ? 'Market was cancelled — get your tokens back' : 'Redeem your winning shares for tokens'}
                     </p>
                   </div>
                 </div>
@@ -175,7 +170,7 @@ export function ClaimWinningsModal({
                         {bet.outcome.toUpperCase()}
                       </span>
                       <span className="text-sm text-surface-400 ml-2">
-                        Bet: {formatCredits(bet.amount)} {tokenSymbol}
+                        Shares: {formatCredits(bet.amount)} {tokenSymbol}
                       </span>
                     </div>
                     <div className="text-right">
@@ -196,7 +191,7 @@ export function ClaimWinningsModal({
                   <div>
                     <p className="text-sm font-medium text-accent-300">CLI Required</p>
                     <p className="text-xs text-surface-400 mt-1">
-                      {isRefund ? 'Claiming refunds' : 'Claiming winnings'} requires your private <strong>Bet record</strong>, which wallets cannot expose through their API.
+                      {isRefund ? 'Claiming refunds' : 'Redeeming shares'} requires your private <strong>OutcomeShare record</strong>, which wallets cannot expose through their API.
                       You need to use the <code className="text-accent-300">snarkos</code> CLI with your private key.
                     </p>
                   </div>
@@ -205,89 +200,57 @@ export function ClaimWinningsModal({
                 {/* CLI Commands */}
                 <div className="space-y-4">
                   {isRefund ? (
-                    <>
-                      <div>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Terminal className="w-4 h-4 text-surface-400" />
-                          <h4 className="text-sm font-medium text-white">Run claim_refund</h4>
-                        </div>
-                        <div className="relative">
-                          <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                            {claimRefundCmd}
-                          </pre>
-                          <button
-                            onClick={() => copyToClipboard(claimRefundCmd, 'refund')}
-                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
-                            title="Copy command"
-                          >
-                            {copiedCommand === 'refund' ? (
-                              <Check className="w-3.5 h-3.5 text-yes-400" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5 text-surface-400" />
-                            )}
-                          </button>
-                        </div>
-                        <p className="text-xs text-surface-500 mt-2">
-                          Replace <code className="text-surface-300">&lt;YOUR_BET_RECORD&gt;</code> with your Bet record plaintext and <code className="text-surface-300">&lt;YOUR_PRIVATE_KEY&gt;</code> with your Aleo private key.
-                        </p>
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Terminal className="w-4 h-4 text-surface-400" />
+                        <h4 className="text-sm font-medium text-white">Run {refundFn}</h4>
                       </div>
-                    </>
+                      <div className="relative">
+                        <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                          {claimRefundCmd}
+                        </pre>
+                        <button
+                          onClick={() => copyToClipboard(claimRefundCmd, 'refund')}
+                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
+                          title="Copy command"
+                        >
+                          {copiedCommand === 'refund' ? (
+                            <Check className="w-3.5 h-3.5 text-yes-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5 text-surface-400" />
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-xs text-surface-500 mt-2">
+                        Replace <code className="text-surface-300">&lt;YOUR_OUTCOME_SHARE_RECORD&gt;</code> with your OutcomeShare record plaintext and <code className="text-surface-300">&lt;YOUR_PRIVATE_KEY&gt;</code> with your Aleo private key.
+                      </p>
+                    </div>
                   ) : (
-                    <>
-                      {/* Step 1: claim_winnings */}
-                      <div>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Terminal className="w-4 h-4 text-surface-400" />
-                          <h4 className="text-sm font-medium text-white">Step 1: claim_winnings</h4>
-                        </div>
-                        <div className="relative">
-                          <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                            {claimWinningsCmd}
-                          </pre>
-                          <button
-                            onClick={() => copyToClipboard(claimWinningsCmd, 'claim')}
-                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
-                            title="Copy command"
-                          >
-                            {copiedCommand === 'claim' ? (
-                              <Check className="w-3.5 h-3.5 text-yes-400" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5 text-surface-400" />
-                            )}
-                          </button>
-                        </div>
-                        <p className="text-xs text-surface-500 mt-2">
-                          This produces a <strong>WinningsClaim</strong> record. Check your transaction output.
-                        </p>
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Terminal className="w-4 h-4 text-surface-400" />
+                        <h4 className="text-sm font-medium text-white">Run {redeemFn}</h4>
                       </div>
-
-                      {/* Step 2: withdraw_winnings */}
-                      <div>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Terminal className="w-4 h-4 text-surface-400" />
-                          <h4 className="text-sm font-medium text-white">Step 2: withdraw_winnings</h4>
-                        </div>
-                        <div className="relative">
-                          <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                            {withdrawWinningsCmd}
-                          </pre>
-                          <button
-                            onClick={() => copyToClipboard(withdrawWinningsCmd, 'withdraw')}
-                            className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
-                            title="Copy command"
-                          >
-                            {copiedCommand === 'withdraw' ? (
-                              <Check className="w-3.5 h-3.5 text-yes-400" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5 text-surface-400" />
-                            )}
-                          </button>
-                        </div>
-                        <p className="text-xs text-surface-500 mt-2">
-                          Replace <code className="text-surface-300">&lt;WINNINGS_CLAIM_RECORD&gt;</code> with the record output from Step 1.
-                        </p>
+                      <div className="relative">
+                        <pre className="p-4 rounded-xl bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+                          {redeemSharesCmd}
+                        </pre>
+                        <button
+                          onClick={() => copyToClipboard(redeemSharesCmd, 'redeem')}
+                          className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
+                          title="Copy command"
+                        >
+                          {copiedCommand === 'redeem' ? (
+                            <Check className="w-3.5 h-3.5 text-yes-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5 text-surface-400" />
+                          )}
+                        </button>
                       </div>
-                    </>
+                      <p className="text-xs text-surface-500 mt-2">
+                        Winning shares redeem 1:1 for tokens. Replace <code className="text-surface-300">&lt;YOUR_OUTCOME_SHARE_RECORD&gt;</code> with your OutcomeShare record plaintext.
+                      </p>
+                    </div>
                   )}
                 </div>
 
@@ -298,17 +261,17 @@ export function ClaimWinningsModal({
                     <p className="text-sm font-medium text-brand-300">Privacy Preserved</p>
                     <p className="text-xs text-surface-400 mt-1">
                       {isRefund
-                        ? 'Your refund will be transferred privately. No one can see you placed this bet.'
+                        ? 'Your refund will be transferred privately. No one can see your position.'
                         : 'Your winnings are transferred privately via ZK proof. Your payout amount is hidden from observers.'}
                     </p>
                   </div>
                 </div>
 
-                {/* Bet record hint */}
+                {/* Record hint */}
                 <div className="text-xs text-surface-500 p-3 rounded-xl bg-surface-800/50">
-                  <p className="font-medium text-surface-400 mb-1">Finding your Bet record:</p>
+                  <p className="font-medium text-surface-400 mb-1">Finding your OutcomeShare record:</p>
                   <p>
-                    Your Bet record was created when the bet was placed. You can find it by looking up your bet transaction on the{' '}
+                    Your OutcomeShare record was created when you bought shares. You can find it by looking up your transaction on the{' '}
                     <a
                       href="https://testnet.explorer.provable.com"
                       target="_blank"

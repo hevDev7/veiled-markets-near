@@ -1,7 +1,8 @@
 // ============================================================================
-// VEILED MARKETS SDK - Type Definitions
+// VEILED MARKETS SDK - Type Definitions (v12)
 // ============================================================================
-// Matches the Leo contract: veiled_markets_v9.aleo
+// Matches the Leo contract: veiled_markets_v13.aleo
+// AMM-based multi-outcome prediction markets
 // ============================================================================
 
 /**
@@ -12,14 +13,29 @@ export enum MarketStatus {
   Closed = 2,
   Resolved = 3,
   Cancelled = 4,
+  PendingResolution = 5,
 }
 
 /**
- * Bet outcome enumeration (matches Leo constants)
+ * Outcome enumeration (matches Leo constants)
+ * v12 supports up to 4 outcomes
  */
 export enum Outcome {
+  One = 1,
+  Two = 2,
+  Three = 3,
+  Four = 4,
+  // Legacy aliases
   Yes = 1,
   No = 2,
+}
+
+/**
+ * Token type enumeration
+ */
+export enum TokenType {
+  ALEO = 1,
+  USDCX = 2,
 }
 
 /**
@@ -41,107 +57,204 @@ export enum MarketCategory {
 export type NetworkType = 'mainnet' | 'testnet';
 
 /**
- * Public market information (matches Leo Market struct)
+ * Public market information (matches Leo Market struct v12)
  */
 export interface Market {
   id: string;                    // field - Unique market identifier
   creator: string;               // address - Market creator
+  resolver: string;              // address - Designated resolver
   questionHash: string;          // field - Hash of the market question
   question?: string;             // Resolved from IPFS/off-chain
   category: MarketCategory;      // u8 - Market category
-  deadline: bigint;              // u64 - Betting deadline (block height)
+  numOutcomes: number;           // u8 - Number of outcomes (2-4)
+  deadline: bigint;              // u64 - Trading deadline (block height)
   resolutionDeadline: bigint;    // u64 - When market must be resolved
   status: MarketStatus;          // u8 - Current market status
   createdAt: bigint;             // u64 - Creation block height
+  tokenType: TokenType;          // u8 - Token denomination (ALEO or USDCX)
 }
 
 /**
- * Aggregate pool data (matches Leo MarketPool struct)
+ * AMM pool data (replaces MarketPool in v12)
  */
-export interface MarketPool {
+export interface AMMPool {
   marketId: string;              // field
-  totalYesPool: bigint;          // u64 - Total amount bet on YES (microcredits)
-  totalNoPool: bigint;           // u64 - Total amount bet on NO (microcredits)
-  totalBets: bigint;             // u64 - Number of bets placed
-  totalUniqueBettors: bigint;    // u64 - Unique participants
+  reserve1: bigint;              // u128 - Outcome 1 shares in pool
+  reserve2: bigint;              // u128 - Outcome 2 shares
+  reserve3: bigint;              // u128 - Outcome 3 (0 if binary)
+  reserve4: bigint;              // u128 - Outcome 4 (0 if binary)
+  totalLiquidity: bigint;        // u128 - Total tokens deposited
+  totalLPShares: bigint;         // u128 - LP tokens in circulation
+  totalVolume: bigint;           // u128 - Cumulative trading volume
 }
 
+/** Legacy alias */
+export type MarketPool = AMMPool;
+
 /**
- * Market resolution data (matches Leo MarketResolution struct)
+ * Market resolution data (v12 with challenge window)
  */
 export interface MarketResolution {
   marketId: string;              // field
-  winningOutcome: Outcome;       // u8 - OUTCOME_YES or OUTCOME_NO
+  winningOutcome: number;        // u8 - Winning outcome (1-4)
   resolver: string;              // address - Who resolved the market
   resolvedAt: bigint;            // u64 - Resolution block height
-  totalPayoutPool: bigint;       // u64 - Pool after fees for winners
+  challengeDeadline: bigint;     // u64 - When challenge window expires
+  finalized: boolean;            // bool - Whether resolution is finalized
 }
 
 /**
- * User's private bet record (matches Leo Bet record)
+ * Market fee tracking (v12 per-trade fees)
+ */
+export interface MarketFees {
+  marketId: string;              // field
+  protocolFees: bigint;          // u128 - Accumulated protocol fees
+  creatorFees: bigint;           // u128 - Accumulated creator fees
+}
+
+/**
+ * Dispute data
+ */
+export interface DisputeData {
+  marketId: string;              // field
+  disputer: string;              // address
+  proposedOutcome: number;       // u8
+  bondAmount: bigint;            // u128
+  disputedAt: bigint;            // u64
+}
+
+/**
+ * Outcome share record (replaces Bet record in v12)
  * This data is encrypted on-chain and only visible to the owner
  */
-export interface Bet {
-  owner: string;                 // address - The bettor's address
-  marketId: string;              // field - Which market this bet is for
-  amount: bigint;                // u64 - Amount wagered (in microcredits)
-  outcome: Outcome;              // u8 - OUTCOME_YES or OUTCOME_NO
-  placedAt: bigint;              // u64 - Block height when bet was placed
-  // These are derived/client-side fields
-  nonce?: string;                // group - Record nonce (for decryption)
-  ciphertext?: string;           // The encrypted record on-chain
+export interface OutcomeShare {
+  owner: string;                 // address
+  marketId: string;              // field
+  outcome: number;               // u8 (1-4)
+  quantity: bigint;              // u128 - Number of shares
+  shareNonce: string;            // field - Unique nonce
+  tokenType: TokenType;          // u8
 }
 
 /**
- * Winnings claim record (matches Leo WinningsClaim record)
+ * LP token record
  */
-export interface WinningsClaim {
-  owner: string;                 // address - Winner's address
-  marketId: string;              // field - Which market
-  betAmount: bigint;             // u64 - Original bet amount
-  winningOutcome: Outcome;       // u8 - The outcome that won
+export interface LPToken {
+  owner: string;                 // address
+  marketId: string;              // field
+  lpShares: bigint;              // u128
+  lpNonce: string;               // field
+  tokenType: TokenType;          // u8
 }
 
 /**
- * Refund claim record (matches Leo RefundClaim record)
+ * Dispute bond receipt record
+ */
+export interface DisputeBondReceipt {
+  owner: string;                 // address
+  marketId: string;              // field
+  bondAmount: bigint;            // u128
+  disputeNonce: string;          // field
+  tokenType: TokenType;          // u8
+}
+
+/**
+ * Refund claim record
  */
 export interface RefundClaim {
   owner: string;                 // address
   marketId: string;              // field
-  amount: bigint;                // u64
+  amount: bigint;                // u128
+}
+
+/** Legacy alias for Bet (v11 compat) */
+export interface Bet {
+  owner: string;
+  marketId: string;
+  amount: bigint;
+  outcome: Outcome;
+  placedAt: bigint;
+  nonce?: string;
+  ciphertext?: string;
+}
+
+/** Legacy alias for WinningsClaim */
+export interface WinningsClaim {
+  owner: string;
+  marketId: string;
+  betAmount: bigint;
+  winningOutcome: Outcome;
 }
 
 /**
  * Market with computed statistics (for frontend display)
  */
 export interface MarketWithStats extends Market {
-  pool: MarketPool;
+  pool: AMMPool;
   resolution?: MarketResolution;
-  yesPercentage: number;         // Calculated: yesPool / totalPool * 100
-  noPercentage: number;          // Calculated: noPool / totalPool * 100
-  totalVolume: bigint;           // Calculated: yesPool + noPool
-  potentialYesPayout: number;    // Multiplier for YES bet
-  potentialNoPayout: number;     // Multiplier for NO bet
-  timeRemaining?: string;        // Formatted time until deadline
+  fees?: MarketFees;
+  prices: number[];              // Outcome prices (0-1 range)
+  totalVolume: bigint;           // From pool
+  totalLiquidity: bigint;        // From pool
+  potentialPayouts: number[];    // 1/price for each outcome
+  // Legacy binary fields
+  yesPercentage: number;
+  noPercentage: number;
+  potentialYesPayout: number;
+  potentialNoPayout: number;
+  timeRemaining?: string;
 }
 
 /**
- * Create market parameters
+ * Create market parameters (v12)
  */
 export interface CreateMarketParams {
   question: string;
   category: MarketCategory;
+  numOutcomes: number;           // 2, 3, or 4
   deadline: Date;
   resolutionDeadline: Date;
+  resolver?: string;             // Defaults to creator
+  tokenType?: TokenType;         // Defaults to ALEO
+  initialLiquidity: bigint;      // Required to seed AMM
 }
 
 /**
- * Place bet parameters
+ * Buy shares parameters (replaces PlaceBetParams)
  */
-export interface PlaceBetParams {
+export interface BuySharesParams {
   marketId: string;
-  amount: bigint;                // Amount in microcredits
-  outcome: Outcome;
+  outcome: number;               // 1-4
+  amountIn: bigint;              // Amount in microcredits
+  minSharesOut?: bigint;         // Slippage protection
+}
+
+/** Legacy alias */
+export type PlaceBetParams = BuySharesParams;
+
+/**
+ * Sell shares parameters
+ */
+export interface SellSharesParams {
+  shareRecord: string;           // Encrypted OutcomeShare record
+  sharesToSell: bigint;
+  minTokensOut?: bigint;         // Slippage protection
+}
+
+/**
+ * Add liquidity parameters
+ */
+export interface AddLiquidityParams {
+  marketId: string;
+  amount: bigint;
+}
+
+/**
+ * Remove liquidity parameters
+ */
+export interface RemoveLiquidityParams {
+  lpTokenRecord: string;         // Encrypted LPToken record
+  sharesToRemove: bigint;
 }
 
 /**
@@ -169,7 +282,7 @@ export interface WalletState {
 }
 
 /**
- * Wallet adapter interface (for different wallet providers)
+ * Wallet adapter interface
  */
 export interface WalletAdapter {
   name: string;
@@ -216,12 +329,19 @@ export interface VeiledMarketsConfig {
 }
 
 /**
- * Fee configuration (matches Leo constants)
+ * Fee configuration (matches Leo v12 constants - per-trade fees)
  */
-export const PROTOCOL_FEE_BPS = 100n;      // 1% protocol fee
-export const CREATOR_FEE_BPS = 100n;       // 1% creator fee
+export const PROTOCOL_FEE_BPS = 50n;       // 0.5% protocol fee per trade
+export const CREATOR_FEE_BPS = 50n;        // 0.5% creator fee per trade
+export const LP_FEE_BPS = 100n;            // 1.0% LP fee per trade
+export const TOTAL_FEE_BPS = 200n;         // 2.0% total per trade
 export const FEE_DENOMINATOR = 10000n;
-export const MIN_BET_AMOUNT = 1000n;       // 0.001 credits minimum bet
+export const MIN_TRADE_AMOUNT = 1000n;     // 0.001 tokens minimum
+export const MIN_DISPUTE_BOND = 1000000n;  // 1 token minimum bond
+export const CHALLENGE_WINDOW_BLOCKS = 2880n; // ~12 hours
+
+/** Legacy alias */
+export const MIN_BET_AMOUNT = MIN_TRADE_AMOUNT;
 
 /**
  * Network configuration
@@ -236,4 +356,3 @@ export const NETWORK_CONFIG = {
     explorerUrl: 'https://testnet.explorer.provable.com',
   },
 } as const;
-

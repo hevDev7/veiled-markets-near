@@ -17,6 +17,7 @@ import {
     DollarSign,
     Cpu,
     Vote,
+    Loader2,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -27,6 +28,7 @@ import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
 import { cn, formatCredits } from '@/lib/utils'
+import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets } from '@/lib/aleo-client'
 
 const categories = [
     { id: 0, name: 'All Markets', icon: Flame },
@@ -53,6 +55,8 @@ export function Dashboard() {
     const [searchQuery, setSearchQuery] = useState('')
     const [sortBy, setSortBy] = useState('volume')
     const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false)
+    const [pendingInfo, setPendingInfo] = useState<{ count: number; questions: string[] }>({ count: 0, questions: [] })
+    const [isResolvingPending, setIsResolvingPending] = useState(false)
 
     useEffect(() => {
         if (!wallet.connected) {
@@ -63,14 +67,51 @@ export function Dashboard() {
     useEffect(() => {
         fetchMarkets()
         fetchUserBets() // Fetch user's bet records
+
+        // Check for pending markets and update banner
+        setPendingInfo(getPendingMarketsInfo())
+
+        // Auto-resolve pending markets (created but not yet discovered)
+        const tryResolvePending = () => {
+            // Only run if there are pending markets
+            if (!hasPendingMarkets()) {
+                setPendingInfo({ count: 0, questions: [] })
+                return
+            }
+
+            setIsResolvingPending(true)
+            resolvePendingMarkets().then(resolvedIds => {
+                if (resolvedIds.length > 0) {
+                    console.log('[Dashboard] Resolved pending markets:', resolvedIds)
+                    resolvedIds.forEach(id => addMarket(id))
+                    fetchMarkets()
+                }
+                // Update pending count
+                setPendingInfo(getPendingMarketsInfo())
+            }).catch(err => {
+                console.warn('[Dashboard] Pending resolve error:', err)
+            }).finally(() => {
+                setIsResolvingPending(false)
+            })
+        }
+
+        tryResolvePending() // Initial attempt
+
+        // Retry resolution every 60 seconds (for pending Shield wallet markets)
+        const pendingInterval = setInterval(tryResolvePending, 60_000)
+
         // Refresh markets every 30 seconds
-        const interval = setInterval(fetchMarkets, 30000)
-        return () => clearInterval(interval)
-    }, [fetchMarkets, fetchUserBets])
+        const refreshInterval = setInterval(fetchMarkets, 30000)
+
+        return () => {
+            clearInterval(pendingInterval)
+            clearInterval(refreshInterval)
+        }
+    }, [fetchMarkets, fetchUserBets, addMarket])
 
     const filteredMarkets = markets
         .filter(market => {
-            // Hide ended (deadline passed) and non-active (closed/resolved/cancelled) markets
+            // Hide expired and non-active markets
             if (market.status !== 1 || market.timeRemaining === 'Ended') return false
             // Category filter
             if (selectedCategory !== 0 && market.category !== selectedCategory) return false
@@ -171,8 +212,8 @@ export function Dashboard() {
                             />
                             <StatTicker
                                 icon={<Zap className="w-4 h-4" />}
-                                label="TOTAL_TRADES"
-                                value={String(markets.reduce((sum, m) => sum + m.totalBets, 0))}
+                                label="TOTAL_VOLUME"
+                                value={`${(Number(markets.reduce((sum, m) => sum + m.totalVolume, 0n)) / 1_000_000).toFixed(1)} ALEO`}
                                 color="text-surface-400"
                                 delay={0.3}
                             />
@@ -273,6 +314,50 @@ export function Dashboard() {
 
                         {/* Right Content - Markets */}
                         <div className="space-y-4">
+                            {/* Pending Markets Banner */}
+                            {pendingInfo.count > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4"
+                                >
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-0.5">
+                                            {isResolvingPending ? (
+                                                <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
+                                            ) : (
+                                                <Clock className="w-5 h-5 text-yellow-400" />
+                                            )}
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-sm font-medium text-yellow-300 font-mono">
+                                                {pendingInfo.count} PENDING MARKET{pendingInfo.count > 1 ? 'S' : ''} AWAITING CONFIRMATION
+                                            </p>
+                                            <p className="text-xs text-surface-400 mt-1">
+                                                {isResolvingPending
+                                                    ? 'Scanning blockchain for your market...'
+                                                    : 'Your market was submitted but hasn\'t been found on-chain yet. Auto-retrying every 60 seconds.'}
+                                            </p>
+                                            {pendingInfo.questions.map((q, i) => (
+                                                <p key={i} className="text-xs text-yellow-400/70 mt-1 font-mono truncate">
+                                                    &gt; {q}
+                                                </p>
+                                            ))}
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                clearPendingMarkets()
+                                                setPendingInfo({ count: 0, questions: [] })
+                                            }}
+                                            className="text-yellow-400/50 hover:text-yellow-400 text-xs font-mono px-2 py-1 rounded border border-yellow-500/20 hover:border-yellow-500/40 transition-all"
+                                            title="Dismiss pending markets"
+                                        >
+                                            DISMISS
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            )}
+
                             {/* Search Bar */}
                             <motion.div
                                 initial={{ opacity: 0, y: 20 }}

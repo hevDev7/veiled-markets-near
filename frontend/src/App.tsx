@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { Landing, Dashboard, MyBets, History, MarketDetail, Settings } from './pages'
 import { useWalletStore } from './lib/store'
 import { initializeMarketIds } from './lib/aleo-client'
@@ -7,8 +8,31 @@ import { initializeMarketIds } from './lib/aleo-client'
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { wallet } = useWalletStore()
+  const { connected: providerConnected, connecting: providerConnecting } = useWallet()
+  const [canRedirect, setCanRedirect] = useState(false)
 
-  if (!wallet.connected) {
+  const isConnected = wallet.connected || providerConnected
+
+  useEffect(() => {
+    if (isConnected || providerConnecting) {
+      setCanRedirect(false)
+      return
+    }
+
+    // Give wallet auto-connect a short grace period before redirecting.
+    const timeout = window.setTimeout(() => setCanRedirect(true), 800)
+    return () => window.clearTimeout(timeout)
+  }, [isConnected, providerConnecting])
+
+  if (isConnected) {
+    return <>{children}</>
+  }
+
+  if (!canRedirect) {
+    return <div className="min-h-screen bg-surface-950" />
+  }
+
+  if (!isConnected) {
     return <Navigate to="/" replace />
   }
 

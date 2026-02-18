@@ -3,13 +3,15 @@ import { motion } from 'framer-motion'
 import { TrendingUp, TrendingDown, AlertCircle, Info } from 'lucide-react'
 import { type Market } from '@/lib/store'
 import {
-    calculateSharesOut,
-    calculateCreditsOut,
-    calculatePriceImpact,
+    calculateBuySharesOut,
+    calculateSellTokensOut,
+    calculateBuyPriceImpact,
+    calculateSellPriceImpact,
     formatSharePrice,
     calculateMinSharesOut,
-    calculateMinCreditsOut,
-    estimateTradeFees
+    calculateMinTokensOut,
+    estimateTradeFees,
+    type AMMReserves,
 } from '@/lib/amm'
 import { cn, formatCredits } from '@/lib/utils'
 
@@ -33,19 +35,23 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
     }, [amount])
 
     // Calculate trade details
+    const reserves: AMMReserves = useMemo(() => ({
+        reserve_1: market.yesReserve,
+        reserve_2: market.noReserve,
+        reserve_3: market.reserve3 ?? 0n,
+        reserve_4: market.reserve4 ?? 0n,
+        num_outcomes: market.numOutcomes ?? 2,
+    }), [market])
+
     const tradeDetails = useMemo(() => {
         if (amountBigInt === 0n) return null
 
-        const yesReserve = market.yesReserve
-        const noReserve = market.noReserve
+        const outcome = shareType === 'yes' ? 1 : 2
 
         if (tradeType === 'buy') {
-            const reserveIn = shareType === 'yes' ? noReserve : yesReserve
-            const reserveOut = shareType === 'yes' ? yesReserve : noReserve
-
-            const sharesOut = calculateSharesOut(reserveIn, reserveOut, amountBigInt)
+            const sharesOut = calculateBuySharesOut(reserves, outcome, amountBigInt)
             const minSharesOut = calculateMinSharesOut(sharesOut, slippageTolerance)
-            const priceImpact = calculatePriceImpact(yesReserve, noReserve, shareType, amountBigInt, true)
+            const priceImpact = calculateBuyPriceImpact(reserves, outcome, amountBigInt)
             const avgPrice = Number(amountBigInt) / Number(sharesOut)
             const fees = estimateTradeFees(amountBigInt)
 
@@ -59,14 +65,11 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
             }
         } else {
             // Selling shares
-            const reserveIn = shareType === 'yes' ? yesReserve : noReserve
-            const reserveOut = shareType === 'yes' ? noReserve : yesReserve
-
-            const creditsOut = calculateCreditsOut(reserveIn, reserveOut, amountBigInt)
+            const creditsOut = calculateSellTokensOut(reserves, outcome, amountBigInt)
             const fees = estimateTradeFees(creditsOut)
             const netCredits = creditsOut - fees
-            const minCreditsOut = calculateMinCreditsOut(netCredits, slippageTolerance)
-            const priceImpact = calculatePriceImpact(yesReserve, noReserve, shareType, amountBigInt, false)
+            const minCreditsOut = calculateMinTokensOut(netCredits, slippageTolerance)
+            const priceImpact = calculateSellPriceImpact(reserves, outcome, amountBigInt)
             const avgPrice = Number(netCredits) / Number(amountBigInt)
 
             return {
@@ -78,7 +81,7 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                 total: netCredits
             }
         }
-    }, [market, tradeType, shareType, amountBigInt, slippageTolerance])
+    }, [reserves, tradeType, shareType, amountBigInt, slippageTolerance])
 
     const handleTrade = () => {
         if (!tradeDetails || amountBigInt === 0n) return

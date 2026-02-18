@@ -2050,7 +2050,7 @@ export class WalletManager {
   /**
    * Test wallet transaction: send 1000 microcredits to self via credits.aleo/transfer_public
    * This tests if the wallet's prover works for simple transactions.
-   * If this succeeds but place_bet_public fails, the issue is program-specific.
+   * If this succeeds but buy_shares_public fails, the issue is program-specific.
    */
   async testTransaction(): Promise<string> {
     if (this.demoMode) {

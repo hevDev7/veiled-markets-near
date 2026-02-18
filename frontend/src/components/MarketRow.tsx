@@ -86,9 +86,9 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
 
                     <div className="text-center">
                         <div className="flex items-center gap-1.5 text-surface-400 mb-1">
-                            <span className="text-xs font-mono text-surface-500">BETS</span>
+                            <span className="text-xs font-mono text-surface-500">LIQUIDITY</span>
                         </div>
-                        <p className="text-sm font-bold text-white font-mono">{market.totalBets}</p>
+                        <p className="text-sm font-bold text-white font-mono">{formatCredits(market.totalLiquidity ?? 0n, 0)}</p>
                     </div>
 
                     <div className="text-center">
@@ -149,7 +149,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                             {formatCredits(market.totalVolume, 0)}
                         </span>
                         <span className="text-surface-400">
-                            {market.totalBets} bets
+                            LIQ {formatCredits(market.totalLiquidity ?? 0n, 0)}
                         </span>
                         <span className="text-surface-400">
                             <Clock className="w-3 h-3 inline mr-1" />
