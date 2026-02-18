@@ -234,6 +234,9 @@ export function MarketDetail() {
 
   const isExpired = market ? (liveExpired || market.timeRemaining === 'Ended' || market.status !== 1) : false
 
+  // Live countdown with seconds
+  const liveTimeRemaining = useLiveCountdown(market?.deadlineTimestamp, market?.timeRemaining)
+
   // AMM price calculations
   const reserves: AMMReserves | null = useMemo(() => {
     if (!market) return null
@@ -722,7 +725,7 @@ export function MarketDetail() {
                       <span>Ends In</span>
                     </div>
                     <p className="text-lg font-bold text-white">
-                      {market.timeRemaining}
+                      {liveTimeRemaining}
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-surface-800/30">
@@ -1647,4 +1650,34 @@ export function MarketDetail() {
       <Footer />
     </div>
   )
+}
+
+/** Live countdown hook — updates every second when deadlineTimestamp is available */
+function useLiveCountdown(deadlineTimestamp?: number, fallbackTimeRemaining?: string): string {
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    if (!deadlineTimestamp || deadlineTimestamp <= Date.now()) return
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [deadlineTimestamp])
+
+  if (!deadlineTimestamp || deadlineTimestamp <= 0) {
+    if (fallbackTimeRemaining) return fallbackTimeRemaining
+    return 'Ended'
+  }
+
+  const diffMs = deadlineTimestamp - now
+  if (diffMs <= 0) return 'Ended'
+
+  const totalSeconds = Math.floor(diffMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
 }

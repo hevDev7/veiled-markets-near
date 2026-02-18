@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Clock, Users, TrendingUp, Shield, Zap, ExternalLink } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
@@ -11,12 +12,7 @@ interface MarketCardProps {
 }
 
 export function MarketCard({ market, index, onClick }: MarketCardProps) {
-  console.log('MarketCard market:', {
-    id: market.id.slice(0, 20),
-    deadline: market.deadline,
-    timeRemaining: market.timeRemaining,
-  });
-  const timeRemaining = getTimeRemaining(market.deadline, market.timeRemaining)
+  const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
 
   return (
     <motion.div
@@ -156,22 +152,33 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
   )
 }
 
-function getTimeRemaining(deadline: bigint, timeRemaining?: string): string {
-  // If timeRemaining is already calculated (from block height), use it
-  if (timeRemaining) return timeRemaining;
+/** Live countdown hook — updates every second when deadlineTimestamp is available */
+function useLiveCountdown(deadlineTimestamp?: number, fallbackTimeRemaining?: string): string {
+  const [now, setNow] = useState(Date.now())
 
-  // Fallback: treat deadline as Unix timestamp
-  const now = Date.now() / 1000
-  const target = Number(deadline)
-  const diff = target - now
+  useEffect(() => {
+    if (!deadlineTimestamp || deadlineTimestamp <= Date.now()) return
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [deadlineTimestamp])
 
-  if (diff <= 0) return 'Ended'
+  if (!deadlineTimestamp || deadlineTimestamp <= 0) {
+    if (fallbackTimeRemaining) return fallbackTimeRemaining
+    return 'Ended'
+  }
 
-  const days = Math.floor(diff / (60 * 60 * 24))
-  const hours = Math.floor((diff % (60 * 60 * 24)) / (60 * 60))
+  const diffMs = deadlineTimestamp - now
+  if (diffMs <= 0) return 'Ended'
 
-  if (days > 0) return `${days}d ${hours}h`
-  if (hours > 0) return `${hours}h`
-  return '<1h'
+  const totalSeconds = Math.floor(diffMs / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
 }
 

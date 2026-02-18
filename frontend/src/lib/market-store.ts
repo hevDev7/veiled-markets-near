@@ -76,16 +76,24 @@ async function transformMarketData(
     const daysRemaining = Math.floor(secondsRemaining / 86400)
     const hoursRemaining = Math.floor((secondsRemaining % 86400) / 3600)
     const minutesRemaining = Math.floor((secondsRemaining % 3600) / 60)
+    const secsRemaining = Math.floor(secondsRemaining % 60)
+
+    // Estimated deadline as unix timestamp (ms) for live countdown
+    const deadlineTimestamp = blocksRemaining > 0
+        ? Date.now() + blocksRemaining * config.msPerBlock
+        : 0
 
     let timeRemaining: string
     if (blocksRemaining <= 0) {
         timeRemaining = 'Ended'
     } else if (daysRemaining > 0) {
-        timeRemaining = `${daysRemaining}d ${hoursRemaining}h`
+        timeRemaining = `${daysRemaining}d ${hoursRemaining}h ${minutesRemaining}m`
     } else if (hoursRemaining > 0) {
-        timeRemaining = `${hoursRemaining}h ${minutesRemaining}m`
+        timeRemaining = `${hoursRemaining}h ${minutesRemaining}m ${secsRemaining}s`
+    } else if (minutesRemaining > 0) {
+        timeRemaining = `${minutesRemaining}m ${secsRemaining}s`
     } else {
-        timeRemaining = `${minutesRemaining}m`
+        timeRemaining = `${secsRemaining}s`
     }
 
     // Look up custom outcome labels (saved during market creation), fall back to defaults
@@ -146,6 +154,7 @@ async function transformMarketData(
         creator: market.creator,
         resolver: market.resolver,
         timeRemaining,
+        deadlineTimestamp: deadlineTimestamp || undefined,
         resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,

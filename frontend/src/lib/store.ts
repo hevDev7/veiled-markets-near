@@ -74,6 +74,7 @@ export interface Market {
   creator?: string
   resolver?: string
   timeRemaining?: string
+  deadlineTimestamp?: number  // Estimated deadline as unix ms (for live countdown)
   resolutionSource?: string
   tags?: string[]
   transactionId?: string

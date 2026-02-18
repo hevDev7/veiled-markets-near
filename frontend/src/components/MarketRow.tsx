@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Clock, TrendingUp, Shield, ChevronRight, ExternalLink } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
@@ -11,7 +12,7 @@ interface MarketRowProps {
 }
 
 export function MarketRow({ market, index, onClick }: MarketRowProps) {
-    const timeRemaining = getTimeRemaining(market.deadline, market.timeRemaining)
+    const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
 
     return (
@@ -182,24 +183,32 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
     )
 }
 
-function getTimeRemaining(deadline: bigint, timeRemaining?: string): string {
-    // If timeRemaining is already calculated (from block height), use it
-    if (timeRemaining) {
-        // Convert to uppercase format (17d 13h -> 17D 13H)
-        return timeRemaining.toUpperCase();
+/** Live countdown hook — updates every second when deadlineTimestamp is available */
+function useLiveCountdown(deadlineTimestamp?: number, fallbackTimeRemaining?: string): string {
+    const [now, setNow] = useState(Date.now())
+
+    useEffect(() => {
+        if (!deadlineTimestamp || deadlineTimestamp <= Date.now()) return
+        const interval = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(interval)
+    }, [deadlineTimestamp])
+
+    if (!deadlineTimestamp || deadlineTimestamp <= 0) {
+        if (fallbackTimeRemaining) return fallbackTimeRemaining.toUpperCase()
+        return 'ENDED'
     }
 
-    // Fallback: treat deadline as Unix timestamp
-    const now = Date.now() / 1000
-    const target = Number(deadline)
-    const diff = target - now
+    const diffMs = deadlineTimestamp - now
+    if (diffMs <= 0) return 'ENDED'
 
-    if (diff <= 0) return 'ENDED'
+    const totalSeconds = Math.floor(diffMs / 1000)
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor((totalSeconds % 86400) / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
 
-    const days = Math.floor(diff / (60 * 60 * 24))
-    const hours = Math.floor((diff % (60 * 60 * 24)) / (60 * 60))
-
-    if (days > 0) return `${days}D ${hours}H`
-    if (hours > 0) return `${hours}H`
-    return '<1H'
+    if (days > 0) return `${days}D ${hours}H ${minutes}M`
+    if (hours > 0) return `${hours}H ${minutes}M ${seconds}S`
+    if (minutes > 0) return `${minutes}M ${seconds}S`
+    return `${seconds}S`
 }
