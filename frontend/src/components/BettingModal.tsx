@@ -129,6 +129,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           lockedMultiplier: selectedOutcome === 'yes'
             ? market.potentialYesPayout
             : market.potentialNoPayout,
+          tokenType: market.tokenType || 'ALEO',
         })
       } else {
         throw new Error('No transaction ID returned from wallet')

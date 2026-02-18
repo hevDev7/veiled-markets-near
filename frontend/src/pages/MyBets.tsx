@@ -499,12 +499,13 @@ function BetCard({
   showClaimAction,
 }: {
   bet: Bet
-  market?: { question: string }
+  market?: { question: string; tokenType?: 'ALEO' | 'USDCX' }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
   showClaimAction: boolean
 }) {
   const isSell = bet.type === 'sell'
+  const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
   const isYes = bet.outcome === 'yes'
   const isPending = bet.status === 'pending'
   const isWon = bet.status === 'won'
@@ -606,7 +607,7 @@ function BetCard({
               <div className="text-right">
                 <p className="text-xs text-surface-500">Received</p>
                 <p className="text-sm font-bold text-yes-400">
-                  +{formatCredits(bet.tokensReceived || bet.amount)}
+                  +{formatCredits(bet.tokensReceived || bet.amount)} {tokenSymbol}
                 </p>
               </div>
             </>
@@ -614,7 +615,7 @@ function BetCard({
             <>
               <div className="text-right">
                 <p className="text-xs text-surface-500">Stake</p>
-                <p className="text-sm font-bold text-white">{formatCredits(bet.amount)}</p>
+                <p className="text-sm font-bold text-white">{formatCredits(bet.amount)} {tokenSymbol}</p>
               </div>
 
               {(isWon || isLost || isRefunded) && (
@@ -629,10 +630,10 @@ function BetCard({
                     isRefunded && "text-orange-400"
                   )}>
                     {isWon
-                      ? `+${formatCredits(bet.payoutAmount || bet.amount)}`
+                      ? `+${formatCredits(bet.payoutAmount || bet.amount)} ${tokenSymbol}`
                       : isRefunded
-                        ? formatCredits(bet.amount)
-                        : `-${formatCredits(bet.amount)}`}
+                        ? `${formatCredits(bet.amount)} ${tokenSymbol}`
+                        : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
                 </div>
               )}

@@ -215,6 +215,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           status: 'pending',
           marketQuestion: market.question,
           lockedMultiplier: tradePreview?.potentialPayout ? tradePreview.potentialPayout / parseFloat(amount) : 1,
+          tokenType: market.tokenType || 'ALEO',
         })
 
         // Refresh balance

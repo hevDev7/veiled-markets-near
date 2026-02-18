@@ -366,6 +366,7 @@ export function MarketDetail() {
           marketQuestion: market.question,
           sharesSold: sellPreview.maxSharesUsed,
           tokensReceived: sellPreview.netTokens,
+          tokenType: market.tokenType || 'ALEO',
         })
 
         pollTransactionStatus(result.transactionId, async (status, onChainTxId) => {
@@ -551,6 +552,7 @@ export function MarketDetail() {
           marketQuestion: market.question,
           sharesReceived: tradePreview.sharesOut,
           lockedMultiplier: tradePreview.potentialPayout / (Number(buyAmountMicro) / 1_000_000),
+          tokenType: market.tokenType || 'ALEO',
         })
 
         setTxId(result.transactionId)
