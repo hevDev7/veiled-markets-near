@@ -13,6 +13,7 @@ import {
     fetchMarketById,
     initializeMarketIds,
     getQuestionText,
+    getOutcomeLabels,
     getMarketTransactionId,
     getMarketDescription,
     getMarketResolutionSource,
@@ -86,10 +87,14 @@ async function transformMarketData(
         timeRemaining = `${minutesRemaining}m`
     }
 
-    // Default outcome labels
+    // Look up custom outcome labels (saved during market creation), fall back to defaults
     const defaultLabels = numOutcomes === 2
         ? ['Yes', 'No']
         : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`)
+    const savedLabels = getOutcomeLabels(market.id) || getOutcomeLabels(market.question_hash)
+    const outcomeLabels = (savedLabels && savedLabels.length >= numOutcomes)
+        ? savedLabels.slice(0, numOutcomes)
+        : defaultLabels
 
     const questionText = getQuestionText(market.question_hash)
     const transactionId = getMarketTransactionId(market.id)
@@ -102,7 +107,7 @@ async function transformMarketData(
         description: registryDescription || undefined,
         category: market.category,
         numOutcomes,
-        outcomeLabels: defaultLabels,
+        outcomeLabels,
         deadline: market.deadline,
         resolutionDeadline: market.resolution_deadline,
         status: market.status,

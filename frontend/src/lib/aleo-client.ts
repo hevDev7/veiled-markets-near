@@ -1785,6 +1785,49 @@ export async function initializeMarketIds(): Promise<void> {
 }
 
 /**
+ * Outcome labels mapping
+ * Maps question_hash (or market_id) to array of custom outcome labels
+ * Loaded from localStorage
+ */
+let OUTCOME_LABELS_MAP: Record<string, string[]> = {};
+
+// Load saved outcome labels from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('veiled_markets_outcome_labels');
+    if (saved) {
+      OUTCOME_LABELS_MAP = JSON.parse(saved);
+      console.log('Loaded outcome labels from localStorage');
+    }
+  } catch (e) {
+    console.warn('Failed to load outcome labels from localStorage:', e);
+  }
+}
+
+/**
+ * Register outcome labels for a market (keyed by question hash or market ID)
+ */
+export function registerOutcomeLabels(key: string, labels: string[]): void {
+  const filtered = labels.filter(l => l.trim().length > 0);
+  if (filtered.length === 0) return;
+  OUTCOME_LABELS_MAP[key] = filtered;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('veiled_markets_outcome_labels', JSON.stringify(OUTCOME_LABELS_MAP));
+    } catch (e) {
+      console.warn('Failed to save outcome labels to localStorage:', e);
+    }
+  }
+}
+
+/**
+ * Get outcome labels for a market (by question hash or market ID)
+ */
+export function getOutcomeLabels(key: string): string[] | null {
+  return OUTCOME_LABELS_MAP[key] || null;
+}
+
+/**
  * Get question text from hash
  */
 export function getQuestionText(questionHash: string): string {

@@ -761,14 +761,12 @@ export function MarketDetail() {
                 className="glass-card p-6"
               >
                 <OddsChart
-                  currentYes={market.yesPercentage}
-                  currentNo={market.noPercentage}
-                  yesPool={market.yesReserve}
-                  noPool={market.noReserve}
+                  numOutcomes={market.numOutcomes}
+                  outcomeLabels={outcomeLabels}
+                  reserves={[market.yesReserve, market.noReserve, market.reserve3, market.reserve4].slice(0, market.numOutcomes)}
+                  prices={prices}
                   totalVolume={market.totalVolume}
                   totalBets={market.totalBets}
-                  potentialYesPayout={market.potentialYesPayout}
-                  potentialNoPayout={market.potentialNoPayout}
                   tokenSymbol={market.tokenType || 'ALEO'}
                 />
               </motion.div>

@@ -25,6 +25,8 @@ A prediction market protocol where users trade outcome shares with complete priv
 - **Multi-Outcome** — Support for 2, 3, or 4 outcome markets
 - **Dual Token** — Markets in ALEO or USDCX stablecoin
 - **LP Provision** — Add/remove liquidity, earn 1% LP fees per trade
+- **Inline Sell** — Sell shares directly from market detail with tokens-desired approach
+- **Position Tracking** — Auto-fetch share records from wallet, track shares received per bet
 - **Dispute Resolution** — On-chain dispute mechanism with bond staking
 
 ## Contract Details
@@ -36,6 +38,7 @@ A prediction market protocol where users trade outcome shares with complete priv
 | **Deploy TX** | `at186k9d264w2s9qfd994aam2xpyda828hnsyh0aan5g25p32v5cuqqgqstv5` |
 | **Transitions** | 30 |
 | **Statements** | 1,974 |
+| **Deploy Cost** | ~60.70 ALEO |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
 
 ## Architecture
@@ -58,10 +61,21 @@ veiled-markets/
 │   └── src/main.leo       # FPMM AMM, LP, dispute, multi-token (2500+ lines)
 ├── frontend/              # React dashboard
 │   ├── src/
-│   │   ├── components/    # Trading modals, market cards, wallet bridge
-│   │   ├── hooks/         # useAleoTransaction (wallet-agnostic)
-│   │   ├── lib/           # AMM math, aleo-client, store, config
-│   │   ├── pages/         # Dashboard, MarketDetail, Landing
+│   │   ├── components/    # Trading UI, wallet bridge, modals, panels
+│   │   │   ├── BuySharesModal.tsx
+│   │   │   ├── SellSharesModal.tsx
+│   │   │   ├── CreateMarketModal.tsx
+│   │   │   ├── ClaimWinningsModal.tsx
+│   │   │   ├── OutcomeSelector.tsx
+│   │   │   ├── LiquidityPanel.tsx
+│   │   │   ├── DisputePanel.tsx
+│   │   │   ├── CreatorFeesPanel.tsx
+│   │   │   ├── AdminPanel.tsx
+│   │   │   ├── WalletBridge.tsx
+│   │   │   └── WalletCompatibilityLab.tsx
+│   │   ├── hooks/         # useAleoTransaction (wallet-agnostic TX + polling)
+│   │   ├── lib/           # AMM math, aleo-client, store, config, credits-record
+│   │   ├── pages/         # Landing, Dashboard, MarketDetail, MyBets, Settings, History
 │   │   └── styles/        # Tailwind + custom CSS
 │   └── public/            # markets-index.json, static assets
 ├── backend/               # Blockchain indexer
@@ -81,7 +95,7 @@ Veiled Markets uses a **Fixed Product Market Maker** (FPMM), the same model used
 Binary: shares_out = amount * (reserve_yes + reserve_no + amount) / (reserve_other + amount)
 ```
 
-**Sell (complete-set burning):** User specifies tokens to withdraw. Contract computes shares needed from the user's outcome to burn a complete set and release collateral.
+**Sell (complete-set burning):** User specifies tokens to withdraw (`tokens_desired` approach). Contract computes shares needed from the user's outcome to burn a complete set and release collateral. No `sqrt` needed on-chain.
 
 ```
 Binary: shares_needed = tokens_desired * (r_i + r_other - td) / (r_other - td)
@@ -89,13 +103,17 @@ Binary: shares_needed = tokens_desired * (r_i + r_other - td) / (r_other - td)
 
 **Redeem:** Winning shares redeem 1:1 (1 share = 1 token). Losing shares = 0.
 
+### `expected_shares` Pattern (v14)
+
+Frontend pre-computes shares from the FPMM formula, the `OutcomeShare` record stores this value, and finalize validates `shares_out >= expected_shares`. This fixes the quantity=0 bug from v13 where records had no share quantity.
+
 ### Fees (per trade)
 
 | Fee | Rate | Recipient |
 |-----|------|-----------|
 | Protocol | 0.5% | Protocol treasury |
 | Creator | 0.5% | Market creator |
-| LP | 1.0% | Liquidity providers |
+| LP | 1.0% | Liquidity providers (stays in pool) |
 | **Total** | **2.0%** | |
 
 ### Implied Price
@@ -126,6 +144,33 @@ ALEO buy shares use `buy_shares_private`, which calls `credits.aleo/transfer_pri
 
 USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less private, but necessary for stablecoin mechanics).
 
+## Frontend Features
+
+### Market Detail — Inline Trading
+
+The market detail page has an integrated **Buy/Sell** tab toggle in the right sidebar:
+
+- **Buy Tab:** Select outcome, enter amount, preview shares received with price impact and fees, execute via wallet
+- **Sell Tab:** Load share positions from wallet (auto-fetch `OutcomeShare` records), enter withdrawal amount, preview shares burned and net tokens received, execute sell
+- Manual record paste fallback for wallets that don't support record fetching
+
+### My Bets — Position Tracking
+
+- Displays **shares received** (fixed at time of purchase) instead of fluctuating market odds
+- Auto-promotes stale pending bets (>2 minutes) to active status
+  - `at1...` IDs: verified on-chain via explorer API
+  - `shield_xxx` IDs: auto-promoted (Shield Wallet confirms on-chain)
+- Tabs: All, Accepted, Unredeemed, Settled
+- Import existing bets by transaction ID
+- Claim winnings / refunds directly from bet cards
+
+### Wallet Integration
+
+- **Shield Wallet** as primary wallet (returns `shield_xxx` event IDs, handled by background blockchain scanner)
+- **Puzzle Wallet** support via server-side delegated proving (WalletConnect V2)
+- Transaction polling with on-chain verification fallback
+- Credits record fetching for private buy transactions (multiple wallet strategies)
+
 ## Key Transitions (30 total)
 
 ### Market Lifecycle
@@ -135,6 +180,8 @@ USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less priv
 | `create_market_usdcx` | Create USDCX market with initial liquidity |
 | `close_market` | Close betting (after deadline) |
 | `resolve_market` | Resolve with winning outcome |
+| `finalize_resolution` | Finalize after dispute window |
+| `cancel_market` | Creator cancels market |
 | `emergency_cancel` | Cancel unresolved market (past resolution deadline) |
 
 ### Trading
@@ -142,9 +189,10 @@ USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less priv
 |---|---|
 | `buy_shares_private` | Buy shares with private credits record (ALEO) |
 | `buy_shares_usdcx` | Buy shares with USDCX (public signer) |
-| `sell_shares` | Sell ALEO shares (tokens_desired approach) |
+| `sell_shares` | Sell ALEO shares (tokens_desired approach, calls `credits.aleo/transfer_public`) |
 | `sell_shares_usdcx` | Sell USDCX shares |
 | `redeem_shares` / `redeem_shares_usdcx` | Redeem winning shares 1:1 |
+| `claim_refund` / `claim_refund_usdcx` | Claim refund on cancelled markets |
 
 ### Liquidity
 | Transition | Description |
@@ -153,13 +201,16 @@ USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less priv
 | `remove_liquidity` / `remove_liq_usdcx` | Withdraw liquidity proportionally |
 | `claim_lp_refund` / `claim_lp_refund_usdcx` | Claim LP refund on cancelled markets |
 
-### Dispute & Fees
+### Dispute & Governance
 | Transition | Description |
 |---|---|
-| `dispute_resolution` | Stake bond to dispute market resolution |
-| `resolve_dispute` | Admin resolves dispute |
+| `dispute_resolution` / `dispute_resolution_usdcx` | Stake bond to dispute market resolution |
 | `claim_dispute_bond` / `claim_disp_bond_usdcx` | Reclaim dispute bond |
 | `withdraw_creator_fees` / `withdraw_fees_usdcx` | Creator withdraws accumulated fees |
+| `init_multisig` | Initialize multisig for treasury |
+| `propose_treasury_withdrawal` | Propose treasury withdrawal |
+| `approve_proposal` | Approve multisig proposal |
+| `execute_proposal` | Execute approved proposal |
 
 ## Quick Start
 
@@ -178,7 +229,7 @@ cd veiled-markets-near
 
 # Install frontend dependencies
 cd frontend
-npm install
+npm install --legacy-peer-deps
 
 # Setup environment
 cp .env.example .env
@@ -245,7 +296,7 @@ snarkos developer execute veiled_markets_v14.aleo create_market \
 
 Parameters:
 1. `question_hash` — BHP256 hash of the question string
-2. `category` — 1-7 (Politics, Sports, Crypto, etc.)
+2. `category` — 1-7 (Politics, Sports, Crypto, Entertainment, Tech, Economics, Science)
 3. `num_outcomes` — 2, 3, or 4
 4. `deadline` — Block height for betting cutoff
 5. `resolution_deadline` — Block height for resolution cutoff
@@ -265,23 +316,17 @@ Parameters:
 
 ### Wallet Compatibility
 
-| Wallet | Create Market | Buy Shares | Status |
-|--------|:---:|:---:|---|
-| Shield Wallet | Yes | Yes | Primary wallet |
-| Puzzle Wallet | Untested | Untested | Server-side proving |
-| Leo Wallet | No | No | Can't resolve 4-level import chain |
+| Wallet | Create Market | Buy Shares | Sell Shares | Status |
+|--------|:---:|:---:|:---:|---|
+| Shield Wallet | Yes | Yes | Yes | Primary wallet |
+| Puzzle Wallet | Untested | Untested | Untested | Server-side proving |
+| Leo Wallet | No | No | No | Can't resolve 4-level import chain |
 
-## Blockchain Indexer
+### Known Shield Wallet Behavior
 
-The indexer scans the Aleo blockchain for market creation transactions.
-
-```bash
-cd backend
-npm install
-npm run index
-```
-
-Outputs `markets-index.json` with all discovered market IDs, creators, and metadata.
+- Returns `shield_xxx` event IDs instead of `at1...` transaction IDs
+- Child transitions (`transfer_public_as_signer`) may show as ACCEPTED while parent shows REJECTED in Shield UI — but the on-chain transaction is actually ACCEPTED
+- App handles this with auto-promotion of stale pending bets and background blockchain scanning
 
 ## Tech Stack
 
@@ -292,6 +337,7 @@ Outputs `markets-index.json` with all discovered market IDs, creators, and metad
 | **Styling** | Tailwind CSS, Framer Motion |
 | **State** | Zustand |
 | **Wallet** | ProvableHQ Aleo Wallet Adapter |
+| **UI Components** | Radix UI (Dialog, Tabs, Slider, Tooltip, Progress) |
 | **Persistence** | Supabase (cross-device bet tracking) |
 | **Hosting** | Vercel |
 | **Build** | vite-plugin-wasm, vite-plugin-top-level-await |
@@ -315,6 +361,16 @@ cd contracts && leo build
 cd sdk && npm test
 ```
 
+### Vite Build Configuration
+
+The `@provablehq/sdk` requires specific Vite config:
+
+- `vite-plugin-wasm` + `vite-plugin-top-level-await` for WASM support
+- `optimizeDeps.exclude: ['@provablehq/wasm', '@provablehq/sdk']`
+- `build.target: 'esnext'` and `worker.format: 'es'`
+- COOP/COEP headers needed for SharedArrayBuffer in dev mode
+- Do NOT use `commonjsOptions.exclude` for `@provablehq` (breaks `core-js` require)
+
 ## Audit Fixes (v10+)
 
 | ID | Fix |
@@ -329,11 +385,17 @@ cd sdk && npm test
 
 | Version | Key Changes |
 |---------|-------------|
-| **v14** | FPMM AMM, removed `buy_shares_public`, `expected_shares` pattern, `sell_shares` tokens_desired approach, `sell_shares` calls `credits.aleo/transfer_public` directly |
+| **v14** | FPMM AMM with correct formulas, removed `buy_shares_public` (ALEO uses `buy_shares_private` only), `expected_shares` pattern fixes quantity=0 bug, `sell_shares` uses tokens_desired approach + calls `credits.aleo/transfer_public` directly, multisig treasury governance |
 | v13 | Fixed ternary underflow bug in buy_shares (Leo evaluates both branches) |
 | v12 | Initial FPMM implementation, multi-outcome markets, LP provision |
 | v11 | USDCX stablecoin integration, dual-token markets |
 | v10 | Audit fixes (C-01, C-02, C-03, H-01, H-02), dispute resolution |
+
+## Testnet Markets (v14)
+
+Markets are registered in `frontend/public/markets-index.json` and `frontend/src/lib/question-mapping.ts`.
+
+Creating markets via the frontend dashboard or CLI populates these registries. The blockchain indexer (`backend/`) can scan for new markets automatically.
 
 ## Documentation
 

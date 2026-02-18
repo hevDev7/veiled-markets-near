@@ -23,6 +23,7 @@ import {
   CONTRACT_INFO,
   getTransactionUrl,
   registerQuestionText,
+  registerOutcomeLabels,
   registerMarketTransaction,
   waitForMarketCreation,
   savePendingMarket,
@@ -310,6 +311,9 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       // Register the question text with the question hash for future lookup
       registerQuestionText(questionHash, formData.question)
       registerMarketTransaction(questionHash, transactionId)
+      // Save custom outcome labels (keyed by question hash)
+      const activeLabels = formData.outcomeLabels.slice(0, formData.numOutcomes)
+      registerOutcomeLabels(questionHash, activeLabels)
 
       console.log('Registered market:', { questionHash, question: formData.question, transactionId })
 
@@ -359,6 +363,9 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           if (resolved) return
           resolved = true
           console.log('[CreateMarket] Market ID found:', actualMarketId)
+
+          // Also register outcome labels by market ID (so market-store can look up by either key)
+          registerOutcomeLabels(actualMarketId, activeLabels)
 
           // Update Supabase: register real market ID AND delete stale pending_ entry
           if (isSupabaseAvailable()) {
