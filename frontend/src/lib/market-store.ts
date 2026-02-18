@@ -23,6 +23,7 @@ import {
     type MarketResolutionData,
 } from './aleo-client'
 import { calculateAllPrices, type AMMReserves } from './amm'
+import { config } from './config'
 
 interface MarketsState {
     markets: Market[]
@@ -71,7 +72,7 @@ async function transformMarketData(
 
     // Calculate time remaining
     const blocksRemaining = Number(market.deadline - currentBlock)
-    const secondsRemaining = blocksRemaining * 15
+    const secondsRemaining = blocksRemaining * config.secondsPerBlock
     const daysRemaining = Math.floor(secondsRemaining / 86400)
     const hoursRemaining = Math.floor((secondsRemaining % 86400) / 3600)
     const minutesRemaining = Math.floor((secondsRemaining % 3600) / 60)

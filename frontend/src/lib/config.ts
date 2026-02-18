@@ -23,6 +23,10 @@ export interface AppConfig {
   rpcUrl: string;
   explorerUrl: string;
 
+  // Block time
+  secondsPerBlock: number;
+  msPerBlock: number;
+
   // Program
   programId: string;
   creditsProgramId: string;
@@ -91,6 +95,10 @@ function loadConfig(): AppConfig {
     network,
     rpcUrl: getEnv('VITE_ALEO_RPC_URL', networkConfig.rpcUrl),
     explorerUrl: getEnv('VITE_EXPLORER_URL', networkConfig.explorerUrl),
+
+    // Block time (measured on testnet: ~3.6s, use 4s as conservative estimate)
+    secondsPerBlock: network === 'mainnet' ? 15 : 4,
+    msPerBlock: network === 'mainnet' ? 15000 : 4000,
 
     // Program
     programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v15.aleo'),

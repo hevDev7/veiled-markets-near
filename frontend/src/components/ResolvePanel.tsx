@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Clock,
   ArrowRight,
+  ShieldAlert,
 } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
@@ -16,11 +17,13 @@ import {
   buildCloseMarketInputs,
   buildResolveMarketInputs,
   buildFinalizeResolutionInputs,
+  buildEmergencyCancelInputs,
   getCurrentBlockHeight,
   MARKET_STATUS,
   type MarketResolutionData,
 } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
+import { config } from '@/lib/config'
 
 interface ResolvePanelProps {
   market: Market
@@ -71,6 +74,13 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
 
   const isResolver = wallet.address === market.creator || wallet.address === market.resolver
   const canFinalize = resolution && currentBlock > resolution.challenge_deadline
+
+  // Check if market is past resolution deadline (eligible for emergency cancel)
+  const isPastResolutionDeadline = currentBlock > 0n
+    && market.resolutionDeadline > 0n
+    && currentBlock > market.resolutionDeadline
+    && market.status !== MARKET_STATUS.RESOLVED
+    && market.status !== MARKET_STATUS.CANCELLED
 
   // Steps config
   const steps: { key: ResolveStep; label: string; icon: React.ElementType }[] = [
@@ -155,6 +165,31 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     }
   }
 
+  const handleEmergencyCancel = async () => {
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      const inputs = buildEmergencyCancelInputs(market.id)
+      const result = await executeTransaction({
+        program: CONTRACT_INFO.programId,
+        function: 'emergency_cancel',
+        inputs,
+        fee: 0.5,
+      })
+      if (result?.transactionId) {
+        setTransactionId(result.transactionId)
+        onResolutionChange?.()
+      } else {
+        throw new Error('No transaction ID returned from wallet')
+      }
+    } catch (err: unknown) {
+      console.error('Emergency cancel failed:', err)
+      setError(err instanceof Error ? err.message : 'Failed to emergency cancel')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const resetState = () => {
     setTransactionId(null)
     setError(null)
@@ -168,8 +203,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     if (!resolution || currentBlock === 0n) return null
     const blocksLeft = resolution.challenge_deadline - currentBlock
     if (blocksLeft <= 0n) return { text: 'Challenge window ended', canFinalize: true }
-    // ~5 seconds per block
-    const secondsLeft = Number(blocksLeft) * 5
+    const secondsLeft = Number(blocksLeft) * config.secondsPerBlock
     const hours = Math.floor(secondsLeft / 3600)
     const minutes = Math.floor((secondsLeft % 3600) / 60)
     return {
@@ -284,6 +318,42 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
           </div>
         ) : (
           <>
+            {/* Emergency Cancel Banner — shown when past resolution deadline */}
+            {isPastResolutionDeadline && (
+              <div className="mb-4 p-4 rounded-xl bg-no-500/10 border border-no-500/20 space-y-3">
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className="w-5 h-5 text-no-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-no-400">Resolution Deadline Passed</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      This market has passed its resolution deadline (block {market.resolutionDeadline.toString()}).
+                      {currentStep === 'resolve'
+                        ? ' The resolver can no longer submit a resolution.'
+                        : ''}
+                      {' '}Anyone can emergency cancel this market to allow bettors to claim refunds.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleEmergencyCancel}
+                  disabled={isSubmitting}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-no-500/20 hover:bg-no-500/30 border border-no-500/30 text-no-400 font-medium text-sm transition-colors"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Confirm in Wallet...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldAlert className="w-4 h-4" />
+                      <span>Emergency Cancel Market</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* Step 1: Close Market */}
             {currentStep === 'close' && (
               <div className="space-y-4">
@@ -353,65 +423,69 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 )}
 
                 {/* Outcome selection */}
-                <div>
-                  <label className="block text-sm text-surface-400 mb-2">Select Winning Outcome</label>
-                  <div className="space-y-2">
-                    {outcomeLabels.map((label, i) => {
-                      const outcomeNum = i + 1
-                      const isSelected = selectedOutcome === outcomeNum
-                      const colorIdx = Math.min(i, 3)
-                      return (
-                        <button
-                          key={outcomeNum}
-                          onClick={() => setSelectedOutcome(outcomeNum)}
-                          className={cn(
-                            'w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between',
-                            isSelected
-                              ? 'bg-brand-500/10 border-brand-500/40 ring-1 ring-brand-500/20'
-                              : 'bg-surface-800/30 border-surface-700/50 hover:border-surface-600/50'
-                          )}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              'px-2 py-0.5 text-xs font-medium rounded-full border',
-                              outcomeColors[colorIdx]
-                            )}>
-                              {label}
-                            </span>
-                          </div>
-                          {isSelected && (
-                            <CheckCircle2 className="w-4 h-4 text-brand-400" />
-                          )}
-                        </button>
-                      )
-                    })}
+                {!isPastResolutionDeadline && (
+                  <div>
+                    <label className="block text-sm text-surface-400 mb-2">Select Winning Outcome</label>
+                    <div className="space-y-2">
+                      {outcomeLabels.map((label, i) => {
+                        const outcomeNum = i + 1
+                        const isSelected = selectedOutcome === outcomeNum
+                        const colorIdx = Math.min(i, 3)
+                        return (
+                          <button
+                            key={outcomeNum}
+                            onClick={() => setSelectedOutcome(outcomeNum)}
+                            className={cn(
+                              'w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between',
+                              isSelected
+                                ? 'bg-brand-500/10 border-brand-500/40 ring-1 ring-brand-500/20'
+                                : 'bg-surface-800/30 border-surface-700/50 hover:border-surface-600/50'
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                'px-2 py-0.5 text-xs font-medium rounded-full border',
+                                outcomeColors[colorIdx]
+                              )}>
+                                {label}
+                              </span>
+                            </div>
+                            {isSelected && (
+                              <CheckCircle2 className="w-4 h-4 text-brand-400" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                <button
-                  onClick={handleResolveMarket}
-                  disabled={isSubmitting || !selectedOutcome || !isResolver}
-                  className={cn(
-                    'w-full flex items-center justify-center gap-2 btn-primary',
-                    (!selectedOutcome || !isResolver) && 'opacity-50 cursor-not-allowed'
-                  )}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Confirm in Wallet...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Gavel className="w-5 h-5" />
-                      <span>
-                        {selectedOutcome
-                          ? `Resolve: ${outcomeLabels[selectedOutcome - 1]} Wins`
-                          : 'Select Winning Outcome'}
-                      </span>
-                    </>
-                  )}
-                </button>
+                {!isPastResolutionDeadline && (
+                  <button
+                    onClick={handleResolveMarket}
+                    disabled={isSubmitting || !selectedOutcome || !isResolver}
+                    className={cn(
+                      'w-full flex items-center justify-center gap-2 btn-primary',
+                      (!selectedOutcome || !isResolver) && 'opacity-50 cursor-not-allowed'
+                    )}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Confirm in Wallet...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Gavel className="w-5 h-5" />
+                        <span>
+                          {selectedOutcome
+                            ? `Resolve: ${outcomeLabels[selectedOutcome - 1]} Wins`
+                            : 'Select Winning Outcome'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             )}
 

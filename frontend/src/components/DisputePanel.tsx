@@ -12,6 +12,7 @@ import {
   CHALLENGE_WINDOW_BLOCKS,
 } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
+import { config } from '@/lib/config'
 
 interface DisputePanelProps {
   market: Market
@@ -67,7 +68,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
       return
     }
 
-    const secondsRemaining = blocksRemaining * 15 // ~15 sec per block
+    const secondsRemaining = blocksRemaining * config.secondsPerBlock
     const hours = Math.floor(secondsRemaining / 3600)
     const minutes = Math.floor((secondsRemaining % 3600) / 60)
 
@@ -202,7 +203,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                 </span>
               </div>
               <p className="text-xs text-surface-400 mt-1">
-                ~{Number(CHALLENGE_WINDOW_BLOCKS) * 15 / 3600} hours from resolution.
+                ~{(Number(CHALLENGE_WINDOW_BLOCKS) * config.secondsPerBlock / 3600).toFixed(1)} hours from resolution.
                 Block {resolution.challenge_deadline.toString()}.
               </p>
             </div>

@@ -9,7 +9,7 @@
 Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiled-markets.vercel.app)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v14.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v15.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -27,19 +27,21 @@ A prediction market protocol where users trade outcome shares with complete priv
 - **LP Provision** — Add/remove liquidity, earn 1% LP fees per trade
 - **Inline Trading** — Buy and sell shares directly from market detail page
 - **Position Tracking** — Auto-fetch share records from wallet, track shares and sell history per bet
-- **Dispute Resolution** — On-chain dispute mechanism with bond staking
+- **Market Resolution** — 3-step on-chain resolution (close → resolve → finalize) with full UI
+- **Dispute Mechanism** — On-chain dispute with bond staking, automatic re-resolution flow
 - **Multi-Outcome Pool Breakdown** — Dynamic pool visualization for 2-4 outcome markets
+- **Needs Resolution Filter** — Dashboard filter to find expired markets awaiting resolution
 
 ## Contract Details
 
 | Field | Value |
 |---|---|
-| **Program** | `veiled_markets_v14.aleo` |
+| **Program** | `veiled_markets_v15.aleo` |
 | **Network** | Aleo Testnet |
-| **Deploy TX** | `at186k9d264w2s9qfd994aam2xpyda828hnsyh0aan5g25p32v5cuqqgqstv5` |
+| **Deploy TX** | `at1kdqmt63rhhx3t27af3psrq97flnjy4jjr67dsryt4uk62cd6lqqqcrtr37` |
 | **Transitions** | 30 |
-| **Statements** | 1,974 |
-| **Deploy Cost** | ~60.70 ALEO |
+| **Statements** | 1,969 |
+| **Deploy Cost** | ~60.72 ALEO |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
 
 ## Architecture
@@ -49,7 +51,7 @@ Frontend (React + Vite + TypeScript)
     |
 Shield Wallet (ProvableHQ Adapter)
     |
-Smart Contract (veiled_markets_v14.aleo)
+Smart Contract (veiled_markets_v15.aleo)
     |
 Aleo Blockchain (Testnet)
 ```
@@ -70,6 +72,7 @@ veiled-markets/
 │   │   │   ├── OutcomeSelector.tsx      # Multi-outcome selector (2-4 outcomes)
 │   │   │   ├── OddsChart.tsx            # Multi-outcome pool breakdown
 │   │   │   ├── LiquidityPanel.tsx       # Add/remove liquidity
+│   │   │   ├── ResolvePanel.tsx         # 3-step market resolution UI
 │   │   │   ├── DisputePanel.tsx         # Dispute resolution
 │   │   │   ├── CreatorFeesPanel.tsx     # Creator fee withdrawal
 │   │   │   ├── AdminPanel.tsx           # Admin: resolve, close, cancel
@@ -92,8 +95,8 @@ veiled-markets/
 │   │   │   └── utils.ts                 # Formatting, classnames, helpers
 │   │   ├── pages/
 │   │   │   ├── Landing.tsx              # Landing page with hero
-│   │   │   ├── Dashboard.tsx            # Market listing + create market
-│   │   │   ├── MarketDetail.tsx         # Market detail + inline Buy/Sell trading
+│   │   │   ├── Dashboard.tsx            # Market listing + create market + resolution filter
+│   │   │   ├── MarketDetail.tsx         # Market detail + inline Buy/Sell + Resolve tab
 │   │   │   ├── MyBets.tsx               # Position tracking (buy + sell history)
 │   │   │   ├── History.tsx              # Transaction history
 │   │   │   └── Settings.tsx             # App settings
@@ -125,7 +128,7 @@ Binary: shares_needed = tokens_desired * (r_i + r_other - td) / (r_other - td)
 
 **Redeem:** Winning shares redeem 1:1 (1 share = 1 token). Losing shares = 0.
 
-### `expected_shares` Pattern (v14)
+### `expected_shares` Pattern
 
 Frontend pre-computes shares from the FPMM formula, the `OutcomeShare` record stores this value, and finalize validates `shares_out >= expected_shares`. This fixes the quantity=0 bug from v13 where records had no share quantity.
 
@@ -150,6 +153,42 @@ Binary:
 N-outcome:
   price_i = product(r_j for j != i) / sum_of_products
 ```
+
+## Market Resolution
+
+Markets follow a 3-step on-chain resolution process with a built-in dispute window:
+
+### Resolution Flow
+
+```
+1. close_market      →  Status: ACTIVE → CLOSED        (anyone, after deadline)
+2. resolve_market    →  Status: CLOSED → PENDING        (resolver only)
+3. finalize_resolution → Status: PENDING → RESOLVED     (anyone, after challenge window)
+```
+
+### Resolve Panel UI
+
+The **Resolve** tab on the market detail page guides the resolver through all 3 steps:
+
+- **Step 1 — Close Market:** Closes betting after the market deadline has passed
+- **Step 2 — Resolve Market:** Resolver selects the winning outcome (only the designated resolver address can execute this step)
+- **Step 3 — Finalize:** After the challenge window (~800 blocks, ~2-3 hours) passes with no disputes, anyone can finalize the resolution
+
+Each step shows transaction status, block countdown for the challenge window, and auto-advances to the next step after confirmation.
+
+### Dispute Mechanism
+
+During the challenge window (between resolve and finalize), anyone can dispute the resolution:
+
+1. **Disputer** calls `dispute_resolution` with a proposed different outcome + 1 ALEO bond
+2. Market status resets to **CLOSED**, resolution is removed
+3. **Resolver** must re-resolve the market with a corrected outcome
+4. A new challenge window begins
+5. After finalization, if the final outcome matches the disputer's proposed outcome, the disputer can reclaim their bond via `claim_dispute_bond`
+
+### Needs Resolution Filter
+
+The Dashboard includes a **"Needs Resolution"** sort option (Gavel icon) that filters to show only expired/ended markets that still need to be resolved. This helps resolvers easily find markets awaiting action.
 
 ## Privacy Model
 
@@ -178,6 +217,7 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 
 - **Buy Tab:** Select outcome (2-4 options with custom labels and colors), enter amount, preview shares received with price impact and fees, execute via wallet
 - **Sell Tab:** Auto-fetch `OutcomeShare` records from wallet, select position, enter withdrawal amount, preview shares burned and net tokens received, execute sell
+- **Resolve Tab:** 3-step resolution wizard (close → resolve → finalize) with challenge window countdown
 - Manual record paste fallback for wallets that don't support record fetching
 
 ### Multi-Outcome Support
@@ -215,10 +255,10 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 | `create_market` | Create ALEO market with initial liquidity |
 | `create_market_usdcx` | Create USDCX market with initial liquidity |
 | `close_market` | Close betting (after deadline) |
-| `resolve_market` | Resolve with winning outcome |
-| `finalize_resolution` | Finalize after dispute window |
-| `cancel_market` | Creator cancels market |
-| `emergency_cancel` | Cancel unresolved market (past resolution deadline) |
+| `resolve_market` | Resolve with winning outcome (resolver only) |
+| `finalize_resolution` | Finalize after challenge window (anyone) |
+| `cancel_market` | Creator cancels market (no volume only) |
+| `emergency_cancel` | Cancel unresolved market past resolution deadline (anyone) |
 
 ### Trading
 | Transition | Description |
@@ -240,8 +280,8 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 ### Dispute & Governance
 | Transition | Description |
 |---|---|
-| `dispute_resolution` / `dispute_resolution_usdcx` | Stake bond to dispute market resolution |
-| `claim_dispute_bond` / `claim_disp_bond_usdcx` | Reclaim dispute bond |
+| `dispute_resolution` / `dispute_resolution_usdcx` | Stake 1 ALEO bond to dispute resolution |
+| `claim_dispute_bond` / `claim_disp_bond_usdcx` | Reclaim bond if final outcome matches proposal |
 | `withdraw_creator_fees` / `withdraw_fees_usdcx` | Creator withdraws accumulated fees |
 | `init_multisig` | Initialize multisig for treasury |
 | `propose_treasury_withdrawal` | Propose treasury withdrawal |
@@ -269,7 +309,7 @@ npm install --legacy-peer-deps
 
 # Setup environment
 cp .env.example .env
-# Edit .env if needed (defaults point to testnet with v14)
+# Edit .env if needed (defaults point to testnet with v15)
 
 # Start development server
 npm run dev
@@ -282,7 +322,7 @@ Key variables in `frontend/.env`:
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets_v14.aleo
+VITE_PROGRAM_ID=veiled_markets_v15.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
@@ -293,7 +333,7 @@ VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 ```bash
 cd contracts
 leo build
-# Output: 1974 statements, 30 transitions
+# Output: 1969 statements, 30 transitions
 ```
 
 ### Deploy Contract
@@ -301,7 +341,7 @@ leo build
 ```bash
 cd contracts
 leo deploy --network testnet --yes --broadcast
-# Cost: ~60.70 ALEO for v14
+# Cost: ~60.72 ALEO for v15
 ```
 
 ## Create a Market (CLI)
@@ -314,8 +354,8 @@ CURRENT_BLOCK=$(curl -s "https://api.explorer.provable.com/v1/testnet/block/heig
 DEADLINE=$((CURRENT_BLOCK + 100000))    # ~5 days
 RESOLUTION=$((CURRENT_BLOCK + 200000))  # ~10 days
 
-# Create market (7 inputs for v14)
-snarkos developer execute veiled_markets_v14.aleo create_market \
+# Create market (7 inputs)
+snarkos developer execute veiled_markets_v15.aleo create_market \
   "<question_hash>field" \
   "3u8" \
   "2u8" \
@@ -346,7 +386,7 @@ Parameters:
 1. Install Shield Wallet browser extension
 2. Switch to **Testnet** network
 3. Get test credits from [Aleo Faucet](https://faucet.aleo.org)
-4. Connect wallet in the app — this registers `veiled_markets_v14.aleo`
+4. Connect wallet in the app — this registers `veiled_markets_v15.aleo`
 
 > **Note:** If you see "program not in allowed programs" error, disconnect and reconnect Shield Wallet to re-register the program.
 
@@ -433,13 +473,14 @@ All buy and sell transactions are recorded in Zustand store and persisted to `lo
 
 | Version | Key Changes |
 |---------|-------------|
-| **v14** | FPMM AMM with correct formulas, `buy_shares_private` only (ALEO), `expected_shares` pattern, `sell_shares` tokens_desired approach + `credits.aleo/transfer_public`, multisig treasury governance, custom outcome labels, multi-outcome pool breakdown, sell tracking in My Bets |
+| **v15** | Fixed dispute lifecycle bugs: `resolve_market` now clears stale dispute data on re-resolve, `emergency_cancel` cleans up resolution/dispute state, `claim_dispute_bond` uses unforgeable `DisputeBondReceipt` record instead of mapping (prevents stuck markets). Added Resolve Panel UI (3-step resolution wizard), "Needs Resolution" dashboard filter |
+| v14 | FPMM AMM with correct formulas, `buy_shares_private` only (ALEO), `expected_shares` pattern, `sell_shares` tokens_desired approach + `credits.aleo/transfer_public`, multisig treasury governance, custom outcome labels, multi-outcome pool breakdown, sell tracking in My Bets |
 | v13 | Fixed ternary underflow bug in buy_shares (Leo evaluates both branches) |
 | v12 | Initial FPMM implementation, multi-outcome markets, LP provision |
 | v11 | USDCX stablecoin integration, dual-token markets |
 | v10 | Audit fixes (C-01, C-02, C-03, H-01, H-02), dispute resolution |
 
-## Testnet Markets (v14)
+## Testnet Markets
 
 Markets are registered in `frontend/public/markets-index.json` and `frontend/src/lib/question-mapping.ts`.
 
@@ -471,6 +512,6 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v14.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
+[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v15.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
 
 </div>

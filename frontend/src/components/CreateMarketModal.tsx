@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useWalletStore } from '@/lib/store'
+import { config } from '@/lib/config'
 import { cn } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
@@ -186,12 +187,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       console.log('Current block height:', currentBlock.toString())
       console.log('Current block type:', typeof currentBlock)
 
-      // Convert dates to block heights (assuming ~15 seconds per block)
+      // Convert dates to block heights using configured block time
       const deadlineDate = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`)
       const resolutionDate = new Date(`${formData.resolutionDeadlineDate}T${formData.resolutionDeadlineTime}`)
 
-      const deadlineBlocks = BigInt(Math.floor((deadlineDate.getTime() - Date.now()) / 15000))
-      const resolutionBlocks = BigInt(Math.floor((resolutionDate.getTime() - Date.now()) / 15000))
+      const deadlineBlocks = BigInt(Math.floor((deadlineDate.getTime() - Date.now()) / config.msPerBlock))
+      const resolutionBlocks = BigInt(Math.floor((resolutionDate.getTime() - Date.now()) / config.msPerBlock))
 
       const deadlineBlockHeight = currentBlock + deadlineBlocks
       const resolutionBlockHeight = currentBlock + resolutionBlocks

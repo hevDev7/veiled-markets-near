@@ -1122,11 +1122,19 @@ export function buildCancelMarketInputs(marketId: string): string[] {
 }
 
 /**
+ * Build inputs for emergency_cancel transaction (v15)
+ * Anyone can call this for markets past resolution_deadline that aren't resolved/cancelled.
+ */
+export function buildEmergencyCancelInputs(marketId: string): string[] {
+  return [marketId];
+}
+
+/**
  * Format block height to approximate date
  */
 export function blockHeightToDate(blockHeight: bigint, currentHeight: bigint): Date {
   const blocksRemaining = Number(blockHeight - currentHeight);
-  const msRemaining = blocksRemaining * 15000; // ~15 seconds per block
+  const msRemaining = blocksRemaining * config.msPerBlock;
   return new Date(Date.now() + msRemaining);
 }
 
@@ -1137,7 +1145,7 @@ export function formatTimeRemaining(deadlineBlock: bigint, currentBlock: bigint)
   const blocksRemaining = Number(deadlineBlock - currentBlock);
   if (blocksRemaining <= 0) return 'Ended';
 
-  const secondsRemaining = blocksRemaining * 15;
+  const secondsRemaining = blocksRemaining * config.secondsPerBlock;
   const days = Math.floor(secondsRemaining / 86400);
   const hours = Math.floor((secondsRemaining % 86400) / 3600);
   const minutes = Math.floor((secondsRemaining % 3600) / 60);
@@ -1519,7 +1527,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
         if (!marketId) {
           // Use deeper scan for older pending markets
           const ageMs = Date.now() - pending.createdAt
-          const blocksToScan = Math.min(2000, Math.max(500, Math.floor(ageMs / 15000) + 200))
+          const blocksToScan = Math.min(2000, Math.max(500, Math.floor(ageMs / config.msPerBlock) + 200))
           marketId = await scanBlockchainForMarket(pending.questionHash, blocksToScan)
         }
 
