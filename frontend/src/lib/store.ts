@@ -98,9 +98,12 @@ export interface Bet {
   outcome: 'yes' | 'no'
   placedAt: number
   status: 'pending' | 'active' | 'won' | 'lost' | 'refunded'
+  type?: 'buy' | 'sell'       // Trade type (default 'buy')
   marketQuestion?: string
   lockedMultiplier?: number    // Payout multiplier locked at time of bet
   sharesReceived?: bigint      // Shares received from buy (v14 FPMM)
+  sharesSold?: bigint          // Shares burned in sell
+  tokensReceived?: bigint      // Net tokens received from sell (after fees)
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
   winningOutcome?: 'yes' | 'no' // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
@@ -1040,6 +1043,8 @@ function parseBetFromStorage(bet: any): Bet {
     ...bet,
     amount: BigInt(bet.amount),
     sharesReceived: bet.sharesReceived ? BigInt(bet.sharesReceived) : undefined,
+    sharesSold: bet.sharesSold ? BigInt(bet.sharesSold) : undefined,
+    tokensReceived: bet.tokensReceived ? BigInt(bet.tokensReceived) : undefined,
     payoutAmount: bet.payoutAmount ? BigInt(bet.payoutAmount) : undefined,
   }
 }
@@ -1049,6 +1054,8 @@ function serializeBetForStorage(bet: Bet): any {
     ...bet,
     amount: bet.amount.toString(),
     sharesReceived: bet.sharesReceived?.toString(),
+    sharesSold: bet.sharesSold?.toString(),
+    tokensReceived: bet.tokensReceived?.toString(),
     payoutAmount: bet.payoutAmount?.toString(),
   }
 }

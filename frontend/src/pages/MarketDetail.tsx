@@ -353,6 +353,21 @@ export function MarketDetail() {
         setSellTxId(result.transactionId)
         setSellStep('pending')
 
+        // Record sell in My Bets
+        const outcomeStr = parsedShareRecord.outcome === 1 ? 'yes' : 'no' as const
+        addPendingBet({
+          id: result.transactionId,
+          marketId: market.id,
+          amount: sellTokensMicro,
+          outcome: outcomeStr,
+          placedAt: Date.now(),
+          status: 'pending',
+          type: 'sell',
+          marketQuestion: market.question,
+          sharesSold: sellPreview.maxSharesUsed,
+          tokensReceived: sellPreview.netTokens,
+        })
+
         pollTransactionStatus(result.transactionId, async (status, onChainTxId) => {
           if (onChainTxId) setSellTxId(onChainTxId)
           if (status === 'confirmed') {

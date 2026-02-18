@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp,
   TrendingDown,
+  ArrowDownToLine,
   Clock,
   Loader2,
   ExternalLink,
@@ -503,6 +504,7 @@ function BetCard({
   onClaim: (mode: 'winnings' | 'refund') => void
   showClaimAction: boolean
 }) {
+  const isSell = bet.type === 'sell'
   const isYes = bet.outcome === 'yes'
   const isPending = bet.status === 'pending'
   const isWon = bet.status === 'won'
@@ -518,6 +520,7 @@ function BetCard({
       className={cn(
         "glass-card p-5 transition-all duration-200 hover:border-surface-600/50",
         isPending && "border-accent-500/20",
+        isSell && "border-purple-500/20",
         isWon && !bet.claimed && "border-yes-500/20",
         isLost && "border-no-500/15",
         isRefunded && !bet.claimed && "border-orange-500/20"
@@ -527,12 +530,15 @@ function BetCard({
         {/* Icon */}
         <div className={cn(
           "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
+          isSell ? "bg-purple-500/10" :
           isWon ? "bg-yes-500/10" :
           isLost ? "bg-no-500/10" :
           isRefunded ? "bg-orange-500/10" :
           isYes ? "bg-yes-500/10" : "bg-no-500/10"
         )}>
-          {isWon ? (
+          {isSell ? (
+            <ArrowDownToLine className="w-5 h-5 text-purple-400" />
+          ) : isWon ? (
             <Trophy className="w-5 h-5 text-yes-400" />
           ) : isLost ? (
             <XCircle className="w-5 h-5 text-no-400" />
@@ -548,12 +554,18 @@ function BetCard({
         {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5">
-            <span className={cn(
-              "px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase",
-              isYes ? "bg-yes-500/15 text-yes-400" : "bg-no-500/15 text-no-400"
-            )}>
-              {isYes ? 'YES' : 'NO'}
-            </span>
+            {isSell ? (
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase bg-purple-500/15 text-purple-400">
+                SELL
+              </span>
+            ) : (
+              <span className={cn(
+                "px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase",
+                isYes ? "bg-yes-500/15 text-yes-400" : "bg-no-500/15 text-no-400"
+              )}>
+                {isYes ? 'YES' : 'NO'}
+              </span>
+            )}
             {isPending && (
               <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-accent-500/15 text-accent-400 flex items-center gap-1">
                 <Loader2 className="w-2.5 h-2.5 animate-spin" />
@@ -583,49 +595,68 @@ function BetCard({
 
         {/* Amount + Result */}
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="text-right">
-            <p className="text-xs text-surface-500">Stake</p>
-            <p className="text-sm font-bold text-white">{formatCredits(bet.amount)}</p>
-          </div>
+          {isSell ? (
+            <>
+              <div className="text-right">
+                <p className="text-xs text-surface-500">Shares Sold</p>
+                <p className="text-sm font-bold text-purple-400">
+                  {bet.sharesSold ? formatCredits(bet.sharesSold) : '—'}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-surface-500">Received</p>
+                <p className="text-sm font-bold text-yes-400">
+                  +{formatCredits(bet.tokensReceived || bet.amount)}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-right">
+                <p className="text-xs text-surface-500">Stake</p>
+                <p className="text-sm font-bold text-white">{formatCredits(bet.amount)}</p>
+              </div>
 
-          {(isWon || isLost || isRefunded) && (
-            <div className="text-right">
-              <p className="text-xs text-surface-500">
-                {isWon ? 'Payout' : isRefunded ? 'Refund' : 'P&L'}
-              </p>
-              <p className={cn(
-                "text-sm font-bold",
-                isWon && "text-yes-400",
-                isLost && "text-no-400",
-                isRefunded && "text-orange-400"
-              )}>
-                {isWon
-                  ? `+${formatCredits(bet.payoutAmount || bet.amount)}`
-                  : isRefunded
-                    ? formatCredits(bet.amount)
-                    : `-${formatCredits(bet.amount)}`}
-              </p>
-            </div>
-          )}
+              {(isWon || isLost || isRefunded) && (
+                <div className="text-right">
+                  <p className="text-xs text-surface-500">
+                    {isWon ? 'Payout' : isRefunded ? 'Refund' : 'P&L'}
+                  </p>
+                  <p className={cn(
+                    "text-sm font-bold",
+                    isWon && "text-yes-400",
+                    isLost && "text-no-400",
+                    isRefunded && "text-orange-400"
+                  )}>
+                    {isWon
+                      ? `+${formatCredits(bet.payoutAmount || bet.amount)}`
+                      : isRefunded
+                        ? formatCredits(bet.amount)
+                        : `-${formatCredits(bet.amount)}`}
+                  </p>
+                </div>
+              )}
 
-          {isActive && (
-            <div className="text-right">
-              <p className="text-xs text-surface-500">Shares</p>
-              <p className={cn(
-                "text-sm font-bold",
-                isYes ? "text-yes-400" : "text-no-400"
-              )}>
-                {bet.sharesReceived
-                  ? formatCredits(bet.sharesReceived)
-                  : bet.lockedMultiplier
-                    ? formatCredits(BigInt(Math.floor(Number(bet.amount) * bet.lockedMultiplier)))
-                    : '—'}
-              </p>
-            </div>
+              {isActive && (
+                <div className="text-right">
+                  <p className="text-xs text-surface-500">Shares</p>
+                  <p className={cn(
+                    "text-sm font-bold",
+                    isYes ? "text-yes-400" : "text-no-400"
+                  )}>
+                    {bet.sharesReceived
+                      ? formatCredits(bet.sharesReceived)
+                      : bet.lockedMultiplier
+                        ? formatCredits(BigInt(Math.floor(Number(bet.amount) * bet.lockedMultiplier)))
+                        : '—'}
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
           {/* Claim/Refund actions */}
-          {showClaimAction && isWon && !bet.claimed && (
+          {!isSell && showClaimAction && isWon && !bet.claimed && (
             <button
               onClick={() => onClaim('winnings')}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-yes-500 hover:bg-yes-400 text-white transition-colors flex items-center gap-1.5"
@@ -635,7 +666,7 @@ function BetCard({
             </button>
           )}
 
-          {showClaimAction && isRefunded && !bet.claimed && (
+          {!isSell && showClaimAction && isRefunded && !bet.claimed && (
             <button
               onClick={() => onClaim('refund')}
               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500 hover:bg-orange-400 text-white transition-colors flex items-center gap-1.5"
