@@ -100,6 +100,7 @@ export interface Bet {
   status: 'pending' | 'active' | 'won' | 'lost' | 'refunded'
   marketQuestion?: string
   lockedMultiplier?: number    // Payout multiplier locked at time of bet
+  sharesReceived?: bigint      // Shares received from buy (v14 FPMM)
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
   winningOutcome?: 'yes' | 'no' // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
@@ -1038,6 +1039,7 @@ function parseBetFromStorage(bet: any): Bet {
   return {
     ...bet,
     amount: BigInt(bet.amount),
+    sharesReceived: bet.sharesReceived ? BigInt(bet.sharesReceived) : undefined,
     payoutAmount: bet.payoutAmount ? BigInt(bet.payoutAmount) : undefined,
   }
 }
@@ -1046,6 +1048,7 @@ function serializeBetForStorage(bet: Bet): any {
   return {
     ...bet,
     amount: bet.amount.toString(),
+    sharesReceived: bet.sharesReceived?.toString(),
     payoutAmount: bet.payoutAmount?.toString(),
   }
 }

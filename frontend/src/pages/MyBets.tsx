@@ -498,7 +498,7 @@ function BetCard({
   showClaimAction,
 }: {
   bet: Bet
-  market?: { question: string; yesPercentage: number; noPercentage: number }
+  market?: { question: string }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
   showClaimAction: boolean
@@ -608,14 +608,18 @@ function BetCard({
             </div>
           )}
 
-          {isActive && market && (
+          {isActive && (
             <div className="text-right">
-              <p className="text-xs text-surface-500">Odds</p>
+              <p className="text-xs text-surface-500">Shares</p>
               <p className={cn(
                 "text-sm font-bold",
                 isYes ? "text-yes-400" : "text-no-400"
               )}>
-                {isYes ? market.yesPercentage : market.noPercentage}%
+                {bet.sharesReceived
+                  ? formatCredits(bet.sharesReceived)
+                  : bet.lockedMultiplier
+                    ? formatCredits(BigInt(Math.floor(Number(bet.amount) * bet.lockedMultiplier)))
+                    : '—'}
               </p>
             </div>
           )}

@@ -16,6 +16,10 @@ import {
   ShieldAlert,
   Coins,
   ShoppingCart,
+  TrendingDown,
+  Wallet,
+  RefreshCw,
+  ChevronDown,
 } from 'lucide-react'
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -24,6 +28,7 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
   buildBuySharesInputs,
+  buildSellSharesInputs,
   getCurrentBlockHeight,
   getMarketResolution,
   getMarketFees,
@@ -35,12 +40,17 @@ import {
   type DisputeDataResult,
 } from '@/lib/aleo-client'
 // fetchCreditsRecord dynamically imported where needed for buy_shares_private
+import type { ParsedOutcomeShare } from '@/lib/credits-record'
 import {
   calculateBuySharesOut,
   calculateBuyPriceImpact,
   calculateFees,
   calculateMinSharesOut,
   calculateAllPrices,
+  calculateSellSharesNeeded,
+  calculateSellNetTokens,
+  calculateMaxTokensDesired,
+  calculateSellPriceImpact,
   type AMMReserves,
 } from '@/lib/amm'
 import { DashboardHeader } from '@/components/DashboardHeader'
@@ -152,6 +162,19 @@ export function MarketDetail() {
   // Active tab for extra panels
   const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees'>('trade')
 
+  // Sell shares state
+  const [tradeMode, setTradeMode] = useState<'buy' | 'sell'>('buy')
+  const [sellShareRecord, setSellShareRecord] = useState('')
+  const [sellTokensDesired, setSellTokensDesired] = useState('')
+  const [sellSlippage, setSellSlippage] = useState(2)
+  const [sellStep, setSellStep] = useState<TradeStep>('select')
+  const [sellError, setSellError] = useState<string | null>(null)
+  const [sellTxId, setSellTxId] = useState<string | null>(null)
+  const [walletShareRecords, setWalletShareRecords] = useState<ParsedOutcomeShare[]>([])
+  const [isFetchingRecords, setIsFetchingRecords] = useState(false)
+  const [fetchRecordError, setFetchRecordError] = useState<string | null>(null)
+  const [showPasteInput, setShowPasteInput] = useState(false)
+
   // Redirect to landing if not connected
   useEffect(() => {
     if (!wallet.connected) {
@@ -254,6 +277,131 @@ export function MarketDetail() {
       potentialPayout,
     }
   }, [reserves, selectedOutcome, buyAmountMicro, slippage])
+
+  // ---- Sell computed values ----
+  const parsedShareRecord = useMemo(() => {
+    if (!sellShareRecord) return null
+    const outcomeMatch = sellShareRecord.match(/outcome:\s*(\d+)u8/)
+    const qtyMatch = sellShareRecord.match(/quantity:\s*(\d+)u128/)
+    const marketMatch = sellShareRecord.match(/market_id:\s*(\d+field)/)
+    if (!outcomeMatch || !qtyMatch) return null
+    return {
+      outcome: parseInt(outcomeMatch[1]),
+      quantity: BigInt(qtyMatch[1]),
+      marketId: marketMatch ? marketMatch[1] : null,
+    }
+  }, [sellShareRecord])
+
+  const sellMaxTokens = useMemo(() => {
+    if (!reserves || !parsedShareRecord || parsedShareRecord.quantity <= 0n) return 0n
+    return calculateMaxTokensDesired(reserves, parsedShareRecord.outcome, parsedShareRecord.quantity)
+  }, [reserves, parsedShareRecord])
+
+  const sellTokensMicro = useMemo(() => {
+    const num = parseFloat(sellTokensDesired) || 0
+    return BigInt(Math.floor(num * 1_000_000))
+  }, [sellTokensDesired])
+
+  const sellPreview = useMemo(() => {
+    if (!reserves || !parsedShareRecord || sellTokensMicro <= 0n) return null
+    const sharesNeeded = calculateSellSharesNeeded(reserves, parsedShareRecord.outcome, sellTokensMicro)
+    if (sharesNeeded <= 0n) return null
+    const maxSharesUsed = (sharesNeeded * BigInt(Math.floor((100 + sellSlippage) * 100))) / 10000n
+    const netTokens = calculateSellNetTokens(sellTokensMicro)
+    const fees = calculateFees(sellTokensMicro)
+    const priceImpact = calculateSellPriceImpact(reserves, parsedShareRecord.outcome, sellTokensMicro)
+    return {
+      sharesNeeded,
+      maxSharesUsed,
+      netTokens,
+      fees,
+      priceImpact,
+      exceedsBalance: maxSharesUsed > parsedShareRecord.quantity,
+    }
+  }, [reserves, parsedShareRecord, sellTokensMicro, sellSlippage])
+
+  // Sell handler
+  const handleSellShares = async () => {
+    if (!market || !parsedShareRecord || sellTokensMicro <= 0n || !sellPreview) return
+
+    setSellStep('processing')
+    setSellError(null)
+
+    try {
+      if (sellPreview.exceedsBalance) {
+        throw new Error(
+          `Need ${formatCredits(sellPreview.maxSharesUsed)} shares (with ${sellSlippage}% slippage) but only have ${formatCredits(parsedShareRecord.quantity)}.`
+        )
+      }
+
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      const { functionName, inputs } = buildSellSharesInputs(
+        sellShareRecord,
+        sellTokensMicro,
+        sellPreview.maxSharesUsed,
+        tokenType,
+      )
+
+      const result = await executeTransaction({
+        program: CONTRACT_INFO.programId,
+        function: functionName,
+        inputs,
+        fee: 0.5,
+      })
+
+      if (result?.transactionId) {
+        setSellTxId(result.transactionId)
+        setSellStep('pending')
+
+        pollTransactionStatus(result.transactionId, async (status, onChainTxId) => {
+          if (onChainTxId) setSellTxId(onChainTxId)
+          if (status === 'confirmed') {
+            setSellStep('success')
+          } else if (status === 'failed') {
+            setSellError('Transaction failed on-chain.')
+            setSellStep('error')
+          } else {
+            setSellStep('success')
+          }
+        }, 30, 10_000)
+      } else {
+        throw new Error('No transaction ID returned from wallet')
+      }
+    } catch (err: unknown) {
+      console.error('Sell failed:', err)
+      setSellError(err instanceof Error ? err.message : 'Failed to sell shares')
+      setSellStep('error')
+    }
+  }
+
+  const resetSell = () => {
+    setSellShareRecord('')
+    setSellTokensDesired('')
+    setSellStep('select')
+    setSellError(null)
+    setSellTxId(null)
+    setWalletShareRecords([])
+    setFetchRecordError(null)
+    setShowPasteInput(false)
+  }
+
+  const handleFetchRecords = async () => {
+    setIsFetchingRecords(true)
+    setFetchRecordError(null)
+    try {
+      const { fetchOutcomeShareRecords } = await import('@/lib/credits-record')
+      const records = await fetchOutcomeShareRecords(CONTRACT_INFO.programId, market?.id)
+      setWalletShareRecords(records)
+      if (records.length === 0) {
+        setFetchRecordError('No share positions found for this market. Your wallet may not support record fetching.')
+      }
+    } catch (err) {
+      console.error('[Sell] Failed to fetch records:', err)
+      setFetchRecordError(err instanceof Error ? err.message : 'Failed to fetch records from wallet')
+    } finally {
+      setIsFetchingRecords(false)
+    }
+  }
 
   if (!wallet.connected) return null
 
@@ -386,6 +534,7 @@ export function MarketDetail() {
           placedAt: Date.now(),
           status: 'pending',
           marketQuestion: market.question,
+          sharesReceived: tradePreview.sharesOut,
           lockedMultiplier: tradePreview.potentialPayout / (Number(buyAmountMicro) / 1_000_000),
         })
 
@@ -768,9 +917,39 @@ export function MarketDetail() {
                 transition={{ delay: 0.1 }}
                 className="glass-card p-6 sticky top-24"
               >
-                <h2 className="text-lg font-semibold text-white mb-4">
-                  {isExpired ? 'Market Expired' : 'Buy Shares'}
-                </h2>
+                {/* Buy/Sell Tab Toggle */}
+                {!isExpired && canTrade && step === 'select' ? (
+                  <div className="flex gap-2 mb-4">
+                    <button
+                      onClick={() => setTradeMode('buy')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all',
+                        tradeMode === 'buy'
+                          ? 'bg-yes-500/20 text-yes-400 border border-yes-500/30'
+                          : 'bg-surface-800/50 text-surface-400 hover:text-white border border-transparent'
+                      )}
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      Buy
+                    </button>
+                    <button
+                      onClick={() => setTradeMode('sell')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all',
+                        tradeMode === 'sell'
+                          ? 'bg-no-500/20 text-no-400 border border-no-500/30'
+                          : 'bg-surface-800/50 text-surface-400 hover:text-white border border-transparent'
+                      )}
+                    >
+                      <TrendingDown className="w-4 h-4" />
+                      Sell
+                    </button>
+                  </div>
+                ) : (
+                  <h2 className="text-lg font-semibold text-white mb-4">
+                    {isExpired ? 'Market Expired' : 'Buy Shares'}
+                  </h2>
+                )}
 
                 {/* Expired State */}
                 {isExpired && step === 'select' && (
@@ -869,7 +1048,7 @@ export function MarketDetail() {
                 )}
 
                 {/* Trading Form */}
-                {canTrade && step === 'select' && (
+                {canTrade && step === 'select' && tradeMode === 'buy' && (
                   <>
                     {/* Outcome Selection */}
                     <div className="mb-6">
@@ -1041,6 +1220,365 @@ export function MarketDetail() {
                       Your trade is encrypted with zero-knowledge proofs.
                       Only you can see your position.
                     </p>
+                  </>
+                )}
+
+                {/* Sell Tab Content */}
+                {canTrade && tradeMode === 'sell' && (
+                  <>
+                    {/* Sell: Select state */}
+                    {sellStep === 'select' && (
+                      <div className="space-y-4">
+                        {/* Share Positions from Wallet */}
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-sm text-surface-400">Your Share Positions</label>
+                            {(walletShareRecords.length > 0 || isFetchingRecords) && (
+                              <button
+                                onClick={handleFetchRecords}
+                                disabled={isFetchingRecords}
+                                className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 disabled:text-surface-600 transition-colors"
+                              >
+                                {isFetchingRecords ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <RefreshCw className="w-3 h-3" />
+                                )}
+                                {isFetchingRecords ? 'Loading...' : 'Refresh'}
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Loading state */}
+                          {isFetchingRecords && walletShareRecords.length === 0 && (
+                            <div className="flex items-center justify-center py-6 rounded-xl bg-surface-800/30">
+                              <Loader2 className="w-5 h-5 text-brand-500 animate-spin mr-2" />
+                              <span className="text-sm text-surface-400">Fetching from wallet...</span>
+                            </div>
+                          )}
+
+                          {/* Records list */}
+                          {walletShareRecords.length > 0 && (
+                            <div className="space-y-2">
+                              {walletShareRecords.map((rec, idx) => {
+                                const isSelected = sellShareRecord === rec.plaintext
+                                const label = outcomeLabels[rec.outcome - 1] || `Outcome ${rec.outcome}`
+                                const colorIdx = Math.min(rec.outcome - 1, 3)
+                                const outcomeColors = [
+                                  'bg-yes-500/10 border-yes-500/30 text-yes-400',
+                                  'bg-no-500/10 border-no-500/30 text-no-400',
+                                  'bg-purple-500/10 border-purple-500/30 text-purple-400',
+                                  'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
+                                ]
+                                return (
+                                  <button
+                                    key={idx}
+                                    onClick={() => setSellShareRecord(isSelected ? '' : rec.plaintext)}
+                                    className={cn(
+                                      'w-full p-3 rounded-xl border text-left transition-all',
+                                      isSelected
+                                        ? 'bg-brand-500/10 border-brand-500/40 ring-1 ring-brand-500/20'
+                                        : 'bg-surface-800/30 border-surface-700/50 hover:border-surface-600/50'
+                                    )}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2">
+                                        <span className={cn(
+                                          'px-2 py-0.5 text-xs font-medium rounded-full border',
+                                          outcomeColors[colorIdx]
+                                        )}>
+                                          {label}
+                                        </span>
+                                        {isSelected && <Check className="w-3.5 h-3.5 text-brand-400" />}
+                                      </div>
+                                      <span className="text-white font-medium text-sm">
+                                        {formatCredits(rec.quantity)} shares
+                                      </span>
+                                    </div>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {/* No records found */}
+                          {!isFetchingRecords && walletShareRecords.length === 0 && fetchRecordError && (
+                            <div className="p-4 rounded-xl bg-surface-800/30 text-center">
+                              <Wallet className="w-6 h-6 text-surface-500 mx-auto mb-2" />
+                              <p className="text-xs text-surface-400">{fetchRecordError}</p>
+                            </div>
+                          )}
+
+                          {/* Initial prompt — no fetch attempted yet */}
+                          {!isFetchingRecords && walletShareRecords.length === 0 && !fetchRecordError && (
+                            <button
+                              onClick={handleFetchRecords}
+                              className="w-full py-6 rounded-xl bg-surface-800/30 border border-dashed border-surface-700/50 hover:border-brand-500/30 transition-all text-center group"
+                            >
+                              <Wallet className="w-8 h-8 text-surface-500 group-hover:text-brand-400 mx-auto mb-2 transition-colors" />
+                              <p className="text-sm text-surface-400 group-hover:text-surface-300 transition-colors">
+                                Click to load your share positions
+                              </p>
+                              <p className="text-xs text-surface-600 mt-1">
+                                Fetches OutcomeShare records from your wallet
+                              </p>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Manual Paste Fallback */}
+                        <div>
+                          <button
+                            onClick={() => setShowPasteInput(!showPasteInput)}
+                            className="flex items-center gap-1.5 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+                          >
+                            <ChevronDown className={cn('w-3 h-3 transition-transform', showPasteInput && 'rotate-180')} />
+                            Enter record manually
+                          </button>
+                          {showPasteInput && (
+                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-2">
+                              <textarea
+                                value={sellShareRecord}
+                                onChange={(e) => setSellShareRecord(e.target.value)}
+                                placeholder={`{\n  owner: aleo1...,\n  outcome: 1u8,\n  quantity: 1000000u128,\n  ...\n}`}
+                                className="input-field w-full h-24 text-xs font-mono resize-none"
+                              />
+                            </motion.div>
+                          )}
+                        </div>
+
+                        {/* Record Preview */}
+                        {parsedShareRecord && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="p-3 rounded-xl bg-surface-800/50 space-y-2"
+                          >
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Outcome</span>
+                              <span className="text-white font-medium">
+                                {outcomeLabels[parsedShareRecord.outcome - 1] || `Outcome ${parsedShareRecord.outcome}`}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Your Shares</span>
+                              <span className="text-white font-medium">
+                                {formatCredits(parsedShareRecord.quantity)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Max Withdrawable</span>
+                              <span className="text-surface-300">
+                                {formatCredits(sellMaxTokens)} {tokenSymbol}
+                              </span>
+                            </div>
+                            {parsedShareRecord.marketId && parsedShareRecord.marketId !== market.id && (
+                              <div className="flex items-start gap-2 p-2 rounded-lg bg-no-500/10 border border-no-500/20">
+                                <AlertCircle className="w-3.5 h-3.5 text-no-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-no-400">This record belongs to a different market!</p>
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+
+                        {/* Amount to Withdraw */}
+                        {parsedShareRecord && parsedShareRecord.quantity > 0n && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                          >
+                            <label className="text-sm text-surface-400 mb-2 block">
+                              Amount to Withdraw ({tokenSymbol})
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="number"
+                                value={sellTokensDesired}
+                                onChange={(e) => setSellTokensDesired(e.target.value)}
+                                placeholder="0.00"
+                                className="input-field w-full pr-24 text-lg"
+                                min="0"
+                                step="0.1"
+                              />
+                              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                <button
+                                  onClick={() => setSellTokensDesired(
+                                    (Number(sellMaxTokens) / 1_000_000).toString()
+                                  )}
+                                  className="text-xs text-brand-400 hover:text-brand-300"
+                                >
+                                  Max
+                                </button>
+                                <span className="text-surface-400 text-sm">{tokenSymbol}</span>
+                              </div>
+                            </div>
+
+                            {/* Slippage */}
+                            <div className="mt-3">
+                              <label className="text-xs text-surface-500 mb-1.5 block">Slippage Tolerance</label>
+                              <div className="flex gap-2">
+                                {SLIPPAGE_PRESETS.map(s => (
+                                  <button
+                                    key={s}
+                                    onClick={() => setSellSlippage(s)}
+                                    className={cn(
+                                      'px-3 py-1 rounded-lg text-xs font-medium transition-all',
+                                      sellSlippage === s
+                                        ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                                        : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                                    )}
+                                  >
+                                    {s}%
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+
+                        {/* Sell Preview */}
+                        {sellPreview && (
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="p-4 rounded-xl bg-surface-800/30 space-y-2"
+                          >
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Shares Used</span>
+                              <span className="text-white font-medium">
+                                {formatCredits(sellPreview.sharesNeeded)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Max Shares (slippage)</span>
+                              <span className="text-surface-300">
+                                {formatCredits(sellPreview.maxSharesUsed)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Trading Fee (2%)</span>
+                              <span className="text-surface-300">
+                                {formatCredits(sellPreview.fees.totalFees)} {tokenSymbol}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-surface-400">Price Impact</span>
+                              <span className={cn(
+                                'font-medium',
+                                Math.abs(sellPreview.priceImpact) > 5 ? 'text-no-400' : 'text-surface-300'
+                              )}>
+                                {sellPreview.priceImpact.toFixed(2)}%
+                              </span>
+                            </div>
+                            <div className="flex justify-between pt-2 border-t border-surface-700/50">
+                              <span className="text-surface-400 text-sm">You Receive</span>
+                              <span className="text-yes-400 font-bold">
+                                {formatCredits(sellPreview.netTokens)} {tokenSymbol}
+                              </span>
+                            </div>
+                            {sellPreview.exceedsBalance && (
+                              <div className="mt-2 p-2 rounded-lg bg-no-500/10 border border-no-500/20">
+                                <p className="text-xs text-no-400">
+                                  Insufficient shares. Try a smaller amount.
+                                </p>
+                              </div>
+                            )}
+                            {Math.abs(sellPreview.priceImpact) > 5 && !sellPreview.exceedsBalance && (
+                              <div className="mt-2 p-2 rounded-lg bg-no-500/10 border border-no-500/20">
+                                <p className="text-xs text-no-400">
+                                  High price impact! Consider reducing amount.
+                                </p>
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+
+                        {/* Sell Button */}
+                        <button
+                          onClick={handleSellShares}
+                          disabled={!parsedShareRecord || sellTokensMicro <= 0n || sellPreview?.exceedsBalance}
+                          className={cn(
+                            "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
+                            parsedShareRecord && sellTokensMicro > 0n && !sellPreview?.exceedsBalance
+                              ? "bg-no-500 hover:bg-no-400 text-white"
+                              : "bg-surface-800 text-surface-500 cursor-not-allowed"
+                          )}
+                        >
+                          <TrendingDown className="w-5 h-5" />
+                          {parsedShareRecord && sellTokensMicro > 0n
+                            ? `Sell for ${sellTokensDesired} ${tokenSymbol}`
+                            : 'Select Position & Enter Amount'}
+                        </button>
+
+                        <p className="text-xs text-surface-500 text-center">
+                          Shares are burned and tokens transferred to your public balance.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Sell: Processing */}
+                    {sellStep === 'processing' && (
+                      <div className="text-center py-8">
+                        <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
+                        <h3 className="text-xl font-bold text-white mb-2">Processing...</h3>
+                        <p className="text-surface-400">Please confirm the transaction in your wallet.</p>
+                      </div>
+                    )}
+
+                    {/* Sell: Pending */}
+                    {sellStep === 'pending' && (
+                      <div className="text-center py-8">
+                        <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
+                        <h3 className="text-xl font-bold text-white mb-2">Transaction Pending</h3>
+                        <p className="text-surface-400 mb-4">
+                          Waiting for on-chain confirmation. This may take 1-3 minutes.
+                        </p>
+                        <button onClick={resetSell} className="btn-secondary w-full text-sm">
+                          Close
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Sell: Success */}
+                    {sellStep === 'success' && (
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 rounded-full bg-yes-500/10 flex items-center justify-center mx-auto mb-4">
+                          <CheckCircle2 className="w-8 h-8 text-yes-400" />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">Shares Sold!</h3>
+                        <p className="text-surface-400 mb-4">
+                          You withdrew {sellTokensDesired} {tokenSymbol} from the pool.
+                        </p>
+                        {sellTxId && sellTxId.startsWith('at1') && (
+                          <a
+                            href={`https://testnet.explorer.provable.com/transaction/${sellTxId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-4"
+                          >
+                            <span>View Transaction</span>
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        )}
+                        <button onClick={resetSell} className="btn-primary w-full">
+                          Done
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Sell: Error */}
+                    {sellStep === 'error' && (
+                      <div className="text-center py-8">
+                        <div className="w-16 h-16 rounded-full bg-no-500/10 flex items-center justify-center mx-auto mb-4">
+                          <AlertCircle className="w-8 h-8 text-no-400" />
+                        </div>
+                        <h3 className="text-xl font-bold text-white mb-2">Sell Failed</h3>
+                        <p className="text-surface-400 mb-6 whitespace-pre-line text-left text-sm">{sellError}</p>
+                        <button onClick={resetSell} className="btn-primary w-full">
+                          Try Again
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </motion.div>

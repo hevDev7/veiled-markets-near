@@ -253,3 +253,152 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
   console.log('[Bet] All strategies exhausted — no Credits record found for buy_shares_private')
   return null
 }
+
+/**
+ * Parsed OutcomeShare record
+ */
+export interface ParsedOutcomeShare {
+  plaintext: string
+  outcome: number
+  quantity: bigint
+  marketId: string | null
+  owner: string | null
+}
+
+/**
+ * Parse an OutcomeShare record plaintext string into structured data.
+ */
+function parseOutcomeShare(text: string): ParsedOutcomeShare | null {
+  const outcomeMatch = text.match(/outcome:\s*(\d+)u8/)
+  const qtyMatch = text.match(/quantity:\s*(\d+)u128/)
+  if (!outcomeMatch || !qtyMatch) return null
+  const marketMatch = text.match(/market_id:\s*(\d+field)/)
+  const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/)
+  return {
+    plaintext: text,
+    outcome: parseInt(outcomeMatch[1]),
+    quantity: BigInt(qtyMatch[1]),
+    marketId: marketMatch ? marketMatch[1] : null,
+    owner: ownerMatch ? ownerMatch[1] : null,
+  }
+}
+
+/**
+ * Extract OutcomeShare records from a list of raw wallet records.
+ * Filters for records containing "outcome:" and "quantity:" (OutcomeShare fields).
+ */
+function extractShareRecords(records: any[]): ParsedOutcomeShare[] {
+  const results: ParsedOutcomeShare[] = []
+  for (const record of records) {
+    if (!record) continue
+    if (record.spent === true || record.is_spent === true) continue
+    if (record.status === 'spent' || record.status === 'Spent') continue
+
+    let plaintext: string | null = null
+
+    if (typeof record === 'string') {
+      if (record.includes('outcome:') && record.includes('quantity:')) plaintext = record
+    } else if (typeof record === 'object') {
+      // Try known plaintext fields
+      for (const key of ['plaintext', 'data', 'content']) {
+        if (record[key] != null) {
+          const val = String(record[key])
+          if (val.includes('outcome:') && val.includes('quantity:')) {
+            plaintext = val
+            break
+          }
+        }
+      }
+      // Scan all string fields
+      if (!plaintext) {
+        for (const key of Object.keys(record)) {
+          const val = record[key]
+          if (val == null) continue
+          const valStr = String(val)
+          if (valStr.includes('outcome:') && valStr.includes('quantity:') && valStr.includes('{') && !valStr.startsWith('{"')) {
+            plaintext = valStr
+            break
+          }
+        }
+      }
+    }
+
+    if (plaintext) {
+      const parsed = parseOutcomeShare(plaintext)
+      if (parsed && parsed.quantity > 0n) results.push(parsed)
+    }
+  }
+  return results
+}
+
+/**
+ * Fetch OutcomeShare records from the wallet for a given program.
+ * Returns parsed records. Optionally filters by marketId.
+ */
+export async function fetchOutcomeShareRecords(
+  programId: string,
+  marketId?: string,
+): Promise<ParsedOutcomeShare[]> {
+  console.log(`[Sell] === Fetching OutcomeShare records for ${programId} ===`)
+
+  let allRecords: ParsedOutcomeShare[] = []
+
+  // Strategy 1: Adapter requestRecords with plaintext=true
+  const adapterRecords = (window as any).__aleoRequestRecords
+  if (typeof adapterRecords === 'function') {
+    try {
+      console.log('[Sell] Strategy 1: adapter requestRecords(program, true)')
+      const records = await adapterRecords(programId, true)
+      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
+      console.log(`[Sell] Strategy 1 → Got ${recordsArr.length} record(s)`)
+      allRecords = extractShareRecords(recordsArr)
+      if (allRecords.length > 0) {
+        console.log(`[Sell] Found ${allRecords.length} OutcomeShare record(s)`)
+      }
+    } catch (err) {
+      console.log('[Sell] Strategy 1 failed:', err)
+    }
+  }
+
+  // Strategy 2: Adapter requestRecordPlaintexts
+  if (allRecords.length === 0) {
+    const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
+    if (typeof adapterPlaintexts === 'function') {
+      try {
+        console.log('[Sell] Strategy 2: adapter requestRecordPlaintexts(program)')
+        const records = await adapterPlaintexts(programId)
+        const recordsArr = Array.isArray(records) ? records : (records?.records || [])
+        console.log(`[Sell] Strategy 2 → Got ${recordsArr.length} record(s)`)
+        allRecords = extractShareRecords(recordsArr)
+      } catch (err) {
+        console.log('[Sell] Strategy 2 failed:', err)
+      }
+    }
+  }
+
+  // Strategy 3: Native wallet API
+  if (allRecords.length === 0) {
+    const wallet = (window as any).leoWallet || (window as any).leo
+    if (wallet && typeof wallet.requestRecords === 'function') {
+      try {
+        console.log('[Sell] Strategy 3: native wallet requestRecords(program)')
+        const result = await wallet.requestRecords(programId)
+        const recordsArr = result?.records || (Array.isArray(result) ? result : [])
+        console.log(`[Sell] Strategy 3 → Got ${recordsArr.length} record(s)`)
+        allRecords = extractShareRecords(recordsArr)
+      } catch (err) {
+        console.log('[Sell] Strategy 3 failed:', err)
+      }
+    }
+  }
+
+  // Filter by market if specified
+  if (marketId && allRecords.length > 0) {
+    const filtered = allRecords.filter(r => !r.marketId || r.marketId === marketId)
+    console.log(`[Sell] Filtered to ${filtered.length} record(s) for market ${marketId.slice(0, 20)}...`)
+    return filtered
+  }
+
+  console.log(`[Sell] Returning ${allRecords.length} OutcomeShare record(s)`)
+  return allRecords
+}
