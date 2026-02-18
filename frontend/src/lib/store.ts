@@ -72,6 +72,7 @@ export interface Market {
   finalized?: boolean
 
   creator?: string
+  resolver?: string
   timeRemaining?: string
   resolutionSource?: string
   tags?: string[]

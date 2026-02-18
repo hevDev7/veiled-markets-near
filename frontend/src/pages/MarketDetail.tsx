@@ -60,6 +60,7 @@ import { OutcomeSelector } from '@/components/OutcomeSelector'
 import { LiquidityPanel } from '@/components/LiquidityPanel'
 import { DisputePanel } from '@/components/DisputePanel'
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
+import { ResolvePanel } from '@/components/ResolvePanel'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 
 const categoryNames: Record<number, string> = {
@@ -142,7 +143,7 @@ export function MarketDetail() {
   const { marketId } = useParams<{ marketId: string }>()
   const { wallet } = useWalletStore()
   const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
-  const { markets } = useRealMarketsStore()
+  const { markets, fetchMarkets } = useRealMarketsStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [market, setMarket] = useState<Market | null>(null)
@@ -160,7 +161,7 @@ export function MarketDetail() {
   const [, setDispute] = useState<DisputeDataResult | null>(null)
 
   // Active tab for extra panels
-  const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees'>('trade')
+  const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees' | 'resolve'>('trade')
 
   // Sell shares state
   const [tradeMode, setTradeMode] = useState<'buy' | 'sell'>('buy')
@@ -609,9 +610,29 @@ export function MarketDetail() {
   const quickAmounts = [1, 5, 10, 25, 50, 100]
 
   // Determine which panels to show based on market status
+  const showResolve = isExpired || market.status === MARKET_STATUS.CLOSED || market.status === MARKET_STATUS.PENDING_RESOLUTION || market.status === MARKET_STATUS.RESOLVED
   const showDispute = market.status === MARKET_STATUS.PENDING_RESOLUTION && resolution
   const showCreatorFees = market.status === MARKET_STATUS.RESOLVED && fees && wallet.address === market.creator
   const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired
+
+  // Re-fetch market + resolution data after a resolution action
+  const refreshExtras = async () => {
+    if (!market?.id) return
+    try {
+      // Refresh markets to get updated status (e.g. ACTIVE → CLOSED)
+      await fetchMarkets()
+      const [res, feesData, disputeData] = await Promise.all([
+        getMarketResolution(market.id),
+        getMarketFees(market.id),
+        getMarketDispute(market.id),
+      ])
+      if (res) setResolution(res)
+      if (feesData) setFees(feesData)
+      if (disputeData) setDispute(disputeData)
+    } catch (err) {
+      console.warn('[MarketDetail] Failed to refresh extras:', err)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-surface-950 flex flex-col">
@@ -838,6 +859,20 @@ export function MarketDetail() {
                       Creator Fees
                     </button>
                   )}
+                  {showResolve && (
+                    <button
+                      onClick={() => setActiveTab('resolve')}
+                      className={cn(
+                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                        activeTab === 'resolve'
+                          ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
+                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                      )}
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      Resolve
+                    </button>
+                  )}
                 </div>
 
                 {/* Tab content */}
@@ -849,6 +884,13 @@ export function MarketDetail() {
                 )}
                 {activeTab === 'fees' && showCreatorFees && fees && (
                   <CreatorFeesPanel market={market} fees={fees} />
+                )}
+                {activeTab === 'resolve' && showResolve && (
+                  <ResolvePanel
+                    market={market}
+                    resolution={resolution}
+                    onResolutionChange={refreshExtras}
+                  />
                 )}
               </motion.div>
 

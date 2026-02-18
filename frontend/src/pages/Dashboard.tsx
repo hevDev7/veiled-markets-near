@@ -18,6 +18,7 @@ import {
     Cpu,
     Vote,
     Loader2,
+    Gavel,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -43,6 +44,7 @@ const sortOptions = [
     { id: 'volume', name: 'Highest Volume', icon: TrendingUp },
     { id: 'ending', name: 'Ending Soon', icon: Clock },
     { id: 'newest', name: 'Newest', icon: Flame },
+    { id: 'needs_resolution', name: 'Needs Resolution', icon: Gavel },
 ]
 
 export function Dashboard() {
@@ -111,8 +113,14 @@ export function Dashboard() {
 
     const filteredMarkets = markets
         .filter(market => {
-            // Hide expired and non-active markets
-            if (market.status !== 1 || market.timeRemaining === 'Ended') return false
+            if (sortBy === 'needs_resolution') {
+                // Show expired, closed, or pending resolution markets
+                const isEnded = market.timeRemaining === 'Ended' || market.status !== 1
+                if (!isEnded) return false
+            } else {
+                // Default: hide expired and non-active markets
+                if (market.status !== 1 || market.timeRemaining === 'Ended') return false
+            }
             // Category filter
             if (selectedCategory !== 0 && market.category !== selectedCategory) return false
             // Search filter
@@ -127,6 +135,9 @@ export function Dashboard() {
                     return Number(a.deadline - b.deadline)
                 case 'newest':
                     return Number(b.deadline - a.deadline)
+                case 'needs_resolution':
+                    // Show unresolved first (status 1=active expired, 2=closed), then pending resolution, then resolved
+                    return a.status - b.status
                 default:
                     return 0
             }

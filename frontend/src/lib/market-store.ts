@@ -143,6 +143,7 @@ async function transformMarketData(
         finalized: resolution?.finalized,
 
         creator: market.creator,
+        resolver: market.resolver,
         timeRemaining,
         resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
