@@ -49,7 +49,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                         </div>
                     </div>
 
-                    <h3 className="text-base font-semibold text-white group-hover:text-brand-300 transition-colors line-clamp-1 mb-2">
+                    <h3 className="text-base font-semibold text-white group-hover:text-brand-300 transition-colors mb-2">
                         {market.question}
                     </h3>
 

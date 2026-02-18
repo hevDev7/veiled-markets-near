@@ -22,12 +22,13 @@ A prediction market protocol where users trade outcome shares with complete priv
 
 - **Private Trading** — Buy shares via `transfer_private_to_public` (address and amount encrypted on-chain)
 - **FPMM AMM** — Complete-set minting/burning with constant product invariant
-- **Multi-Outcome** — Support for 2, 3, or 4 outcome markets
+- **Multi-Outcome** — Support for 2, 3, or 4 outcome markets with custom labels
 - **Dual Token** — Markets in ALEO or USDCX stablecoin
 - **LP Provision** — Add/remove liquidity, earn 1% LP fees per trade
-- **Inline Sell** — Sell shares directly from market detail with tokens-desired approach
-- **Position Tracking** — Auto-fetch share records from wallet, track shares received per bet
+- **Inline Trading** — Buy and sell shares directly from market detail page
+- **Position Tracking** — Auto-fetch share records from wallet, track shares and sell history per bet
 - **Dispute Resolution** — On-chain dispute mechanism with bond staking
+- **Multi-Outcome Pool Breakdown** — Dynamic pool visualization for 2-4 outcome markets
 
 ## Contract Details
 
@@ -62,22 +63,43 @@ veiled-markets/
 ├── frontend/              # React dashboard
 │   ├── src/
 │   │   ├── components/    # Trading UI, wallet bridge, modals, panels
-│   │   │   ├── BuySharesModal.tsx
-│   │   │   ├── SellSharesModal.tsx
-│   │   │   ├── CreateMarketModal.tsx
-│   │   │   ├── ClaimWinningsModal.tsx
-│   │   │   ├── OutcomeSelector.tsx
-│   │   │   ├── LiquidityPanel.tsx
-│   │   │   ├── DisputePanel.tsx
-│   │   │   ├── CreatorFeesPanel.tsx
-│   │   │   ├── AdminPanel.tsx
-│   │   │   ├── WalletBridge.tsx
-│   │   │   └── WalletCompatibilityLab.tsx
-│   │   ├── hooks/         # useAleoTransaction (wallet-agnostic TX + polling)
-│   │   ├── lib/           # AMM math, aleo-client, store, config, credits-record
-│   │   ├── pages/         # Landing, Dashboard, MarketDetail, MyBets, Settings, History
-│   │   └── styles/        # Tailwind + custom CSS
-│   └── public/            # markets-index.json, static assets
+│   │   │   ├── CreateMarketModal.tsx    # Market creation wizard (3-step)
+│   │   │   ├── BuySharesModal.tsx       # Buy shares modal
+│   │   │   ├── SellSharesModal.tsx      # Sell shares modal
+│   │   │   ├── ClaimWinningsModal.tsx   # Claim winnings / refunds
+│   │   │   ├── OutcomeSelector.tsx      # Multi-outcome selector (2-4 outcomes)
+│   │   │   ├── OddsChart.tsx            # Multi-outcome pool breakdown
+│   │   │   ├── LiquidityPanel.tsx       # Add/remove liquidity
+│   │   │   ├── DisputePanel.tsx         # Dispute resolution
+│   │   │   ├── CreatorFeesPanel.tsx     # Creator fee withdrawal
+│   │   │   ├── AdminPanel.tsx           # Admin: resolve, close, cancel
+│   │   │   ├── WalletBridge.tsx         # Multi-wallet connector
+│   │   │   └── WalletCompatibilityLab.tsx # Wallet testing tools
+│   │   ├── hooks/
+│   │   │   ├── useAleoTransaction.ts    # Wallet-agnostic TX execution + polling
+│   │   │   ├── useSDKTransaction.ts     # SDK-based transaction execution
+│   │   │   └── useAleoProver.ts         # WASM prover integration
+│   │   ├── lib/
+│   │   │   ├── amm.ts                   # FPMM math (prices, buy/sell formulas, fees)
+│   │   │   ├── aleo-client.ts           # Blockchain API, market registry, outcome labels
+│   │   │   ├── market-store.ts          # Zustand store for real blockchain markets
+│   │   │   ├── store.ts                 # Zustand store for bets, wallet, settings
+│   │   │   ├── credits-record.ts        # Wallet record fetching (3 strategies)
+│   │   │   ├── config.ts                # Program ID, network, RPC config
+│   │   │   ├── supabase.ts              # Cross-device bet persistence
+│   │   │   ├── question-mapping.ts      # Question hash to text mapping
+│   │   │   ├── wallet.ts                # Wallet utilities
+│   │   │   └── utils.ts                 # Formatting, classnames, helpers
+│   │   ├── pages/
+│   │   │   ├── Landing.tsx              # Landing page with hero
+│   │   │   ├── Dashboard.tsx            # Market listing + create market
+│   │   │   ├── MarketDetail.tsx         # Market detail + inline Buy/Sell trading
+│   │   │   ├── MyBets.tsx               # Position tracking (buy + sell history)
+│   │   │   ├── History.tsx              # Transaction history
+│   │   │   └── Settings.tsx             # App settings
+│   │   └── styles/                      # Tailwind + custom CSS
+│   └── public/
+│       └── markets-index.json           # Known market IDs for bootstrapping
 ├── backend/               # Blockchain indexer
 ├── sdk/                   # TypeScript SDK
 └── docs/                  # Architecture documentation
@@ -121,8 +143,12 @@ Frontend pre-computes shares from the FPMM formula, the `OutcomeShare` record st
 Outcome prices are derived from pool reserves:
 
 ```
-price_yes = reserve_no / (reserve_yes + reserve_no)
-price_no  = reserve_yes / (reserve_yes + reserve_no)
+Binary:
+  price_yes = reserve_no / (reserve_yes + reserve_no)
+  price_no  = reserve_yes / (reserve_yes + reserve_no)
+
+N-outcome:
+  price_i = product(r_j for j != i) / sum_of_products
 ```
 
 ## Privacy Model
@@ -150,13 +176,23 @@ USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less priv
 
 The market detail page has an integrated **Buy/Sell** tab toggle in the right sidebar:
 
-- **Buy Tab:** Select outcome, enter amount, preview shares received with price impact and fees, execute via wallet
-- **Sell Tab:** Load share positions from wallet (auto-fetch `OutcomeShare` records), enter withdrawal amount, preview shares burned and net tokens received, execute sell
+- **Buy Tab:** Select outcome (2-4 options with custom labels and colors), enter amount, preview shares received with price impact and fees, execute via wallet
+- **Sell Tab:** Auto-fetch `OutcomeShare` records from wallet, select position, enter withdrawal amount, preview shares burned and net tokens received, execute sell
 - Manual record paste fallback for wallets that don't support record fetching
 
-### My Bets — Position Tracking
+### Multi-Outcome Support
 
-- Displays **shares received** (fixed at time of purchase) instead of fluctuating market odds
+- **2 outcomes:** Binary markets (Yes/No) — green/red color scheme
+- **3 outcomes:** Triple markets — green/red/purple
+- **4 outcomes:** Quad markets — green/red/purple/yellow
+- **Custom labels:** Creator enters custom outcome names during market creation (e.g., "Apple", "Google", "Meta", "Amazon")
+- **Pool Breakdown:** Dynamic visualization showing reserves, percentages, and payout multipliers for all outcomes
+
+### My Bets — Position & Trade Tracking
+
+- Tracks both **buy** and **sell** transactions
+- Buy entries show **shares received** (fixed at time of purchase)
+- Sell entries show **shares sold** and **tokens received** (with purple SELL badge)
 - Auto-promotes stale pending bets (>2 minutes) to active status
   - `at1...` IDs: verified on-chain via explorer API
   - `shield_xxx` IDs: auto-promoted (Shield Wallet confirms on-chain)
@@ -169,7 +205,7 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 - **Shield Wallet** as primary wallet (returns `shield_xxx` event IDs, handled by background blockchain scanner)
 - **Puzzle Wallet** support via server-side delegated proving (WalletConnect V2)
 - Transaction polling with on-chain verification fallback
-- Credits record fetching for private buy transactions (multiple wallet strategies)
+- Credits record fetching for private buy transactions (3 wallet strategies with fallback)
 
 ## Key Transitions (30 total)
 
@@ -338,7 +374,7 @@ Parameters:
 | **State** | Zustand |
 | **Wallet** | ProvableHQ Aleo Wallet Adapter |
 | **UI Components** | Radix UI (Dialog, Tabs, Slider, Tooltip, Progress) |
-| **Persistence** | Supabase (cross-device bet tracking) |
+| **Persistence** | Supabase (cross-device bet tracking) + localStorage |
 | **Hosting** | Vercel |
 | **Build** | vite-plugin-wasm, vite-plugin-top-level-await |
 
@@ -371,6 +407,18 @@ The `@provablehq/sdk` requires specific Vite config:
 - COOP/COEP headers needed for SharedArrayBuffer in dev mode
 - Do NOT use `commonjsOptions.exclude` for `@provablehq` (breaks `core-js` require)
 
+## Data Persistence
+
+### Outcome Labels
+
+Custom outcome labels (for 3-4 outcome markets) are saved to `localStorage` during market creation, keyed by both question hash and market ID. When a market is loaded, `market-store.ts` looks up saved labels before falling back to defaults ("Outcome 1", "Outcome 2", etc.).
+
+### Bet & Sell Tracking
+
+All buy and sell transactions are recorded in Zustand store and persisted to `localStorage` (per-address) and optionally Supabase. Each entry tracks:
+- **Buy:** stake amount, outcome, shares received, locked multiplier
+- **Sell:** tokens desired, shares sold, net tokens received
+
 ## Audit Fixes (v10+)
 
 | ID | Fix |
@@ -385,7 +433,7 @@ The `@provablehq/sdk` requires specific Vite config:
 
 | Version | Key Changes |
 |---------|-------------|
-| **v14** | FPMM AMM with correct formulas, removed `buy_shares_public` (ALEO uses `buy_shares_private` only), `expected_shares` pattern fixes quantity=0 bug, `sell_shares` uses tokens_desired approach + calls `credits.aleo/transfer_public` directly, multisig treasury governance |
+| **v14** | FPMM AMM with correct formulas, `buy_shares_private` only (ALEO), `expected_shares` pattern, `sell_shares` tokens_desired approach + `credits.aleo/transfer_public`, multisig treasury governance, custom outcome labels, multi-outcome pool breakdown, sell tracking in My Bets |
 | v13 | Fixed ternary underflow bug in buy_shares (Leo evaluates both branches) |
 | v12 | Initial FPMM implementation, multi-outcome markets, LP provision |
 | v11 | USDCX stablecoin integration, dual-token markets |
@@ -395,7 +443,7 @@ The `@provablehq/sdk` requires specific Vite config:
 
 Markets are registered in `frontend/public/markets-index.json` and `frontend/src/lib/question-mapping.ts`.
 
-Creating markets via the frontend dashboard or CLI populates these registries. The blockchain indexer (`backend/`) can scan for new markets automatically.
+Creating markets via the frontend dashboard or CLI populates these registries. Outcome labels are persisted in `localStorage` and looked up by question hash or market ID. The blockchain indexer (`backend/`) can scan for new markets automatically.
 
 ## Documentation
 
