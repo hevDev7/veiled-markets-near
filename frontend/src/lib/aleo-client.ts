@@ -1,13 +1,13 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v14.aleo program
+// Client for interacting with the deployed veiled_markets_v15.aleo program
 // ============================================================================
 
 import { config } from './config';
 import { fetchMarketRegistry, isSupabaseAvailable, clearAllSupabaseData } from './supabase';
 
-// Contract constants (matching main.leo v14)
+// Contract constants (matching main.leo v15)
 export const MARKET_STATUS = {
   ACTIVE: 1,
   CLOSED: 2,
@@ -56,7 +56,7 @@ export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
 export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
 export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
 
-// Types matching the contract structures (v14)
+// Types matching the contract structures (v15)
 export interface MarketData {
   id: string;
   creator: string;
@@ -773,7 +773,7 @@ function generateRandomNonce(): string {
 }
 
 /**
- * Build inputs for create_market transaction (v14)
+ * Build inputs for create_market transaction (v15)
  * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
@@ -804,7 +804,7 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for buy_shares (v14 AMM trading)
+ * Build inputs for buy_shares (v15 AMM trading)
  * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
  * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
@@ -851,7 +851,7 @@ export function buildBuySharesInputs(
 }
 
 /**
- * Build inputs for buy_shares_private (v14 privacy-preserving, ALEO only)
+ * Build inputs for buy_shares_private (v15 privacy-preserving, ALEO only)
  * Alias for buildBuySharesInputs with tokenType='ALEO'.
  */
 export function buildBuySharesPrivateInputs(
@@ -866,7 +866,7 @@ export function buildBuySharesPrivateInputs(
 }
 
 /**
- * Build inputs for sell_shares (v14 tokens_desired approach)
+ * Build inputs for sell_shares (v15 tokens_desired approach)
  * sell_shares(shares: OutcomeShare, tokens_desired, max_shares_used)
  * User specifies how many tokens to withdraw. Contract computes shares needed.
  * Transition calls credits.aleo/transfer_public for the net payout.
@@ -890,7 +890,7 @@ export function buildSellSharesInputs(
 }
 
 /**
- * Build inputs for add_liquidity (v14 LP provision)
+ * Build inputs for add_liquidity (v15 LP provision)
  * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
  * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
  */
@@ -916,7 +916,7 @@ export function buildAddLiquidityInputs(
 }
 
 /**
- * Build inputs for remove_liquidity (v14 LP withdrawal)
+ * Build inputs for remove_liquidity (v15 LP withdrawal)
  * remove_liquidity(lp_token: LPToken, shares_to_remove, min_tokens_out)
  */
 export function buildRemoveLiquidityInputs(
@@ -938,7 +938,7 @@ export function buildRemoveLiquidityInputs(
 }
 
 /**
- * Build inputs for dispute_resolution (v14 - bond always in ALEO)
+ * Build inputs for dispute_resolution (v15 - bond always in ALEO)
  * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
  * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
  */
@@ -983,7 +983,7 @@ export function buildPlaceBetPrivateInputs(
 }
 
 /**
- * Calculate outcome price from AMM pool (v14 FPMM)
+ * Calculate outcome price from AMM pool (v15 FPMM)
  * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
  * Binary simplification: price_i = r_other / (r1 + r2)
  */
@@ -1098,7 +1098,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for withdraw_creator_fees (v14)
+ * Build inputs for withdraw_creator_fees (v15)
  * withdraw_creator_fees(market_id, expected_amount) — ALEO
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
@@ -1887,7 +1887,7 @@ export async function fetchMarketById(marketId: string) {
 }
 
 /**
- * Get the correct redeem/refund function name based on token type (v14)
+ * Get the correct redeem/refund function name based on token type (v15)
  */
 export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX'): string {
   return tokenType === 'USDCX' ? 'redeem_shares_usdcx' : 'redeem_shares';
@@ -1902,7 +1902,7 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
 }
 
 /**
- * Build inputs for claim_lp_refund (v14 - LP refund on cancelled market)
+ * Build inputs for claim_lp_refund (v15 - LP refund on cancelled market)
  * claim_lp_refund(lp_token: LPToken, min_tokens_out)
  */
 export function buildClaimLpRefundInputs(

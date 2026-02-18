@@ -23,7 +23,7 @@
 import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 
-program veiled_markets_v14.aleo {
+program veiled_markets_v15.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -83,6 +83,7 @@ program veiled_markets_v14.aleo {
     record DisputeBondReceipt {
         owner: address,
         market_id: field,
+        proposed_outcome: u8,
         bond_amount: u128,
         dispute_nonce: field,
         token_type: u8,
@@ -1400,6 +1401,11 @@ program veiled_markets_v14.aleo {
 
         let challenge_deadline: u64 = current_height + CHALLENGE_WINDOW_BLOCKS;
 
+        // v15 fix: Clear old dispute data when re-resolving after a dispute.
+        // Without this, finalize_resolution would fail because it checks
+        // !market_disputes.contains(market_id) and old dispute data persists.
+        market_disputes.remove(market_id);
+
         market_resolutions.set(market_id, MarketResolution {
             market_id: market_id,
             winning_outcome: winning_outcome,
@@ -1514,6 +1520,11 @@ program veiled_markets_v14.aleo {
         assert(market.status != MARKET_STATUS_RESOLVED);
         assert(market.status != MARKET_STATUS_CANCELLED);
 
+        // v15 fix: Clean up stale resolution/dispute data on cancel.
+        // This prevents leftover state for stuck disputed markets.
+        market_resolutions.remove(market_id);
+        market_disputes.remove(market_id);
+
         markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
@@ -1546,6 +1557,7 @@ program veiled_markets_v14.aleo {
         let receipt: DisputeBondReceipt = DisputeBondReceipt {
             owner: self.caller,
             market_id: market_id,
+            proposed_outcome: proposed_outcome,
             bond_amount: MIN_DISPUTE_BOND,
             dispute_nonce: dispute_nonce,
             token_type: TOKEN_ALEO,
@@ -1635,7 +1647,7 @@ program veiled_markets_v14.aleo {
 
         return claim_dispute_bond_fin(
             transfer_future, claim_key, receipt.market_id,
-            receipt.bond_amount, self.caller
+            receipt.bond_amount, self.caller, receipt.proposed_outcome
         );
     }
 
@@ -1645,17 +1657,20 @@ program veiled_markets_v14.aleo {
         market_id: field,
         bond_amount: u128,
         claimer: address,
+        proposed_outcome: u8,
     ) {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_RESOLVED || market.status == STATUS_PENDING_RESOLUTION);
+        // v15 fix: Only allow bond claim after market is fully resolved (finalized).
+        // Previously also allowed STATUS_PENDING_RESOLUTION which was premature.
+        assert(market.status == MARKET_STATUS_RESOLVED);
 
-        let dispute: DisputeData = market_disputes.get(market_id);
-        assert(dispute.disputer == claimer);
-
+        // v15 fix: Use proposed_outcome from DisputeBondReceipt (unforgeable record)
+        // instead of reading from market_disputes mapping, which may have been
+        // cleared during re-resolution.
         let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(resolution.winning_outcome == dispute.proposed_outcome);
+        assert(resolution.winning_outcome == proposed_outcome);
 
         let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
         assert(!already_claimed);

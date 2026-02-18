@@ -1,7 +1,7 @@
 // ============================================================================
-// AMM Utility Functions - v14 FPMM (Fixed Product Market Maker)
+// AMM Utility Functions - v15 FPMM (Fixed Product Market Maker)
 // ============================================================================
-// Correct complete-set minting/burning formulas matching contract v14.
+// Correct complete-set minting/burning formulas matching contract v15.
 // Supports 2-4 outcome markets.
 
 const SHARE_PRICE_SCALE = 1_000_000 // $1.00 in microcredits
