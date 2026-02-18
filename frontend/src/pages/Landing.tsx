@@ -143,7 +143,7 @@ export function Landing() {
 
   // Terminal lines data
   const terminalLines = [
-    { prompt: '$', text: 'aleo connect --wallet puzzle', color: 'text-surface-300' },
+    { prompt: '$', text: 'aleo connect --wallet shield', color: 'text-surface-300' },
     { text: '✓ Wallet connected: aleo1...', color: 'text-yes-400' },
     { prompt: '$', text: 'veiled bet --market 0x4f2a --amount 100 --side YES', color: 'text-surface-300' },
     { text: '⚡ Generating zero-knowledge proof...', color: 'text-accent-400' },
@@ -351,9 +351,7 @@ export function Landing() {
               {/* Supported Wallets */}
               <div className="flex items-center justify-center lg:justify-start gap-3 text-surface-500 text-sm">
                 <span>Supports:</span>
-                <span className="text-surface-400">Puzzle Wallet</span>
-                <span className="text-surface-600">•</span>
-                <span className="text-surface-400">Leo Wallet</span>
+                <span className="text-surface-400">Shield Wallet</span>
               </div>
             </motion.div>
           </div>
@@ -422,7 +420,7 @@ export function Landing() {
 
           <div className="space-y-8">
             {[
-              { num: '01', title: 'Connect', desc: 'Link your Aleo wallet (Puzzle or Leo)' },
+              { num: '01', title: 'Connect', desc: 'Link your Shield Wallet' },
               { num: '02', title: 'Browse', desc: 'Explore prediction markets across multiple categories' },
               { num: '03', title: 'Bet', desc: 'Place encrypted bets with zero-knowledge proofs' },
               { num: '04', title: 'Claim', desc: 'Privately collect your winnings when markets resolve' },

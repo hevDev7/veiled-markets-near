@@ -2,11 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AleoWalletProvider } from '@provablehq/aleo-wallet-adaptor-react'
-import { LeoWalletAdapter } from '@provablehq/aleo-wallet-adaptor-leo'
-import { FoxWalletAdapter } from '@provablehq/aleo-wallet-adaptor-fox'
-import { SoterWalletAdapter } from '@provablehq/aleo-wallet-adaptor-soter'
 import { ShieldWalletAdapter } from '@provablehq/aleo-wallet-adaptor-shield'
-import { PuzzleWalletAdapter } from '@provablehq/aleo-wallet-adaptor-puzzle'
 import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 import { Network } from '@provablehq/aleo-types'
 import { WalletModalProvider } from '@provablehq/aleo-wallet-adaptor-react-ui'
@@ -25,13 +21,6 @@ initializeQuestionMappings()
 initializeMarketIds()
 
 const wallets = [
-  new LeoWalletAdapter({ appName: 'Veiled Markets' }),
-  new PuzzleWalletAdapter({
-    appName: 'Veiled Markets',
-    appDescription: 'Privacy-Preserving Prediction Markets on Aleo',
-  }),
-  new FoxWalletAdapter({ appName: 'Veiled Markets' }),
-  new SoterWalletAdapter({ appName: 'Veiled Markets' }),
   new ShieldWalletAdapter(),
 ]
 
