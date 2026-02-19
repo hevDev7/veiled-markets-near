@@ -11,12 +11,15 @@ import {
   ExternalLink,
   Loader2,
   Wallet,
+  Search,
+  ClipboardPaste,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { type Bet, useBetsStore, useWalletStore, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { getRedeemFunction, getRefundFunction } from '@/lib/aleo-client'
+import { fetchOutcomeShareRecords, type ParsedOutcomeShare } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
 
 interface ClaimWinningsModalProps {
@@ -43,8 +46,51 @@ export function ClaimWinningsModal({
   const { wallet } = useWalletStore()
   const { executeTransaction } = useAleoTransaction()
 
+  // Record fetching state
+  const [shareRecords, setShareRecords] = useState<ParsedOutcomeShare[]>([])
+  const [selectedRecord, setSelectedRecord] = useState<ParsedOutcomeShare | null>(null)
+  const [isFetchingRecords, setIsFetchingRecords] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [showPasteInput, setShowPasteInput] = useState(false)
+  const [pastedRecord, setPastedRecord] = useState('')
+
   const isRefund = mode === 'refund'
   const bet = bets[0] // We handle one bet at a time
+
+  // Fetch records when modal opens
+  const fetchRecords = useCallback(async () => {
+    if (!bet) return
+    setIsFetchingRecords(true)
+    setFetchError(null)
+    try {
+      const records = await fetchOutcomeShareRecords(CONTRACT_INFO.programId, bet.marketId)
+      setShareRecords(records)
+      if (records.length === 1) {
+        setSelectedRecord(records[0])
+      } else if (records.length === 0) {
+        setFetchError('No OutcomeShare records found. Your wallet may not support record fetching, or records may be spent.')
+      }
+    } catch (err) {
+      console.error('Failed to fetch OutcomeShare records:', err)
+      setFetchError('Failed to fetch records from wallet. Try pasting the record manually.')
+    } finally {
+      setIsFetchingRecords(false)
+    }
+  }, [bet])
+
+  useEffect(() => {
+    if (isOpen && bet && wallet.connected) {
+      fetchRecords()
+    }
+    if (!isOpen) {
+      // Reset state when modal closes
+      setShareRecords([])
+      setSelectedRecord(null)
+      setFetchError(null)
+      setShowPasteInput(false)
+      setPastedRecord('')
+    }
+  }, [isOpen, bet, wallet.connected, fetchRecords])
 
   const handleClose = () => {
     setCopiedCommand(null)
@@ -79,9 +125,23 @@ export function ClaimWinningsModal({
     }
   }
 
+  // Get the record plaintext to use for the transaction
+  const getRecordPlaintext = (): string | null => {
+    if (selectedRecord) return selectedRecord.plaintext
+    if (pastedRecord.trim()) return pastedRecord.trim()
+    return null
+  }
+
   // Execute claim/redeem via wallet
   const handleWalletClaim = async () => {
     if (!bet || !wallet.connected) return
+
+    const recordPlaintext = getRecordPlaintext()
+    if (!recordPlaintext) {
+      setError('No OutcomeShare record selected. Fetch records or paste one manually.')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
     try {
@@ -90,20 +150,15 @@ export function ClaimWinningsModal({
         ? getRefundFunction(tokenType)
         : getRedeemFunction(tokenType)
 
-      // For record-based transitions, we pass a placeholder for the record input.
-      // Shield Wallet uses recordIndices to identify which inputs are records
-      // and prompts the user to select the appropriate record from their wallet.
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
         function: functionName,
-        inputs: ['{}'], // Placeholder — wallet selects the OutcomeShare record
+        inputs: [recordPlaintext],
         fee: 0.5,
-        recordIndices: [0], // Input 0 is a record (OutcomeShare)
       })
 
       if (result?.transactionId) {
         setTxId(result.transactionId)
-        // Mark as claimed locally
         markBetClaimed(bet.id)
         onClaimSuccess?.()
       } else {
@@ -125,9 +180,12 @@ export function ClaimWinningsModal({
   const refundFn = getRefundFunction(tokenType)
   const redeemFn = getRedeemFunction(tokenType)
 
+  // FPMM: winning shares redeem 1:1, so payout = shares received (not old parimutuel payoutAmount)
   const payoutDisplay = isRefund
     ? formatCredits(bet.amount)
-    : formatCredits(bet.payoutAmount || bet.amount)
+    : formatCredits(bet.sharesReceived || bet.amount)
+
+  const hasRecord = !!getRecordPlaintext()
 
   // CLI commands as fallback
   const claimRefundCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${refundFn} \\
@@ -267,6 +325,99 @@ export function ClaimWinningsModal({
                       </div>
                     </div>
 
+                    {/* Record Selection */}
+                    {wallet.connected && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-surface-300">OutcomeShare Record</p>
+                          <button
+                            onClick={fetchRecords}
+                            disabled={isFetchingRecords}
+                            className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                          >
+                            {isFetchingRecords ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Search className="w-3 h-3" />
+                            )}
+                            {isFetchingRecords ? 'Fetching...' : 'Fetch Records'}
+                          </button>
+                        </div>
+
+                        {/* Records list */}
+                        {shareRecords.length > 0 && (
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {shareRecords.map((rec, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => {
+                                  setSelectedRecord(rec)
+                                  setShowPasteInput(false)
+                                  setPastedRecord('')
+                                }}
+                                className={cn(
+                                  "w-full p-3 rounded-lg border text-left transition-all text-sm",
+                                  selectedRecord === rec
+                                    ? "border-brand-500/50 bg-brand-500/10"
+                                    : "border-surface-700 bg-surface-800/30 hover:border-surface-600"
+                                )}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className={cn(
+                                    "text-xs font-medium px-2 py-0.5 rounded-full",
+                                    rec.outcome === 1
+                                      ? "bg-yes-500/20 text-yes-400"
+                                      : "bg-no-500/20 text-no-400"
+                                  )}>
+                                    Outcome {rec.outcome}
+                                  </span>
+                                  <span className="text-surface-300 font-medium">
+                                    {formatCredits(rec.quantity)} shares
+                                  </span>
+                                </div>
+                                {selectedRecord === rec && (
+                                  <Check className="w-4 h-4 text-brand-400 absolute right-3 top-3" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Fetch error */}
+                        {fetchError && !showPasteInput && (
+                          <p className="text-xs text-surface-500">{fetchError}</p>
+                        )}
+
+                        {/* Paste record toggle */}
+                        <button
+                          onClick={() => {
+                            setShowPasteInput(!showPasteInput)
+                            if (!showPasteInput) {
+                              setSelectedRecord(null)
+                            }
+                          }}
+                          className="text-xs text-surface-400 hover:text-surface-300 flex items-center gap-1"
+                        >
+                          <ClipboardPaste className="w-3 h-3" />
+                          {showPasteInput ? 'Hide paste input' : 'Paste record manually'}
+                        </button>
+
+                        {/* Manual paste input */}
+                        {showPasteInput && (
+                          <textarea
+                            value={pastedRecord}
+                            onChange={(e) => {
+                              setPastedRecord(e.target.value)
+                              setSelectedRecord(null)
+                            }}
+                            placeholder="{ owner: aleo1..., market_id: ...field, outcome: 1u8, quantity: ...u128, share_nonce: ...field, token_type: 1u8, _nonce: ...group.public }"
+                            className="w-full p-3 rounded-lg bg-surface-900 border border-surface-700 text-xs text-surface-300 font-mono resize-none focus:border-brand-500/50 focus:outline-none"
+                            rows={4}
+                          />
+                        )}
+                      </div>
+                    )}
+
                     {/* Error display */}
                     {error && (
                       <div className="flex items-start gap-3 p-4 rounded-xl bg-no-500/10 border border-no-500/20">
@@ -275,7 +426,7 @@ export function ClaimWinningsModal({
                           <p className="text-sm font-medium text-no-400">Transaction Failed</p>
                           <p className="text-xs text-surface-400 mt-1">{error}</p>
                           <p className="text-xs text-surface-500 mt-2">
-                            If the wallet cannot find the record, try the CLI method below.
+                            If the wallet cannot find the record, try pasting it manually or use the CLI method below.
                           </p>
                         </div>
                       </div>
@@ -286,13 +437,13 @@ export function ClaimWinningsModal({
                       <div className="space-y-3">
                         <button
                           onClick={handleWalletClaim}
-                          disabled={isSubmitting}
+                          disabled={isSubmitting || !hasRecord}
                           className={cn(
                             "w-full py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2",
                             isRefund
                               ? "bg-orange-500 hover:bg-orange-400 text-white"
                               : "bg-gradient-to-r from-yes-500 to-brand-500 hover:from-yes-400 hover:to-brand-400 text-white",
-                            isSubmitting && "opacity-70 cursor-not-allowed"
+                            (isSubmitting || !hasRecord) && "opacity-70 cursor-not-allowed"
                           )}
                         >
                           {isSubmitting ? (
@@ -307,9 +458,11 @@ export function ClaimWinningsModal({
                             </>
                           )}
                         </button>
-                        <p className="text-xs text-surface-500 text-center">
-                          Your wallet will prompt you to select the OutcomeShare record.
-                        </p>
+                        {!hasRecord && (
+                          <p className="text-xs text-surface-500 text-center">
+                            Select or paste an OutcomeShare record to continue.
+                          </p>
+                        )}
                       </div>
                     )}
 

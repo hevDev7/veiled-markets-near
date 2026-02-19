@@ -630,7 +630,7 @@ function BetCard({
                     isRefunded && "text-orange-400"
                   )}>
                     {isWon
-                      ? `+${formatCredits(bet.payoutAmount || bet.amount)} ${tokenSymbol}`
+                      ? `+${formatCredits(bet.sharesReceived || bet.amount)} ${tokenSymbol}`
                       : isRefunded
                         ? `${formatCredits(bet.amount)} ${tokenSymbol}`
                         : `-${formatCredits(bet.amount)} ${tokenSymbol}`}

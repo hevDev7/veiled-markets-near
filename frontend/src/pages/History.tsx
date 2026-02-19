@@ -65,7 +65,7 @@ export function History() {
   const lostBets = completedBets.filter(b => b.status === 'lost')
   const refundedBets = completedBets.filter(b => b.status === 'refunded')
 
-  const totalWon = wonBets.reduce((sum, bet) => sum + (bet.payoutAmount || bet.amount), 0n)
+  const totalWon = wonBets.reduce((sum, bet) => sum + (bet.sharesReceived || bet.amount), 0n)
   const totalLost = lostBets.reduce((sum, bet) => sum + bet.amount, 0n)
   const netPnL = totalWon - totalLost
 
@@ -276,9 +276,9 @@ function HistoryCard({
   const StatusIcon = isWon ? Trophy : isLost ? XCircle : RefreshCcw
   const statusColor = isWon ? 'yes' : isLost ? 'no' : 'accent'
 
-  // Use real payout amount from sync, or fall back to bet amount for refunds
+  // FPMM: winning shares redeem 1:1, so payout = shares received
   const payout = isWon
-    ? (bet.payoutAmount || bet.amount)
+    ? (bet.sharesReceived || bet.amount)
     : isRefunded
       ? bet.amount
       : 0n

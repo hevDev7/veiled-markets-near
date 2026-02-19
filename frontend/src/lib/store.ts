@@ -14,7 +14,6 @@ import {
   CONTRACT_INFO,
   getMarket,
   getMarketResolution,
-  getMarketPool,
 } from './aleo-client'
 import { config } from './config'
 import {
@@ -1763,16 +1762,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         } else if (market.status === 3) {
           // RESOLVED → check winning outcome
           const resolution = await getMarketResolution(marketId)
-          const pool = await getMarketPool(marketId)
-          if (!resolution || !pool) continue
+          if (!resolution) continue
 
           const winningOutcome: 'yes' | 'no' = resolution.winning_outcome === 1 ? 'yes' : 'no'
-          const winningPool = winningOutcome === 'yes' ? pool.reserve_1 : pool.reserve_2
-          const totalPayoutPool = pool.total_liquidity
 
           for (const bet of marketBets) {
-            if (bet.outcome === winningOutcome && winningPool > 0n) {
-              const payoutAmount = (bet.amount * totalPayoutPool) / winningPool
+            if (bet.outcome === winningOutcome) {
+              // FPMM: winning shares redeem 1:1 (payout = number of shares)
+              const payoutAmount = bet.sharesReceived || bet.amount
               updates.push({ betId: bet.id, newStatus: 'won', payoutAmount, winningOutcome })
             } else {
               updates.push({ betId: bet.id, newStatus: 'lost', winningOutcome })
