@@ -46,11 +46,16 @@ function betToRow(bet: Bet, address: string) {
     outcome: bet.outcome,
     placed_at: bet.placedAt,
     status: bet.status,
+    type: bet.type || 'buy',
     market_question: bet.marketQuestion || null,
     locked_multiplier: bet.lockedMultiplier || null,
+    shares_received: bet.sharesReceived?.toString() || null,
+    shares_sold: bet.sharesSold?.toString() || null,
+    tokens_received: bet.tokensReceived?.toString() || null,
     payout_amount: bet.payoutAmount?.toString() || null,
     winning_outcome: bet.winningOutcome || null,
     claimed: bet.claimed || false,
+    token_type: bet.tokenType || 'ALEO',
     updated_at: new Date().toISOString(),
   }
 }
@@ -63,11 +68,16 @@ function rowToBet(row: any): Bet {
     outcome: row.outcome,
     placedAt: row.placed_at,
     status: row.status,
+    type: row.type || 'buy',
     marketQuestion: row.market_question || undefined,
     lockedMultiplier: row.locked_multiplier || undefined,
+    sharesReceived: row.shares_received ? BigInt(row.shares_received) : undefined,
+    sharesSold: row.shares_sold ? BigInt(row.shares_sold) : undefined,
+    tokensReceived: row.tokens_received ? BigInt(row.tokens_received) : undefined,
     payoutAmount: row.payout_amount ? BigInt(row.payout_amount) : undefined,
     winningOutcome: row.winning_outcome || undefined,
     claimed: row.claimed || false,
+    tokenType: row.token_type || undefined,
   }
 }
 
