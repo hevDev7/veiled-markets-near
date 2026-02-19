@@ -156,11 +156,12 @@ export function ClaimWinningsModal({
           />
 
           {/* Modal */}
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-lg z-50 max-h-[85vh] overflow-y-auto"
+            className="w-full max-w-lg max-h-[85vh] overflow-y-auto"
           >
             <div className="glass-card overflow-hidden">
               {/* Header */}
@@ -400,6 +401,7 @@ export function ClaimWinningsModal({
               </div>
             </div>
           </motion.div>
+          </div>
         </>
       )}
     </AnimatePresence>

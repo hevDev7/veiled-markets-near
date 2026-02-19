@@ -26,9 +26,12 @@ A prediction market protocol where users trade outcome shares with complete priv
 - **Dual Token** — Markets in ALEO or USDCX stablecoin
 - **LP Provision** — Add/remove liquidity, earn 1% LP fees per trade
 - **Inline Trading** — Buy and sell shares directly from market detail page
+- **Live Countdown** — Real-time countdown timer with seconds precision on all market cards and detail pages
 - **Position Tracking** — Auto-fetch share records from wallet, track shares and sell history per bet
 - **Market Resolution** — 3-step on-chain resolution (close → resolve → finalize) with full UI
+- **Emergency Cancel** — Auto-detected in Resolve Panel for expired unresolved markets past resolution deadline
 - **Dispute Mechanism** — On-chain dispute with bond staking, automatic re-resolution flow
+- **Wallet-Based Claims** — Claim winnings and refunds directly via wallet (Shield/Puzzle) with CLI fallback
 - **Multi-Outcome Pool Breakdown** — Dynamic pool visualization for 2-4 outcome markets
 - **Needs Resolution Filter** — Dashboard filter to find expired markets awaiting resolution
 
@@ -43,6 +46,7 @@ A prediction market protocol where users trade outcome shares with complete priv
 | **Statements** | 1,969 |
 | **Deploy Cost** | ~60.72 ALEO |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
+| **Block Time** | ~4s/block (testnet), ~15s/block (mainnet) |
 
 ## Architecture
 
@@ -68,11 +72,11 @@ veiled-markets/
 │   │   │   ├── CreateMarketModal.tsx    # Market creation wizard (3-step)
 │   │   │   ├── BuySharesModal.tsx       # Buy shares modal
 │   │   │   ├── SellSharesModal.tsx      # Sell shares modal
-│   │   │   ├── ClaimWinningsModal.tsx   # Claim winnings / refunds
+│   │   │   ├── ClaimWinningsModal.tsx   # Wallet-based claim winnings / refunds
 │   │   │   ├── OutcomeSelector.tsx      # Multi-outcome selector (2-4 outcomes)
 │   │   │   ├── OddsChart.tsx            # Multi-outcome pool breakdown
 │   │   │   ├── LiquidityPanel.tsx       # Add/remove liquidity
-│   │   │   ├── ResolvePanel.tsx         # 3-step market resolution UI
+│   │   │   ├── ResolvePanel.tsx         # 3-step resolution + emergency cancel
 │   │   │   ├── DisputePanel.tsx         # Dispute resolution
 │   │   │   ├── CreatorFeesPanel.tsx     # Creator fee withdrawal
 │   │   │   ├── AdminPanel.tsx           # Admin: resolve, close, cancel
@@ -88,7 +92,7 @@ veiled-markets/
 │   │   │   ├── market-store.ts          # Zustand store for real blockchain markets
 │   │   │   ├── store.ts                 # Zustand store for bets, wallet, settings
 │   │   │   ├── credits-record.ts        # Wallet record fetching (3 strategies)
-│   │   │   ├── config.ts                # Program ID, network, RPC config
+│   │   │   ├── config.ts                # Program ID, network, RPC, block time config
 │   │   │   ├── supabase.ts              # Cross-device bet persistence
 │   │   │   ├── question-mapping.ts      # Question hash to text mapping
 │   │   │   ├── wallet.ts                # Wallet utilities
@@ -161,9 +165,9 @@ Markets follow a 3-step on-chain resolution process with a built-in dispute wind
 ### Resolution Flow
 
 ```
-1. close_market      →  Status: ACTIVE → CLOSED        (anyone, after deadline)
-2. resolve_market    →  Status: CLOSED → PENDING        (resolver only)
-3. finalize_resolution → Status: PENDING → RESOLVED     (anyone, after challenge window)
+1. close_market        →  Status: ACTIVE → CLOSED        (anyone, after deadline)
+2. resolve_market      →  Status: CLOSED → PENDING        (resolver only, before resolution_deadline)
+3. finalize_resolution →  Status: PENDING → RESOLVED       (anyone, after challenge window — no end deadline)
 ```
 
 ### Resolve Panel UI
@@ -171,10 +175,14 @@ Markets follow a 3-step on-chain resolution process with a built-in dispute wind
 The **Resolve** tab on the market detail page guides the resolver through all 3 steps:
 
 - **Step 1 — Close Market:** Closes betting after the market deadline has passed
-- **Step 2 — Resolve Market:** Resolver selects the winning outcome (only the designated resolver address can execute this step)
-- **Step 3 — Finalize:** After the challenge window (~800 blocks, ~2-3 hours) passes with no disputes, anyone can finalize the resolution
+- **Step 2 — Resolve Market:** Resolver selects the winning outcome (only the designated resolver address can execute this step, must be before `resolution_deadline`)
+- **Step 3 — Finalize:** After the challenge window (~2880 blocks, ~3.2 hours on testnet) passes with no disputes, anyone can finalize. There is **no end deadline** — finalization can happen at any time after the challenge window closes.
 
 Each step shows transaction status, block countdown for the challenge window, and auto-advances to the next step after confirmation.
+
+### Emergency Cancel
+
+If a market passes its `resolution_deadline` without being resolved, the Resolve Panel automatically detects this and displays an **Emergency Cancel** banner. Anyone can call `emergency_cancel` to set the market to CANCELLED status, enabling bettors to reclaim their funds via `claim_refund`.
 
 ### Dispute Mechanism
 
@@ -184,11 +192,33 @@ During the challenge window (between resolve and finalize), anyone can dispute t
 2. Market status resets to **CLOSED**, resolution is removed
 3. **Resolver** must re-resolve the market with a corrected outcome
 4. A new challenge window begins
-5. After finalization, if the final outcome matches the disputer's proposed outcome, the disputer can reclaim their bond via `claim_dispute_bond`
+5. After finalization, if the final outcome matches the disputer's proposed outcome, the disputer can reclaim their bond via `claim_dispute_bond` (uses unforgeable `DisputeBondReceipt` record)
+
+v15 fixes: `resolve_market` clears stale dispute data on re-resolve, `emergency_cancel` cleans up resolution/dispute state, `claim_dispute_bond` uses `DisputeBondReceipt` record instead of mapping (prevents stuck markets after dispute).
 
 ### Needs Resolution Filter
 
 The Dashboard includes a **"Needs Resolution"** sort option (Gavel icon) that filters to show only expired/ended markets that still need to be resolved. This helps resolvers easily find markets awaiting action.
+
+### Claim Winnings & Refunds
+
+The **My Bets** page (Unredeemed tab) provides wallet-based claim functionality:
+
+- **Redeem Shares:** For resolved markets — claim winning shares 1:1 via wallet
+- **Claim Refund:** For cancelled markets — reclaim bet amount via wallet
+- Both use `executeTransaction` with `recordIndices: [0]` for Shield Wallet compatibility
+- CLI fallback available in collapsible "Advanced" section for troubleshooting
+
+## Block Time Configuration
+
+Block time differs between testnet and mainnet. The frontend uses network-aware configuration:
+
+| Network | Block Time | Challenge Window (2880 blocks) |
+|---------|-----------|-------------------------------|
+| **Testnet** | ~4 seconds/block | ~3.2 hours |
+| **Mainnet** | ~15 seconds/block | ~12 hours |
+
+All deadline calculations (market duration, resolution countdown, challenge window) use the centralized `config.secondsPerBlock` / `config.msPerBlock` values. The dashboard and market detail pages show **live countdown timers** with seconds precision, updating every second.
 
 ## Privacy Model
 
@@ -211,13 +241,21 @@ USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less priv
 
 ## Frontend Features
 
+### Live Countdown Timer
+
+All market cards on the Dashboard and the Market Detail page display a **live countdown** with seconds precision. The timer:
+- Computes a `deadlineTimestamp` from block height at fetch time
+- Updates every 1 second via `useLiveCountdown` hook
+- Format: `2D 5H 30M` (> 1 day), `3H 15M 42S` (> 1 hour), `15M 30S` (> 1 min), `45S` (< 1 min)
+- Shows `ENDED` when the deadline has passed
+
 ### Market Detail — Inline Trading
 
 The market detail page has an integrated **Buy/Sell** tab toggle in the right sidebar:
 
 - **Buy Tab:** Select outcome (2-4 options with custom labels and colors), enter amount, preview shares received with price impact and fees, execute via wallet
 - **Sell Tab:** Auto-fetch `OutcomeShare` records from wallet, select position, enter withdrawal amount, preview shares burned and net tokens received, execute sell
-- **Resolve Tab:** 3-step resolution wizard (close → resolve → finalize) with challenge window countdown
+- **Resolve Tab:** 3-step resolution wizard (close → resolve → finalize) with challenge window countdown + emergency cancel detection
 - Manual record paste fallback for wallets that don't support record fetching
 
 ### Multi-Outcome Support
@@ -238,7 +276,7 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
   - `shield_xxx` IDs: auto-promoted (Shield Wallet confirms on-chain)
 - Tabs: All, Accepted, Unredeemed, Settled
 - Import existing bets by transaction ID
-- Claim winnings / refunds directly from bet cards
+- **Claim winnings / refunds directly via wallet** from Unredeemed tab (with CLI fallback)
 
 ### Wallet Integration
 
@@ -255,8 +293,8 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 | `create_market` | Create ALEO market with initial liquidity |
 | `create_market_usdcx` | Create USDCX market with initial liquidity |
 | `close_market` | Close betting (after deadline) |
-| `resolve_market` | Resolve with winning outcome (resolver only) |
-| `finalize_resolution` | Finalize after challenge window (anyone) |
+| `resolve_market` | Resolve with winning outcome (resolver only, before resolution_deadline) |
+| `finalize_resolution` | Finalize after challenge window — no end deadline (anyone) |
 | `cancel_market` | Creator cancels market (no volume only) |
 | `emergency_cancel` | Cancel unresolved market past resolution deadline (anyone) |
 
@@ -280,13 +318,13 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 ### Dispute & Governance
 | Transition | Description |
 |---|---|
-| `dispute_resolution` / `dispute_resolution_usdcx` | Stake 1 ALEO bond to dispute resolution |
-| `claim_dispute_bond` / `claim_disp_bond_usdcx` | Reclaim bond if final outcome matches proposal |
+| `dispute_resolution` | Stake 1 ALEO bond to dispute resolution |
+| `claim_dispute_bond` | Reclaim bond via `DisputeBondReceipt` record if final outcome matches |
 | `withdraw_creator_fees` / `withdraw_fees_usdcx` | Creator withdraws accumulated fees |
 | `init_multisig` | Initialize multisig for treasury |
 | `propose_treasury_withdrawal` | Propose treasury withdrawal |
 | `approve_proposal` | Approve multisig proposal |
-| `execute_proposal` | Execute approved proposal |
+| `execute_proposal` / `exec_proposal_usdcx` | Execute approved proposal |
 
 ## Quick Start
 
@@ -350,9 +388,9 @@ leo deploy --network testnet --yes --broadcast
 # Get current block height
 CURRENT_BLOCK=$(curl -s "https://api.explorer.provable.com/v1/testnet/block/height/latest")
 
-# Calculate deadlines
-DEADLINE=$((CURRENT_BLOCK + 100000))    # ~5 days
-RESOLUTION=$((CURRENT_BLOCK + 200000))  # ~10 days
+# Calculate deadlines (testnet: ~4s/block)
+DEADLINE=$((CURRENT_BLOCK + 21600))      # ~1 day (21600 blocks × 4s)
+RESOLUTION=$((CURRENT_BLOCK + 43200))    # ~2 days (43200 blocks × 4s)
 
 # Create market (7 inputs)
 snarkos developer execute veiled_markets_v15.aleo create_market \
@@ -379,6 +417,15 @@ Parameters:
 6. `resolver` — Address authorized to resolve the market
 7. `initial_liquidity` — In microcredits (10000000 = 10 ALEO)
 
+### Block Time Reference
+
+| Duration | Testnet (~4s/block) | Mainnet (~15s/block) |
+|----------|-------------------|---------------------|
+| 1 hour | ~900 blocks | ~240 blocks |
+| 12 hours | ~10,800 blocks | ~2,880 blocks |
+| 1 day | ~21,600 blocks | ~5,760 blocks |
+| 7 days | ~151,200 blocks | ~40,320 blocks |
+
 ## Wallet Setup
 
 **Recommended:** [Shield Wallet](https://shieldwallet.io/)
@@ -392,11 +439,11 @@ Parameters:
 
 ### Wallet Compatibility
 
-| Wallet | Create Market | Buy Shares | Sell Shares | Status |
-|--------|:---:|:---:|:---:|---|
-| Shield Wallet | Yes | Yes | Yes | Primary wallet |
-| Puzzle Wallet | Untested | Untested | Untested | Server-side proving |
-| Leo Wallet | No | No | No | Can't resolve 4-level import chain |
+| Wallet | Create Market | Buy Shares | Sell Shares | Claim/Refund | Status |
+|--------|:---:|:---:|:---:|:---:|---|
+| Shield Wallet | Yes | Yes | Yes | Yes | Primary wallet |
+| Puzzle Wallet | Untested | Untested | Untested | Untested | Server-side proving |
+| Leo Wallet | No | No | No | No | Can't resolve 4-level import chain |
 
 ### Known Shield Wallet Behavior
 
@@ -473,7 +520,7 @@ All buy and sell transactions are recorded in Zustand store and persisted to `lo
 
 | Version | Key Changes |
 |---------|-------------|
-| **v15** | Fixed dispute lifecycle bugs: `resolve_market` now clears stale dispute data on re-resolve, `emergency_cancel` cleans up resolution/dispute state, `claim_dispute_bond` uses unforgeable `DisputeBondReceipt` record instead of mapping (prevents stuck markets). Added Resolve Panel UI (3-step resolution wizard), "Needs Resolution" dashboard filter |
+| **v15** | Fixed dispute lifecycle bugs: `resolve_market` clears stale dispute data on re-resolve, `emergency_cancel` cleans up resolution/dispute state, `claim_dispute_bond` uses unforgeable `DisputeBondReceipt` record. Added Resolve Panel UI (3-step wizard + emergency cancel), "Needs Resolution" dashboard filter, wallet-based claim/refund (replaces CLI-only), live countdown with seconds precision, network-aware block time config (4s testnet / 15s mainnet) |
 | v14 | FPMM AMM with correct formulas, `buy_shares_private` only (ALEO), `expected_shares` pattern, `sell_shares` tokens_desired approach + `credits.aleo/transfer_public`, multisig treasury governance, custom outcome labels, multi-outcome pool breakdown, sell tracking in My Bets |
 | v13 | Fixed ternary underflow bug in buy_shares (Leo evaluates both branches) |
 | v12 | Initial FPMM implementation, multi-outcome markets, LP provision |
