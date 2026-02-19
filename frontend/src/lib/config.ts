@@ -3,6 +3,7 @@
 // ============================================================================
 // Reads environment variables with type safety and defaults
 // ============================================================================
+import { devLog } from './logger'
 
 /**
  * Network type
@@ -101,7 +102,7 @@ function loadConfig(): AppConfig {
     msPerBlock: network === 'mainnet' ? 15000 : 4000,
 
     // Program
-    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v15.aleo'),
+    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v16.aleo'),
     creditsProgramId: getEnv('VITE_CREDITS_PROGRAM_ID', 'credits.aleo'),
     usdcxProgramId: getEnv('VITE_USDCX_PROGRAM_ID', 'test_usdcx_stablecoin.aleo'),
 
@@ -147,7 +148,7 @@ export const isProd = import.meta.env.PROD;
  */
 export function debug(...args: unknown[]): void {
   if (config.debug) {
-    console.log('[Veiled Markets]', ...args);
+    devLog('[Veiled Markets]', ...args);
   }
 }
 
@@ -156,7 +157,7 @@ export function debug(...args: unknown[]): void {
  * Supports both Aleo transaction IDs (at1...) and UUIDs
  */
 export function getTransactionUrl(txId: string): string {
-  console.log('getTransactionUrl called with:', txId);
+  devLog('getTransactionUrl called with:', txId);
 
   // Clean the transaction ID (remove any whitespace)
   const cleanTxId = txId.trim();
@@ -164,9 +165,9 @@ export function getTransactionUrl(txId: string): string {
   // Build the URL - Provable Explorer supports both formats
   const url = `${config.explorerUrl}/transaction/${cleanTxId}`;
 
-  console.log('Generated URL:', url);
-  console.log('Explorer base:', config.explorerUrl);
-  console.log('Transaction ID format:', cleanTxId.startsWith('at1') ? 'Aleo format' : 'UUID format');
+  devLog('Generated URL:', url);
+  devLog('Explorer base:', config.explorerUrl);
+  devLog('Transaction ID format:', cleanTxId.startsWith('at1') ? 'Aleo format' : 'UUID format');
 
   return url;
 }

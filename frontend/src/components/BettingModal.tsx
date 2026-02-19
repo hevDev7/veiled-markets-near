@@ -7,6 +7,7 @@ import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji,
 import { TransactionLink } from './TransactionLink'
 import { buildBuySharesInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
+import { devWarn } from '../lib/logger'
 
 interface BettingModalProps {
   market: Market | null
@@ -60,7 +61,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         if (validationErr instanceof Error && validationErr.message.includes('Market is')) {
           throw validationErr
         }
-        console.warn('Pre-validation skipped (network error):', validationErr)
+        devWarn('Pre-validation skipped (network error):', validationErr)
       }
 
       const outcomeNum = selectedOutcome === 'yes' ? 1 : 2
@@ -96,7 +97,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         setPrivacyMode('private')
       }
 
-      console.warn('[Bet] Using', functionName, '— public mode, inputs:', inputs)
+      devWarn('[Bet] Using', functionName, '— public mode, inputs:', inputs)
 
       // Add timeout — wallet can hang after confirmation (especially Shield)
       const WALLET_TIMEOUT_MS = 120_000

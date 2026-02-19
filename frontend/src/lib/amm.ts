@@ -1,7 +1,7 @@
 // ============================================================================
-// AMM Utility Functions - v15 FPMM (Fixed Product Market Maker)
+// AMM Utility Functions - v16 FPMM (Fixed Product Market Maker)
 // ============================================================================
-// Correct complete-set minting/burning formulas matching contract v15.
+// Correct complete-set minting/burning formulas matching contract v16.
 // Supports 2-4 outcome markets.
 
 const SHARE_PRICE_SCALE = 1_000_000 // $1.00 in microcredits
@@ -432,8 +432,11 @@ export function calculateMinSharesOut(
     expectedShares: bigint,
     slippageTolerance: number // percentage (e.g., 1 = 1%)
 ): bigint {
+    if (expectedShares <= 0n) return 0n
     const slippageFactor = BigInt(Math.floor((100 - slippageTolerance) * 100))
-    return (expectedShares * slippageFactor) / 10000n
+    const result = (expectedShares * slippageFactor) / 10000n
+    // Floor of 1 prevents truncation to 0 for small orders
+    return result < 1n ? 1n : result
 }
 
 /**
@@ -443,8 +446,11 @@ export function calculateMinTokensOut(
     expectedTokens: bigint,
     slippageTolerance: number
 ): bigint {
+    if (expectedTokens <= 0n) return 0n
     const slippageFactor = BigInt(Math.floor((100 - slippageTolerance) * 100))
-    return (expectedTokens * slippageFactor) / 10000n
+    const result = (expectedTokens * slippageFactor) / 10000n
+    // Floor of 1 prevents truncation to 0 for small orders
+    return result < 1n ? 1n : result
 }
 
 /**

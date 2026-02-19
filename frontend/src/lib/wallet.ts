@@ -22,6 +22,7 @@ import { Network } from '@provablehq/aleo-types';
 
 // Import config for API URLs
 import { config } from './config';
+import { devLog, devWarn } from './logger';
 
 export type NetworkType = 'mainnet' | 'testnet';
 
@@ -209,7 +210,7 @@ export class PuzzleWalletAdapter {
 
   async connect(): Promise<WalletAccount> {
     try {
-      console.log('Puzzle Wallet: Attempting to connect...');
+      devLog('Puzzle Wallet: Attempting to connect...');
 
       const connectPromise = puzzleConnect({
         dAppInfo: {
@@ -231,7 +232,7 @@ export class PuzzleWalletAdapter {
         'Connection timed out. Puzzle Wallet extension may not be installed or is not responding.'
       );
 
-      console.log('Puzzle Wallet: Connect response:', response);
+      devLog('Puzzle Wallet: Connect response:', response);
 
       if (response && response.connection && response.connection.address) {
         this.connected = true;
@@ -241,7 +242,7 @@ export class PuzzleWalletAdapter {
           network: networkStr.includes('Mainnet') ? 'mainnet' : 'testnet',
         };
 
-        console.log('Puzzle Wallet: Connected successfully');
+        devLog('Puzzle Wallet: Connected successfully');
         return this.account;
       }
 
@@ -289,7 +290,7 @@ export class PuzzleWalletAdapter {
       let publicBalance = 0n;
       let privateBalance = 0n;
 
-      console.log('Puzzle Wallet: getBalance response:', JSON.stringify(balance));
+      devLog('Puzzle Wallet: getBalance response:', JSON.stringify(balance));
 
       if (balance && (balance as any).balances) {
         for (const b of (balance as any).balances) {
@@ -307,7 +308,7 @@ export class PuzzleWalletAdapter {
         }
       }
 
-      console.log('Puzzle Wallet: Parsed balance - public:', publicBalance.toString(), 'private:', privateBalance.toString());
+      devLog('Puzzle Wallet: Parsed balance - public:', publicBalance.toString(), 'private:', privateBalance.toString());
 
       // Try getRecords as fallback for private balance
       if (privateBalance === 0n) {
@@ -315,7 +316,7 @@ export class PuzzleWalletAdapter {
           const recordsResponse = await puzzleGetRecords({
             filter: { programIds: ['credits.aleo'], status: 'Unspent' as any },
           });
-          console.log('Puzzle Wallet: getRecords response:', JSON.stringify(recordsResponse));
+          devLog('Puzzle Wallet: getRecords response:', JSON.stringify(recordsResponse));
 
           if (recordsResponse && recordsResponse.records) {
             for (const record of recordsResponse.records) {
@@ -323,12 +324,12 @@ export class PuzzleWalletAdapter {
               const match = String(plaintext).match(/microcredits:\s*(\d+)u64/);
               if (match) {
                 privateBalance += BigInt(match[1]);
-                console.log('Puzzle Wallet: Found private record:', match[1]);
+                devLog('Puzzle Wallet: Found private record:', match[1]);
               }
             }
           }
         } catch (err) {
-          console.log('Puzzle Wallet: getRecords fallback failed:', err);
+          devLog('Puzzle Wallet: getRecords fallback failed:', err);
         }
       }
 
@@ -339,13 +340,13 @@ export class PuzzleWalletAdapter {
 
       return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
     } catch (err) {
-      console.warn('Puzzle Wallet: getBalance failed:', err);
+      devWarn('Puzzle Wallet: getBalance failed:', err);
       if (this.account?.address) {
         try {
           const publicBalance = await fetchPublicBalance(this.account.address);
           return { public: publicBalance, private: 0n, usdcxPublic: 0n };
         } catch {
-          console.warn('Puzzle Wallet: fetchPublicBalance also failed');
+          devWarn('Puzzle Wallet: fetchPublicBalance also failed');
         }
       }
       return { public: 0n, private: 0n, usdcxPublic: 0n };
@@ -358,7 +359,7 @@ export class PuzzleWalletAdapter {
     }
 
     try {
-      console.log('Puzzle Wallet: requestTransaction called with:', {
+      devLog('Puzzle Wallet: requestTransaction called with:', {
         programId: request.programId,
         functionName: request.functionName,
         fee: request.fee,
@@ -394,18 +395,18 @@ export class PuzzleWalletAdapter {
         inputs: request.inputs, // Try plain array first
       };
 
-      console.log('Puzzle Wallet: Attempt 1 - Plain array format');
-      console.log('Puzzle Wallet: Event params:', JSON.stringify(eventParams, null, 2));
+      devLog('Puzzle Wallet: Attempt 1 - Plain array format');
+      devLog('Puzzle Wallet: Event params:', JSON.stringify(eventParams, null, 2));
 
       try {
         const response = await requestCreateEvent(eventParams);
-        console.log('Puzzle Wallet: Response:', response);
+        devLog('Puzzle Wallet: Response:', response);
 
         if (response && response.eventId) {
           return response.eventId;
         }
       } catch (err: any) {
-        console.log('Puzzle Wallet: Plain array format failed, trying object format');
+        devLog('Puzzle Wallet: Plain array format failed, trying object format');
 
         // If plain array fails, log the error and throw
         console.error('Puzzle Wallet: Plain array format failed:', err);
@@ -514,7 +515,7 @@ export class LeoWalletAdapter {
 
     // If adapter is connected but account is null, try to restore account
     if (!this.account && this.adapter.account) {
-      console.log('Leo Wallet: Restoring account from adapter');
+      devLog('Leo Wallet: Restoring account from adapter');
       this.account = {
         address: this.adapter.account.address,
         network: 'testnet',
@@ -537,16 +538,16 @@ export class LeoWalletAdapter {
 
   async connect(): Promise<WalletAccount> {
     try {
-      console.log('Leo Wallet: Attempting to connect...');
-      console.log('Leo Wallet: readyState:', this.adapter.readyState);
+      devLog('Leo Wallet: Attempting to connect...');
+      devLog('Leo Wallet: readyState:', this.adapter.readyState);
 
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
-        console.log('Leo Wallet: Trying network testnet...');
+        devLog('Leo Wallet: Trying network testnet...');
         await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
 
         if (this.adapter.account) {
-          console.log('Leo Wallet: Connected successfully');
+          devLog('Leo Wallet: Connected successfully');
           this.account = {
             address: this.adapter.account.address,
             network: 'testnet',
@@ -554,7 +555,7 @@ export class LeoWalletAdapter {
           return this.account;
         }
       } catch (err) {
-        console.log('Leo Wallet: Failed with network testnet:', err);
+        devLog('Leo Wallet: Failed with network testnet:', err);
         throw err;
       }
 
@@ -595,25 +596,25 @@ export class LeoWalletAdapter {
     // Fetch public balance from API
     try {
       publicBalance = await fetchPublicBalance(this.account.address);
-      console.log('Leo Wallet: Public balance from API:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
+      devLog('Leo Wallet: Public balance from API:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
     } catch (error) {
       console.error('Leo Wallet: Failed to fetch public balance:', error);
     }
 
     // Try to get balance directly from Leo Wallet window object FIRST
     try {
-      console.log('Leo Wallet: Attempting to access window.leoWallet...');
+      devLog('Leo Wallet: Attempting to access window.leoWallet...');
       const leoWallet = (window as any).leoWallet || (window as any).leo;
 
       if (leoWallet) {
-        console.log('Leo Wallet: Found window.leoWallet object');
-        console.log('Leo Wallet: Available methods:', Object.keys(leoWallet));
+        devLog('Leo Wallet: Found window.leoWallet object');
+        devLog('Leo Wallet: Available methods:', Object.keys(leoWallet));
 
         // Try to get balance from wallet
         if (typeof leoWallet.getBalance === 'function') {
-          console.log('Leo Wallet: Calling leoWallet.getBalance()...');
+          devLog('Leo Wallet: Calling leoWallet.getBalance()...');
           const walletBalance = await leoWallet.getBalance();
-          console.log('Leo Wallet: Wallet balance response:', walletBalance);
+          devLog('Leo Wallet: Wallet balance response:', walletBalance);
 
           if (walletBalance) {
             // Try to parse the balance - handle number, bigint, or string
@@ -623,7 +624,7 @@ export class LeoWalletAdapter {
               const parsed = BigInt(cleaned.replace(/[^\d]/g, '') || '0');
               if (parsed > 0n) {
                 privateBalance = parsed;
-                console.log('Leo Wallet: Got private balance from wallet:', privateBalance.toString());
+                devLog('Leo Wallet: Got private balance from wallet:', privateBalance.toString());
               }
             }
           }
@@ -631,22 +632,22 @@ export class LeoWalletAdapter {
 
         // Try alternative method - getAccount
         if (privateBalance === 0n && typeof leoWallet.getAccount === 'function') {
-          console.log('Leo Wallet: Trying leoWallet.getAccount()...');
+          devLog('Leo Wallet: Trying leoWallet.getAccount()...');
           const account = await leoWallet.getAccount();
-          console.log('Leo Wallet: Account response:', account);
+          devLog('Leo Wallet: Account response:', account);
 
           if (account && account.balance) {
             if (typeof account.balance.private === 'number' || typeof account.balance.private === 'bigint') {
               privateBalance = BigInt(account.balance.private);
-              console.log('Leo Wallet: ✅ Got private balance from account:', privateBalance.toString());
+              devLog('Leo Wallet: ✅ Got private balance from account:', privateBalance.toString());
             }
           }
         }
       } else {
-        console.log('Leo Wallet: window.leoWallet not found');
+        devLog('Leo Wallet: window.leoWallet not found');
       }
     } catch (error) {
-      console.warn('Leo Wallet: Failed to access window.leoWallet:', error);
+      devWarn('Leo Wallet: Failed to access window.leoWallet:', error);
     }
 
     // Fetch private balance from wallet records
@@ -702,8 +703,8 @@ export class LeoWalletAdapter {
         totalCount++;
         // Log the first few records to debug format
         if (totalCount <= 3) {
-          console.log(`Leo Wallet: Record ${totalCount} keys:`, r && typeof r === 'object' ? Object.keys(r) : typeof r);
-          console.log(`Leo Wallet: Record ${totalCount} spent?:`, r?.spent, r?.isSpent, r?.status, r?.recordStatus);
+          devLog(`Leo Wallet: Record ${totalCount} keys:`, r && typeof r === 'object' ? Object.keys(r) : typeof r);
+          devLog(`Leo Wallet: Record ${totalCount} spent?:`, r?.spent, r?.isSpent, r?.status, r?.recordStatus);
         }
         // Skip spent records
         if (isRecordSpent(r)) {
@@ -713,10 +714,10 @@ export class LeoWalletAdapter {
         const amount = extractMicrocredits(r);
         if (amount > 0n) {
           sum += amount;
-          console.log('Leo Wallet: Unspent record:', (Number(amount) / 1_000_000).toFixed(2), 'ALEO');
+          devLog('Leo Wallet: Unspent record:', (Number(amount) / 1_000_000).toFixed(2), 'ALEO');
         }
       }
-      console.log(`Leo Wallet: Total records: ${totalCount}, spent: ${spentCount}, unspent with value: ${totalCount - spentCount}`);
+      devLog(`Leo Wallet: Total records: ${totalCount}, spent: ${spentCount}, unspent with value: ${totalCount - spentCount}`);
       return sum;
     };
 
@@ -725,13 +726,13 @@ export class LeoWalletAdapter {
       try {
         const leoWallet = (window as any).leoWallet || (window as any).leo;
         if (leoWallet && typeof leoWallet.requestRecordPlaintexts === 'function') {
-          console.log('Leo Wallet: Method 1 - window.leoWallet.requestRecordPlaintexts...');
+          devLog('Leo Wallet: Method 1 - window.leoWallet.requestRecordPlaintexts...');
           const result = await leoWallet.requestRecordPlaintexts('credits.aleo');
-          console.log('Leo Wallet: Method 1 response:', result);
+          devLog('Leo Wallet: Method 1 response:', result);
           privateBalance = sumRecords(result);
         }
       } catch (err) {
-        console.log('Leo Wallet: Method 1 failed:', err);
+        devLog('Leo Wallet: Method 1 failed:', err);
       }
     }
 
@@ -740,51 +741,51 @@ export class LeoWalletAdapter {
       try {
         const leoWallet = (window as any).leoWallet || (window as any).leo;
         if (leoWallet && typeof leoWallet.requestRecords === 'function') {
-          console.log('Leo Wallet: Method 2 - window.leoWallet.requestRecords...');
+          devLog('Leo Wallet: Method 2 - window.leoWallet.requestRecords...');
           const result = await leoWallet.requestRecords('credits.aleo');
-          console.log('Leo Wallet: Method 2 response:', result);
+          devLog('Leo Wallet: Method 2 response:', result);
           privateBalance = sumRecords(result);
         }
       } catch (err) {
-        console.log('Leo Wallet: Method 2 failed:', err);
+        devLog('Leo Wallet: Method 2 failed:', err);
       }
     }
 
     // Method 3: Adapter requestRecords(program, true) - calls requestRecordPlaintexts internally
     if (privateBalance === 0n) {
       try {
-        console.log('Leo Wallet: Method 3 - adapter.requestRecords(credits.aleo, true)...');
+        devLog('Leo Wallet: Method 3 - adapter.requestRecords(credits.aleo, true)...');
         const records = await this.adapter.requestRecords('credits.aleo', true);
-        console.log('Leo Wallet: Method 3 response:', records);
+        devLog('Leo Wallet: Method 3 response:', records);
         privateBalance = sumRecords(records);
       } catch (err) {
-        console.log('Leo Wallet: Method 3 failed:', err);
+        devLog('Leo Wallet: Method 3 failed:', err);
       }
     }
 
     // Method 4: Adapter requestRecords(program, false)
     if (privateBalance === 0n) {
       try {
-        console.log('Leo Wallet: Method 4 - adapter.requestRecords(credits.aleo, false)...');
+        devLog('Leo Wallet: Method 4 - adapter.requestRecords(credits.aleo, false)...');
         const records = await this.adapter.requestRecords('credits.aleo', false);
-        console.log('Leo Wallet: Method 4 response:', records);
+        devLog('Leo Wallet: Method 4 response:', records);
         privateBalance = sumRecords(records);
       } catch (err) {
-        console.log('Leo Wallet: Method 4 failed:', err);
+        devLog('Leo Wallet: Method 4 failed:', err);
       }
     }
 
     const totalBalance = publicBalance + privateBalance;
-    console.log('Leo Wallet: ========== FINAL BALANCE SUMMARY ==========');
-    console.log('Leo Wallet: Public:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
-    console.log('Leo Wallet: Private:', privateBalance.toString(), `(${Number(privateBalance) / 1_000_000} ALEO)`);
-    console.log('Leo Wallet: Total:', totalBalance.toString(), `(${Number(totalBalance) / 1_000_000} ALEO)`);
-    console.log('Leo Wallet: ==========================================');
+    devLog('Leo Wallet: ========== FINAL BALANCE SUMMARY ==========');
+    devLog('Leo Wallet: Public:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
+    devLog('Leo Wallet: Private:', privateBalance.toString(), `(${Number(privateBalance) / 1_000_000} ALEO)`);
+    devLog('Leo Wallet: Total:', totalBalance.toString(), `(${Number(totalBalance) / 1_000_000} ALEO)`);
+    devLog('Leo Wallet: ==========================================');
 
     if (privateBalance === 0n) {
-      console.warn('Leo Wallet: ⚠️ Private balance is 0 - this may not be accurate!');
-      console.warn('Leo Wallet: ⚠️ Leo Wallet extension may show different balance');
-      console.warn('Leo Wallet: ⚠️ Private records are encrypted and may not be accessible via SDK');
+      devWarn('Leo Wallet: ⚠️ Private balance is 0 - this may not be accurate!');
+      devWarn('Leo Wallet: ⚠️ Leo Wallet extension may show different balance');
+      devWarn('Leo Wallet: ⚠️ Private records are encrypted and may not be accessible via SDK');
     }
 
     return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
@@ -796,8 +797,8 @@ export class LeoWalletAdapter {
     }
 
     try {
-      console.log('Leo Wallet: Executing transaction...');
-      console.log('Leo Wallet: Request:', {
+      devLog('Leo Wallet: Executing transaction...');
+      devLog('Leo Wallet: Request:', {
         program: request.programId,
         function: request.functionName,
         inputs: request.inputs,
@@ -818,7 +819,7 @@ export class LeoWalletAdapter {
         }
       }
 
-      console.log('Leo Wallet: Inputs validated:', request.inputs);
+      devLog('Leo Wallet: Inputs validated:', request.inputs);
 
       // Bypass the ProvableHQ alpha adapter and call Leo Wallet extension directly.
       // The adapter (v0.3.0-alpha.2) uses requestTransaction() internally, but
@@ -848,19 +849,19 @@ export class LeoWalletAdapter {
         // Method 1: requestExecution with 'testnetbeta' chainId
         if (typeof leoWallet.requestExecution === 'function') {
           try {
-            console.log('Leo Wallet: Method 1 - requestExecution (testnetbeta)...');
+            devLog('Leo Wallet: Method 1 - requestExecution (testnetbeta)...');
             result = await leoWallet.requestExecution(txData);
-            console.log('Leo Wallet: Method 1 result:', result);
+            devLog('Leo Wallet: Method 1 result:', result);
           } catch (err: any) {
-            console.log('Leo Wallet: Method 1 failed:', err?.message || err);
+            devLog('Leo Wallet: Method 1 failed:', err?.message || err);
 
             // Method 2: requestExecution with 'testnet' chainId
             try {
-              console.log('Leo Wallet: Method 2 - requestExecution (testnet)...');
+              devLog('Leo Wallet: Method 2 - requestExecution (testnet)...');
               result = await leoWallet.requestExecution({ ...txData, chainId: 'testnet' });
-              console.log('Leo Wallet: Method 2 result:', result);
+              devLog('Leo Wallet: Method 2 result:', result);
             } catch (err2: any) {
-              console.log('Leo Wallet: Method 2 failed:', err2?.message || err2);
+              devLog('Leo Wallet: Method 2 failed:', err2?.message || err2);
             }
           }
         }
@@ -868,19 +869,19 @@ export class LeoWalletAdapter {
         // Method 3: requestTransaction with 'testnetbeta' (what the adapter does)
         if (!result && typeof leoWallet.requestTransaction === 'function') {
           try {
-            console.log('Leo Wallet: Method 3 - requestTransaction (testnetbeta)...');
+            devLog('Leo Wallet: Method 3 - requestTransaction (testnetbeta)...');
             result = await leoWallet.requestTransaction(txData);
-            console.log('Leo Wallet: Method 3 result:', result);
+            devLog('Leo Wallet: Method 3 result:', result);
           } catch (err: any) {
-            console.log('Leo Wallet: Method 3 failed:', err?.message || err);
+            devLog('Leo Wallet: Method 3 failed:', err?.message || err);
 
             // Method 4: requestTransaction with 'testnet' chainId
             try {
-              console.log('Leo Wallet: Method 4 - requestTransaction (testnet)...');
+              devLog('Leo Wallet: Method 4 - requestTransaction (testnet)...');
               result = await leoWallet.requestTransaction({ ...txData, chainId: 'testnet' });
-              console.log('Leo Wallet: Method 4 result:', result);
+              devLog('Leo Wallet: Method 4 result:', result);
             } catch (err2: any) {
-              console.log('Leo Wallet: Method 4 failed:', err2?.message || err2);
+              devLog('Leo Wallet: Method 4 failed:', err2?.message || err2);
             }
           }
         }
@@ -888,7 +889,7 @@ export class LeoWalletAdapter {
 
       // Fallback: use the adapter's executeTransaction if direct calls all failed
       if (!result) {
-        console.log('Leo Wallet: Falling back to adapter executeTransaction...');
+        devLog('Leo Wallet: Falling back to adapter executeTransaction...');
         const adapterFee = Math.round((request.fee || 0.5) * 1_000_000);
         result = await this.adapter.executeTransaction({
           program: request.programId,
@@ -899,9 +900,9 @@ export class LeoWalletAdapter {
         });
       }
 
-      console.log('Leo Wallet: Final result:', result);
-      console.log('Leo Wallet: Result type:', typeof result);
-      console.log('Leo Wallet: Result keys:', result ? Object.keys(result) : 'null');
+      devLog('Leo Wallet: Final result:', result);
+      devLog('Leo Wallet: Result type:', typeof result);
+      devLog('Leo Wallet: Result keys:', result ? Object.keys(result) : 'null');
 
       // Try different possible response formats
       let transactionId = null;
@@ -918,12 +919,12 @@ export class LeoWalletAdapter {
       }
 
       if (transactionId) {
-        console.log('Leo Wallet: Transaction ID:', transactionId);
-        console.log('Leo Wallet: Transaction ID format:', transactionId.startsWith('at1') ? 'Aleo format (at1...)' : 'UUID/Event ID format');
+        devLog('Leo Wallet: Transaction ID:', transactionId);
+        devLog('Leo Wallet: Transaction ID format:', transactionId.startsWith('at1') ? 'Aleo format (at1...)' : 'UUID/Event ID format');
 
         // If it's a UUID (event ID), try to get the actual transaction ID from wallet
         if (!transactionId.startsWith('at1') && transactionId.includes('-')) {
-          console.log('Leo Wallet: Got UUID, polling for on-chain transaction ID...');
+          devLog('Leo Wallet: Got UUID, polling for on-chain transaction ID...');
 
           // Store the event ID
           (window as any).__lastLeoEventId = transactionId;
@@ -931,12 +932,12 @@ export class LeoWalletAdapter {
           // Poll with longer timeout (ZK proving can take 1-3 minutes for complex programs)
           const realTxId = await this.pollForTransactionId(transactionId, 30);
           if (realTxId) {
-            console.log('Leo Wallet: Got real transaction ID:', realTxId);
+            devLog('Leo Wallet: Got real transaction ID:', realTxId);
             return realTxId;
           }
 
-          console.warn('Leo Wallet: Could not get real transaction ID, returning UUID');
-          console.warn('Leo Wallet: User can check Leo Wallet extension for actual transaction');
+          devWarn('Leo Wallet: Could not get real transaction ID, returning UUID');
+          devWarn('Leo Wallet: User can check Leo Wallet extension for actual transaction');
         }
 
         return transactionId;
@@ -973,9 +974,9 @@ export class LeoWalletAdapter {
    * so we poll with longer timeouts.
    */
   private async pollForTransactionId(eventId: string, maxAttempts: number = 30): Promise<string | null> {
-    console.log('Leo Wallet: Polling for on-chain transaction ID...');
-    console.log('Leo Wallet: Event/Request ID:', eventId);
-    console.log('Leo Wallet: Max attempts:', maxAttempts, '(~', maxAttempts * 5, 'seconds)');
+    devLog('Leo Wallet: Polling for on-chain transaction ID...');
+    devLog('Leo Wallet: Event/Request ID:', eventId);
+    devLog('Leo Wallet: Max attempts:', maxAttempts, '(~', maxAttempts * 5, 'seconds)');
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
@@ -985,7 +986,7 @@ export class LeoWalletAdapter {
         if (leoWallet && typeof leoWallet.transactionStatus === 'function') {
           const status = await leoWallet.transactionStatus(eventId);
           if (attempt < 3 || attempt % 5 === 0) {
-            console.log(`Leo Wallet: Poll ${attempt + 1}/${maxAttempts} - status:`, status);
+            devLog(`Leo Wallet: Poll ${attempt + 1}/${maxAttempts} - status:`, status);
           }
 
           if (status) {
@@ -1000,13 +1001,13 @@ export class LeoWalletAdapter {
             // Check for on-chain transaction ID
             const onChainId = status.transactionId || status.transaction_id || status.txId || status.id;
             if (onChainId && typeof onChainId === 'string' && onChainId.startsWith('at1')) {
-              console.log('Leo Wallet: Found on-chain transaction ID:', onChainId);
+              devLog('Leo Wallet: Found on-chain transaction ID:', onChainId);
               return onChainId;
             }
 
             // Check if finalized
             if (statusStr === 'Finalized' || statusStr === 'Completed') {
-              console.log('Leo Wallet: Transaction finalized, checking for ID...');
+              devLog('Leo Wallet: Transaction finalized, checking for ID...');
               if (status.transaction?.id?.startsWith('at1')) {
                 return status.transaction.id;
               }
@@ -1021,7 +1022,7 @@ export class LeoWalletAdapter {
             if (adapterStatus) {
               const onChainId = adapterStatus.transactionId || adapterStatus.transaction_id;
               if (onChainId && typeof onChainId === 'string' && onChainId.startsWith('at1')) {
-                console.log('Leo Wallet: Found on-chain ID via adapter:', onChainId);
+                devLog('Leo Wallet: Found on-chain ID via adapter:', onChainId);
                 return onChainId;
               }
             }
@@ -1034,13 +1035,13 @@ export class LeoWalletAdapter {
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (err) {
         if (attempt < 3) {
-          console.log(`Leo Wallet: Poll ${attempt + 1} error:`, err);
+          devLog(`Leo Wallet: Poll ${attempt + 1} error:`, err);
         }
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
 
-    console.log('Leo Wallet: Could not get on-chain transaction ID after', maxAttempts, 'attempts (~', maxAttempts * 5, 'seconds)');
+    devLog('Leo Wallet: Could not get on-chain transaction ID after', maxAttempts, 'attempts (~', maxAttempts * 5, 'seconds)');
     return null;
   }
 
@@ -1057,80 +1058,80 @@ export class LeoWalletAdapter {
           ...Object.getOwnPropertyNames(proto),
           ...Object.keys(leoWallet),
         ])].filter(k => typeof leoWallet[k] === 'function');
-        console.log('Leo Wallet getRecords: Available wallet methods:', methods.join(', '));
+        devLog('Leo Wallet getRecords: Available wallet methods:', methods.join(', '));
       } catch { /* ignore */ }
     }
 
     // Method 1: window.leoWallet.requestRecordPlaintexts (returns decrypted records)
     try {
       if (leoWallet && typeof leoWallet.requestRecordPlaintexts === 'function') {
-        console.log('Leo Wallet getRecords: Method 1 - requestRecordPlaintexts("' + programId + '")...');
+        devLog('Leo Wallet getRecords: Method 1 - requestRecordPlaintexts("' + programId + '")...');
         const result = await leoWallet.requestRecordPlaintexts(programId);
-        console.log('Leo Wallet getRecords: Method 1 raw type:', typeof result);
-        try { console.log('Leo Wallet getRecords: Method 1 raw:', JSON.stringify(result).slice(0, 1000)); } catch {}
+        devLog('Leo Wallet getRecords: Method 1 raw type:', typeof result);
+        try { devLog('Leo Wallet getRecords: Method 1 raw:', JSON.stringify(result).slice(0, 1000)); } catch {}
         const records = Array.isArray(result) ? result : (result?.records || []);
         if (records.length > 0) {
-          console.log('Leo Wallet getRecords: Method 1 got', records.length, 'records');
+          devLog('Leo Wallet getRecords: Method 1 got', records.length, 'records');
           for (let i = 0; i < Math.min(records.length, 2); i++) {
-            console.log(`Leo Wallet getRecords: Record[${i}] type:`, typeof records[i]);
+            devLog(`Leo Wallet getRecords: Record[${i}] type:`, typeof records[i]);
             if (typeof records[i] === 'object' && records[i]) {
-              console.log(`Leo Wallet getRecords: Record[${i}] keys:`, Object.keys(records[i]));
+              devLog(`Leo Wallet getRecords: Record[${i}] keys:`, Object.keys(records[i]));
             }
-            try { console.log(`Leo Wallet getRecords: Record[${i}]:`, JSON.stringify(records[i]).slice(0, 500)); } catch {}
+            try { devLog(`Leo Wallet getRecords: Record[${i}]:`, JSON.stringify(records[i]).slice(0, 500)); } catch {}
           }
           return records;
         }
-        console.log('Leo Wallet getRecords: Method 1 returned 0 records');
+        devLog('Leo Wallet getRecords: Method 1 returned 0 records');
       }
     } catch (err) {
-      console.log('Leo Wallet getRecords: Method 1 failed:', err);
+      devLog('Leo Wallet getRecords: Method 1 failed:', err);
     }
 
     // Method 2: window.leoWallet.requestRecords
     try {
       if (leoWallet && typeof leoWallet.requestRecords === 'function') {
-        console.log('Leo Wallet getRecords: Method 2 - requestRecords("' + programId + '")...');
+        devLog('Leo Wallet getRecords: Method 2 - requestRecords("' + programId + '")...');
         const result = await leoWallet.requestRecords(programId);
-        console.log('Leo Wallet getRecords: Method 2 raw type:', typeof result);
-        try { console.log('Leo Wallet getRecords: Method 2 raw:', JSON.stringify(result).slice(0, 1000)); } catch {}
+        devLog('Leo Wallet getRecords: Method 2 raw type:', typeof result);
+        try { devLog('Leo Wallet getRecords: Method 2 raw:', JSON.stringify(result).slice(0, 1000)); } catch {}
         const records = Array.isArray(result) ? result : (result?.records || []);
         if (records.length > 0) {
-          console.log('Leo Wallet getRecords: Method 2 got', records.length, 'records');
+          devLog('Leo Wallet getRecords: Method 2 got', records.length, 'records');
           return records;
         }
-        console.log('Leo Wallet getRecords: Method 2 returned 0 records');
+        devLog('Leo Wallet getRecords: Method 2 returned 0 records');
       }
     } catch (err) {
-      console.log('Leo Wallet getRecords: Method 2 failed:', err);
+      devLog('Leo Wallet getRecords: Method 2 failed:', err);
     }
 
     // Method 3: Adapter requestRecords with plaintext
     try {
-      console.log('Leo Wallet getRecords: Method 3 - adapter.requestRecords(programId, true)...');
+      devLog('Leo Wallet getRecords: Method 3 - adapter.requestRecords(programId, true)...');
       const records = await this.adapter.requestRecords(programId, true);
-      console.log('Leo Wallet getRecords: Method 3 result count:', records?.length || 0);
-      try { console.log('Leo Wallet getRecords: Method 3 raw:', JSON.stringify(records).slice(0, 1000)); } catch {}
+      devLog('Leo Wallet getRecords: Method 3 result count:', records?.length || 0);
+      try { devLog('Leo Wallet getRecords: Method 3 raw:', JSON.stringify(records).slice(0, 1000)); } catch {}
       if (records && records.length > 0) {
         return records;
       }
     } catch (err) {
-      console.log('Leo Wallet getRecords: Method 3 failed:', err);
+      devLog('Leo Wallet getRecords: Method 3 failed:', err);
     }
 
     // Method 4: Adapter requestRecords without plaintext
     try {
-      console.log('Leo Wallet getRecords: Method 4 - adapter.requestRecords(programId, false)...');
+      devLog('Leo Wallet getRecords: Method 4 - adapter.requestRecords(programId, false)...');
       const records = await this.adapter.requestRecords(programId, false);
-      console.log('Leo Wallet getRecords: Method 4 result count:', records?.length || 0);
-      try { console.log('Leo Wallet getRecords: Method 4 raw:', JSON.stringify(records).slice(0, 1000)); } catch {}
+      devLog('Leo Wallet getRecords: Method 4 result count:', records?.length || 0);
+      try { devLog('Leo Wallet getRecords: Method 4 raw:', JSON.stringify(records).slice(0, 1000)); } catch {}
       if (records && records.length > 0) {
         return records;
       }
     } catch (err) {
-      console.log('Leo Wallet getRecords: Method 4 failed:', err);
+      devLog('Leo Wallet getRecords: Method 4 failed:', err);
     }
 
-    console.warn('Leo Wallet getRecords: ⚠️ All 4 methods returned empty for', programId);
+    devWarn('Leo Wallet getRecords: ⚠️ All 4 methods returned empty for', programId);
     return [];
   }
 
@@ -1194,15 +1195,15 @@ export class FoxWalletAdapter {
 
   async connect(): Promise<WalletAccount> {
     try {
-      console.log('Fox Wallet: Attempting to connect...');
-      console.log('Fox Wallet: readyState:', this.adapter.readyState);
+      devLog('Fox Wallet: Attempting to connect...');
+      devLog('Fox Wallet: readyState:', this.adapter.readyState);
 
       try {
-        console.log('Fox Wallet: Trying network testnet...');
+        devLog('Fox Wallet: Trying network testnet...');
         await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
 
         if (this.adapter.account) {
-          console.log('Fox Wallet: Connected successfully');
+          devLog('Fox Wallet: Connected successfully');
           this.account = {
             address: this.adapter.account.address,
             network: 'testnet',
@@ -1210,7 +1211,7 @@ export class FoxWalletAdapter {
           return this.account;
         }
       } catch (err) {
-        console.log('Fox Wallet: Failed with network testnet:', err);
+        devLog('Fox Wallet: Failed with network testnet:', err);
         throw err;
       }
 
@@ -1251,7 +1252,7 @@ export class FoxWalletAdapter {
     try {
       publicBalance = await fetchPublicBalance(this.account.address);
     } catch {
-      console.warn('Wallet: fetchPublicBalance failed, using 0');
+      devWarn('Wallet: fetchPublicBalance failed, using 0');
     }
 
     try {
@@ -1278,7 +1279,7 @@ export class FoxWalletAdapter {
     }
 
     try {
-      console.log('Fox Wallet: Executing transaction...');
+      devLog('Fox Wallet: Executing transaction...');
 
       const result = await this.adapter.executeTransaction({
         program: request.programId,
@@ -1288,7 +1289,7 @@ export class FoxWalletAdapter {
         privateFee: false,
       });
 
-      console.log('Fox Wallet: Transaction result:', result);
+      devLog('Fox Wallet: Transaction result:', result);
 
       if (result && result.transactionId) {
         return result.transactionId;
@@ -1381,15 +1382,15 @@ export class SoterWalletAdapter {
 
   async connect(): Promise<WalletAccount> {
     try {
-      console.log('Soter Wallet: Attempting to connect...');
-      console.log('Soter Wallet: readyState:', this.adapter.readyState);
+      devLog('Soter Wallet: Attempting to connect...');
+      devLog('Soter Wallet: readyState:', this.adapter.readyState);
 
       try {
-        console.log('Soter Wallet: Trying network testnet...');
+        devLog('Soter Wallet: Trying network testnet...');
         await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
 
         if (this.adapter.account) {
-          console.log('Soter Wallet: Connected successfully');
+          devLog('Soter Wallet: Connected successfully');
           this.account = {
             address: this.adapter.account.address,
             network: 'testnet',
@@ -1397,7 +1398,7 @@ export class SoterWalletAdapter {
           return this.account;
         }
       } catch (err) {
-        console.log('Soter Wallet: Failed with network testnet:', err);
+        devLog('Soter Wallet: Failed with network testnet:', err);
         throw err;
       }
 
@@ -1438,7 +1439,7 @@ export class SoterWalletAdapter {
     try {
       publicBalance = await fetchPublicBalance(this.account.address);
     } catch {
-      console.warn('Wallet: fetchPublicBalance failed, using 0');
+      devWarn('Wallet: fetchPublicBalance failed, using 0');
     }
 
     try {
@@ -1465,7 +1466,7 @@ export class SoterWalletAdapter {
     }
 
     try {
-      console.log('Soter Wallet: Executing transaction...');
+      devLog('Soter Wallet: Executing transaction...');
 
       const result = await this.adapter.executeTransaction({
         program: request.programId,
@@ -1475,7 +1476,7 @@ export class SoterWalletAdapter {
         privateFee: false,
       });
 
-      console.log('Soter Wallet: Transaction result:', result);
+      devLog('Soter Wallet: Transaction result:', result);
 
       if (result && result.transactionId) {
         return result.transactionId;
@@ -1567,7 +1568,7 @@ export class ShieldWalletAdapter {
 
   async connect(): Promise<WalletAccount> {
     try {
-      console.log('Shield Wallet: Attempting to connect...');
+      devLog('Shield Wallet: Attempting to connect...');
       const shieldWallet = this.getShieldWallet();
 
       if (!shieldWallet) {
@@ -1577,7 +1578,7 @@ export class ShieldWalletAdapter {
         );
       }
 
-      console.log('Shield Wallet: Found wallet object, methods:', Object.keys(shieldWallet));
+      devLog('Shield Wallet: Found wallet object, methods:', Object.keys(shieldWallet));
 
       // Try to connect using standard Aleo wallet interface
       if (typeof shieldWallet.connect === 'function') {
@@ -1616,7 +1617,7 @@ export class ShieldWalletAdapter {
         network: 'testnet',
       };
 
-      console.log('Shield Wallet: Connected successfully:', address);
+      devLog('Shield Wallet: Connected successfully:', address);
       return this.account;
     } catch (error: any) {
       console.error('Shield Wallet connection error:', error);
@@ -1655,7 +1656,7 @@ export class ShieldWalletAdapter {
     try {
       publicBalance = await fetchPublicBalance(this.account.address);
     } catch {
-      console.warn('Shield Wallet: fetchPublicBalance failed');
+      devWarn('Shield Wallet: fetchPublicBalance failed');
     }
 
     // Try to get balance from Shield Wallet
@@ -1671,7 +1672,7 @@ export class ShieldWalletAdapter {
           }
         }
       } catch (err) {
-        console.log('Shield Wallet: getBalance failed:', err);
+        devLog('Shield Wallet: getBalance failed:', err);
       }
 
       // Try requestRecordPlaintexts
@@ -1687,7 +1688,7 @@ export class ShieldWalletAdapter {
             }
           }
         } catch (err) {
-          console.log('Shield Wallet: requestRecordPlaintexts failed:', err);
+          devLog('Shield Wallet: requestRecordPlaintexts failed:', err);
         }
       }
     }
@@ -1705,8 +1706,8 @@ export class ShieldWalletAdapter {
       throw new Error('Shield Wallet not available');
     }
 
-    console.log('Shield Wallet: Executing transaction...');
-    console.log('Shield Wallet: Request:', {
+    devLog('Shield Wallet: Executing transaction...');
+    devLog('Shield Wallet: Request:', {
       program: request.programId,
       function: request.functionName,
       inputs: request.inputs,
@@ -1730,29 +1731,29 @@ export class ShieldWalletAdapter {
     // Method 1: requestExecution (preferred for program execution)
     if (typeof shieldWallet.requestExecution === 'function') {
       try {
-        console.log('Shield Wallet: Trying requestExecution...');
+        devLog('Shield Wallet: Trying requestExecution...');
         result = await shieldWallet.requestExecution(txData);
-        console.log('Shield Wallet: requestExecution result:', result);
+        devLog('Shield Wallet: requestExecution result:', result);
       } catch (err: any) {
-        console.log('Shield Wallet: requestExecution failed:', err?.message || err);
+        devLog('Shield Wallet: requestExecution failed:', err?.message || err);
       }
     }
 
     // Method 2: requestTransaction
     if (!result && typeof shieldWallet.requestTransaction === 'function') {
       try {
-        console.log('Shield Wallet: Trying requestTransaction...');
+        devLog('Shield Wallet: Trying requestTransaction...');
         result = await shieldWallet.requestTransaction(txData);
-        console.log('Shield Wallet: requestTransaction result:', result);
+        devLog('Shield Wallet: requestTransaction result:', result);
       } catch (err: any) {
-        console.log('Shield Wallet: requestTransaction failed:', err?.message || err);
+        devLog('Shield Wallet: requestTransaction failed:', err?.message || err);
       }
     }
 
     // Method 3: executeTransaction (alternative API)
     if (!result && typeof shieldWallet.executeTransaction === 'function') {
       try {
-        console.log('Shield Wallet: Trying executeTransaction...');
+        devLog('Shield Wallet: Trying executeTransaction...');
         result = await shieldWallet.executeTransaction({
           program: request.programId,
           function: request.functionName,
@@ -1760,9 +1761,9 @@ export class ShieldWalletAdapter {
           fee: request.fee,
           privateFee: false,
         });
-        console.log('Shield Wallet: executeTransaction result:', result);
+        devLog('Shield Wallet: executeTransaction result:', result);
       } catch (err: any) {
-        console.log('Shield Wallet: executeTransaction failed:', err?.message || err);
+        devLog('Shield Wallet: executeTransaction failed:', err?.message || err);
       }
     }
 
@@ -1779,7 +1780,7 @@ export class ShieldWalletAdapter {
     }
 
     if (transactionId) {
-      console.log('Shield Wallet: Transaction ID:', transactionId);
+      devLog('Shield Wallet: Transaction ID:', transactionId);
       return transactionId;
     }
 
@@ -2067,9 +2068,9 @@ export class WalletManager {
       throw new Error('No account connected');
     }
 
-    console.log('=== WALLET TEST TRANSACTION ===');
-    console.log('Testing credits.aleo/transfer_public (send 1000 microcredits to self)');
-    console.log('Address:', account.address);
+    devLog('=== WALLET TEST TRANSACTION ===');
+    devLog('Testing credits.aleo/transfer_public (send 1000 microcredits to self)');
+    devLog('Address:', account.address);
 
     return await this.adapter.requestTransaction({
       programId: 'credits.aleo',

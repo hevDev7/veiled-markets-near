@@ -172,7 +172,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
       const inputs = buildEmergencyCancelInputs(market.id)
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
-        function: 'emergency_cancel',
+        function: 'cancel_market',
         inputs,
         fee: 0.5,
       })

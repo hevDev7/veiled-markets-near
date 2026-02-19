@@ -8,6 +8,7 @@ import { TransactionLink } from './TransactionLink'
 import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
 import { calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
+import { devWarn } from '../lib/logger'
 
 interface BuySharesModalProps {
   market: Market | null
@@ -133,7 +134,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
             (validationErr.message.includes('Market is') || validationErr.message.includes('deadline has passed'))) {
           throw validationErr
         }
-        console.warn('Pre-validation skipped (network error):', validationErr)
+        devWarn('Pre-validation skipped (network error):', validationErr)
       }
 
       let functionName: string
@@ -215,6 +216,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           status: 'pending',
           marketQuestion: market.question,
           lockedMultiplier: tradePreview?.potentialPayout ? tradePreview.potentialPayout / parseFloat(amount) : 1,
+          sharesReceived: tradePreview?.sharesOut,
           tokenType: market.tokenType || 'ALEO',
         })
 

@@ -13,6 +13,7 @@ import {
 } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
 import { config } from '@/lib/config'
+import { devWarn } from '../lib/logger'
 
 interface DisputePanelProps {
   market: Market
@@ -42,7 +43,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
         const height = await getCurrentBlockHeight()
         if (mounted) setCurrentBlock(height)
       } catch (err) {
-        console.warn('Failed to fetch block height:', err)
+        devWarn('Failed to fetch block height:', err)
       }
     }
 

@@ -180,10 +180,12 @@ export function ClaimWinningsModal({
   const refundFn = getRefundFunction(tokenType)
   const redeemFn = getRedeemFunction(tokenType)
 
-  // FPMM: winning shares redeem 1:1, so payout = shares received (not old parimutuel payoutAmount)
+  // FPMM: winning shares redeem 1:1, payout = quantity from OutcomeShare record (most accurate)
+  // Fallback chain: selected record quantity > bet.sharesReceived > bet.amount
+  const recordQuantity = selectedRecord?.quantity
   const payoutDisplay = isRefund
     ? formatCredits(bet.amount)
-    : formatCredits(bet.sharesReceived || bet.amount)
+    : formatCredits(recordQuantity || bet.sharesReceived || bet.amount)
 
   const hasRecord = !!getRecordPlaintext()
 
@@ -383,9 +385,26 @@ export function ClaimWinningsModal({
                           </div>
                         )}
 
-                        {/* Fetch error */}
-                        {fetchError && !showPasteInput && (
-                          <p className="text-xs text-surface-500">{fetchError}</p>
+                        {/* No records found — likely already redeemed */}
+                        {fetchError && !isFetchingRecords && !showPasteInput && (
+                          <div className="p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20 space-y-3">
+                            <div className="flex items-start gap-3">
+                              <Check className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <p className="text-sm font-medium text-yellow-300">Already Redeemed?</p>
+                                <p className="text-xs text-surface-400 mt-1">
+                                  No unspent OutcomeShare records found for this market. If you already redeemed these shares, mark this bet as claimed.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={handleMarkClaimed}
+                              className="w-full py-2.5 rounded-xl font-medium bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 border border-yellow-500/30 transition-colors flex items-center justify-center gap-2"
+                            >
+                              <Check className="w-4 h-4" />
+                              Mark as Already Claimed
+                            </button>
+                          </div>
                         )}
 
                         {/* Paste record toggle */}

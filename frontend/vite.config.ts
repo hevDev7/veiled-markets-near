@@ -51,6 +51,21 @@ export default defineConfig({
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'credentialless',
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "script-src 'self' 'wasm-unsafe-eval'",
+        "style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com",
+        "font-src 'self' https://cdn.fontshare.com https://fonts.gstatic.com",
+        "img-src 'self' data: blob:",
+        "connect-src 'self' https://api.explorer.provable.com https://*.supabase.co wss://*.walletconnect.com https://*.walletconnect.com https://api.explorer.aleo.org",
+        "worker-src 'self' blob:",
+        "frame-src 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+      ].join('; '),
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'Referrer-Policy': 'strict-origin-when-cross-origin',
     },
   },
 })

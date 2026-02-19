@@ -9,7 +9,7 @@
 Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiled-markets.vercel.app)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v15.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v16.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -39,7 +39,7 @@ A prediction market protocol where users trade outcome shares with complete priv
 
 | Field | Value |
 |---|---|
-| **Program** | `veiled_markets_v15.aleo` |
+| **Program** | `veiled_markets_v16.aleo` |
 | **Network** | Aleo Testnet |
 | **Deploy TX** | `at1kdqmt63rhhx3t27af3psrq97flnjy4jjr67dsryt4uk62cd6lqqqcrtr37` |
 | **Transitions** | 30 |
@@ -55,7 +55,7 @@ Frontend (React + Vite + TypeScript)
     |
 Shield Wallet (ProvableHQ Adapter)
     |
-Smart Contract (veiled_markets_v15.aleo)
+Smart Contract (veiled_markets_v16.aleo)
     |
 Aleo Blockchain (Testnet)
 ```
@@ -360,7 +360,7 @@ Key variables in `frontend/.env`:
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets_v15.aleo
+VITE_PROGRAM_ID=veiled_markets_v16.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
@@ -393,7 +393,7 @@ DEADLINE=$((CURRENT_BLOCK + 21600))      # ~1 day (21600 blocks × 4s)
 RESOLUTION=$((CURRENT_BLOCK + 43200))    # ~2 days (43200 blocks × 4s)
 
 # Create market (7 inputs)
-snarkos developer execute veiled_markets_v15.aleo create_market \
+snarkos developer execute veiled_markets_v16.aleo create_market \
   "<question_hash>field" \
   "3u8" \
   "2u8" \
@@ -433,7 +433,7 @@ Parameters:
 1. Install Shield Wallet browser extension
 2. Switch to **Testnet** network
 3. Get test credits from [Aleo Faucet](https://faucet.aleo.org)
-4. Connect wallet in the app — this registers `veiled_markets_v15.aleo`
+4. Connect wallet in the app — this registers `veiled_markets_v16.aleo`
 
 > **Note:** If you see "program not in allowed programs" error, disconnect and reconnect Shield Wallet to re-register the program.
 
@@ -559,6 +559,6 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v15.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
+[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v16.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
 
 </div>

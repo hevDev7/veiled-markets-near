@@ -61,7 +61,8 @@ import { LiquidityPanel } from '@/components/LiquidityPanel'
 import { DisputePanel } from '@/components/DisputePanel'
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
-import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
+import { cn, formatCredits, getTokenSymbol, sanitizeUrl, safeHostname, isValidAleoAddress } from '@/lib/utils'
+import { devWarn } from '../lib/logger'
 
 const categoryNames: Record<number, string> = {
   1: 'Politics',
@@ -205,7 +206,7 @@ export function MarketDetail() {
         if (feesData) setFees(feesData)
         if (disputeData) setDispute(disputeData)
       } catch (err) {
-        console.warn('[MarketDetail] Failed to fetch extras:', err)
+        devWarn('[MarketDetail] Failed to fetch extras:', err)
       }
     }
     fetchExtras()
@@ -534,7 +535,7 @@ export function MarketDetail() {
         inputs = result.inputs
       }
 
-      console.warn('[Trade] Submitting:', { function: functionName, mode: tokenType === 'USDCX' ? 'PUBLIC' : 'PRIVATE', inputs })
+      devWarn('[Trade] Submitting:', { function: functionName, mode: tokenType === 'USDCX' ? 'PUBLIC' : 'PRIVATE', inputs })
 
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
@@ -633,7 +634,7 @@ export function MarketDetail() {
       if (feesData) setFees(feesData)
       if (disputeData) setDispute(disputeData)
     } catch (err) {
-      console.warn('[MarketDetail] Failed to refresh extras:', err)
+      devWarn('[MarketDetail] Failed to refresh extras:', err)
     }
   }
 
@@ -920,34 +921,44 @@ export function MarketDetail() {
                   <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Creator</span>
                     <div className="flex items-center gap-2">
-                      <a
-                        href={`https://testnet.explorer.provable.com/address/${market.creator}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
-                      >
-                        <span className="font-mono text-sm">
+                      {isValidAleoAddress(market.creator) ? (
+                        <a
+                          href={`https://testnet.explorer.provable.com/address/${market.creator}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                        >
+                          <span className="font-mono text-sm">
+                            {market.creator?.slice(0, 10)}...{market.creator?.slice(-6)}
+                          </span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <span className="font-mono text-sm text-surface-400">
                           {market.creator?.slice(0, 10)}...{market.creator?.slice(-6)}
                         </span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                      )}
                     </div>
                   </div>
                   <div className="flex justify-between py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Resolution Source</span>
-                    {market.resolutionSource?.startsWith('http') ? (
-                      <a
-                        href={market.resolutionSource}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
-                      >
-                        <span>{new URL(market.resolutionSource).hostname.replace('www.', '')}</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    ) : (
-                      <span className="text-white">{market.resolutionSource || 'On-chain'}</span>
-                    )}
+                    {(() => {
+                      const safeUrl = sanitizeUrl(market.resolutionSource)
+                      if (safeUrl) {
+                        return (
+                          <a
+                            href={safeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                          >
+                            <span>{safeHostname(safeUrl) || safeUrl}</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )
+                      }
+                      return <span className="text-white">{market.resolutionSource || 'On-chain'}</span>
+                    })()}
                   </div>
                   <div className="flex justify-between py-3 border-b border-surface-800/50">
                     <span className="text-surface-400">Trading Fees</span>

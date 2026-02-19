@@ -13,8 +13,6 @@ import {
   Bell,
   Gamepad2,
   RefreshCw,
-  Loader2,
-  Zap
 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -31,14 +29,11 @@ const navItems = [
 export function DashboardHeader() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { wallet, refreshBalance, testTransaction } = useWalletStore()
+  const { wallet, refreshBalance } = useWalletStore()
   const { disconnect: providerDisconnect } = useWallet()
   const [showDropdown, setShowDropdown] = useState(false)
   const [copied, setCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<string | null>(null)
-
   const handleCopy = () => {
     if (wallet.address) {
       navigator.clipboard.writeText(wallet.address)
@@ -65,21 +60,6 @@ export function DashboardHeader() {
     // WalletBridge will sync disconnected state to useWalletStore
     setShowDropdown(false)
     navigate('/')
-  }
-
-  const handleTestTransaction = async () => {
-    setTesting(true)
-    setTestResult(null)
-    try {
-      const txId = await testTransaction()
-      setTestResult(`OK: ${txId.substring(0, 20)}...`)
-      setTimeout(() => setTestResult(null), 15000)
-    } catch (err: any) {
-      setTestResult(`FAIL: ${err?.message || err}`)
-      setTimeout(() => setTestResult(null), 10000)
-    } finally {
-      setTesting(false)
-    }
   }
 
   // Get total balance (public + private)
@@ -313,31 +293,6 @@ export function DashboardHeader() {
                     </div>
                   </div>
 
-                  {/* Wallet Test */}
-                  {!wallet.isDemoMode && (
-                    <div className="p-1 mt-1 border-t border-surface-800">
-                      <button
-                        onClick={handleTestTransaction}
-                        disabled={testing}
-                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-surface-800/50 transition-colors"
-                      >
-                        {testing ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Zap className="w-3.5 h-3.5" />
-                        )}
-                        {testing ? 'Testing wallet...' : 'Test Wallet TX (credits.aleo)'}
-                      </button>
-                      {testResult && (
-                        <p className={cn(
-                          'px-3 py-1 text-xs',
-                          testResult.startsWith('OK') ? 'text-yes-400' : 'text-no-400'
-                        )}>
-                          {testResult}
-                        </p>
-                      )}
-                    </div>
-                  )}
 
                   {/* Menu Items */}
                   <div className="p-1 mt-1 border-t border-surface-800">

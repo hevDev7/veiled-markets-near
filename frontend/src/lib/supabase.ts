@@ -4,10 +4,15 @@
 // Handles persistent storage of bet data in Supabase PostgreSQL.
 // Works alongside localStorage as write-through cache.
 // If VITE_SUPABASE_URL is not set, all operations return empty/no-op.
+//
+// PRIVACY: Sensitive bet fields (outcome, amount, shares) are encrypted
+// with a wallet-derived AES-256-GCM key before storage. See crypto.ts.
 // ============================================================================
 
 import { createClient } from '@supabase/supabase-js'
 import type { Bet, CommitmentRecord } from './store'
+import { encryptField, decryptField, isEncrypted } from './crypto'
+import { devLog, devWarn } from './logger'
 
 // ---- Market Registry Types ----
 
@@ -35,63 +40,102 @@ export function isSupabaseAvailable(): boolean {
   return supabase !== null
 }
 
+// ---- Encryption helpers ----
+
+/** Encrypt a field value if encryption key is available; otherwise pass through */
+async function enc(value: string | null, key: CryptoKey | null): Promise<string | null> {
+  if (!key || value === null) return value
+  return encryptField(value, key)
+}
+
+/** Decrypt a field value if it's encrypted and key is available; otherwise pass through */
+async function dec(value: string | null | undefined, key: CryptoKey | null): Promise<string | null> {
+  if (!value) return value ?? null
+  if (!key) {
+    // No key — if the field is encrypted, we can't read it
+    return isEncrypted(value) ? null : value
+  }
+  return decryptField(value, key)
+}
+
 // ---- Bet Serialization (DB row ↔ App type) ----
 
-function betToRow(bet: Bet, address: string) {
+async function betToRow(bet: Bet, address: string, encryptionKey: CryptoKey | null) {
   return {
     id: bet.id,
     address,
     market_id: bet.marketId,
-    amount: bet.amount.toString(),
-    outcome: bet.outcome,
+    // Sensitive fields — encrypted when key available
+    amount: await enc(bet.amount.toString(), encryptionKey),
+    outcome: await enc(bet.outcome, encryptionKey),
+    locked_multiplier: await enc(bet.lockedMultiplier?.toString() || null, encryptionKey),
+    shares_received: await enc(bet.sharesReceived?.toString() || null, encryptionKey),
+    shares_sold: await enc(bet.sharesSold?.toString() || null, encryptionKey),
+    tokens_received: await enc(bet.tokensReceived?.toString() || null, encryptionKey),
+    payout_amount: await enc(bet.payoutAmount?.toString() || null, encryptionKey),
+    winning_outcome: await enc(bet.winningOutcome || null, encryptionKey),
+    // Non-sensitive fields — always plaintext
     placed_at: bet.placedAt,
     status: bet.status,
     type: bet.type || 'buy',
     market_question: bet.marketQuestion || null,
-    locked_multiplier: bet.lockedMultiplier || null,
-    shares_received: bet.sharesReceived?.toString() || null,
-    shares_sold: bet.sharesSold?.toString() || null,
-    tokens_received: bet.tokensReceived?.toString() || null,
-    payout_amount: bet.payoutAmount?.toString() || null,
-    winning_outcome: bet.winningOutcome || null,
     claimed: bet.claimed || false,
     token_type: bet.tokenType || 'ALEO',
     updated_at: new Date().toISOString(),
   }
 }
 
-function rowToBet(row: any): Bet {
+async function rowToBet(row: any, encryptionKey: CryptoKey | null): Promise<Bet | null> {
+  const outcome = await dec(row.outcome, encryptionKey)
+  const amount = await dec(row.amount, encryptionKey)
+
+  // If we can't decrypt the core fields, skip this row
+  if (outcome === null || amount === null) {
+    devWarn('[Supabase] Cannot decrypt bet row (wrong key or no key):', row.id)
+    return null
+  }
+
+  const lockedMultiplier = await dec(row.locked_multiplier, encryptionKey)
+  const sharesReceived = await dec(row.shares_received, encryptionKey)
+  const sharesSold = await dec(row.shares_sold, encryptionKey)
+  const tokensReceived = await dec(row.tokens_received, encryptionKey)
+  const payoutAmount = await dec(row.payout_amount, encryptionKey)
+  const winningOutcome = await dec(row.winning_outcome, encryptionKey)
+
   return {
     id: row.id,
     marketId: row.market_id,
-    amount: BigInt(row.amount),
-    outcome: row.outcome,
+    amount: BigInt(amount),
+    outcome: outcome as 'yes' | 'no',
     placedAt: row.placed_at,
     status: row.status,
     type: row.type || 'buy',
     marketQuestion: row.market_question || undefined,
-    lockedMultiplier: row.locked_multiplier || undefined,
-    sharesReceived: row.shares_received ? BigInt(row.shares_received) : undefined,
-    sharesSold: row.shares_sold ? BigInt(row.shares_sold) : undefined,
-    tokensReceived: row.tokens_received ? BigInt(row.tokens_received) : undefined,
-    payoutAmount: row.payout_amount ? BigInt(row.payout_amount) : undefined,
-    winningOutcome: row.winning_outcome || undefined,
+    lockedMultiplier: lockedMultiplier ? Number(lockedMultiplier) : undefined,
+    sharesReceived: sharesReceived ? BigInt(sharesReceived) : undefined,
+    sharesSold: sharesSold ? BigInt(sharesSold) : undefined,
+    tokensReceived: tokensReceived ? BigInt(tokensReceived) : undefined,
+    payoutAmount: payoutAmount ? BigInt(payoutAmount) : undefined,
+    winningOutcome: (winningOutcome as 'yes' | 'no') || undefined,
     claimed: row.claimed || false,
     tokenType: row.token_type || undefined,
   }
 }
 
-function commitmentToRow(record: CommitmentRecord, address: string) {
+async function commitmentToRow(record: CommitmentRecord, address: string, encryptionKey: CryptoKey | null) {
   return {
     id: record.id,
     address,
     market_id: record.marketId,
-    amount: record.amount.toString(),
-    outcome: record.outcome,
-    commitment_hash: record.commitmentHash,
-    user_nonce: record.userNonce,
+    // Sensitive fields — encrypted
+    amount: await enc(record.amount.toString(), encryptionKey),
+    outcome: await enc(record.outcome, encryptionKey),
+    commitment_hash: await enc(record.commitmentHash, encryptionKey),
+    user_nonce: await enc(record.userNonce, encryptionKey),
+    // Non-sensitive fields
     bettor: record.bettor,
-    bet_amount_record_plaintext: record.betAmountRecordPlaintext,
+    // SECURITY: Never persist decrypted credits record plaintext
+    bet_amount_record_plaintext: '[REDACTED]',
     commit_tx_id: record.commitTxId,
     committed_at: record.committedAt,
     revealed: record.revealed || false,
@@ -100,14 +144,25 @@ function commitmentToRow(record: CommitmentRecord, address: string) {
   }
 }
 
-function rowToCommitment(row: any): CommitmentRecord {
+async function rowToCommitment(row: any, encryptionKey: CryptoKey | null): Promise<CommitmentRecord | null> {
+  const outcome = await dec(row.outcome, encryptionKey)
+  const amount = await dec(row.amount, encryptionKey)
+
+  if (outcome === null || amount === null) {
+    devWarn('[Supabase] Cannot decrypt commitment row (wrong key or no key):', row.id)
+    return null
+  }
+
+  const commitmentHash = await dec(row.commitment_hash, encryptionKey)
+  const userNonce = await dec(row.user_nonce, encryptionKey)
+
   return {
     id: row.id,
     marketId: row.market_id,
-    amount: BigInt(row.amount),
-    outcome: row.outcome,
-    commitmentHash: row.commitment_hash,
-    userNonce: row.user_nonce,
+    amount: BigInt(amount),
+    outcome: outcome as 'yes' | 'no',
+    commitmentHash: commitmentHash || row.commitment_hash,
+    userNonce: userNonce || row.user_nonce,
     bettor: row.bettor,
     betAmountRecordPlaintext: row.bet_amount_record_plaintext,
     commitTxId: row.commit_tx_id,
@@ -119,59 +174,61 @@ function rowToCommitment(row: any): CommitmentRecord {
 
 // ---- CRUD Operations ----
 
-export async function fetchBets(address: string): Promise<Bet[]> {
+export async function fetchBets(address: string, encryptionKey: CryptoKey | null = null): Promise<Bet[]> {
   if (!supabase) return []
   try {
     const { data, error } = await supabase
       .from('user_bets')
       .select('*')
       .eq('address', address)
-    if (error) { console.warn('[Supabase] fetchBets error:', error.message); return [] }
-    return (data || []).map(rowToBet)
+    if (error) { devWarn('[Supabase] fetchBets error:', error.message); return [] }
+    const results = await Promise.all((data || []).map(row => rowToBet(row, encryptionKey)))
+    return results.filter((bet): bet is Bet => bet !== null)
   } catch (e) {
-    console.warn('[Supabase] fetchBets exception:', e)
+    devWarn('[Supabase] fetchBets exception:', e)
     return []
   }
 }
 
-export async function upsertBets(bets: Bet[], address: string): Promise<void> {
+export async function upsertBets(bets: Bet[], address: string, encryptionKey: CryptoKey | null = null): Promise<void> {
   if (!supabase || bets.length === 0) return
   try {
-    const rows = bets.map(b => betToRow(b, address))
+    const rows = await Promise.all(bets.map(b => betToRow(b, address, encryptionKey)))
     const { error } = await supabase
       .from('user_bets')
       .upsert(rows, { onConflict: 'id,address' })
-    if (error) console.warn('[Supabase] upsertBets error:', error.message)
+    if (error) devWarn('[Supabase] upsertBets error:', error.message)
   } catch (e) {
-    console.warn('[Supabase] upsertBets exception:', e)
+    devWarn('[Supabase] upsertBets exception:', e)
   }
 }
 
-export async function fetchPendingBets(address: string): Promise<Bet[]> {
+export async function fetchPendingBets(address: string, encryptionKey: CryptoKey | null = null): Promise<Bet[]> {
   if (!supabase) return []
   try {
     const { data, error } = await supabase
       .from('pending_bets')
       .select('*')
       .eq('address', address)
-    if (error) { console.warn('[Supabase] fetchPendingBets error:', error.message); return [] }
-    return (data || []).map(rowToBet)
+    if (error) { devWarn('[Supabase] fetchPendingBets error:', error.message); return [] }
+    const results = await Promise.all((data || []).map(row => rowToBet(row, encryptionKey)))
+    return results.filter((bet): bet is Bet => bet !== null)
   } catch (e) {
-    console.warn('[Supabase] fetchPendingBets exception:', e)
+    devWarn('[Supabase] fetchPendingBets exception:', e)
     return []
   }
 }
 
-export async function upsertPendingBets(bets: Bet[], address: string): Promise<void> {
+export async function upsertPendingBets(bets: Bet[], address: string, encryptionKey: CryptoKey | null = null): Promise<void> {
   if (!supabase || bets.length === 0) return
   try {
-    const rows = bets.map(b => betToRow(b, address))
+    const rows = await Promise.all(bets.map(b => betToRow(b, address, encryptionKey)))
     const { error } = await supabase
       .from('pending_bets')
       .upsert(rows, { onConflict: 'id,address' })
-    if (error) console.warn('[Supabase] upsertPendingBets error:', error.message)
+    if (error) devWarn('[Supabase] upsertPendingBets error:', error.message)
   } catch (e) {
-    console.warn('[Supabase] upsertPendingBets exception:', e)
+    devWarn('[Supabase] upsertPendingBets exception:', e)
   }
 }
 
@@ -183,41 +240,43 @@ export async function removePendingBet(betId: string, address: string): Promise<
       .delete()
       .eq('id', betId)
       .eq('address', address)
-    if (error) console.warn('[Supabase] removePendingBet error:', error.message)
+    if (error) devWarn('[Supabase] removePendingBet error:', error.message)
   } catch (e) {
-    console.warn('[Supabase] removePendingBet exception:', e)
+    devWarn('[Supabase] removePendingBet exception:', e)
   }
 }
 
-export async function fetchCommitments(address: string): Promise<CommitmentRecord[]> {
+export async function fetchCommitments(address: string, encryptionKey: CryptoKey | null = null): Promise<CommitmentRecord[]> {
   if (!supabase) return []
   try {
     const { data, error } = await supabase
       .from('commitment_records')
       .select('*')
       .eq('address', address)
-    if (error) { console.warn('[Supabase] fetchCommitments error:', error.message); return [] }
-    return (data || []).map(rowToCommitment)
+    if (error) { devWarn('[Supabase] fetchCommitments error:', error.message); return [] }
+    const results = await Promise.all((data || []).map(row => rowToCommitment(row, encryptionKey)))
+    return results.filter((r): r is CommitmentRecord => r !== null)
   } catch (e) {
-    console.warn('[Supabase] fetchCommitments exception:', e)
+    devWarn('[Supabase] fetchCommitments exception:', e)
     return []
   }
 }
 
-export async function upsertCommitments(records: CommitmentRecord[], address: string): Promise<void> {
+export async function upsertCommitments(records: CommitmentRecord[], address: string, encryptionKey: CryptoKey | null = null): Promise<void> {
   if (!supabase || records.length === 0) return
   try {
-    const rows = records.map(r => commitmentToRow(r, address))
+    const rows = await Promise.all(records.map(r => commitmentToRow(r, address, encryptionKey)))
     const { error } = await supabase
       .from('commitment_records')
       .upsert(rows, { onConflict: 'id,address' })
-    if (error) console.warn('[Supabase] upsertCommitments error:', error.message)
+    if (error) devWarn('[Supabase] upsertCommitments error:', error.message)
   } catch (e) {
-    console.warn('[Supabase] upsertCommitments exception:', e)
+    devWarn('[Supabase] upsertCommitments exception:', e)
   }
 }
 
 // ---- Market Registry Operations ----
+// Note: Market registry is PUBLIC data — no encryption needed.
 
 /**
  * Fetch all registered markets from Supabase.
@@ -231,12 +290,12 @@ export async function fetchMarketRegistry(): Promise<MarketRegistryEntry[]> {
       .select('*')
       .order('created_at', { ascending: false })
     if (error) {
-      console.warn('[Supabase] fetchMarketRegistry error:', error.message)
+      devWarn('[Supabase] fetchMarketRegistry error:', error.message)
       return []
     }
     return (data || []) as MarketRegistryEntry[]
   } catch (e) {
-    console.warn('[Supabase] fetchMarketRegistry exception:', e)
+    devWarn('[Supabase] fetchMarketRegistry exception:', e)
     return []
   }
 }
@@ -250,10 +309,10 @@ export async function registerMarketInRegistry(entry: MarketRegistryEntry): Prom
     const { error } = await supabase
       .from('market_registry')
       .upsert([entry], { onConflict: 'market_id' })
-    if (error) console.warn('[Supabase] registerMarket error:', error.message)
-    else console.log('[Supabase] Market registered:', entry.market_id.slice(0, 20) + '...')
+    if (error) devWarn('[Supabase] registerMarket error:', error.message)
+    else devLog('[Supabase] Market registered:', entry.market_id.slice(0, 20) + '...')
   } catch (e) {
-    console.warn('[Supabase] registerMarket exception:', e)
+    devWarn('[Supabase] registerMarket exception:', e)
   }
 }
 
@@ -270,9 +329,9 @@ export async function updateMarketRegistry(
       .from('market_registry')
       .update(updates)
       .eq('market_id', marketId)
-    if (error) console.warn('[Supabase] updateMarketRegistry error:', error.message)
+    if (error) devWarn('[Supabase] updateMarketRegistry error:', error.message)
   } catch (e) {
-    console.warn('[Supabase] updateMarketRegistry exception:', e)
+    devWarn('[Supabase] updateMarketRegistry exception:', e)
   }
 }
 
@@ -309,6 +368,6 @@ export async function clearAllSupabaseData(): Promise<{ deleted: string[]; error
     }
   }
 
-  console.log('[Supabase] Cleared tables:', deleted, 'Errors:', errors)
+  devLog('[Supabase] Cleared tables:', deleted, 'Errors:', errors)
   return { deleted, errors }
 }

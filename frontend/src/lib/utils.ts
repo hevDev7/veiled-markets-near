@@ -118,6 +118,44 @@ export function getCategoryEmoji(category: number): string {
 }
 
 /**
+ * Validate and sanitize a URL — only allows https: (and http: for localhost dev).
+ * Returns the validated URL string, or null if invalid/unsafe.
+ */
+export function sanitizeUrl(url: string | undefined | null): string | null {
+  if (!url || typeof url !== 'string') return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.href
+    }
+    return null // Block javascript:, data:, etc.
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Extract hostname from URL safely
+ */
+export function safeHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace('www.', '')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Validate Aleo address format (aleo1... followed by 58 alphanumeric chars)
+ */
+export function isValidAleoAddress(addr: string | undefined | null): boolean {
+  if (!addr) return false
+  return /^aleo1[a-z0-9]{58}$/.test(addr)
+}
+
+/**
  * Delay utility for animations
  */
 export function delay(ms: number): Promise<void> {

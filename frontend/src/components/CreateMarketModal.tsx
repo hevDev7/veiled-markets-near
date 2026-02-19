@@ -16,7 +16,7 @@ import {
 import { useState } from 'react'
 import { useWalletStore } from '@/lib/store'
 import { config } from '@/lib/config'
-import { cn } from '@/lib/utils'
+import { cn, sanitizeUrl } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
   hashToField,
@@ -31,6 +31,7 @@ import {
   updatePendingMarketTxId,
 } from '@/lib/aleo-client'
 import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
+import { devLog, devWarn } from '../lib/logger'
 
 interface CreateMarketModalProps {
   isOpen: boolean
@@ -111,13 +112,28 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       setError('Please enter a market question')
       return false
     }
-    if (formData.question.length < 20) {
+    if (formData.question.trim().length < 20) {
       setError('Question must be at least 20 characters')
+      return false
+    }
+    if (formData.question.trim().length > 500) {
+      setError('Question must be at most 500 characters')
       return false
     }
     if (!formData.category) {
       setError('Please select a category')
       return false
+    }
+    // Validate resolutionSource URL if provided
+    if (formData.resolutionSource.trim()) {
+      const src = formData.resolutionSource.trim()
+      // If it looks like a URL (contains ://), validate it
+      if (src.includes('://') || src.startsWith('http')) {
+        if (!sanitizeUrl(src)) {
+          setError('Resolution source URL is invalid. Must be a valid https:// URL.')
+          return false
+        }
+      }
     }
     setError(null)
     return true
@@ -144,6 +160,16 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       setError('Resolution deadline must be after betting deadline')
       return false
     }
+    // Validate initial liquidity bounds
+    const liquidity = parseFloat(formData.initialLiquidity)
+    if (isNaN(liquidity) || liquidity < 1) {
+      setError('Initial liquidity must be at least 1 token')
+      return false
+    }
+    if (liquidity > 10_000) {
+      setError('Initial liquidity cannot exceed 10,000 tokens')
+      return false
+    }
     setError(null)
     return true
   }
@@ -168,24 +194,24 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
     setError(null)
 
     try {
-      console.log('=== STARTING MARKET CREATION ===')
-      console.log('Form data:', formData)
+      devLog('=== STARTING MARKET CREATION ===')
+      devLog('Form data:', formData)
 
       // Hash the question to field for on-chain storage
-      console.log('Hashing question to field...')
+      devLog('Hashing question to field...')
       const questionHash = await hashToField(formData.question)
-      console.log('Question hash result:', questionHash)
-      console.log('Question hash type:', typeof questionHash)
+      devLog('Question hash result:', questionHash)
+      devLog('Question hash type:', typeof questionHash)
 
       if (!questionHash) {
         throw new Error('Failed to generate question hash')
       }
 
       // Get current block height to calculate deadlines
-      console.log('Fetching current block height...')
+      devLog('Fetching current block height...')
       const currentBlock = await getCurrentBlockHeight()
-      console.log('Current block height:', currentBlock.toString())
-      console.log('Current block type:', typeof currentBlock)
+      devLog('Current block height:', currentBlock.toString())
+      devLog('Current block type:', typeof currentBlock)
 
       // Convert dates to block heights using configured block time
       const deadlineDate = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`)
@@ -197,17 +223,17 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const deadlineBlockHeight = currentBlock + deadlineBlocks
       const resolutionBlockHeight = currentBlock + resolutionBlocks
 
-      console.log('=== BLOCK HEIGHT CALCULATION ===')
-      console.log('Current time:', new Date().toISOString())
-      console.log('Deadline date:', deadlineDate.toISOString())
-      console.log('Resolution date:', resolutionDate.toISOString())
-      console.log('Deadline blocks from now:', deadlineBlocks.toString())
-      console.log('Resolution blocks from now:', resolutionBlocks.toString())
-      console.log('Current block height:', currentBlock.toString())
-      console.log('Deadline block height:', deadlineBlockHeight.toString())
-      console.log('Resolution block height:', resolutionBlockHeight.toString())
+      devLog('=== BLOCK HEIGHT CALCULATION ===')
+      devLog('Current time:', new Date().toISOString())
+      devLog('Deadline date:', deadlineDate.toISOString())
+      devLog('Resolution date:', resolutionDate.toISOString())
+      devLog('Deadline blocks from now:', deadlineBlocks.toString())
+      devLog('Resolution blocks from now:', resolutionBlocks.toString())
+      devLog('Current block height:', currentBlock.toString())
+      devLog('Deadline block height:', deadlineBlockHeight.toString())
+      devLog('Resolution block height:', resolutionBlockHeight.toString())
 
-      // Build transaction inputs for v15 create_market
+      // Build transaction inputs for v16 create_market
       // create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
       // Token type is determined by function name: create_market (ALEO) vs create_market_usdcx (USDCX)
       const input0 = String(questionHash);
@@ -222,7 +248,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const createProgramId = CREATE_MARKET_PROGRAM_ID
 
       if (CONTRACT_INFO.programId !== createProgramId) {
-        console.warn(
+        devWarn(
           '[CreateMarket] config program mismatch:',
           CONTRACT_INFO.programId,
           '→ forcing',
@@ -230,24 +256,24 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         )
       }
 
-      console.log('=== CREATE MARKET DEBUG ===')
-      console.log('Question:', formData.question)
-      console.log('Question Hash:', questionHash)
-      console.log('Category:', formData.category)
-      console.log('Current Block:', currentBlock.toString())
-      console.log('Deadline Block:', deadlineBlockHeight.toString())
-      console.log('Resolution Block:', resolutionBlockHeight.toString())
-      console.log('Input 0 (hash):', input0)
-      console.log('Input 1 (category):', input1)
-      console.log('Input 2 (num_outcomes):', input2)
-      console.log('Input 3 (deadline):', input3)
-      console.log('Input 4 (resolution):', input4)
-      console.log('Input 5 (resolver):', input5)
-      console.log('Input 6 (liquidity):', input6)
-      console.log('Inputs array (7):', inputs)
-      console.log('Program ID (configured):', CONTRACT_INFO.programId)
-      console.log('Program ID (create market):', createProgramId)
-      console.log('Network:', CONTRACT_INFO.network)
+      devLog('=== CREATE MARKET DEBUG ===')
+      devLog('Question:', formData.question)
+      devLog('Question Hash:', questionHash)
+      devLog('Category:', formData.category)
+      devLog('Current Block:', currentBlock.toString())
+      devLog('Deadline Block:', deadlineBlockHeight.toString())
+      devLog('Resolution Block:', resolutionBlockHeight.toString())
+      devLog('Input 0 (hash):', input0)
+      devLog('Input 1 (category):', input1)
+      devLog('Input 2 (num_outcomes):', input2)
+      devLog('Input 3 (deadline):', input3)
+      devLog('Input 4 (resolution):', input4)
+      devLog('Input 5 (resolver):', input5)
+      devLog('Input 6 (liquidity):', input6)
+      devLog('Inputs array (7):', inputs)
+      devLog('Program ID (configured):', CONTRACT_INFO.programId)
+      devLog('Program ID (create market):', createProgramId)
+      devLog('Network:', CONTRACT_INFO.network)
 
       // Validate inputs before sending
       if (!questionHash || !questionHash.endsWith('field')) {
@@ -287,7 +313,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         program: createProgramId,
         function: createFunctionName,
         inputs,
-        fee: 3.0, // 3.0 ALEO for create_market (v15: 1969 stmts, complex finalize + nested transfer)
+        fee: 3.0, // 3.0 ALEO for create_market (v16: 1969 stmts, complex finalize + nested transfer)
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -307,7 +333,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         clearTimeout(slowTimer)
       }
 
-      console.log('Market creation transaction submitted:', transactionId)
+      devLog('Market creation transaction submitted:', transactionId)
 
       // Register the question text with the question hash for future lookup
       registerQuestionText(questionHash, formData.question)
@@ -316,7 +342,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const activeLabels = formData.outcomeLabels.slice(0, formData.numOutcomes)
       registerOutcomeLabels(questionHash, activeLabels)
 
-      console.log('Registered market:', { questionHash, question: formData.question, transactionId })
+      devLog('Registered market:', { questionHash, question: formData.question, transactionId })
 
       // Use transaction ID as market ID reference for UI
       setMarketId(transactionId)
@@ -348,7 +374,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           creator_address: wallet.address!,
           transaction_id: transactionId,
           created_at: Date.now(),
-        }).catch(err => console.warn('[CreateMarket] Early Supabase register failed:', err))
+        }).catch(err => devWarn('[CreateMarket] Early Supabase register failed:', err))
       }
 
       // ============================================================
@@ -363,7 +389,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         const onMarketFound = (actualMarketId: string, onChainTxId: string) => {
           if (resolved) return
           resolved = true
-          console.log('[CreateMarket] Market ID found:', actualMarketId)
+          devLog('[CreateMarket] Market ID found:', actualMarketId)
 
           // Also register outcome labels by market ID (so market-store can look up by either key)
           registerOutcomeLabels(actualMarketId, activeLabels)
@@ -380,7 +406,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               creator_address: wallet.address!,
               transaction_id: onChainTxId || transactionId,
               created_at: Date.now(),
-            }).catch(err => console.warn('[CreateMarket] Supabase update failed:', err))
+            }).catch(err => devWarn('[CreateMarket] Supabase update failed:', err))
 
             // Delete the pending_ placeholder entry created earlier
             import('@/lib/supabase').then(({ supabase: sb }) => {
@@ -389,7 +415,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                   sb.from('market_registry')
                     .delete()
                     .eq('market_id', `pending_${transactionId}`)
-                ).then(() => console.log('[CreateMarket] Deleted pending Supabase entry'))
+                ).then(() => devLog('[CreateMarket] Deleted pending Supabase entry'))
                   .catch(() => {})
               }
             }).catch(() => {})
@@ -408,7 +434,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           const isShieldId = transactionId.startsWith('shield_')
 
           if (!transactionId.startsWith('at1')) {
-            console.log(`[CreateMarket] Polling wallet for on-chain tx ID...${isShieldId ? ' (Shield — adapter may resolve)' : ''}`)
+            devLog(`[CreateMarket] Polling wallet for on-chain tx ID...${isShieldId ? ' (Shield — adapter may resolve)' : ''}`)
             onChainTxId = await new Promise<string>((resolve) => {
               let didResolve = false
               const finish = (id: string) => { if (!didResolve) { didResolve = true; resolve(id) } }
@@ -471,7 +497,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           // For Shield: if first round didn't find it, wait and try again
           // Aleo testnet can take 2-5 minutes for finalization
           if (!resolved && isShieldOrDemo) {
-            console.log('[CreateMarket] Shield scan round 1 complete — waiting 60s for round 2...')
+            devLog('[CreateMarket] Shield scan round 1 complete — waiting 60s for round 2...')
             await new Promise(r => setTimeout(r, 60_000))
             if (resolved) return
             const marketId2 = await waitForMarketCreation(
@@ -507,7 +533,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                   const txId = typeof result === 'string' ? result :
                     (result?.transactionId || result?.txId || result?.id)
                   if (txId && typeof txId === 'string' && txId.startsWith('at1')) {
-                    console.log(`[CreateMarket] Shield.${method} returned at1 ID:`, txId)
+                    devLog(`[CreateMarket] Shield.${method} returned at1 ID:`, txId)
                     const marketId = await waitForMarketCreation(
                       txId,
                       questionHash,
@@ -532,7 +558,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               const adapterResult = await (window as any).__provable_adapter__?.transactionStatus?.(transactionId)
               if (adapterResult?.transactionId?.startsWith('at1')) {
                 const txId = adapterResult.transactionId
-                console.log('[CreateMarket] Adapter resolved Shield TX to:', txId)
+                devLog('[CreateMarket] Adapter resolved Shield TX to:', txId)
                 const marketId = await waitForMarketCreation(
                   txId,
                   questionHash,
@@ -551,7 +577,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         await Promise.allSettled([strategy1(), strategy2(), strategy3()])
 
         if (!resolved) {
-          console.warn('[CreateMarket] Both strategies failed to find market ID — will retry via Dashboard periodic scan')
+          devWarn('[CreateMarket] Both strategies failed to find market ID — will retry via Dashboard periodic scan')
           // Don't call onSuccess with questionHash — it's not a valid market ID
           // The pending market is saved in localStorage and will be resolved by Dashboard's periodic resolvePendingMarkets()
         }

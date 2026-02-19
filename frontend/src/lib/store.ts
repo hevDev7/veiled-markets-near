@@ -16,6 +16,7 @@ import {
   getMarketResolution,
 } from './aleo-client'
 import { config } from './config'
+import { devLog, devWarn } from './logger'
 import {
   isSupabaseAvailable, fetchBets as sbFetchBets, upsertBets as sbUpsertBets,
   fetchPendingBets as sbFetchPendingBets, upsertPendingBets as sbUpsertPendingBets,
@@ -102,7 +103,7 @@ export interface Bet {
   type?: 'buy' | 'sell'       // Trade type (default 'buy')
   marketQuestion?: string
   lockedMultiplier?: number    // Payout multiplier locked at time of bet
-  sharesReceived?: bigint      // Shares received from buy (v15 FPMM)
+  sharesReceived?: bigint      // Shares received from buy (v16 FPMM)
   sharesSold?: bigint          // Shares burned in sell
   tokensReceived?: bigint      // Net tokens received from sell (after fees)
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
@@ -136,6 +137,7 @@ export interface WalletState {
   balance: WalletBalance
   walletType: WalletType | null
   isDemoMode: boolean
+  encryptionKey: CryptoKey | null  // wallet-derived AES-256-GCM key for Supabase privacy
 }
 
 // ============================================================================
@@ -163,6 +165,7 @@ const initialWalletState: WalletState = {
   balance: { public: 0n, private: 0n, usdcxPublic: 0n },
   walletType: null,
   isDemoMode: false,
+  encryptionKey: null,
 }
 
 export const useWalletStore = create<WalletStore>((set, get) => ({
@@ -188,6 +191,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           balance,
           walletType,
           isDemoMode: walletManager.isDemoMode(),
+          encryptionKey: null,
         },
         error: null,
       })
@@ -294,21 +298,21 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
 
       // Determine connected wallet type for prioritized detection
       const connectedType = wallet.walletType
-      console.log('[Balance] Connected wallet type:', connectedType)
+      devLog('[Balance] Connected wallet type:', connectedType)
 
       // Helper: extract private balance from records array
       const sumRecordsBalance = (records: any[], label: string): bigint => {
         let sum = 0n
         const recordsArr = Array.isArray(records) ? records : ((records as any)?.records || [])
         if (recordsArr.length === 0) {
-          console.log(`[Balance] ${label}: 0 records returned`)
+          devLog(`[Balance] ${label}: 0 records returned`)
           return 0n
         }
-        console.log(`[Balance] ${label}: ${recordsArr.length} records returned`)
+        devLog(`[Balance] ${label}: ${recordsArr.length} records returned`)
         for (let i = 0; i < recordsArr.length; i++) {
           const record = recordsArr[i]
           if (isRecordSpent(record)) {
-            console.log(`[Balance] ${label} record ${i}: SPENT, skipping`)
+            devLog(`[Balance] ${label} record ${i}: SPENT, skipping`)
             continue
           }
           const text = typeof record === 'string'
@@ -316,7 +320,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             : ((record as any)?.plaintext || (record as any)?.data || JSON.stringify(record))
           const mc = parseMicrocredits(String(text))
           if (mc > 0n) {
-            console.log(`[Balance] ${label} record ${i}: ${Number(mc) / 1_000_000} ALEO`)
+            devLog(`[Balance] ${label} record ${i}: ${Number(mc) / 1_000_000} ALEO`)
           }
           sum += mc
         }
@@ -326,21 +330,21 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       // Method 1: Provider adapter's requestRecords (from WalletBridge)
       if ((window as any).__aleoRequestRecords) {
         try {
-          console.log('[Balance] Method 1: adapter requestRecords(credits.aleo, true)...')
+          devLog('[Balance] Method 1: adapter requestRecords(credits.aleo, true)...')
           const records = await (window as any).__aleoRequestRecords('credits.aleo', true)
           privateBalance = sumRecordsBalance(records, 'M1-plaintext')
         } catch (err) {
-          console.log('[Balance] Method 1 plaintext failed:', err)
+          devLog('[Balance] Method 1 plaintext failed:', err)
         }
 
         // Try without plaintext flag
         if (privateBalance === 0n) {
           try {
-            console.log('[Balance] Method 1b: adapter requestRecords(credits.aleo, false)...')
+            devLog('[Balance] Method 1b: adapter requestRecords(credits.aleo, false)...')
             const records = await (window as any).__aleoRequestRecords('credits.aleo', false)
             const recordsArr = Array.isArray(records) ? records : ((records as any)?.records || [])
             if (recordsArr.length > 0) {
-              console.log('[Balance] Method 1b: Got', recordsArr.length, 'encrypted records, trying decrypt...')
+              devLog('[Balance] Method 1b: Got', recordsArr.length, 'encrypted records, trying decrypt...')
               const decryptFn = (window as any).__aleoDecrypt
               for (let i = 0; i < recordsArr.length; i++) {
                 const record = recordsArr[i]
@@ -358,13 +362,13 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
                   recordMc = parseMicrocredits(text)
                 }
                 if (recordMc > 0n) {
-                  console.log(`[Balance] M1b record ${i} decrypted: ${Number(recordMc) / 1_000_000} ALEO`)
+                  devLog(`[Balance] M1b record ${i} decrypted: ${Number(recordMc) / 1_000_000} ALEO`)
                 }
                 privateBalance += recordMc
               }
             }
           } catch (err) {
-            console.log('[Balance] Method 1b failed:', err)
+            devLog('[Balance] Method 1b failed:', err)
           }
         }
       }
@@ -394,7 +398,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
 
         for (const { name: wName, obj: wObj } of walletCandidates) {
           if (privateBalance > 0n) break
-          console.log(`[Balance] Method 2: Trying ${wName} wallet window object...`)
+          devLog(`[Balance] Method 2: Trying ${wName} wallet window object...`)
 
           // 2a: requestRecordPlaintexts (decrypted records)
           if (typeof wObj.requestRecordPlaintexts === 'function') {
@@ -402,7 +406,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
               const result = await wObj.requestRecordPlaintexts('credits.aleo')
               privateBalance = sumRecordsBalance(result, `M2a-${wName}`)
             } catch (err) {
-              console.log(`[Balance] M2a ${wName} requestRecordPlaintexts:`, err)
+              devLog(`[Balance] M2a ${wName} requestRecordPlaintexts:`, err)
             }
           }
 
@@ -412,7 +416,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
               const result = await wObj.requestRecords('credits.aleo')
               const recordsArr = Array.isArray(result) ? result : ((result as any)?.records || [])
               if (recordsArr.length > 0) {
-                console.log(`[Balance] M2b ${wName}: ${recordsArr.length} records, decrypting...`)
+                devLog(`[Balance] M2b ${wName}: ${recordsArr.length} records, decrypting...`)
                 const decryptFn = (window as any).__aleoDecrypt
                   || (typeof wObj.decrypt === 'function' ? wObj.decrypt.bind(wObj) : null)
                 for (let i = 0; i < recordsArr.length; i++) {
@@ -430,37 +434,37 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
                     const text = typeof record === 'string' ? record : JSON.stringify(record)
                     recordMc = parseMicrocredits(text)
                   }
-                  if (recordMc > 0n) console.log(`[Balance] M2b ${wName} record ${i}: ${Number(recordMc) / 1_000_000} ALEO`)
+                  if (recordMc > 0n) devLog(`[Balance] M2b ${wName} record ${i}: ${Number(recordMc) / 1_000_000} ALEO`)
                   privateBalance += recordMc
                 }
               }
             } catch (err) {
-              console.log(`[Balance] M2b ${wName} requestRecords:`, err)
+              devLog(`[Balance] M2b ${wName} requestRecords:`, err)
             }
           }
 
           // 2c: getBalance (Shield Wallet native API)
           if (privateBalance === 0n && typeof wObj.getBalance === 'function') {
             try {
-              console.log(`[Balance] M2c ${wName} getBalance...`)
+              devLog(`[Balance] M2c ${wName} getBalance...`)
               const bal = await wObj.getBalance()
-              console.log(`[Balance] M2c ${wName} getBalance response:`, JSON.stringify(bal).substring(0, 200))
+              devLog(`[Balance] M2c ${wName} getBalance response:`, JSON.stringify(bal).substring(0, 200))
               if (bal?.private !== undefined) {
                 const privVal = String(bal.private).replace(/[ui]\d+\.?\w*$/i, '').trim()
                 const parsed = BigInt(privVal.replace(/[^\d]/g, '') || '0')
                 if (parsed > 0n) {
                   privateBalance = parsed
-                  console.log(`[Balance] M2c ${wName}: ${Number(parsed) / 1_000_000} ALEO`)
+                  devLog(`[Balance] M2c ${wName}: ${Number(parsed) / 1_000_000} ALEO`)
                 }
               }
             } catch (err) {
-              console.log(`[Balance] M2c ${wName} getBalance:`, err)
+              devLog(`[Balance] M2c ${wName} getBalance:`, err)
             }
           }
         }
 
         if (privateBalance === 0n) {
-          console.log('[Balance] Method 2: No private balance found from any wallet object')
+          devLog('[Balance] Method 2: No private balance found from any wallet object')
         }
       }
 
@@ -471,9 +475,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           // Log available methods for debugging
           try {
             const methods = Object.keys(shieldObj).filter(k => typeof shieldObj[k] === 'function')
-            console.log('[Balance] Shield Wallet methods:', methods.join(', '))
+            devLog('[Balance] Shield Wallet methods:', methods.join(', '))
             const allKeys = Object.keys(shieldObj)
-            console.log('[Balance] Shield Wallet all keys:', allKeys.join(', '))
+            devLog('[Balance] Shield Wallet all keys:', allKeys.join(', '))
           } catch { /* ignore */ }
 
           // Try alternative method names that Shield might use
@@ -486,9 +490,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             if (privateBalance > 0n) break
             if (typeof shieldObj[method] === 'function') {
               try {
-                console.log(`[Balance] M3 Shield trying ${method}()...`)
+                devLog(`[Balance] M3 Shield trying ${method}()...`)
                 const result = await shieldObj[method]('credits.aleo')
-                console.log(`[Balance] M3 Shield ${method}() returned:`, typeof result, JSON.stringify(result).substring(0, 300))
+                devLog(`[Balance] M3 Shield ${method}() returned:`, typeof result, JSON.stringify(result).substring(0, 300))
                 if (result) {
                   const records = Array.isArray(result) ? result : (result?.records || [])
                   for (const r of records) {
@@ -507,7 +511,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
                   }
                 }
               } catch (err) {
-                console.log(`[Balance] M3 Shield ${method}() failed:`, err)
+                devLog(`[Balance] M3 Shield ${method}() failed:`, err)
               }
             }
           }
@@ -517,7 +521,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             try {
               const balProp = shieldObj.balance || shieldObj.privateBalance
               if (balProp !== undefined) {
-                console.log('[Balance] M3 Shield balance property:', balProp)
+                devLog('[Balance] M3 Shield balance property:', balProp)
                 const cleaned = String(balProp).replace(/[ui]\d+\.?\w*$/i, '').replace(/[^\d]/g, '')
                 if (cleaned) privateBalance = BigInt(cleaned)
               }
@@ -525,7 +529,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           }
 
           if (privateBalance === 0n) {
-            console.log('[Balance] Shield Wallet: Private balance detection not supported by this wallet extension')
+            devLog('[Balance] Shield Wallet: Private balance detection not supported by this wallet extension')
           }
         }
       }
@@ -540,7 +544,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
 
       const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic }
 
-      console.log('[Balance] Final:', {
+      devLog('[Balance] Final:', {
         public: `${Number(publicBalance) / 1_000_000} ALEO`,
         private: `${Number(privateBalance) / 1_000_000} ALEO`,
         usdcxPublic: `${Number(usdcxPublic) / 1_000_000} USDCX`,
@@ -587,7 +591,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
 
   testTransaction: async () => {
     const txId = await walletManager.testTransaction()
-    console.log('Test transaction submitted:', txId)
+    devLog('Test transaction submitted:', txId)
 
     setTimeout(() => {
       useWalletStore.getState().refreshBalance()
@@ -657,7 +661,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v15.aleo program.
+// in the veiled_markets_v16.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1001,6 +1005,7 @@ interface BetsStore {
   getTotalBetsValue: () => bigint
   getCommitmentRecords: (marketId?: string) => CommitmentRecord[]
   getPendingReveals: () => CommitmentRecord[]
+  flushToSupabase: () => Promise<void>
 }
 
 // Per-address localStorage key helpers
@@ -1061,14 +1066,25 @@ function serializeBetForStorage(bet: Bet): any {
   }
 }
 
-// Helper to load bets from localStorage (per-address)
+// Helper to load bets from localStorage (per-address), with deduplication
 function loadBetsFromStorage(address?: string): Bet[] {
   if (typeof window === 'undefined' || !address) return []
   try {
     const saved = localStorage.getItem(getBetsKey(address))
     if (!saved) return []
     const parsed = JSON.parse(saved)
-    return parsed.map(parseBetFromStorage)
+    const bets: Bet[] = parsed.map(parseBetFromStorage)
+    // Deduplicate by bet ID (keep last occurrence which has the most recent status)
+    const byId = new Map<string, Bet>()
+    for (const bet of bets) byId.set(bet.id, bet)
+    const deduped = Array.from(byId.values())
+    if (deduped.length < bets.length) {
+      devWarn(`[Bets] Deduped ${bets.length - deduped.length} duplicate bets from localStorage`)
+      // Save cleaned data back
+      const serializable = deduped.map(serializeBetForStorage)
+      localStorage.setItem(getBetsKey(address), JSON.stringify(serializable))
+    }
+    return deduped
   } catch (e) {
     console.error('Failed to load bets from storage:', e)
     return []
@@ -1091,21 +1107,25 @@ function loadPendingBetsFromStorage(address?: string): Bet[] {
 
 // Helper to save pending bets to localStorage (per-address)
 function savePendingBetsToStorage(bets: Bet[]) {
-  const address = useWalletStore.getState().wallet.address
+  const { address, encryptionKey } = useWalletStore.getState().wallet
   if (typeof window === 'undefined' || !address) {
-    console.warn('[Bets] savePendingBetsToStorage SKIPPED — no address:', address)
+    devWarn('[Bets] savePendingBetsToStorage SKIPPED — no address:', address)
     return
   }
   try {
     const serializable = bets.map(serializeBetForStorage)
     const key = getPendingBetsKey(address)
     localStorage.setItem(key, JSON.stringify(serializable))
-    console.warn(`[Bets] Saved ${bets.length} pending bets to localStorage key: ${key}`)
-    // Sync to Supabase (async, fire-and-forget)
-    if (isSupabaseAvailable()) {
-      sbUpsertPendingBets(bets, address).catch(err =>
-        console.warn('[Supabase] Failed to sync pending bets:', err)
+    devWarn(`[Bets] Saved ${bets.length} pending bets to localStorage key: ${key}`)
+    // Sync to Supabase ONLY if encryption key is available (privacy protection)
+    // Without encryption, sensitive fields (outcome, amount) would be plaintext in DB.
+    // Data will be synced later via flushToSupabase() once key is derived.
+    if (isSupabaseAvailable() && encryptionKey) {
+      sbUpsertPendingBets(bets, address, encryptionKey).catch(err =>
+        devWarn('[Supabase] Failed to sync pending bets:', err)
       )
+    } else if (isSupabaseAvailable() && !encryptionKey) {
+      devWarn('[Bets] Supabase sync deferred — encryption key not yet available')
     }
   } catch (e) {
     console.error('[Bets] Failed to save pending bets to storage:', e)
@@ -1114,16 +1134,18 @@ function savePendingBetsToStorage(bets: Bet[]) {
 
 // Helper to save bets to localStorage (per-address)
 function saveBetsToStorage(bets: Bet[]) {
-  const address = useWalletStore.getState().wallet.address
+  const { address, encryptionKey } = useWalletStore.getState().wallet
   if (typeof window === 'undefined' || !address) return
   try {
     const serializable = bets.map(serializeBetForStorage)
     localStorage.setItem(getBetsKey(address), JSON.stringify(serializable))
-    // Sync to Supabase (async, fire-and-forget)
-    if (isSupabaseAvailable()) {
-      sbUpsertBets(bets, address).catch(err =>
-        console.warn('[Supabase] Failed to sync bets:', err)
+    // Sync to Supabase ONLY if encryption key is available (privacy protection)
+    if (isSupabaseAvailable() && encryptionKey) {
+      sbUpsertBets(bets, address, encryptionKey).catch(err =>
+        devWarn('[Supabase] Failed to sync bets:', err)
       )
+    } else if (isSupabaseAvailable() && !encryptionKey) {
+      devWarn('[Bets] Supabase sync deferred — encryption key not yet available')
     }
   } catch (e) {
     console.error('Failed to save bets to storage:', e)
@@ -1148,19 +1170,22 @@ function loadCommitmentRecordsFromStorage(address?: string): CommitmentRecord[] 
 }
 
 // Helper to save commitment records to localStorage (per-address)
+// SECURITY: betAmountRecordPlaintext is stripped before persistence — it contains
+// decrypted credits record data that should not be stored in localStorage or Supabase.
 function saveCommitmentRecordsToStorage(records: CommitmentRecord[]) {
-  const address = useWalletStore.getState().wallet.address
+  const { address, encryptionKey } = useWalletStore.getState().wallet
   if (typeof window === 'undefined' || !address) return
   try {
     const serializable = records.map(record => ({
       ...record,
       amount: record.amount.toString(),
+      betAmountRecordPlaintext: '[REDACTED]',
     }))
     localStorage.setItem(getCommitmentsKey(address), JSON.stringify(serializable))
-    // Sync to Supabase (async, fire-and-forget)
-    if (isSupabaseAvailable()) {
-      sbUpsertCommitments(records, address).catch(err =>
-        console.warn('[Supabase] Failed to sync commitments:', err)
+    // Sync to Supabase ONLY if encryption key is available (privacy protection)
+    if (isSupabaseAvailable() && encryptionKey) {
+      sbUpsertCommitments(records, address, encryptionKey).catch(err =>
+        devWarn('[Supabase] Failed to sync commitments:', err)
       )
     }
   } catch (e) {
@@ -1176,10 +1201,11 @@ async function syncFromSupabase(
   get: () => { userBets: Bet[]; pendingBets: Bet[]; commitmentRecords: CommitmentRecord[] }
 ) {
   try {
+    const { encryptionKey } = useWalletStore.getState().wallet
     const [remoteBets, remotePending, remoteCommitments] = await Promise.all([
-      sbFetchBets(address),
-      sbFetchPendingBets(address),
-      sbFetchCommitments(address),
+      sbFetchBets(address, encryptionKey),
+      sbFetchPendingBets(address, encryptionKey),
+      sbFetchCommitments(address, encryptionKey),
     ])
 
     if (remoteBets.length > 0) {
@@ -1203,7 +1229,7 @@ async function syncFromSupabase(
       localStorage.setItem(getCommitmentsKey(address), JSON.stringify(serializable))
     }
   } catch (error) {
-    console.warn('[Supabase] Background sync failed:', error)
+    devWarn('[Supabase] Background sync failed:', error)
   }
 }
 
@@ -1266,7 +1292,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v15.aleo contract
+      // Build inputs for the veiled_markets_v16.aleo contract
       // ALEO: buy_shares_private (needs credits record)
       // USDCX: buy_shares_usdcx (no record needed)
       const tokenType = market?.tokenType || 'ALEO'
@@ -1297,12 +1323,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         creditsRecord,
       )
 
-      console.log('=== PLACE BET DEBUG ===')
-      console.log('Market ID:', marketId)
-      console.log('Amount:', amount.toString())
-      console.log('Outcome:', outcome)
-      console.log('Function:', betFunctionName)
-      console.log('Program ID:', CONTRACT_INFO.programId)
+      devLog('=== PLACE BET DEBUG ===')
+      devLog('Market ID:', marketId)
+      devLog('Amount:', amount.toString())
+      devLog('Outcome:', outcome)
+      devLog('Function:', betFunctionName)
+      devLog('Program ID:', CONTRACT_INFO.programId)
 
       // Validate inputs
       for (let i = 0; i < inputs.length; i++) {
@@ -1324,7 +1350,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         fee: 0.5, // 0.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
       })
 
-      console.log('Bet transaction submitted:', transactionId)
+      devLog('Bet transaction submitted:', transactionId)
 
       // Immediately refresh balance
       setTimeout(() => {
@@ -1361,7 +1387,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const refreshIntervals = [3000, 5000, 10000, 15000, 30000]
       refreshIntervals.forEach(delay => {
         setTimeout(() => {
-          console.log(`Refreshing balance after ${delay}ms...`)
+          devLog(`Refreshing balance after ${delay}ms...`)
           useWalletStore.getState().refreshBalance()
         }, delay)
       })
@@ -1381,7 +1407,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
             if (response.ok) {
               clearInterval(pollInterval)
               const activeBet = { ...newBet, status: 'active' as const }
-              const updatedBets = [...get().userBets, activeBet]
+              const alreadyExists = get().userBets.some(b => b.id === transactionId)
+              const updatedBets = alreadyExists ? get().userBets : [...get().userBets, activeBet]
               const updatedPending = get().pendingBets.filter(b => b.id !== transactionId)
               set({
                 pendingBets: updatedPending,
@@ -1393,7 +1420,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
               if (isSupabaseAvailable() && walletState.address) {
                 sbRemovePendingBet(transactionId, walletState.address)
               }
-              console.log('Transaction confirmed, final balance refresh...')
+              devLog('Transaction confirmed, final balance refresh...')
               useWalletStore.getState().refreshBalance()
             }
           } catch {
@@ -1407,7 +1434,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           const stillPending = get().pendingBets.find(b => b.id === transactionId)
           if (stillPending) {
             const activeBet = { ...newBet, status: 'active' as const }
-            const updatedBets = [...get().userBets, activeBet]
+            const alreadyExists = get().userBets.some(b => b.id === transactionId)
+            const updatedBets = alreadyExists ? get().userBets : [...get().userBets, activeBet]
             const updatedPending = get().pendingBets.filter(b => b.id !== transactionId)
             set({
               pendingBets: updatedPending,
@@ -1423,13 +1451,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       } else {
         // UUID (Leo Wallet event ID): bet was accepted by wallet, mark as active immediately
         // Leo Wallet doesn't expose the real at1... tx ID through its adapter API
-        console.log('Transaction submitted via Leo Wallet (UUID event ID). Marking as active.')
-        console.log('User can find the real transaction ID in their Leo Wallet extension.')
+        devLog('Transaction submitted via Leo Wallet (UUID event ID). Marking as active.')
+        devLog('User can find the real transaction ID in their Leo Wallet extension.')
 
         // Short delay then mark as active (the wallet accepted it)
         setTimeout(() => {
           const activeBet = { ...newBet, status: 'active' as const }
-          const updatedBets = [...get().userBets, activeBet]
+          const alreadyExists = get().userBets.some(b => b.id === transactionId)
+          const updatedBets = alreadyExists ? get().userBets : [...get().userBets, activeBet]
           const updatedPending = get().pendingBets.filter(b => b.id !== transactionId)
           set({
             pendingBets: updatedPending,
@@ -1454,7 +1483,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   // Save a bet from external transaction flow (e.g. BettingModal using useAleoTransaction)
   addPendingBet: (bet: Bet) => {
     const address = useWalletStore.getState().wallet.address
-    console.warn('[Bets] addPendingBet called:', {
+    devWarn('[Bets] addPendingBet called:', {
       betId: bet.id,
       marketId: bet.marketId?.slice(0, 20) + '...',
       amount: String(bet.amount),
@@ -1467,19 +1496,19 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     const existingUser = get().userBets.find(b => b.id === bet.id)
 
     if (existingPending || existingUser) {
-      console.warn('[Bets] Skip duplicate pending bet:', bet.id)
+      devWarn('[Bets] Skip duplicate pending bet:', bet.id)
       return
     }
 
     const updatedPending = [...get().pendingBets, bet]
     set({ pendingBets: updatedPending })
     savePendingBetsToStorage(updatedPending)
-    console.warn('[Bets] Added pending bet:', bet.id, 'total pending:', updatedPending.length)
+    devWarn('[Bets] Added pending bet:', bet.id, 'total pending:', updatedPending.length)
 
     // Verify it was saved to localStorage
     if (address) {
       const saved = localStorage.getItem(`veiled_markets_pending_${address}`)
-      console.warn('[Bets] localStorage verification:', saved ? `${JSON.parse(saved).length} bets saved` : 'EMPTY/NULL')
+      devWarn('[Bets] localStorage verification:', saved ? `${JSON.parse(saved).length} bets saved` : 'EMPTY/NULL')
     }
   },
 
@@ -1535,7 +1564,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     const updatedCommitments = [...get().commitmentRecords, commitment]
     set({ commitmentRecords: updatedCommitments })
     saveCommitmentRecordsToStorage(updatedCommitments)
-    console.log('Commitment stored:', commitment.id, 'market:', commitment.marketId)
+    devLog('Commitment stored:', commitment.id, 'market:', commitment.marketId)
   },
 
   // Phase 2: Mark a commitment as revealed
@@ -1547,7 +1576,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     )
     set({ commitmentRecords: updatedCommitments })
     saveCommitmentRecordsToStorage(updatedCommitments)
-    console.log('Commitment revealed:', commitmentId, 'tx:', revealTxId)
+    devLog('Commitment revealed:', commitmentId, 'tx:', revealTxId)
   },
 
   // Phase 2: Export all commitments as JSON for backup
@@ -1581,7 +1610,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         saveCommitmentRecordsToStorage(updatedCommitments)
       }
 
-      console.log(`Imported ${newRecords.length} new commitments (${imported.length - newRecords.length} duplicates skipped)`)
+      devLog(`Imported ${newRecords.length} new commitments (${imported.length - newRecords.length} duplicates skipped)`)
       return newRecords.length
     } catch (e) {
       console.error('Failed to import commitments:', e)
@@ -1710,14 +1739,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
               `https://api.explorer.provable.com/v1/testnet/transaction/${bet.id}`
             )
             if (resp.ok) {
-              console.warn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... confirmed on-chain → promoting`)
+              devWarn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... confirmed on-chain → promoting`)
               promoted.push(bet.id)
             }
           } catch { /* keep as pending */ }
         } else {
           // Shield wallet or other non-at1 IDs — auto-promote
           // Shield transactions land on-chain even if ID format is shield_xxx
-          console.warn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... (non-at1, ${Math.round((Date.now() - bet.placedAt) / 1000)}s old) → auto-promoting`)
+          devWarn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... (non-at1, ${Math.round((Date.now() - bet.placedAt) / 1000)}s old) → auto-promoting`)
           promoted.push(bet.id)
         }
       }
@@ -1728,11 +1757,28 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           .filter(b => promoted.includes(b.id))
           .map(b => ({ ...b, status: 'active' as const }))
 
-        const updatedUserBets = [...get().userBets, ...newActive]
+        // Deduplicate: skip bets whose ID already exists in userBets
+        const existingIds = new Set(get().userBets.map(b => b.id))
+        const dedupedActive = newActive.filter(b => !existingIds.has(b.id))
+        const updatedUserBets = dedupedActive.length > 0
+          ? [...get().userBets, ...dedupedActive]
+          : get().userBets
+
         set({ pendingBets: updatedPending, userBets: updatedUserBets })
         savePendingBetsToStorage(updatedPending)
-        saveBetsToStorage(updatedUserBets)
-        console.warn(`[Bets] Promoted ${promoted.length} stale pending bet(s) to active`)
+        if (dedupedActive.length > 0) {
+          saveBetsToStorage(updatedUserBets)
+        }
+
+        // Clean up promoted bets from Supabase pending_bets
+        const address = useWalletStore.getState().wallet.address
+        if (isSupabaseAvailable() && address) {
+          for (const id of promoted) {
+            sbRemovePendingBet(id, address)
+          }
+        }
+
+        devWarn(`[Bets] Promoted ${promoted.length} stale pending bet(s) to active (${dedupedActive.length} new, ${promoted.length - dedupedActive.length} deduped)`)
       }
     }
 
@@ -1812,6 +1858,28 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
   getTotalBetsValue: () => {
     return get().userBets.reduce((total, bet) => total + bet.amount, 0n)
+  },
+
+  // Flush all local bet data to Supabase with encryption.
+  // Called by WalletBridge after encryption key is derived to ensure
+  // no plaintext data leaks into the database.
+  flushToSupabase: async () => {
+    const { address, encryptionKey } = useWalletStore.getState().wallet
+    if (!address || !encryptionKey || !isSupabaseAvailable()) return
+
+    const { userBets, pendingBets, commitmentRecords } = get()
+    devWarn(`[Bets] Flushing to Supabase (encrypted): ${userBets.length} bets, ${pendingBets.length} pending, ${commitmentRecords.length} commitments`)
+
+    try {
+      await Promise.all([
+        userBets.length > 0 ? sbUpsertBets(userBets, address, encryptionKey) : Promise.resolve(),
+        pendingBets.length > 0 ? sbUpsertPendingBets(pendingBets, address, encryptionKey) : Promise.resolve(),
+        commitmentRecords.length > 0 ? sbUpsertCommitments(commitmentRecords, address, encryptionKey) : Promise.resolve(),
+      ])
+      devWarn('[Bets] Supabase flush complete (all data encrypted)')
+    } catch (err) {
+      devWarn('[Bets] Supabase flush failed:', err)
+    }
   },
 }))
 

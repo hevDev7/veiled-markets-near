@@ -1,3 +1,4 @@
+import { devLog } from './logger'
 /**
  * Shared utility for fetching Credits records from connected wallets.
  * Used by BettingModal and MarketDetail for private trading (buy_shares_private).
@@ -43,7 +44,7 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
         const pt = String(record.plaintext)
         if (pt.includes('microcredits')) {
           plaintext = pt
-          console.log(`[Bet] Record ${i}: found plaintext via record.plaintext (type=${typeof record.plaintext}, len=${pt.length})`)
+          devLog(`[Bet] Record ${i}: found plaintext via record.plaintext (type=${typeof record.plaintext}, len=${pt.length})`)
         }
       }
       // Try record.data
@@ -51,7 +52,7 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
         const dt = String(record.data)
         if (dt.includes('microcredits') && dt.includes('owner')) {
           plaintext = dt
-          console.log(`[Bet] Record ${i}: found plaintext via record.data`)
+          devLog(`[Bet] Record ${i}: found plaintext via record.data`)
         }
       }
       // Try record.content
@@ -59,7 +60,7 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
         const ct = String(record.content)
         if (ct.includes('microcredits') && ct.includes('owner')) {
           plaintext = ct
-          console.log(`[Bet] Record ${i}: found plaintext via record.content`)
+          devLog(`[Bet] Record ${i}: found plaintext via record.content`)
         }
       }
       // Scan ALL string fields for one that looks like a Leo record plaintext
@@ -70,7 +71,7 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
           const valStr = String(val)
           if (valStr.includes('microcredits') && valStr.includes('owner') && valStr.includes('{') && !valStr.startsWith('{"')) {
             plaintext = valStr
-            console.log(`[Bet] Record ${i}: found Leo plaintext in field '${key}'`)
+            devLog(`[Bet] Record ${i}: found Leo plaintext in field '${key}'`)
             break
           }
         }
@@ -82,9 +83,9 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
       if (typeof record === 'object') {
         const keys = Object.keys(record)
         const fieldInfo = keys.map(k => `${k}:${typeof record[k]}`).join(', ')
-        console.log(`[Bet] Record ${i}: no plaintext found. keys=[${fieldInfo}]`)
+        devLog(`[Bet] Record ${i}: no plaintext found. keys=[${fieldInfo}]`)
         if (record.plaintext !== undefined) {
-          console.log(`[Bet] Record ${i}: plaintext field (type=${typeof record.plaintext}):`, String(record.plaintext).slice(0, 500))
+          devLog(`[Bet] Record ${i}: plaintext field (type=${typeof record.plaintext}):`, String(record.plaintext).slice(0, 500))
         }
       }
       continue
@@ -93,21 +94,21 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
     // Parse microcredits value
     const mcMatch = plaintext.match(/microcredits\s*:\s*(\d+)u64/)
     if (!mcMatch) {
-      console.log(`[Bet] Record ${i}: has text with 'microcredits' but regex didn't match. Sample:`, plaintext.slice(0, 200))
+      devLog(`[Bet] Record ${i}: has text with 'microcredits' but regex didn't match. Sample:`, plaintext.slice(0, 200))
       continue
     }
 
     const mc = parseInt(mcMatch[1], 10)
-    console.log(`[Bet] Record ${i}: ${mc} microcredits (need ${minAmountMicro})`)
+    devLog(`[Bet] Record ${i}: ${mc} microcredits (need ${minAmountMicro})`)
 
     if (mc >= minAmountMicro) {
       // Validate it's a proper Leo record plaintext, not JSON metadata
       if (isLeoRecordPlaintext(plaintext)) {
-        console.log(`[Bet] Found suitable Credits record: ${mc} microcredits`)
-        console.log(`[Bet] Record plaintext (first 300 chars):`, plaintext.slice(0, 300))
+        devLog(`[Bet] Found suitable Credits record: ${mc} microcredits`)
+        devLog(`[Bet] Record plaintext (first 300 chars):`, plaintext.slice(0, 300))
         return plaintext
       } else {
-        console.log(`[Bet] Record ${i}: has ${mc} mc but NOT Leo format. Starts with:`, plaintext.slice(0, 80))
+        devLog(`[Bet] Record ${i}: has ${mc} mc but NOT Leo format. Starts with:`, plaintext.slice(0, 80))
       }
     }
   }
@@ -123,36 +124,36 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
  * 4. Native wallet API (Leo/Shield direct)
  */
 export async function fetchCreditsRecord(minAmountMicro: number): Promise<string | null> {
-  console.log('[Bet] === Fetching Credits record for private betting ===')
-  console.log(`[Bet] Need record with >= ${minAmountMicro} microcredits (${minAmountMicro / 1_000_000} ALEO)`)
+  devLog('[Bet] === Fetching Credits record for private betting ===')
+  devLog(`[Bet] Need record with >= ${minAmountMicro} microcredits (${minAmountMicro / 1_000_000} ALEO)`)
 
   // Strategy 1: Adapter requestRecords with plaintext=true
   // This is the SAME approach that works in store.ts balance detection (line 314)
   const adapterRecords = (window as any).__aleoRequestRecords
   if (typeof adapterRecords === 'function') {
     try {
-      console.log('[Bet] Strategy 1: adapter requestRecords("credits.aleo", true) — plaintext mode')
+      devLog('[Bet] Strategy 1: adapter requestRecords("credits.aleo", true) — plaintext mode')
       const records = await adapterRecords('credits.aleo', true)
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      console.log(`[Bet] Strategy 1 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Bet] Strategy 1 → Got ${recordsArr.length} record(s)`)
       if (recordsArr.length > 0) {
-        console.log('[Bet] Strategy 1 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 500))
+        devLog('[Bet] Strategy 1 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 500))
         // Show last record too (record 6 is the one with 5 ALEO in balance detection)
         const last = recordsArr[recordsArr.length - 1]
-        console.log(`[Bet] Strategy 1 → Last record (#${recordsArr.length - 1}) sample:`, JSON.stringify(last)?.slice(0, 500))
+        devLog(`[Bet] Strategy 1 → Last record (#${recordsArr.length - 1}) sample:`, JSON.stringify(last)?.slice(0, 500))
       }
       const found = findSuitableRecord(recordsArr, minAmountMicro)
       if (found) return found
     } catch (err) {
-      console.log('[Bet] Strategy 1 failed:', err)
+      devLog('[Bet] Strategy 1 failed:', err)
     }
 
     // Strategy 2: Adapter requestRecords without plaintext flag + decrypt
     try {
-      console.log('[Bet] Strategy 2: adapter requestRecords("credits.aleo", false) + decrypt')
+      devLog('[Bet] Strategy 2: adapter requestRecords("credits.aleo", false) + decrypt')
       const records = await adapterRecords('credits.aleo', false)
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      console.log(`[Bet] Strategy 2 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Bet] Strategy 2 → Got ${recordsArr.length} record(s)`)
 
       // First try parsing as-is (some wallets include plaintext even without flag)
       const found = findSuitableRecord(recordsArr, minAmountMicro)
@@ -161,7 +162,7 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
       // Try decrypting ciphertext records
       const decryptFn = (window as any).__aleoDecrypt
       if (typeof decryptFn === 'function' && recordsArr.length > 0) {
-        console.log('[Bet] Strategy 2b: decrypting ciphertext records...')
+        devLog('[Bet] Strategy 2b: decrypting ciphertext records...')
         let decryptAttempts = 0
         for (let idx = 0; idx < recordsArr.length; idx++) {
           const record = recordsArr[idx]
@@ -171,52 +172,52 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
           // Shield Wallet uses camelCase 'recordCiphertext'
           const ciphertext = record.ciphertext || record.recordCiphertext || record.record_ciphertext || record.data
           if (!ciphertext || typeof ciphertext !== 'string') {
-            console.log(`[Bet] Strategy 2b: record ${idx} — no ciphertext field found`)
+            devLog(`[Bet] Strategy 2b: record ${idx} — no ciphertext field found`)
             continue
           }
           decryptAttempts++
           try {
-            console.log(`[Bet] Strategy 2b: decrypting record ${idx} (${ciphertext.slice(0, 40)}...)`)
+            devLog(`[Bet] Strategy 2b: decrypting record ${idx} (${ciphertext.slice(0, 40)}...)`)
             const decrypted = await decryptFn(ciphertext)
             const textStr = String(decrypted)
-            console.log(`[Bet] Strategy 2b: decrypted record ${idx}:`, textStr.slice(0, 200))
+            devLog(`[Bet] Strategy 2b: decrypted record ${idx}:`, textStr.slice(0, 200))
             const mcMatch = textStr.match(/microcredits\s*:\s*(\d+)u64/)
             if (mcMatch) {
               const mc = parseInt(mcMatch[1], 10)
-              console.log(`[Bet] Strategy 2b: record ${idx} has ${mc} microcredits (need ${minAmountMicro})`)
+              devLog(`[Bet] Strategy 2b: record ${idx} has ${mc} microcredits (need ${minAmountMicro})`)
               if (mc >= minAmountMicro && textStr.includes('{') && textStr.includes('owner')) {
-                console.log(`[Bet] Strategy 2b: FOUND suitable record with ${mc} microcredits`)
+                devLog(`[Bet] Strategy 2b: FOUND suitable record with ${mc} microcredits`)
                 return textStr
               }
             }
           } catch (decErr) {
-            console.log(`[Bet] Strategy 2b: decrypt failed for record ${idx}:`, (decErr as any)?.message || decErr)
+            devLog(`[Bet] Strategy 2b: decrypt failed for record ${idx}:`, (decErr as any)?.message || decErr)
           }
         }
-        console.log(`[Bet] Strategy 2b: tried ${decryptAttempts} decrypt(s), none suitable`)
+        devLog(`[Bet] Strategy 2b: tried ${decryptAttempts} decrypt(s), none suitable`)
       }
     } catch (err) {
-      console.log('[Bet] Strategy 2 failed:', err)
+      devLog('[Bet] Strategy 2 failed:', err)
     }
   } else {
-    console.log('[Bet] No __aleoRequestRecords adapter found on window')
+    devLog('[Bet] No __aleoRequestRecords adapter found on window')
   }
 
   // Strategy 3: Adapter's requestRecordPlaintexts
   const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
   if (typeof adapterPlaintexts === 'function') {
     try {
-      console.log('[Bet] Strategy 3: adapter requestRecordPlaintexts("credits.aleo")')
+      devLog('[Bet] Strategy 3: adapter requestRecordPlaintexts("credits.aleo")')
       const records = await adapterPlaintexts('credits.aleo')
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      console.log(`[Bet] Strategy 3 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Bet] Strategy 3 → Got ${recordsArr.length} record(s)`)
       if (recordsArr.length > 0) {
-        console.log('[Bet] Strategy 3 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
+        devLog('[Bet] Strategy 3 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
       }
       const found = findSuitableRecord(recordsArr, minAmountMicro)
       if (found) return found
     } catch (err) {
-      console.log('[Bet] Strategy 3 failed:', err)
+      devLog('[Bet] Strategy 3 failed:', err)
     }
   }
 
@@ -225,32 +226,32 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
   if (leoWallet) {
     if (typeof leoWallet.requestRecordPlaintexts === 'function') {
       try {
-        console.log('[Bet] Strategy 4a: leoWallet.requestRecordPlaintexts("credits.aleo")')
+        devLog('[Bet] Strategy 4a: leoWallet.requestRecordPlaintexts("credits.aleo")')
         const result = await leoWallet.requestRecordPlaintexts('credits.aleo')
         const records = result?.records || (Array.isArray(result) ? result : [])
-        console.log(`[Bet] Strategy 4a → Got ${records.length} record(s)`)
+        devLog(`[Bet] Strategy 4a → Got ${records.length} record(s)`)
         const found = findSuitableRecord(records, minAmountMicro)
         if (found) return found
       } catch (err) {
-        console.log('[Bet] Strategy 4a failed:', err)
+        devLog('[Bet] Strategy 4a failed:', err)
       }
     }
 
     if (typeof leoWallet.requestRecords === 'function') {
       try {
-        console.log('[Bet] Strategy 4b: leoWallet.requestRecords("credits.aleo")')
+        devLog('[Bet] Strategy 4b: leoWallet.requestRecords("credits.aleo")')
         const result = await leoWallet.requestRecords('credits.aleo')
         const records = result?.records || (Array.isArray(result) ? result : [])
-        console.log(`[Bet] Strategy 4b → Got ${records.length} record(s)`)
+        devLog(`[Bet] Strategy 4b → Got ${records.length} record(s)`)
         const found = findSuitableRecord(records, minAmountMicro)
         if (found) return found
       } catch (err) {
-        console.log('[Bet] Strategy 4b failed:', err)
+        devLog('[Bet] Strategy 4b failed:', err)
       }
     }
   }
 
-  console.log('[Bet] All strategies exhausted — no Credits record found for buy_shares_private')
+  devLog('[Bet] All strategies exhausted — no Credits record found for buy_shares_private')
   return null
 }
 
@@ -339,7 +340,7 @@ export async function fetchOutcomeShareRecords(
   programId: string,
   marketId?: string,
 ): Promise<ParsedOutcomeShare[]> {
-  console.log(`[Sell] === Fetching OutcomeShare records for ${programId} ===`)
+  devLog(`[Sell] === Fetching OutcomeShare records for ${programId} ===`)
 
   let allRecords: ParsedOutcomeShare[] = []
 
@@ -347,16 +348,16 @@ export async function fetchOutcomeShareRecords(
   const adapterRecords = (window as any).__aleoRequestRecords
   if (typeof adapterRecords === 'function') {
     try {
-      console.log('[Sell] Strategy 1: adapter requestRecords(program, true)')
+      devLog('[Sell] Strategy 1: adapter requestRecords(program, true)')
       const records = await adapterRecords(programId, true)
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      console.log(`[Sell] Strategy 1 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Sell] Strategy 1 → Got ${recordsArr.length} record(s)`)
       allRecords = extractShareRecords(recordsArr)
       if (allRecords.length > 0) {
-        console.log(`[Sell] Found ${allRecords.length} OutcomeShare record(s)`)
+        devLog(`[Sell] Found ${allRecords.length} OutcomeShare record(s)`)
       }
     } catch (err) {
-      console.log('[Sell] Strategy 1 failed:', err)
+      devLog('[Sell] Strategy 1 failed:', err)
     }
   }
 
@@ -365,13 +366,13 @@ export async function fetchOutcomeShareRecords(
     const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
     if (typeof adapterPlaintexts === 'function') {
       try {
-        console.log('[Sell] Strategy 2: adapter requestRecordPlaintexts(program)')
+        devLog('[Sell] Strategy 2: adapter requestRecordPlaintexts(program)')
         const records = await adapterPlaintexts(programId)
         const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-        console.log(`[Sell] Strategy 2 → Got ${recordsArr.length} record(s)`)
+        devLog(`[Sell] Strategy 2 → Got ${recordsArr.length} record(s)`)
         allRecords = extractShareRecords(recordsArr)
       } catch (err) {
-        console.log('[Sell] Strategy 2 failed:', err)
+        devLog('[Sell] Strategy 2 failed:', err)
       }
     }
   }
@@ -381,13 +382,13 @@ export async function fetchOutcomeShareRecords(
     const wallet = (window as any).leoWallet || (window as any).leo
     if (wallet && typeof wallet.requestRecords === 'function') {
       try {
-        console.log('[Sell] Strategy 3: native wallet requestRecords(program)')
+        devLog('[Sell] Strategy 3: native wallet requestRecords(program)')
         const result = await wallet.requestRecords(programId)
         const recordsArr = result?.records || (Array.isArray(result) ? result : [])
-        console.log(`[Sell] Strategy 3 → Got ${recordsArr.length} record(s)`)
+        devLog(`[Sell] Strategy 3 → Got ${recordsArr.length} record(s)`)
         allRecords = extractShareRecords(recordsArr)
       } catch (err) {
-        console.log('[Sell] Strategy 3 failed:', err)
+        devLog('[Sell] Strategy 3 failed:', err)
       }
     }
   }
@@ -395,10 +396,10 @@ export async function fetchOutcomeShareRecords(
   // Filter by market if specified
   if (marketId && allRecords.length > 0) {
     const filtered = allRecords.filter(r => !r.marketId || r.marketId === marketId)
-    console.log(`[Sell] Filtered to ${filtered.length} record(s) for market ${marketId.slice(0, 20)}...`)
+    devLog(`[Sell] Filtered to ${filtered.length} record(s) for market ${marketId.slice(0, 20)}...`)
     return filtered
   }
 
-  console.log(`[Sell] Returning ${allRecords.length} OutcomeShare record(s)`)
+  devLog(`[Sell] Returning ${allRecords.length} OutcomeShare record(s)`)
   return allRecords
 }

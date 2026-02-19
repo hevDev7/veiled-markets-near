@@ -1,3 +1,4 @@
+import { devLog } from './logger'
 // ============================================================================
 // QUESTION HASH TO TEXT MAPPING
 // ============================================================================
@@ -73,7 +74,7 @@ export function initializeQuestionMappings(): void {
             const merged = { ...existingMap, ...mappings };
 
             localStorage.setItem('veiled_markets_questions', JSON.stringify(merged));
-            console.log('✅ Initialized question text mappings for', Object.keys(mappings).length, 'markets');
+            devLog('✅ Initialized question text mappings for', Object.keys(mappings).length, 'markets');
         } catch (e) {
             console.error('Failed to initialize question mappings:', e);
         }
@@ -113,7 +114,7 @@ export function addQuestionMapping(hash: string, question: string): void {
             const existing = getAllQuestionMappings();
             existing[hash] = question;
             localStorage.setItem('veiled_markets_questions', JSON.stringify(existing));
-            console.log('✅ Added question mapping:', hash.slice(0, 16) + '...', '→', question);
+            devLog('✅ Added question mapping:', hash.slice(0, 16) + '...', '→', question);
         } catch (e) {
             console.error('Failed to add question mapping:', e);
         }

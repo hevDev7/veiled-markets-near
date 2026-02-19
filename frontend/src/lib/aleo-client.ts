@@ -1,13 +1,14 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v15.aleo program
+// Client for interacting with the deployed veiled_markets_v16.aleo program
 // ============================================================================
 
 import { config } from './config';
 import { fetchMarketRegistry, isSupabaseAvailable, clearAllSupabaseData } from './supabase';
+import { devLog, devWarn } from './logger'
 
-// Contract constants (matching main.leo v15)
+// Contract constants (matching main.leo v16)
 export const MARKET_STATUS = {
   ACTIVE: 1,
   CLOSED: 2,
@@ -56,7 +57,7 @@ export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
 export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
 export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
 
-// Types matching the contract structures (v15)
+// Types matching the contract structures (v16)
 export interface MarketData {
   id: string;
   creator: string;
@@ -175,7 +176,7 @@ export interface TransactionOutput {
 export async function getTransactionDetails(transactionId: string): Promise<TransactionDetails | null> {
   try {
     const url = `${API_BASE_URL}/transaction/${transactionId}`;
-    console.log('Fetching transaction details:', url);
+    devLog('Fetching transaction details:', url);
 
     const response = await fetchWithTimeout(url);
     if (!response.ok) {
@@ -187,7 +188,7 @@ export async function getTransactionDetails(transactionId: string): Promise<Tran
     }
 
     const data = await response.json();
-    console.log('Transaction data:', data);
+    devLog('Transaction data:', data);
 
     // Extract outputs from the transaction
     const outputs: TransactionOutput[] = [];
@@ -235,7 +236,7 @@ export function extractMarketIdFromTransaction(txDetails: TransactionDetails): s
       // Extract the field value
       const match = value.match(/(\d+field)/);
       if (match) {
-        console.log('Extracted market ID from transaction:', match[1]);
+        devLog('Extracted market ID from transaction:', match[1]);
         return match[1];
       }
     }
@@ -249,7 +250,7 @@ export function extractMarketIdFromTransaction(txDetails: TransactionDetails): s
       const fieldMatch = parsed.match(/(\d+)field/);
       if (fieldMatch) {
         const marketId = `${fieldMatch[1]}field`;
-        console.log('Extracted market ID from parsed output:', marketId);
+        devLog('Extracted market ID from parsed output:', marketId);
         return marketId;
       }
     } catch {
@@ -276,25 +277,25 @@ export async function waitForMarketCreation(
   intervalMs: number = 15000,
   programId: string = PROGRAM_ID
 ): Promise<string | null> {
-  console.log('[waitForMarket] Waiting for market creation:', transactionId, '| program:', programId);
+  devLog('[waitForMarket] Waiting for market creation:', transactionId, '| program:', programId);
 
   // Strategy 1: If we have an on-chain tx ID, poll the RPC directly
   if (transactionId.startsWith('at1')) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      console.log(`[waitForMarket] RPC poll ${attempt + 1}/${maxAttempts}...`);
+      devLog(`[waitForMarket] RPC poll ${attempt + 1}/${maxAttempts}...`);
       const txDetails = await getTransactionDetails(transactionId);
 
       if (txDetails?.status === 'confirmed') {
         const marketId = extractMarketIdFromTransaction(txDetails);
         if (marketId) {
-          console.log('[waitForMarket] Market created! ID:', marketId);
+          devLog('[waitForMarket] Market created! ID:', marketId);
           addKnownMarketId(marketId);
           registerQuestionText(marketId, questionText);
           registerMarketTransaction(marketId, transactionId);
           registerQuestionText(questionHash, questionText);
           return marketId;
         }
-        console.warn('[waitForMarket] TX confirmed but no market ID in outputs');
+        devWarn('[waitForMarket] TX confirmed but no market ID in outputs');
         return null;
       }
 
@@ -309,7 +310,7 @@ export async function waitForMarketCreation(
 
   // Strategy 2: Blockchain scan — scan recent blocks for our create_market transition.
   // This works for ALL wallets (Shield, Puzzle, Leo, etc.) regardless of event ID format.
-  console.log('[waitForMarket] Falling back to blockchain scan for questionHash:', questionHash);
+  devLog('[waitForMarket] Falling back to blockchain scan for questionHash:', questionHash);
 
   // Wait for the transaction to be included in a block, then do progressively deeper scans
   // Quick first scan (30 blocks ~7.5 min), then deeper scans with longer delays
@@ -326,21 +327,21 @@ export async function waitForMarketCreation(
     await new Promise(resolve => setTimeout(resolve, delayMs));
 
     try {
-      console.log(`[waitForMarket] Scan attempt ${i + 1}/${scanSchedule.length} (${blocks} blocks)...`);
+      devLog(`[waitForMarket] Scan attempt ${i + 1}/${scanSchedule.length} (${blocks} blocks)...`);
       const marketId = await scanBlockchainForMarket(questionHash, blocks, programId);
       if (marketId) {
-        console.log('[waitForMarket] Found market via blockchain scan! ID:', marketId);
+        devLog('[waitForMarket] Found market via blockchain scan! ID:', marketId);
         addKnownMarketId(marketId);
         registerQuestionText(marketId, questionText);
         registerQuestionText(questionHash, questionText);
         return marketId;
       }
     } catch (err) {
-      console.warn(`[waitForMarket] Scan attempt ${i + 1} error:`, err);
+      devWarn(`[waitForMarket] Scan attempt ${i + 1} error:`, err);
     }
   }
 
-  console.warn('[waitForMarket] All strategies exhausted');
+  devWarn('[waitForMarket] All strategies exhausted');
   return null;
 }
 
@@ -359,7 +360,7 @@ async function scanBlockchainForMarket(
     const latestHeight = await getCurrentBlockHeight();
     const startHeight = Number(latestHeight);
 
-    console.log(`[scanBlockchain] Scanning blocks ${startHeight - blocksToScan} to ${startHeight} for hash ${questionHash.slice(0, 20)}...`);
+    devLog(`[scanBlockchain] Scanning blocks ${startHeight - blocksToScan} to ${startHeight} for hash ${questionHash.slice(0, 20)}...`);
 
     let scannedCount = 0;
     let failedCount = 0;
@@ -382,7 +383,7 @@ async function scanBlockchainForMarket(
 
       const found = results.find(r => r !== null && r !== undefined);
       if (found) {
-        console.log(`[scanBlockchain] Found market after scanning ${scannedCount} blocks (${failedCount} failed)`);
+        devLog(`[scanBlockchain] Found market after scanning ${scannedCount} blocks (${failedCount} failed)`);
         return found;
       }
 
@@ -392,9 +393,9 @@ async function scanBlockchainForMarket(
       }
     }
 
-    console.log(`[scanBlockchain] Not found after ${scannedCount} blocks (${failedCount} blocks failed to fetch)`);
+    devLog(`[scanBlockchain] Not found after ${scannedCount} blocks (${failedCount} blocks failed to fetch)`);
   } catch (err) {
-    console.warn('[scanBlockchain] Error:', err);
+    devWarn('[scanBlockchain] Error:', err);
   }
 
   return null;
@@ -461,7 +462,7 @@ async function scanBlockForCreateMarket(
           const foundMarketId = args[0];     // market_id
 
           if (foundQuestionHash === questionHash && foundMarketId) {
-            console.log(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}...`);
+            devLog(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}...`);
             return foundMarketId;
           }
         }
@@ -617,7 +618,7 @@ export async function getMappingValue<T>(
 ): Promise<T | null> {
   try {
     const url = `${API_BASE_URL}/program/${PROGRAM_ID}/mapping/${mappingName}/${key}`;
-    console.log('Fetching mapping:', url);
+    devLog('Fetching mapping:', url);
 
     const response = await fetchWithRetry(url);
     if (!response.ok) {
@@ -626,7 +627,7 @@ export async function getMappingValue<T>(
     }
 
     const data = await response.text();
-    console.log('Mapping response:', data);
+    devLog('Mapping response:', data);
 
     // Parse the JSON string first (API returns JSON-encoded string)
     const cleanData = JSON.parse(data);
@@ -651,7 +652,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
   const data = await getMappingValue<Record<string, string>>('markets', marketId);
   if (!data) return null;
 
-  console.log('getMarket parsed data:', data);
+  devLog('getMarket parsed data:', data);
 
   // Parse each field explicitly
   const parsedCategory = parseAleoValue(data.category || '0u8');
@@ -676,7 +677,7 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
     token_type: typeof parsedTokenType === 'number' ? parsedTokenType : 1,
   };
 
-  console.log('getMarket result:', result);
+  devLog('getMarket result:', result);
   return result;
 }
 
@@ -773,7 +774,7 @@ function generateRandomNonce(): string {
 }
 
 /**
- * Build inputs for create_market transaction (v15)
+ * Build inputs for create_market transaction (v16)
  * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
@@ -804,7 +805,7 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for buy_shares (v15 AMM trading)
+ * Build inputs for buy_shares (v16 AMM trading)
  * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
  * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
@@ -851,7 +852,7 @@ export function buildBuySharesInputs(
 }
 
 /**
- * Build inputs for buy_shares_private (v15 privacy-preserving, ALEO only)
+ * Build inputs for buy_shares_private (v16 privacy-preserving, ALEO only)
  * Alias for buildBuySharesInputs with tokenType='ALEO'.
  */
 export function buildBuySharesPrivateInputs(
@@ -866,7 +867,7 @@ export function buildBuySharesPrivateInputs(
 }
 
 /**
- * Build inputs for sell_shares (v15 tokens_desired approach)
+ * Build inputs for sell_shares (v16 tokens_desired approach)
  * sell_shares(shares: OutcomeShare, tokens_desired, max_shares_used)
  * User specifies how many tokens to withdraw. Contract computes shares needed.
  * Transition calls credits.aleo/transfer_public for the net payout.
@@ -890,7 +891,7 @@ export function buildSellSharesInputs(
 }
 
 /**
- * Build inputs for add_liquidity (v15 LP provision)
+ * Build inputs for add_liquidity (v16 LP provision)
  * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
  * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
  */
@@ -916,7 +917,7 @@ export function buildAddLiquidityInputs(
 }
 
 /**
- * Build inputs for remove_liquidity (v15 LP withdrawal)
+ * Build inputs for remove_liquidity (v16 LP withdrawal)
  * remove_liquidity(lp_token: LPToken, shares_to_remove, min_tokens_out)
  */
 export function buildRemoveLiquidityInputs(
@@ -938,7 +939,7 @@ export function buildRemoveLiquidityInputs(
 }
 
 /**
- * Build inputs for dispute_resolution (v15 - bond always in ALEO)
+ * Build inputs for dispute_resolution (v16 - bond always in ALEO)
  * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
  * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
  */
@@ -983,7 +984,7 @@ export function buildPlaceBetPrivateInputs(
 }
 
 /**
- * Calculate outcome price from AMM pool (v15 FPMM)
+ * Calculate outcome price from AMM pool (v16 FPMM)
  * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
  * Binary simplification: price_i = r_other / (r1 + r2)
  */
@@ -1098,7 +1099,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for withdraw_creator_fees (v15)
+ * Build inputs for withdraw_creator_fees (v16)
  * withdraw_creator_fees(market_id, expected_amount) — ALEO
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
@@ -1122,8 +1123,10 @@ export function buildCancelMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for emergency_cancel transaction (v15)
- * Anyone can call this for markets past resolution_deadline that aren't resolved/cancelled.
+ * Build inputs for emergency cancel via cancel_market (v16)
+ * In v16, cancel_market handles both creator cancel (active, no volume)
+ * and emergency cancel (anyone, past resolution_deadline).
+ * Same inputs as buildCancelMarketInputs.
  */
 export function buildEmergencyCancelInputs(marketId: string): string[] {
   return [marketId];
@@ -1248,8 +1251,8 @@ export async function hashToField(input: string): Promise<string> {
     hashBigInt = BigInt(1);
   }
 
-  console.log('hashToField input:', input);
-  console.log('hashToField result:', `${hashBigInt.toString()}field`);
+  devLog('hashToField input:', input);
+  devLog('hashToField result:', `${hashBigInt.toString()}field`);
 
   return `${hashBigInt.toString()}field`;
 }
@@ -1269,11 +1272,11 @@ if (typeof window !== 'undefined') {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) {
         KNOWN_MARKET_IDS = parsed;
-        console.log('Loaded', KNOWN_MARKET_IDS.length, 'market IDs from localStorage');
+        devLog('Loaded', KNOWN_MARKET_IDS.length, 'market IDs from localStorage');
       }
     }
   } catch (e) {
-    console.warn('Failed to load market IDs from localStorage:', e);
+    devWarn('Failed to load market IDs from localStorage:', e);
   }
 }
 
@@ -1287,9 +1290,9 @@ export function addKnownMarketId(marketId: string): void {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('veiled_markets_ids', JSON.stringify(KNOWN_MARKET_IDS));
-        console.log('Saved market ID to localStorage:', marketId);
+        devLog('Saved market ID to localStorage:', marketId);
       } catch (e) {
-        console.warn('Failed to save market IDs to localStorage:', e);
+        devWarn('Failed to save market IDs to localStorage:', e);
       }
     }
   }
@@ -1326,7 +1329,7 @@ export async function resolveMarketFromTransaction(
           const questionHash = args[2];
 
           if (marketId) {
-            console.log('[resolveFromTx] Found market_id:', marketId.slice(0, 30) + '...');
+            devLog('[resolveFromTx] Found market_id:', marketId.slice(0, 30) + '...');
             addKnownMarketId(marketId);
             if (questionText) {
               registerQuestionText(marketId, questionText);
@@ -1339,7 +1342,7 @@ export async function resolveMarketFromTransaction(
       }
     }
   } catch (err) {
-    console.warn('[resolveFromTx] Error:', err);
+    devWarn('[resolveFromTx] Error:', err);
   }
 
   return null;
@@ -1369,10 +1372,10 @@ export function savePendingMarket(pending: PendingMarket): void {
     if (!list.some(p => p.questionHash === pending.questionHash)) {
       list.push(pending)
       localStorage.setItem('veiled_markets_pending', JSON.stringify(list))
-      console.log('[Pending] Saved pending market:', pending.questionHash.slice(0, 20) + '...')
+      devLog('[Pending] Saved pending market:', pending.questionHash.slice(0, 20) + '...')
     }
   } catch (e) {
-    console.warn('[Pending] Failed to save:', e)
+    devWarn('[Pending] Failed to save:', e)
   }
 }
 
@@ -1401,7 +1404,7 @@ export function updatePendingMarketTxId(questionHash: string, resolvedTxId: stri
     if (entry && !entry.transactionId.startsWith('at1') && resolvedTxId.startsWith('at1')) {
       entry.transactionId = resolvedTxId
       localStorage.setItem('veiled_markets_pending', JSON.stringify(list))
-      console.log('[Pending] Updated TX ID:', questionHash.slice(0, 20), '→', resolvedTxId.slice(0, 20))
+      devLog('[Pending] Updated TX ID:', questionHash.slice(0, 20), '→', resolvedTxId.slice(0, 20))
     }
   } catch { /* ignore */ }
 }
@@ -1451,7 +1454,7 @@ export async function clearAllStaleData(): Promise<string> {
   cleared.push(...deleted.map(t => `supabase:${t}`))
 
   const summary = `Cleared: ${cleared.join(', ')}${errors.length > 0 ? `. Errors: ${errors.join(', ')}` : ''}`
-  console.log('[ClearStaleData]', summary)
+  devLog('[ClearStaleData]', summary)
   return summary
 }
 
@@ -1511,7 +1514,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
     }
     if (active.length === 0) return []
 
-    console.log(`[Pending] Resolving ${active.length} pending market(s)...`)
+    devLog(`[Pending] Resolving ${active.length} pending market(s)...`)
     const resolved: string[] = []
 
     for (const pending of active) {
@@ -1532,7 +1535,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
         }
 
         if (marketId) {
-          console.log('[Pending] Resolved:', pending.questionHash.slice(0, 20), '→', marketId.slice(0, 20))
+          devLog('[Pending] Resolved:', pending.questionHash.slice(0, 20), '→', marketId.slice(0, 20))
           addKnownMarketId(marketId)
           registerQuestionText(marketId, pending.questionText)
           registerQuestionText(pending.questionHash, pending.questionText)
@@ -1564,13 +1567,13 @@ export async function resolvePendingMarkets(): Promise<string[]> {
           } catch { /* ignore Supabase errors */ }
         }
       } catch (err) {
-        console.warn('[Pending] Failed to resolve:', pending.questionHash.slice(0, 20), err)
+        devWarn('[Pending] Failed to resolve:', pending.questionHash.slice(0, 20), err)
       }
     }
 
     return resolved
   } catch (e) {
-    console.warn('[Pending] Failed to load pending markets:', e)
+    devWarn('[Pending] Failed to load pending markets:', e)
     return []
   }
 }
@@ -1588,10 +1591,10 @@ if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('veiled_markets_questions');
     if (saved) {
       QUESTION_TEXT_MAP = JSON.parse(saved);
-      console.log('Loaded question texts from localStorage');
+      devLog('Loaded question texts from localStorage');
     }
   } catch (e) {
-    console.warn('Failed to load question texts from localStorage:', e);
+    devWarn('Failed to load question texts from localStorage:', e);
   }
 }
 
@@ -1605,7 +1608,7 @@ export function registerQuestionText(key: string, questionText: string): void {
     try {
       localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
     } catch (e) {
-      console.warn('Failed to save question texts to localStorage:', e);
+      devWarn('Failed to save question texts to localStorage:', e);
     }
   }
 }
@@ -1623,10 +1626,10 @@ if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('veiled_markets_txs');
     if (saved) {
       MARKET_TX_MAP = JSON.parse(saved);
-      console.log('Loaded transaction IDs from localStorage');
+      devLog('Loaded transaction IDs from localStorage');
     }
   } catch (e) {
-    console.warn('Failed to load transaction IDs from localStorage:', e);
+    devWarn('Failed to load transaction IDs from localStorage:', e);
   }
 }
 
@@ -1640,7 +1643,7 @@ export function registerMarketTransaction(marketId: string, transactionId: strin
     try {
       localStorage.setItem('veiled_markets_txs', JSON.stringify(MARKET_TX_MAP));
     } catch (e) {
-      console.warn('Failed to save transaction IDs to localStorage:', e);
+      devWarn('Failed to save transaction IDs to localStorage:', e);
     }
   }
 }
@@ -1654,7 +1657,7 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
   try {
     const response = await fetch('/markets-index.json');
     if (!response.ok) {
-      console.log('Indexer data not found - markets will be added when created via UI');
+      devLog('Indexer data not found - markets will be added when created via UI');
       return KNOWN_MARKET_IDS; // Return current list (from localStorage)
     }
 
@@ -1672,7 +1675,7 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
         if (market.questionHash) {
           QUESTION_TEXT_MAP[market.questionHash] = questionText;
         }
-        console.log(`Loaded question text for ${marketId.slice(0, 16)}...`);
+        devLog(`Loaded question text for ${marketId.slice(0, 16)}...`);
       }
     }
 
@@ -1681,12 +1684,12 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
       try {
         localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
       } catch (e) {
-        console.warn('Failed to save question texts to localStorage:', e);
+        devWarn('Failed to save question texts to localStorage:', e);
       }
     }
 
     if (marketIds.length > 0) {
-      console.log(`✅ Loaded ${marketIds.length} markets from indexer`);
+      devLog(`✅ Loaded ${marketIds.length} markets from indexer`);
       // Merge with existing IDs (in case some were created locally)
       const allIds = new Set([...KNOWN_MARKET_IDS, ...marketIds]);
       return Array.from(allIds);
@@ -1694,7 +1697,7 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
 
     return KNOWN_MARKET_IDS;
   } catch (error) {
-    console.log('Indexer not available - using locally stored market IDs');
+    devLog('Indexer not available - using locally stored market IDs');
     return KNOWN_MARKET_IDS;
   }
 }
@@ -1755,10 +1758,10 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
       }
     }
 
-    console.log(`[Supabase] Loaded ${ids.length} markets from registry`);
+    devLog(`[Supabase] Loaded ${ids.length} markets from registry`);
     return ids;
   } catch (error) {
-    console.warn('[Supabase] Failed to load market registry:', error);
+    devWarn('[Supabase] Failed to load market registry:', error);
     return [];
   }
 }
@@ -1785,11 +1788,11 @@ export async function initializeMarketIds(): Promise<void> {
       localStorage.setItem('veiled_markets_txs', JSON.stringify(MARKET_TX_MAP));
       localStorage.setItem('veiled_markets_ids', JSON.stringify(KNOWN_MARKET_IDS));
     } catch (e) {
-      console.warn('Failed to persist merged data to localStorage:', e);
+      devWarn('Failed to persist merged data to localStorage:', e);
     }
   }
 
-  console.log(`[Markets] Initialized ${KNOWN_MARKET_IDS.length} total markets`);
+  devLog(`[Markets] Initialized ${KNOWN_MARKET_IDS.length} total markets`);
 }
 
 /**
@@ -1805,10 +1808,10 @@ if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('veiled_markets_outcome_labels');
     if (saved) {
       OUTCOME_LABELS_MAP = JSON.parse(saved);
-      console.log('Loaded outcome labels from localStorage');
+      devLog('Loaded outcome labels from localStorage');
     }
   } catch (e) {
-    console.warn('Failed to load outcome labels from localStorage:', e);
+    devWarn('Failed to load outcome labels from localStorage:', e);
   }
 }
 
@@ -1823,7 +1826,7 @@ export function registerOutcomeLabels(key: string, labels: string[]): void {
     try {
       localStorage.setItem('veiled_markets_outcome_labels', JSON.stringify(OUTCOME_LABELS_MAP));
     } catch (e) {
-      console.warn('Failed to save outcome labels to localStorage:', e);
+      devWarn('Failed to save outcome labels to localStorage:', e);
     }
   }
 }
@@ -1858,7 +1861,7 @@ export async function fetchAllMarkets(): Promise<Array<{
   pool: MarketPoolData;
   resolution?: MarketResolutionData;
 }>> {
-  console.log('fetchAllMarkets: Fetching known markets...');
+  devLog('fetchAllMarkets: Fetching known markets...');
 
   const results = await Promise.all(
     KNOWN_MARKET_IDS.map(id => fetchMarketById(id))
@@ -1895,7 +1898,7 @@ export async function fetchMarketById(marketId: string) {
 }
 
 /**
- * Get the correct redeem/refund function name based on token type (v15)
+ * Get the correct redeem/refund function name based on token type (v16)
  */
 export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX'): string {
   return tokenType === 'USDCX' ? 'redeem_shares_usdcx' : 'redeem_shares';
@@ -1910,7 +1913,7 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
 }
 
 /**
- * Build inputs for claim_lp_refund (v15 - LP refund on cancelled market)
+ * Build inputs for claim_lp_refund (v16 - LP refund on cancelled market)
  * claim_lp_refund(lp_token: LPToken, min_tokens_out)
  */
 export function buildClaimLpRefundInputs(

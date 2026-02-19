@@ -14,6 +14,7 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits } from '@/lib/utils'
 import { getMappingValue } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
+import { devWarn } from '../lib/logger'
 
 type AdminAction = 'propose' | 'approve' | 'execute'
 type ProposalAction = 'withdraw_protocol_fees' | 'update_fee_bps' | 'emergency_pause'
@@ -68,7 +69,7 @@ export function AdminPanel() {
           })
         }
       } catch (err) {
-        console.warn('Failed to fetch treasury balances:', err)
+        devWarn('Failed to fetch treasury balances:', err)
       } finally {
         if (mounted) setIsLoadingBalances(false)
       }

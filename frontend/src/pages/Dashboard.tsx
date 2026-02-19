@@ -30,6 +30,7 @@ import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
 import { cn, formatCredits } from '@/lib/utils'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets } from '@/lib/aleo-client'
+import { devLog, devWarn } from '../lib/logger'
 
 const categories = [
     { id: 0, name: 'All Markets', icon: Flame },
@@ -84,14 +85,14 @@ export function Dashboard() {
             setIsResolvingPending(true)
             resolvePendingMarkets().then(resolvedIds => {
                 if (resolvedIds.length > 0) {
-                    console.log('[Dashboard] Resolved pending markets:', resolvedIds)
+                    devLog('[Dashboard] Resolved pending markets:', resolvedIds)
                     resolvedIds.forEach(id => addMarket(id))
                     fetchMarkets()
                 }
                 // Update pending count
                 setPendingInfo(getPendingMarketsInfo())
             }).catch(err => {
-                console.warn('[Dashboard] Pending resolve error:', err)
+                devWarn('[Dashboard] Pending resolve error:', err)
             }).finally(() => {
                 setIsResolvingPending(false)
             })
@@ -469,7 +470,7 @@ export function Dashboard() {
                 isOpen={isCreateMarketOpen}
                 onClose={() => setIsCreateMarketOpen(false)}
                 onSuccess={(marketId) => {
-                    console.log('Market created:', marketId)
+                    devLog('Market created:', marketId)
                     // Add the new market to the list
                     addMarket(marketId)
                     // Refresh all markets after a short delay to ensure blockchain state is updated

@@ -12,6 +12,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { config } from '@/lib/config'
 import type { WorkerRequest, WorkerResponse, CommitmentData } from '@/workers/aleo-sdk.worker'
+import { devWarn } from '../lib/logger'
 
 export type SDKTxPhase =
   | 'idle'
@@ -74,7 +75,7 @@ async function fetchCreditsRecordFromWallet(minAmountMicro: number): Promise<str
 
   try {
     // Try with plaintext=true first (wallet returns decrypted records)
-    console.warn('[SDK] Trying wallet requestRecords(credits.aleo, true)...')
+    devWarn('[SDK] Trying wallet requestRecords(credits.aleo, true)...')
     const records = await requestRecords('credits.aleo', true)
     const recordsArr = Array.isArray(records) ? records : ((records as any)?.records || [])
 
@@ -93,7 +94,7 @@ async function fetchCreditsRecordFromWallet(minAmountMicro: number): Promise<str
       if (mcMatch) {
         const mc = parseInt(mcMatch[1], 10)
         if (mc >= minAmountMicro) {
-          console.warn(`[SDK] Found Credits record from wallet: ${mc} microcredits`)
+          devWarn(`[SDK] Found Credits record from wallet: ${mc} microcredits`)
           // Return the plaintext in Leo record format
           if (textStr.includes('{') && textStr.includes('owner')) {
             return textStr
@@ -101,9 +102,9 @@ async function fetchCreditsRecordFromWallet(minAmountMicro: number): Promise<str
         }
       }
     }
-    console.warn('[SDK] Wallet returned records but none had sufficient balance')
+    devWarn('[SDK] Wallet returned records but none had sufficient balance')
   } catch (err) {
-    console.warn('[SDK] Wallet requestRecords failed:', err)
+    devWarn('[SDK] Wallet requestRecords failed:', err)
   }
 
   // Try with plaintext=false + decrypt
@@ -111,7 +112,7 @@ async function fetchCreditsRecordFromWallet(minAmountMicro: number): Promise<str
     const decryptFn = (window as any).__aleoDecrypt
     if (!decryptFn) return null
 
-    console.warn('[SDK] Trying wallet requestRecords(credits.aleo, false) + decrypt...')
+    devWarn('[SDK] Trying wallet requestRecords(credits.aleo, false) + decrypt...')
     const records = await requestRecords('credits.aleo', false)
     const recordsArr = Array.isArray(records) ? records : ((records as any)?.records || [])
 
@@ -129,7 +130,7 @@ async function fetchCreditsRecordFromWallet(minAmountMicro: number): Promise<str
         if (mcMatch) {
           const mc = parseInt(mcMatch[1], 10)
           if (mc >= minAmountMicro) {
-            console.warn(`[SDK] Found Credits record from wallet (decrypted): ${mc} microcredits`)
+            devWarn(`[SDK] Found Credits record from wallet (decrypted): ${mc} microcredits`)
             if (textStr.includes('{') && textStr.includes('owner')) {
               return textStr
             }
@@ -138,7 +139,7 @@ async function fetchCreditsRecordFromWallet(minAmountMicro: number): Promise<str
       } catch { /* decrypt failed for this record */ }
     }
   } catch (err) {
-    console.warn('[SDK] Wallet decrypt flow failed:', err)
+    devWarn('[SDK] Wallet decrypt flow failed:', err)
   }
 
   return null
@@ -188,9 +189,9 @@ export function useSDKTransaction() {
       const record = await fetchCreditsRecordFromWallet(amountMicro)
       if (record) {
         creditsRecordPlaintext = record
-        console.warn('[SDK] Pre-fetched Credits record from wallet adapter')
+        devWarn('[SDK] Pre-fetched Credits record from wallet adapter')
       } else {
-        console.warn('[SDK] No wallet record available, worker will scan blocks')
+        devWarn('[SDK] No wallet record available, worker will scan blocks')
       }
     }
 
@@ -230,7 +231,7 @@ export function useSDKTransaction() {
         }))
       } else if (resp.type === 'result') {
         const txId = resp.txId!
-        console.warn('[SDK] Transaction submitted:', txId)
+        devWarn('[SDK] Transaction submitted:', txId)
 
         // Start polling for confirmation on the main thread
         setState({ phase: 'polling', progress: 'Waiting for confirmation...', txId, error: null })
@@ -247,7 +248,7 @@ export function useSDKTransaction() {
             try {
               const verified = await onChainVerify()
               if (verified) {
-                console.warn(`[SDK] On-chain verified at poll ${i + 1}!`)
+                devWarn(`[SDK] On-chain verified at poll ${i + 1}!`)
                 setState({ phase: 'confirmed', progress: 'Transaction confirmed!', txId, error: null })
                 return
               }
@@ -258,7 +259,7 @@ export function useSDKTransaction() {
           try {
             const resp = await fetch(`${rpcUrl}/transaction/${txId}`)
             if (resp.ok) {
-              console.warn(`[SDK] Transaction on-chain at poll ${i + 1}`)
+              devWarn(`[SDK] Transaction on-chain at poll ${i + 1}`)
               setState({ phase: 'confirmed', progress: 'Transaction confirmed!', txId, error: null })
               return
             }
@@ -451,7 +452,7 @@ export function useSDKTransaction() {
 
     const worker = createWorkerWithHandlers(requestId, rpcUrl, async (resp) => {
       const txId = resp.txId!
-      console.warn('[SDK] commit_bet submitted:', txId)
+      devWarn('[SDK] commit_bet submitted:', txId)
 
       const commitmentData = resp.commitmentData || null
       setState(s => ({ ...s, commitmentData }))
@@ -499,7 +500,7 @@ export function useSDKTransaction() {
 
     const worker = createWorkerWithHandlers(requestId, rpcUrl, async (resp) => {
       const txId = resp.txId!
-      console.warn('[SDK] reveal_bet submitted:', txId)
+      devWarn('[SDK] reveal_bet submitted:', txId)
 
       worker.terminate()
       workerRef.current = null

@@ -24,6 +24,7 @@ import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { cn, formatCredits } from '@/lib/utils'
+import { devWarn } from '../lib/logger'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled'
 
@@ -53,9 +54,11 @@ export function MyBets() {
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState(false)
 
-  // Categorize bets
-  const allBets = [...pendingBets, ...userBets]
-  const acceptedBets = [...pendingBets, ...userBets.filter(b => b.status === 'active')]
+  // Categorize bets (deduplicate: if a bet ID exists in userBets, skip it from pendingBets)
+  const userBetIds = new Set(userBets.map(b => b.id))
+  const uniquePending = pendingBets.filter(b => !userBetIds.has(b.id))
+  const allBets = [...uniquePending, ...userBets]
+  const acceptedBets = [...uniquePending, ...userBets.filter(b => b.status === 'active')]
   const unredeemedBets = userBets.filter(b =>
     (b.status === 'won' || b.status === 'refunded') && !b.claimed
   )
@@ -95,7 +98,7 @@ export function MyBets() {
       if (addr) {
         const rawPending = localStorage.getItem(`veiled_markets_pending_${addr}`)
         const rawBets = localStorage.getItem(`veiled_markets_bets_${addr}`)
-        console.warn('[MyBets] localStorage raw data:', {
+        devWarn('[MyBets] localStorage raw data:', {
           address: addr,
           pendingKey: `veiled_markets_pending_${addr}`,
           pendingData: rawPending ? JSON.parse(rawPending) : null,
@@ -103,7 +106,7 @@ export function MyBets() {
           betsData: rawBets ? JSON.parse(rawBets) : null,
         })
       } else {
-        console.warn('[MyBets] No wallet address available!')
+        devWarn('[MyBets] No wallet address available!')
       }
 
       await fetchUserBets()
@@ -111,7 +114,7 @@ export function MyBets() {
 
       // Debug: Check store state after load (read directly from store, not stale closure)
       const storeState = useBetsStore.getState()
-      console.warn('[MyBets] After load — store state:', {
+      devWarn('[MyBets] After load — store state:', {
         userBets: storeState.userBets.length,
         pendingBets: storeState.pendingBets.length,
         userBetIds: storeState.userBets.map(b => b.id.slice(0, 20)),

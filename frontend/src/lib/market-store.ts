@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets_v15.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v16.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 
@@ -24,6 +24,7 @@ import {
 } from './aleo-client'
 import { calculateAllPrices, type AMMReserves } from './amm'
 import { config } from './config'
+import { devLog, devWarn } from './logger'
 
 interface MarketsState {
     markets: Market[]
@@ -204,7 +205,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
             try {
                 currentBlock = await getCurrentBlockHeight()
             } catch {
-                console.warn('[Markets] Block height fetch failed, using 0 (all markets show active)')
+                devWarn('[Markets] Block height fetch failed, using 0 (all markets show active)')
                 currentBlock = 0n
             }
 
@@ -254,7 +255,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 markets: [market, ...state.markets]
             }))
 
-            console.log('✅ Market added to store:', marketId)
+            devLog('✅ Market added to store:', marketId)
         } catch (error) {
             console.error('Failed to add market:', error)
         }

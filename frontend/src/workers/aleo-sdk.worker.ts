@@ -1,3 +1,4 @@
+import { devWarn } from '../lib/logger'
 // ============================================================================
 // Aleo SDK Web Worker
 // ============================================================================
@@ -72,11 +73,11 @@ async function fetchWithRetry(
       }
       return response
     } catch (err: any) {
-      console.warn(`[Worker] Fetch attempt ${attempt}/${maxAttempts} failed for ${url.slice(0, 80)}:`, err?.message || err)
+      devWarn(`[Worker] Fetch attempt ${attempt}/${maxAttempts} failed for ${url.slice(0, 80)}:`, err?.message || err)
       if (attempt === maxAttempts) throw err
       // Longer delays for network instability (ERR_NETWORK_CHANGED etc.)
       const delay = Math.min(2000 * Math.pow(2, attempt - 1), 15000)
-      console.warn(`[Worker] Retrying in ${delay}ms...`)
+      devWarn(`[Worker] Retrying in ${delay}ms...`)
       await new Promise(r => setTimeout(r, delay))
     }
   }
@@ -96,14 +97,14 @@ async function downloadBytes(
 ): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      console.warn(`[Worker] Download ${label} attempt ${attempt}/${maxAttempts}: ${url.slice(0, 80)}`)
+      devWarn(`[Worker] Download ${label} attempt ${attempt}/${maxAttempts}: ${url.slice(0, 80)}`)
       const response = await fetch(url)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const buffer = await response.arrayBuffer()
-      console.warn(`[Worker] Downloaded ${label}: ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB`)
+      devWarn(`[Worker] Downloaded ${label}: ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB`)
       return new Uint8Array(buffer)
     } catch (err: any) {
-      console.warn(`[Worker] Download ${label} attempt ${attempt}/${maxAttempts} failed:`, err?.message || err)
+      devWarn(`[Worker] Download ${label} attempt ${attempt}/${maxAttempts} failed:`, err?.message || err)
       if (attempt === maxAttempts) {
         throw new Error(`Failed to download ${label} after ${maxAttempts} attempts: ${err?.message}`)
       }
@@ -121,20 +122,20 @@ async function loadSDK(id: string) {
   if (sdkCache) return sdkCache
 
   send({ type: 'progress', id, phase: 'initializing', message: 'Loading Aleo SDK in worker...' })
-  console.warn('[Worker] Importing @provablehq/sdk...')
+  devWarn('[Worker] Importing @provablehq/sdk...')
 
   const sdk = await import('@provablehq/sdk')
   sdkCache = sdk
-  console.warn('[Worker] SDK loaded successfully')
+  devWarn('[Worker] SDK loaded successfully')
 
   if (!threadPoolReady) {
     send({ type: 'progress', id, phase: 'initializing', message: 'Initializing WASM thread pool...' })
     try {
       await sdk.initThreadPool()
       threadPoolReady = true
-      console.warn('[Worker] Thread pool initialized (multi-threaded)')
+      devWarn('[Worker] Thread pool initialized (multi-threaded)')
     } catch (e) {
-      console.warn('[Worker] initThreadPool failed, continuing single-threaded:', e)
+      devWarn('[Worker] initThreadPool failed, continuing single-threaded:', e)
     }
   }
 
@@ -152,13 +153,13 @@ async function fetchProgramSources(
   const apiBase = `${rpcUrl}/testnet`
 
   send({ type: 'progress', id, phase: 'initializing', message: `Fetching ${programName}...` })
-  console.warn('[Worker] Fetching program:', `${apiBase}/program/${programName}`)
+  devWarn('[Worker] Fetching program:', `${apiBase}/program/${programName}`)
   const progResp = await fetchWithRetry(`${apiBase}/program/${programName}`)
   if (!progResp.ok) {
     throw new Error(`Failed to fetch ${programName}: HTTP ${progResp.status}`)
   }
   const programSource = (await progResp.text()).replace(/^"|"$/g, '').replace(/\\n/g, '\n')
-  console.warn('[Worker] Program fetched, length:', programSource.length)
+  devWarn('[Worker] Program fetched, length:', programSource.length)
 
   const importRegex = /import\s+(\S+\.aleo)\s*;/g
   const imports: Record<string, string> = {}
@@ -167,7 +168,7 @@ async function fetchProgramSources(
     const importName = match[1]
     if (importName === programName) continue
 
-    console.warn('[Worker] Fetching import:', importName)
+    devWarn('[Worker] Fetching import:', importName)
     send({ type: 'progress', id, phase: 'initializing', message: `Fetching import ${importName}...` })
     const importResp = await fetchWithRetry(`${apiBase}/program/${importName}`)
     if (!importResp.ok) {
@@ -175,7 +176,7 @@ async function fetchProgramSources(
     }
     const importSource = (await importResp.text()).replace(/^"|"$/g, '').replace(/\\n/g, '\n')
     imports[importName] = importSource
-    console.warn('[Worker] Import fetched:', importName, 'length:', importSource.length)
+    devWarn('[Worker] Import fetched:', importName, 'length:', importSource.length)
   }
 
   return { programSource, imports }
@@ -209,7 +210,7 @@ async function findCreditsRecord(
     // Get latest block height
     const latestHeight: number = await networkClient.getLatestHeight()
     const startHeight = Math.max(0, latestHeight - 1000) // scan last ~1000 blocks
-    console.warn(`[Worker] Scanning blocks ${startHeight} to ${latestHeight} for Credits records...`)
+    devWarn(`[Worker] Scanning blocks ${startHeight} to ${latestHeight} for Credits records...`)
 
     const recordProvider = new sdk.NetworkRecordProvider(account, networkClient)
     const records = await recordProvider.findCreditsRecords([minAmount], {
@@ -221,14 +222,14 @@ async function findCreditsRecord(
     if (records && records.length > 0) {
       const record = records[0] as any
       const plaintext: string = record.recordPlaintext || record.record_plaintext
-      console.warn('[Worker] Found Credits record:', plaintext.slice(0, 100))
+      devWarn('[Worker] Found Credits record:', plaintext.slice(0, 100))
       return plaintext
     }
 
-    console.warn('[Worker] No Credits records found with sufficient balance')
+    devWarn('[Worker] No Credits records found with sufficient balance')
     return null
   } catch (err: any) {
-    console.warn('[Worker] Record scan failed:', err?.message || err)
+    devWarn('[Worker] Record scan failed:', err?.message || err)
     return null
   }
 }
@@ -249,7 +250,7 @@ async function handleExecute(req: WorkerRequest) {
     }
 
     const address = account.address().to_string()
-    console.warn('[Worker] Account address:', address)
+    devWarn('[Worker] Account address:', address)
 
     // If privacy mode requested, try to find a Credits record for buy_shares_private
     let finalInputs = [...inputs]
@@ -264,7 +265,7 @@ async function handleExecute(req: WorkerRequest) {
 
       // Strategy 1: Use pre-fetched record from wallet adapter (instant, no scanning needed)
       if (creditsRecordPlaintext) {
-        console.warn('[Worker] Privacy mode: using pre-fetched Credits record from wallet')
+        devWarn('[Worker] Privacy mode: using pre-fetched Credits record from wallet')
         send({ type: 'progress', id, phase: 'initializing', message: 'Using Credits record from wallet...' })
         recordPlaintext = creditsRecordPlaintext
       }
@@ -280,10 +281,10 @@ async function handleExecute(req: WorkerRequest) {
         functionName = 'buy_shares_private'
         finalInputs = [...inputs, recordPlaintext]
         usedPrivateCredits = true
-        console.warn('[Worker] Privacy mode: using buy_shares_private with Credits record')
+        devWarn('[Worker] Privacy mode: using buy_shares_private with Credits record')
         send({ type: 'progress', id, phase: 'initializing', message: 'Using privacy-preserving mode (private Credits)' })
       } else {
-        console.warn('[Worker] Privacy mode: no Credits record found, falling back to buy_shares_public')
+        devWarn('[Worker] Privacy mode: no Credits record found, falling back to buy_shares_public')
         send({ type: 'progress', id, phase: 'initializing', message: 'No private Credits found, using standard mode' })
       }
     }
@@ -297,7 +298,7 @@ async function handleExecute(req: WorkerRequest) {
     // Override fetchBytes to use our retry-capable fetch for any remaining key downloads.
     // The SDK's default get() adds custom headers that cause CORS failures in Workers.
     ;(keyProvider as any).fetchBytes = async (url: string) => {
-      console.warn('[Worker] fetchBytes override called for:', url.slice(0, 80))
+      devWarn('[Worker] fetchBytes override called for:', url.slice(0, 80))
       return await downloadBytes(url, id, 'key', 5)
     }
 
@@ -307,8 +308,8 @@ async function handleExecute(req: WorkerRequest) {
     // finds a cache hit and skips the problematic download entirely.
     send({ type: 'progress', id, phase: 'initializing', message: 'Downloading fee proving key (~29MB)...' })
     const feeKeyMeta = sdk.CREDITS_PROGRAM_KEYS.fee_public
-    console.warn('[Worker] Pre-downloading fee key:', feeKeyMeta.prover)
-    console.warn('[Worker] Fee key locator:', feeKeyMeta.locator)
+    devWarn('[Worker] Pre-downloading fee key:', feeKeyMeta.prover)
+    devWarn('[Worker] Fee key locator:', feeKeyMeta.locator)
 
     const feeKeyBytes = await downloadBytes(feeKeyMeta.prover, id, 'fee proving key')
     const feeProvingKey = sdk.ProvingKey.fromBytes(feeKeyBytes)
@@ -317,12 +318,12 @@ async function handleExecute(req: WorkerRequest) {
       feeKeyMeta.locator,
       [feeProvingKey.toBytes(), feeVerifyingKey.toBytes()]
     )
-    console.warn('[Worker] Fee keys pre-cached at locator:', feeKeyMeta.locator)
+    devWarn('[Worker] Fee keys pre-cached at locator:', feeKeyMeta.locator)
 
     const programManager = new sdk.ProgramManager(rpcUrl, keyProvider, undefined)
     programManager.setAccount(account)
 
-    console.warn('[Worker] Starting execution:', { programName, functionName, inputs: finalInputs, priorityFee })
+    devWarn('[Worker] Starting execution:', { programName, functionName, inputs: finalInputs, priorityFee })
 
     const priorityFeeCredits = priorityFee / 1_000_000
 
@@ -354,7 +355,7 @@ async function handleExecute(req: WorkerRequest) {
         break // success
       } catch (buildErr: any) {
         const buildMsg = buildErr?.message || String(buildErr)
-        console.warn(`[Worker] Build attempt ${buildAttempt}/${maxBuildAttempts} failed:`, buildMsg)
+        devWarn(`[Worker] Build attempt ${buildAttempt}/${maxBuildAttempts} failed:`, buildMsg)
 
         // Retry on SRS/powers download failures or transient network errors
         const isRetryable = buildMsg.includes('powers') ||
@@ -375,12 +376,12 @@ async function handleExecute(req: WorkerRequest) {
       }
     }
 
-    console.warn('[Worker] Transaction built successfully')
+    devWarn('[Worker] Transaction built successfully')
 
     // Broadcast via plain fetch
     send({ type: 'progress', id, phase: 'broadcasting', message: 'Broadcasting transaction to network...' })
     const txString = tx.toString()
-    console.warn('[Worker] Broadcasting transaction, size:', txString.length)
+    devWarn('[Worker] Broadcasting transaction, size:', txString.length)
 
     const broadcastResp = await fetchWithRetry(`${rpcUrl}/testnet/transaction/broadcast`, {
       method: 'POST',
@@ -394,7 +395,7 @@ async function handleExecute(req: WorkerRequest) {
     }
 
     const txId = (await broadcastResp.text()).replace(/"/g, '')
-    console.warn('[Worker] Transaction submitted:', txId)
+    devWarn('[Worker] Transaction submitted:', txId)
 
     send({ type: 'result', id, txId, usedPrivateCredits })
   } catch (err: any) {
@@ -426,7 +427,7 @@ async function handleCommitBet(req: WorkerRequest) {
     }
 
     const address = account.address().to_string()
-    console.warn('[Worker] commit_bet account:', address)
+    devWarn('[Worker] commit_bet account:', address)
 
     // Find or use provided credits record
     let recordPlaintext = creditsRecordPlaintext || null
@@ -502,7 +503,7 @@ async function handleCommitBet(req: WorkerRequest) {
         break
       } catch (buildErr: any) {
         const buildMsg = buildErr?.message || String(buildErr)
-        console.warn(`[Worker] commit_bet build attempt ${buildAttempt}/${maxBuildAttempts} failed:`, buildMsg)
+        devWarn(`[Worker] commit_bet build attempt ${buildAttempt}/${maxBuildAttempts} failed:`, buildMsg)
         const isRetryable = buildMsg.includes('powers') || buildMsg.includes('XMLHttpRequest') ||
           buildMsg.includes('Failed to fetch') || buildMsg.includes('NetworkError') || buildMsg.includes('Download failed')
         if (isRetryable && buildAttempt < maxBuildAttempts) {
@@ -515,7 +516,7 @@ async function handleCommitBet(req: WorkerRequest) {
       }
     }
 
-    console.warn('[Worker] commit_bet transaction built successfully')
+    devWarn('[Worker] commit_bet transaction built successfully')
 
     // Extract bet_amount_record from transaction outputs
     send({ type: 'progress', id, phase: 'proving', message: 'Extracting commitment data from transaction...' })
@@ -558,7 +559,7 @@ async function handleCommitBet(req: WorkerRequest) {
                   const viewKey = account.viewKey()
                   const decrypted = recordCiphertext.decrypt(viewKey)
                   const decryptedStr = decrypted.toString()
-                  console.warn('[Worker] Decrypted record:', decryptedStr.slice(0, 100))
+                  devWarn('[Worker] Decrypted record:', decryptedStr.slice(0, 100))
 
                   // Check if this is a credits record (has microcredits field)
                   if (decryptedStr.includes('microcredits')) {
@@ -568,12 +569,12 @@ async function handleCommitBet(req: WorkerRequest) {
                       const mc = parseInt(mcMatch[1], 10)
                       if (mc === amount) {
                         betAmountRecordPlaintext = decryptedStr
-                        console.warn('[Worker] Found bet_amount_record:', mc, 'microcredits')
+                        devWarn('[Worker] Found bet_amount_record:', mc, 'microcredits')
                       }
                     }
                   }
                 } catch (decryptErr) {
-                  console.warn('[Worker] Could not decrypt record:', decryptErr)
+                  devWarn('[Worker] Could not decrypt record:', decryptErr)
                 }
               }
             }
@@ -597,7 +598,7 @@ async function handleCommitBet(req: WorkerRequest) {
                     const mc = parseInt(mcMatch[1], 10)
                     if (mc === amount) {
                       betAmountRecordPlaintext = decryptedStr
-                      console.warn('[Worker] Found bet_amount_record from split:', mc, 'microcredits')
+                      devWarn('[Worker] Found bet_amount_record from split:', mc, 'microcredits')
                     }
                   }
                 } catch { /* skip */ }
@@ -617,18 +618,18 @@ async function handleCommitBet(req: WorkerRequest) {
               const hashVal = typeof finalizeInputs[0] === 'string' ? finalizeInputs[0] : finalizeInputs[0]?.value
               if (hashVal && typeof hashVal === 'string' && hashVal.includes('field')) {
                 commitmentHash = hashVal.trim()
-                console.warn('[Worker] Found commitment hash from finalize:', commitmentHash)
+                devWarn('[Worker] Found commitment hash from finalize:', commitmentHash)
               }
             }
           }
         }
       }
     } catch (parseErr) {
-      console.warn('[Worker] Failed to parse transaction outputs:', parseErr)
+      devWarn('[Worker] Failed to parse transaction outputs:', parseErr)
     }
 
     if (!betAmountRecordPlaintext) {
-      console.warn('[Worker] WARNING: Could not extract bet_amount_record. User will need to provide it manually for reveal.')
+      devWarn('[Worker] WARNING: Could not extract bet_amount_record. User will need to provide it manually for reveal.')
     }
 
     // Broadcast
@@ -646,7 +647,7 @@ async function handleCommitBet(req: WorkerRequest) {
     }
 
     const txId = (await broadcastResp.text()).replace(/"/g, '')
-    console.warn('[Worker] commit_bet submitted:', txId)
+    devWarn('[Worker] commit_bet submitted:', txId)
 
     send({
       type: 'result',
@@ -690,7 +691,7 @@ async function handleRevealBet(req: WorkerRequest) {
     }
 
     const address = account.address().to_string()
-    console.warn('[Worker] reveal_bet account:', address)
+    devWarn('[Worker] reveal_bet account:', address)
 
     // Reconstruct Commitment struct as input string
     // committed_at is 0u64 — the transition value, not the finalize-updated value
@@ -757,7 +758,7 @@ async function handleRevealBet(req: WorkerRequest) {
         break
       } catch (buildErr: any) {
         const buildMsg = buildErr?.message || String(buildErr)
-        console.warn(`[Worker] reveal_bet build attempt ${buildAttempt}/${maxBuildAttempts} failed:`, buildMsg)
+        devWarn(`[Worker] reveal_bet build attempt ${buildAttempt}/${maxBuildAttempts} failed:`, buildMsg)
         const isRetryable = buildMsg.includes('powers') || buildMsg.includes('XMLHttpRequest') ||
           buildMsg.includes('Failed to fetch') || buildMsg.includes('NetworkError') || buildMsg.includes('Download failed')
         if (isRetryable && buildAttempt < maxBuildAttempts) {
@@ -770,7 +771,7 @@ async function handleRevealBet(req: WorkerRequest) {
       }
     }
 
-    console.warn('[Worker] reveal_bet transaction built successfully')
+    devWarn('[Worker] reveal_bet transaction built successfully')
 
     // Broadcast
     send({ type: 'progress', id, phase: 'broadcasting', message: 'Broadcasting reveal_bet transaction...' })
@@ -787,7 +788,7 @@ async function handleRevealBet(req: WorkerRequest) {
     }
 
     const txId = (await broadcastResp.text()).replace(/"/g, '')
-    console.warn('[Worker] reveal_bet submitted:', txId)
+    devWarn('[Worker] reveal_bet submitted:', txId)
 
     send({ type: 'result', id, txId })
   } catch (err: any) {
@@ -799,7 +800,7 @@ async function handleRevealBet(req: WorkerRequest) {
 
 // Register handler IMMEDIATELY (before any async imports)
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
-  console.warn('[Worker] Received message:', event.data.type)
+  devWarn('[Worker] Received message:', event.data.type)
   const req = event.data
   if (req.type === 'execute') {
     handleExecute(req)
@@ -810,4 +811,4 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
 }
 
-console.warn('[Worker] Aleo SDK worker ready')
+devWarn('[Worker] Aleo SDK worker ready')

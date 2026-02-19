@@ -10,6 +10,7 @@
 import { useCallback } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
+import { devWarn } from '../lib/logger'
 
 interface TransactionOptions {
   program: string
@@ -66,12 +67,12 @@ export function useAleoTransaction() {
       const isShield = wallet.walletType === 'shield'
       const isDemo = wallet.isDemoMode
 
-      console.warn(`[TX] executeTransaction — walletType: ${wallet.walletType}`)
+      devWarn(`[TX] executeTransaction — walletType: ${wallet.walletType}`)
 
       try {
         // Demo mode: simulate transaction
         if (isDemo) {
-          console.warn('[TX] Demo mode — simulating transaction')
+          devWarn('[TX] Demo mode — simulating transaction')
           await new Promise(resolve => setTimeout(resolve, 2000))
           return { transactionId: `demo_tx_${Date.now()}_${Math.random().toString(36).substring(7)}` }
         }
@@ -82,7 +83,7 @@ export function useAleoTransaction() {
         const feeMicrocredits = Math.round(feeAleo * 1_000_000)
 
         const privateFeeFlag = options.privateFee ?? false
-        console.warn('[TX] Calling adapter executeTransaction:', {
+        devWarn('[TX] Calling adapter executeTransaction:', {
           program: options.program,
           function: options.function,
           fee: `${feeAleo} ALEO = ${feeMicrocredits} microcredits`,
@@ -114,7 +115,7 @@ export function useAleoTransaction() {
 
         const txId = extractTransactionId(result)
         if (txId) {
-          console.warn('[TX] Submitted via adapter:', txId)
+          devWarn('[TX] Submitted via adapter:', txId)
           return { transactionId: txId }
         }
 
@@ -178,7 +179,7 @@ export function useAleoTransaction() {
       intervalMs = 10_000,
       onChainVerify?: () => Promise<boolean>,
     ) => {
-      console.warn('[TX] Polling status for:', txId)
+      devWarn('[TX] Polling status for:', txId)
       let walletFailedCount = 0
       let walletFinalStatus: string | null = null
       let walletTxId: string | undefined
@@ -191,19 +192,19 @@ export function useAleoTransaction() {
           try {
             const verified = await onChainVerify()
             if (verified) {
-              console.warn(`[TX] On-chain verification PASSED at poll ${i + 1}!`)
+              devWarn(`[TX] On-chain verification PASSED at poll ${i + 1}!`)
               onStatusChange('confirmed', walletTxId)
               return
             }
           } catch (verifyErr) {
-            console.warn(`[TX] On-chain verify poll ${i + 1} error (will retry):`, verifyErr)
+            devWarn(`[TX] On-chain verify poll ${i + 1} error (will retry):`, verifyErr)
           }
         }
 
         // === Strategy 2: Adapter status API (secondary, for txId) ===
         try {
           const result = await adapterTxStatus(txId)
-          console.warn(`[TX] Poll ${i + 1}/${maxAttempts}:`, JSON.stringify(result))
+          devWarn(`[TX] Poll ${i + 1}/${maxAttempts}:`, JSON.stringify(result))
 
           if (result?.status === 'accepted' || result?.status === 'Finalized' || result?.status === 'Settled') {
             onStatusChange('confirmed', result.transactionId || txId)
@@ -215,7 +216,7 @@ export function useAleoTransaction() {
             walletFinalStatus = result?.status
 
             if (result?.transactionId) {
-              console.warn('[TX] Transaction CONFIRMED FAILED on-chain:', result.transactionId)
+              devWarn('[TX] Transaction CONFIRMED FAILED on-chain:', result.transactionId)
               if (onChainVerify) {
                 try {
                   const verified = await onChainVerify()
@@ -229,7 +230,7 @@ export function useAleoTransaction() {
               return
             }
 
-            console.warn(`[TX] "Failed" without txId (${walletFailedCount}). Continuing...`)
+            devWarn(`[TX] "Failed" without txId (${walletFailedCount}). Continuing...`)
 
             if (walletFailedCount >= 4 && onChainVerify) {
               try {
@@ -241,7 +242,7 @@ export function useAleoTransaction() {
                 onStatusChange('failed', undefined)
                 return
               } catch {
-                console.warn('[TX] On-chain check also failed (network). Will retry...')
+                devWarn('[TX] On-chain check also failed (network). Will retry...')
               }
             }
 
@@ -253,7 +254,7 @@ export function useAleoTransaction() {
           }
           walletFailedCount = 0
         } catch (err) {
-          console.warn(`[TX] Poll ${i + 1} wallet error:`, err)
+          devWarn(`[TX] Poll ${i + 1} wallet error:`, err)
           if (txId.startsWith('at1')) {
             try {
               const resp = await fetch(
