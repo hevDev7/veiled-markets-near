@@ -6,8 +6,8 @@ interface ProbabilityDonutProps {
   outcomeLabels: string[]
   prices: number[] // 0-1 range per outcome
   reserves?: bigint[] // pool reserves per outcome
+  totalLiquidity?: bigint
   totalVolume?: bigint
-  totalBets?: number
   tokenSymbol?: string
   className?: string
 }
@@ -24,8 +24,8 @@ export function ProbabilityDonut({
   outcomeLabels,
   prices,
   reserves,
+  totalLiquidity,
   totalVolume,
-  totalBets,
   tokenSymbol = 'ALEO',
   className,
 }: ProbabilityDonutProps) {
@@ -146,19 +146,21 @@ export function ProbabilityDonut({
             )
           })}
 
-          {/* Total pool + bets */}
+          {/* Total liquidity + volume */}
           {hasPoolData && (
             <div className="flex items-center justify-between pt-2 border-t border-surface-700/50">
-              <span className="text-sm text-surface-400">Total Pool</span>
+              <span className="text-sm text-surface-400">Total Liquidity</span>
               <span className="text-sm font-bold font-mono text-white">
-                {formatCredits(totalVolume ?? 0n)} {tokenSymbol}
+                {formatCredits(totalLiquidity ?? 0n)} {tokenSymbol}
               </span>
             </div>
           )}
-          {totalBets !== undefined && (
+          {totalVolume !== undefined && totalVolume > 0n && (
             <div className="flex items-center justify-between">
-              <span className="text-sm text-surface-400">Total Bets</span>
-              <span className="text-sm font-bold text-surface-300">{totalBets}</span>
+              <span className="text-sm text-surface-400">Volume</span>
+              <span className="text-sm font-bold font-mono text-surface-300">
+                {formatCredits(totalVolume)} {tokenSymbol}
+              </span>
             </div>
           )}
         </div>

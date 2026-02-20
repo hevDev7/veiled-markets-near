@@ -756,8 +756,8 @@ export function MarketDetail() {
                   outcomeLabels={outcomeLabels}
                   prices={prices}
                   reserves={[market.yesReserve, market.noReserve, market.reserve3, market.reserve4].slice(0, market.numOutcomes)}
+                  totalLiquidity={market.totalLiquidity ?? 0n}
                   totalVolume={market.totalVolume}
-                  totalBets={market.totalBets}
                   tokenSymbol={market.tokenType || 'ALEO'}
                   className="mb-6"
                 />

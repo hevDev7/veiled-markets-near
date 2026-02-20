@@ -32,7 +32,7 @@ A prediction market protocol where users trade outcome shares with complete priv
 - **Emergency Cancel** — Auto-detected in Resolve Panel for expired unresolved markets past resolution deadline
 - **Dispute Mechanism** — On-chain dispute with bond staking, automatic re-resolution flow
 - **Wallet-Based Claims** — Claim winnings and refunds directly via wallet (Shield/Puzzle) with CLI fallback
-- **Multi-Outcome Pool Breakdown** — Dynamic pool visualization for 2-4 outcome markets
+- **Market Sentiment Chart** — Donut chart visualization with integrated pool data for 2-4 outcome markets
 - **Needs Resolution Filter** — Dashboard filter to find expired markets awaiting resolution
 
 ## Contract Details
@@ -42,8 +42,7 @@ A prediction market protocol where users trade outcome shares with complete priv
 | **Program** | `veiled_markets_v16.aleo` |
 | **Network** | Aleo Testnet |
 | **Deploy TX** | `at1kdqmt63rhhx3t27af3psrq97flnjy4jjr67dsryt4uk62cd6lqqqcrtr37` |
-| **Transitions** | 30 |
-| **Statements** | 1,969 |
+| **Transitions** | 31 |
 | **Deploy Cost** | ~60.72 ALEO |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
 | **Block Time** | ~4s/block (testnet), ~15s/block (mainnet) |
@@ -65,7 +64,7 @@ Aleo Blockchain (Testnet)
 ```
 veiled-markets/
 ├── contracts/             # Leo smart contract
-│   └── src/main.leo       # FPMM AMM, LP, dispute, multi-token (2500+ lines)
+│   └── src/main.leo       # FPMM AMM, LP, dispute, multi-token (~2576 lines)
 ├── frontend/              # React dashboard
 │   ├── src/
 │   │   ├── components/    # Trading UI, wallet bridge, modals, panels
@@ -74,11 +73,12 @@ veiled-markets/
 │   │   │   ├── SellSharesModal.tsx      # Sell shares modal
 │   │   │   ├── ClaimWinningsModal.tsx   # Wallet-based claim winnings / refunds
 │   │   │   ├── OutcomeSelector.tsx      # Multi-outcome selector (2-4 outcomes)
-│   │   │   ├── OddsChart.tsx            # Multi-outcome pool breakdown
+│   │   │   ├── ProbabilityDonut.tsx     # Market sentiment donut chart + pool data
 │   │   │   ├── LiquidityPanel.tsx       # Add/remove liquidity
 │   │   │   ├── ResolvePanel.tsx         # 3-step resolution + emergency cancel
 │   │   │   ├── DisputePanel.tsx         # Dispute resolution
 │   │   │   ├── CreatorFeesPanel.tsx     # Creator fee withdrawal
+│   │   │   ├── TradingPanel.tsx         # Inline buy/sell trading panel
 │   │   │   ├── AdminPanel.tsx           # Admin: resolve, close, cancel
 │   │   │   ├── WalletBridge.tsx         # Multi-wallet connector
 │   │   │   └── WalletCompatibilityLab.tsx # Wallet testing tools
@@ -182,7 +182,7 @@ Each step shows transaction status, block countdown for the challenge window, an
 
 ### Emergency Cancel
 
-If a market passes its `resolution_deadline` without being resolved, the Resolve Panel automatically detects this and displays an **Emergency Cancel** banner. Anyone can call `emergency_cancel` to set the market to CANCELLED status, enabling bettors to reclaim their funds via `claim_refund`.
+If a market passes its `resolution_deadline` without being resolved, the Resolve Panel automatically detects this and displays an **Emergency Cancel** banner. Anyone can call `cancel_market` (Path B: emergency cancel) to set the market to CANCELLED status, enabling bettors to reclaim their funds via `claim_refund`.
 
 ### Dispute Mechanism
 
@@ -194,7 +194,7 @@ During the challenge window (between resolve and finalize), anyone can dispute t
 4. A new challenge window begins
 5. After finalization, if the final outcome matches the disputer's proposed outcome, the disputer can reclaim their bond via `claim_dispute_bond` (uses unforgeable `DisputeBondReceipt` record)
 
-v15 fixes: `resolve_market` clears stale dispute data on re-resolve, `emergency_cancel` cleans up resolution/dispute state, `claim_dispute_bond` uses `DisputeBondReceipt` record instead of mapping (prevents stuck markets after dispute).
+v15+ fixes: `resolve_market` clears stale dispute data on re-resolve, `cancel_market` cleans up resolution/dispute state, `claim_dispute_bond` uses `DisputeBondReceipt` record instead of mapping (prevents stuck markets after dispute).
 
 ### Needs Resolution Filter
 
@@ -227,6 +227,7 @@ All deadline calculations (market duration, resolution countdown, challenge wind
 | Market question, total pool, reserves, prices | Public |
 | Your trade amount and outcome position | Private (ZK-encrypted) |
 | Your wallet address in buy transactions | Private (`transfer_private_to_public`) |
+| Sell payouts, winning redemptions, refunds | Private (`transfer_public_to_private`) |
 | Market creation, resolution | Public |
 
 ### How Privacy Works
@@ -238,6 +239,8 @@ ALEO buy shares use `buy_shares_private`, which calls `credits.aleo/transfer_pri
 3. The `OutcomeShare` record is returned to the user as an encrypted record
 
 USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less private, but necessary for stablecoin mechanics).
+
+In v16, sell payouts, winning redemptions, and refunds all use `transfer_public_to_private`, so the recipient receives a **private credits record** — observers cannot see who received the payout.
 
 ## Frontend Features
 
@@ -264,7 +267,7 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 - **3 outcomes:** Triple markets — green/red/purple
 - **4 outcomes:** Quad markets — green/red/purple/yellow
 - **Custom labels:** Creator enters custom outcome names during market creation (e.g., "Apple", "Google", "Meta", "Amazon")
-- **Pool Breakdown:** Dynamic visualization showing reserves, percentages, and payout multipliers for all outcomes
+- **Market Sentiment:** Donut chart with integrated pool data, reserves, percentages, and payout multipliers for all outcomes
 
 ### My Bets — Position & Trade Tracking
 
@@ -285,7 +288,7 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 - Transaction polling with on-chain verification fallback
 - Credits record fetching for private buy transactions (3 wallet strategies with fallback)
 
-## Key Transitions (30 total)
+## Key Transitions (31 total)
 
 ### Market Lifecycle
 | Transition | Description |
@@ -295,30 +298,30 @@ The market detail page has an integrated **Buy/Sell** tab toggle in the right si
 | `close_market` | Close betting (after deadline) |
 | `resolve_market` | Resolve with winning outcome (resolver only, before resolution_deadline) |
 | `finalize_resolution` | Finalize after challenge window — no end deadline (anyone) |
-| `cancel_market` | Creator cancels market (no volume only) |
-| `emergency_cancel` | Cancel unresolved market past resolution deadline (anyone) |
+| `cancel_market` | Creator cancel (no volume) OR emergency cancel (past resolution_deadline, anyone) |
 
 ### Trading
 | Transition | Description |
 |---|---|
 | `buy_shares_private` | Buy shares with private credits record (ALEO) |
 | `buy_shares_usdcx` | Buy shares with USDCX (public signer) |
-| `sell_shares` | Sell ALEO shares (tokens_desired approach, calls `credits.aleo/transfer_public`) |
+| `sell_shares` | Sell ALEO shares (tokens_desired approach, calls `credits.aleo/transfer_public_to_private`) |
 | `sell_shares_usdcx` | Sell USDCX shares |
-| `redeem_shares` / `redeem_shares_usdcx` | Redeem winning shares 1:1 |
-| `claim_refund` / `claim_refund_usdcx` | Claim refund on cancelled markets |
+| `redeem_shares` / `redeem_shares_usdcx` | Redeem winning shares 1:1 (private payout) |
+| `claim_refund` / `claim_refund_usdcx` | Claim refund on cancelled markets (private payout) |
 
 ### Liquidity
 | Transition | Description |
 |---|---|
-| `add_liquidity` / `add_liquidity_usdcx` | Provide liquidity, receive LP tokens |
-| `remove_liquidity` / `remove_liq_usdcx` | Withdraw liquidity proportionally |
+| `add_liquidity` / `add_liquidity_usdcx` | Provide liquidity with private credits, receive LP tokens |
+| `remove_liquidity` / `remove_liq_usdcx` | Withdraw liquidity proportionally (active markets) |
+| `withdraw_lp_resolved` / `withdraw_lp_resolved_usdcx` | Withdraw LP share from resolved/finalized markets |
 | `claim_lp_refund` / `claim_lp_refund_usdcx` | Claim LP refund on cancelled markets |
 
 ### Dispute & Governance
 | Transition | Description |
 |---|---|
-| `dispute_resolution` | Stake 1 ALEO bond to dispute resolution |
+| `dispute_resolution` | Stake 1 ALEO bond (private) to dispute resolution |
 | `claim_dispute_bond` | Reclaim bond via `DisputeBondReceipt` record if final outcome matches |
 | `withdraw_creator_fees` / `withdraw_fees_usdcx` | Creator withdraws accumulated fees |
 | `init_multisig` | Initialize multisig for treasury |
@@ -347,7 +350,7 @@ npm install --legacy-peer-deps
 
 # Setup environment
 cp .env.example .env
-# Edit .env if needed (defaults point to testnet with v15)
+# Edit .env if needed (defaults point to testnet with v16)
 
 # Start development server
 npm run dev
@@ -371,7 +374,7 @@ VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 ```bash
 cd contracts
 leo build
-# Output: 1969 statements, 30 transitions
+# Output: 31 transitions
 ```
 
 ### Deploy Contract
@@ -379,7 +382,7 @@ leo build
 ```bash
 cd contracts
 leo deploy --network testnet --yes --broadcast
-# Cost: ~60.72 ALEO for v15
+# Cost: ~60.72 ALEO for v16
 ```
 
 ## Create a Market (CLI)
@@ -520,7 +523,8 @@ All buy and sell transactions are recorded in Zustand store and persisted to `lo
 
 | Version | Key Changes |
 |---------|-------------|
-| **v15** | Fixed dispute lifecycle bugs: `resolve_market` clears stale dispute data on re-resolve, `emergency_cancel` cleans up resolution/dispute state, `claim_dispute_bond` uses unforgeable `DisputeBondReceipt` record. Added Resolve Panel UI (3-step wizard + emergency cancel), "Needs Resolution" dashboard filter, wallet-based claim/refund (replaces CLI-only), live countdown with seconds precision, network-aware block time config (4s testnet / 15s mainnet) |
+| **v16** | Privacy-first: `sell_shares`/`redeem_shares`/`claim_refund` use `transfer_public_to_private` (payouts as private records), `add_liquidity`/`dispute_resolution` use `transfer_private_to_public` (LP/disputer privacy). NEW: `withdraw_lp_resolved`/`withdraw_lp_resolved_usdcx` for LP withdrawal from finalized markets. `cancel_market` now handles both creator cancel and emergency cancel (merged). `transfer_future.await()` moved to top of all finalize functions. Market Sentiment donut chart replaces Pool Breakdown |
+| v15 | Fixed dispute lifecycle bugs: `resolve_market` clears stale dispute data on re-resolve, `cancel_market` cleans up resolution/dispute state, `claim_dispute_bond` uses unforgeable `DisputeBondReceipt` record. Added Resolve Panel UI (3-step wizard + emergency cancel), "Needs Resolution" dashboard filter, wallet-based claim/refund (replaces CLI-only), live countdown with seconds precision, network-aware block time config (4s testnet / 15s mainnet) |
 | v14 | FPMM AMM with correct formulas, `buy_shares_private` only (ALEO), `expected_shares` pattern, `sell_shares` tokens_desired approach + `credits.aleo/transfer_public`, multisig treasury governance, custom outcome labels, multi-outcome pool breakdown, sell tracking in My Bets |
 | v13 | Fixed ternary underflow bug in buy_shares (Leo evaluates both branches) |
 | v12 | Initial FPMM implementation, multi-outcome markets, LP provision |
@@ -532,14 +536,6 @@ All buy and sell transactions are recorded in Zustand store and persisted to `lo
 Markets are registered in `frontend/public/markets-index.json` and `frontend/src/lib/question-mapping.ts`.
 
 Creating markets via the frontend dashboard or CLI populates these registries. Outcome labels are persisted in `localStorage` and looked up by question hash or market ID. The blockchain indexer (`backend/`) can scan for new markets automatically.
-
-## Documentation
-
-- [Architecture Overview](./docs/ARCHITECTURE.md)
-- [Privacy Analysis](./docs/PRIVACY_ANALYSIS.md)
-- [Create Market Guide](./CREATE_MARKET_GUIDE.md)
-- [Indexer Guide](./INDEXER_GUIDE.md)
-- [Wallet Troubleshooting](./WALLET_TROUBLESHOOTING.md)
 
 ## Contributing
 

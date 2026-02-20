@@ -28,9 +28,9 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
 
-  // Total liquidity and LP shares from market data
-  const totalLiquidity = market.yesReserve + market.noReserve
-  const totalLPShares = totalLiquidity // Approximation: in v12, LP shares track proportionally
+  // Total liquidity and LP shares from on-chain pool data
+  const totalLiquidity = market.totalLiquidity ?? (market.yesReserve + market.noReserve)
+  const totalLPShares = market.totalLPShares ?? totalLiquidity
 
   const amountMicro = amount
     ? BigInt(Math.floor(parseFloat(amount) * 1_000_000))
