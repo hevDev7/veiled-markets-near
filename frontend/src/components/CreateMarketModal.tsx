@@ -737,8 +737,11 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             onChange={(e) => updateForm({ description: e.target.value })}
                             placeholder="Provide additional context about how this market will be resolved..."
                             className="input-field w-full h-20 resize-none"
-                            maxLength={500}
+                            maxLength={1500}
                           />
+                          <p className="text-xs text-surface-500 mt-1">
+                            {formData.description.length}/1500
+                          </p>
                         </div>
 
                         {/* Category */}
