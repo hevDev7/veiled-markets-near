@@ -75,8 +75,8 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       minShares,
       priceImpact,
       fees,
-      // Winning shares redeem 1:1 in v12
-      potentialPayout: Number(sharesOut) / 1_000_000,
+      // Winning shares redeem 1:1 (use minShares — matches on-chain record quantity)
+      potentialPayout: Number(minShares) / 1_000_000,
     }
   }, [selectedOutcome, amount, ammReserves, slippageTolerance])
 
@@ -216,7 +216,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           status: 'pending',
           marketQuestion: market.question,
           lockedMultiplier: tradePreview?.potentialPayout ? tradePreview.potentialPayout / parseFloat(amount) : 1,
-          sharesReceived: tradePreview?.sharesOut,
+          sharesReceived: minSharesOut,  // matches on-chain OutcomeShare.quantity (= expected_shares)
           tokenType: market.tokenType || 'ALEO',
         })
 

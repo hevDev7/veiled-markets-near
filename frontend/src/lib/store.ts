@@ -1193,6 +1193,43 @@ function saveCommitmentRecordsToStorage(records: CommitmentRecord[]) {
   }
 }
 
+// ---- Wallet record refresh helper ----
+// After a bet is confirmed on-chain, try to fetch actual OutcomeShare records
+// from the wallet and update sharesReceived with the real on-chain quantity.
+// Best-effort: silently fails if wallet doesn't support record fetching.
+
+async function refreshSharesFromWallet(
+  bet: Bet,
+  get: () => { userBets: Bet[] },
+  set: (partial: Partial<{ userBets: Bet[] }>) => void,
+) {
+  try {
+    const { fetchOutcomeShareRecords } = await import('./credits-record')
+    const records = await fetchOutcomeShareRecords(CONTRACT_INFO.programId, bet.marketId)
+    if (records.length === 0) return
+
+    // Match by outcome (1-indexed: yes=1, no=2)
+    const outcomeNum = bet.outcome === 'yes' ? 1 : 2
+    const matching = records.filter(r => r.outcome === outcomeNum)
+    if (matching.length === 0) return
+
+    // Use the record with the largest quantity (in case of multiple records for same outcome)
+    const bestMatch = matching.reduce((a, b) => a.quantity > b.quantity ? a : b)
+
+    if (bestMatch.quantity !== bet.sharesReceived) {
+      devWarn(`[Bets] Updating sharesReceived from wallet record: ${bet.sharesReceived?.toString()} → ${bestMatch.quantity.toString()}`)
+      const updatedBets = get().userBets.map(b =>
+        b.id === bet.id ? { ...b, sharesReceived: bestMatch.quantity } : b
+      )
+      set({ userBets: updatedBets })
+      saveBetsToStorage(updatedBets)
+    }
+  } catch (err) {
+    // Wallet may not support record fetching — stored minShares value is already correct
+    devLog('[Bets] refreshSharesFromWallet failed (non-critical):', err)
+  }
+}
+
 // ---- Supabase background sync helpers ----
 
 async function syncFromSupabase(
@@ -1422,6 +1459,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
               }
               devLog('Transaction confirmed, final balance refresh...')
               useWalletStore.getState().refreshBalance()
+              // Best-effort: refresh sharesReceived from actual wallet record
+              refreshSharesFromWallet(activeBet, get, set)
             }
           } catch {
             // Transaction not confirmed yet, continue polling
@@ -1469,6 +1508,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           if (isSupabaseAvailable() && walletState.address) {
             sbRemovePendingBet(transactionId, walletState.address)
           }
+          // Best-effort: refresh sharesReceived from actual wallet record
+          refreshSharesFromWallet(activeBet, get, set)
         }, 5000)
       }
 
@@ -1779,6 +1820,11 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         }
 
         devWarn(`[Bets] Promoted ${promoted.length} stale pending bet(s) to active (${dedupedActive.length} new, ${promoted.length - dedupedActive.length} deduped)`)
+
+        // Best-effort: refresh sharesReceived from actual wallet records
+        for (const bet of dedupedActive) {
+          refreshSharesFromWallet(bet, get, set)
+        }
       }
     }
 

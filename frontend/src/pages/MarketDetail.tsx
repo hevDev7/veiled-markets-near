@@ -57,6 +57,7 @@ import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { OddsChart } from '@/components/OddsChart'
 import { OutcomeSelector } from '@/components/OutcomeSelector'
+import { ProbabilityDonut } from '@/components/ProbabilityDonut'
 import { LiquidityPanel } from '@/components/LiquidityPanel'
 import { DisputePanel } from '@/components/DisputePanel'
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
@@ -271,8 +272,8 @@ export function MarketDetail() {
     const priceImpact = calculateBuyPriceImpact(reserves, selectedOutcome, buyAmountMicro)
     const feeBreakdown = calculateFees(buyAmountMicro)
 
-    // Potential payout: winning shares redeem 1:1
-    const potentialPayout = Number(sharesOut) / 1_000_000
+    // Potential payout: winning shares redeem 1:1 (use minShares — matches on-chain record quantity)
+    const potentialPayout = Number(minShares) / 1_000_000
 
     return {
       sharesOut,
@@ -555,7 +556,7 @@ export function MarketDetail() {
           placedAt: Date.now(),
           status: 'pending',
           marketQuestion: market.question,
-          sharesReceived: tradePreview.sharesOut,
+          sharesReceived: tradePreview.minShares,  // matches on-chain OutcomeShare.quantity (= expected_shares)
           lockedMultiplier: tradePreview.potentialPayout / (Number(buyAmountMicro) / 1_000_000),
           tokenType: market.tokenType || 'ALEO',
         })
@@ -748,41 +749,17 @@ export function MarketDetail() {
                 transition={{ delay: 0.1 }}
                 className="glass-card p-6"
               >
-                <h2 className="text-lg font-semibold text-white mb-4">Current Prices</h2>
+                <h2 className="text-lg font-semibold text-white mb-4">Market Sentiment</h2>
 
-                {/* Multi-outcome probability bar */}
-                <div className="mb-6">
-                  <div className="flex justify-between text-sm mb-2">
-                    {outcomeLabels.map((label, i) => {
-                      const pct = (prices[i] ?? 0) * 100
-                      const colors = ['text-yes-400', 'text-no-400', 'text-purple-400', 'text-yellow-400']
-                      return (
-                        <span key={i} className={cn(colors[i], 'font-medium')}>
-                          {label} {pct.toFixed(1)}%
-                        </span>
-                      )
-                    })}
-                  </div>
-                  <div className="h-4 rounded-full overflow-hidden bg-surface-800 flex">
-                    {prices.map((price, i) => {
-                      const gradients = [
-                        'bg-gradient-to-r from-yes-600 to-yes-500',
-                        'bg-gradient-to-r from-no-500 to-no-600',
-                        'bg-gradient-to-r from-purple-600 to-purple-500',
-                        'bg-gradient-to-r from-yellow-600 to-yellow-500',
-                      ]
-                      return (
-                        <div
-                          key={i}
-                          className={cn(gradients[i], 'h-full transition-all duration-500')}
-                          style={{ width: `${price * 100}%` }}
-                        />
-                      )
-                    })}
-                  </div>
-                </div>
+                {/* Donut chart for probability visualization */}
+                <ProbabilityDonut
+                  numOutcomes={numOutcomes}
+                  outcomeLabels={outcomeLabels}
+                  prices={prices}
+                  className="mb-6"
+                />
 
-                {/* Outcome price cards (using OutcomeSelector for consistency) */}
+                {/* Outcome price cards for selection */}
                 <OutcomeSelector
                   numOutcomes={numOutcomes}
                   outcomeLabels={outcomeLabels}
