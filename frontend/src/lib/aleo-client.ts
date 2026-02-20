@@ -116,6 +116,41 @@ const PROGRAM_ID = config.programId;
 // Timeout for network requests (prevents UI from hanging indefinitely)
 const FETCH_TIMEOUT_MS = 10_000; // 10 seconds per request
 
+// ============================================================================
+// In-memory cache for mapping values and block height
+// ============================================================================
+const CACHE_TTL_MS = 30_000; // 30 seconds — fresh data within this window
+const BLOCK_HEIGHT_CACHE_TTL_MS = 10_000; // 10 seconds for block height
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const mappingCache = new Map<string, CacheEntry<unknown>>();
+let blockHeightCache: CacheEntry<bigint> | null = null;
+
+function getCachedMapping<T>(key: string): T | undefined {
+  const entry = mappingCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) return undefined;
+  return entry.data as T;
+}
+
+function setCachedMapping<T>(key: string, data: T): void {
+  mappingCache.set(key, { data, timestamp: Date.now() });
+}
+
+function getCachedBlockHeight(): bigint | undefined {
+  if (!blockHeightCache) return undefined;
+  if (Date.now() - blockHeightCache.timestamp > BLOCK_HEIGHT_CACHE_TTL_MS) return undefined;
+  return blockHeightCache.data;
+}
+
+function setCachedBlockHeight(height: bigint): void {
+  blockHeightCache = { data: height, timestamp: Date.now() };
+}
+
 async function fetchWithTimeout(url: string, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -127,7 +162,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number = FETCH_TIMEOUT_M
 }
 
 // Retry wrapper for flaky API (testnet often returns 522 errors)
-async function fetchWithRetry(url: string, maxRetries: number = 3): Promise<Response> {
+async function fetchWithRetry(url: string, maxRetries: number = 2): Promise<Response> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -139,7 +174,7 @@ async function fetchWithRetry(url: string, maxRetries: number = 3): Promise<Resp
       if (response.status >= 500) {
         lastError = new Error(`Server error: ${response.status}`);
         if (attempt < maxRetries - 1) {
-          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
           continue;
         }
       }
@@ -147,7 +182,7 @@ async function fetchWithRetry(url: string, maxRetries: number = 3): Promise<Resp
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
       }
     }
   }
@@ -603,10 +638,15 @@ function parseAleoValue(value: string): string | number | bigint | boolean {
  * Fetch current block height
  */
 export async function getCurrentBlockHeight(): Promise<bigint> {
+  const cached = getCachedBlockHeight();
+  if (cached !== undefined) return cached;
+
   const response = await fetchWithRetry(`${API_BASE_URL}/latest/height`);
   if (!response.ok) throw new Error(`Failed to fetch block height: ${response.status}`);
   const height = await response.json();
-  return BigInt(height);
+  const result = BigInt(height);
+  setCachedBlockHeight(result);
+  return result;
 }
 
 /**
@@ -616,6 +656,10 @@ export async function getMappingValue<T>(
   mappingName: string,
   key: string
 ): Promise<T | null> {
+  const cacheKey = `${mappingName}:${key}`;
+  const cached = getCachedMapping<T>(cacheKey);
+  if (cached !== undefined) return cached;
+
   try {
     const url = `${API_BASE_URL}/program/${PROGRAM_ID}/mapping/${mappingName}/${key}`;
     devLog('Fetching mapping:', url);
@@ -632,13 +676,17 @@ export async function getMappingValue<T>(
     // Parse the JSON string first (API returns JSON-encoded string)
     const cleanData = JSON.parse(data);
 
+    let result: T;
     // If it's a struct (starts with {), parse it
     if (typeof cleanData === 'string' && cleanData.trim().startsWith('{')) {
-      return parseAleoStruct(cleanData) as T;
+      result = parseAleoStruct(cleanData) as T;
+    } else {
+      // Otherwise parse as simple value
+      result = parseAleoValue(cleanData) as T;
     }
 
-    // Otherwise parse as simple value
-    return parseAleoValue(cleanData) as T;
+    setCachedMapping(cacheKey, result);
+    return result;
   } catch (error) {
     console.error(`Failed to fetch mapping ${mappingName}[${key}]:`, error);
     return null;

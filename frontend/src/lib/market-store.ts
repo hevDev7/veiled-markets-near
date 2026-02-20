@@ -42,6 +42,19 @@ interface MarketsActions {
 
 type MarketsStore = MarketsState & MarketsActions
 
+// Track whether initializeMarketIds has been called
+let marketIdsInitialized = false;
+let marketIdsInitPromise: Promise<void> | null = null;
+
+async function ensureMarketIdsInitialized(): Promise<void> {
+    if (marketIdsInitialized) return;
+    if (marketIdsInitPromise) return marketIdsInitPromise;
+    marketIdsInitPromise = initializeMarketIds().then(() => {
+        marketIdsInitialized = true;
+    });
+    return marketIdsInitPromise;
+}
+
 // Helper: Transform blockchain data to Market format (v12 AMM)
 async function transformMarketData(
     market: MarketData,
@@ -196,18 +209,17 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
         }
 
         try {
-            // Ensure market IDs are loaded from index before fetching
-            await initializeMarketIds()
+            // Ensure market IDs are loaded (only fetches once)
+            await ensureMarketIdsInitialized()
 
-            // Fetch all markets from blockchain
-            const blockchainMarkets = await fetchAllMarkets()
-            let currentBlock: bigint
-            try {
-                currentBlock = await getCurrentBlockHeight()
-            } catch {
-                devWarn('[Markets] Block height fetch failed, using 0 (all markets show active)')
-                currentBlock = 0n
-            }
+            // Fetch markets and block height in parallel
+            const [blockchainMarkets, currentBlock] = await Promise.all([
+                fetchAllMarkets(),
+                getCurrentBlockHeight().catch(() => {
+                    devWarn('[Markets] Block height fetch failed, using 0')
+                    return 0n
+                }),
+            ])
 
             // Transform to Market format (v12: pass resolution for challenge window)
             const markets: Market[] = await Promise.all(
