@@ -246,6 +246,20 @@ export async function removePendingBet(betId: string, address: string): Promise<
   }
 }
 
+export async function removeUserBet(betId: string, address: string): Promise<void> {
+  if (!supabase) return
+  try {
+    const { error } = await supabase
+      .from('user_bets')
+      .delete()
+      .eq('id', betId)
+      .eq('address', address)
+    if (error) devWarn('[Supabase] removeUserBet error:', error.message)
+  } catch (e) {
+    devWarn('[Supabase] removeUserBet exception:', e)
+  }
+}
+
 export async function fetchCommitments(address: string, encryptionKey: CryptoKey | null = null): Promise<CommitmentRecord[]> {
   if (!supabase) return []
   try {

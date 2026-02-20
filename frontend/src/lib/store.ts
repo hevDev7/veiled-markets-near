@@ -20,7 +20,7 @@ import { devLog, devWarn } from './logger'
 import {
   isSupabaseAvailable, fetchBets as sbFetchBets, upsertBets as sbUpsertBets,
   fetchPendingBets as sbFetchPendingBets, upsertPendingBets as sbUpsertPendingBets,
-  removePendingBet as sbRemovePendingBet,
+  removePendingBet as sbRemovePendingBet, removeUserBet as sbRemoveUserBet,
   fetchCommitments as sbFetchCommitments, upsertCommitments as sbUpsertCommitments,
 } from './supabase'
 
@@ -1708,16 +1708,31 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   },
 
   removePendingBet: (pendingBetId: string) => {
-    const exists = get().pendingBets.some(b => b.id === pendingBetId)
-    if (!exists) return
+    const inPending = get().pendingBets.some(b => b.id === pendingBetId)
+    const inActive = get().userBets.some(b => b.id === pendingBetId)
 
-    const updatedPending = get().pendingBets.filter(b => b.id !== pendingBetId)
-    set({ pendingBets: updatedPending })
-    savePendingBetsToStorage(updatedPending)
+    if (!inPending && !inActive) return
+
+    if (inPending) {
+      const updatedPending = get().pendingBets.filter(b => b.id !== pendingBetId)
+      set({ pendingBets: updatedPending })
+      savePendingBetsToStorage(updatedPending)
+    }
+
+    // Also remove from userBets if already auto-promoted (e.g. syncBetStatuses ran before failed status arrived)
+    if (inActive) {
+      const updatedBets = get().userBets.filter(b => b.id !== pendingBetId)
+      set({ userBets: updatedBets })
+      saveBetsToStorage(updatedBets)
+      devWarn(`[Bets] Removed failed/rejected bet ${pendingBetId.slice(0, 20)}... from userBets`)
+    }
 
     const address = useWalletStore.getState().wallet.address
     if (isSupabaseAvailable() && address) {
       sbRemovePendingBet(pendingBetId, address)
+      if (inActive) {
+        sbRemoveUserBet(pendingBetId, address)
+      }
     }
   },
 

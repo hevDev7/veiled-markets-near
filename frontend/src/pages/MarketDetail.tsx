@@ -374,14 +374,18 @@ export function MarketDetail() {
           tokenType: market.tokenType || 'ALEO',
         })
 
-        pollTransactionStatus(result.transactionId, async (status, onChainTxId) => {
+        const sellTxId = result.transactionId
+        pollTransactionStatus(sellTxId, async (status, onChainTxId) => {
           if (onChainTxId) setSellTxId(onChainTxId)
           if (status === 'confirmed') {
+            confirmPendingBet(sellTxId, onChainTxId)
             setSellStep('success')
           } else if (status === 'failed') {
+            removePendingBet(sellTxId)
             setSellError('Transaction failed on-chain.')
             setSellStep('error')
           } else {
+            confirmPendingBet(sellTxId, onChainTxId)
             setSellStep('success')
           }
         }, 30, 10_000)
