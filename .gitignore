@@ -38,3 +38,8 @@ coverage/
 
 # Aleo dev toolkit
 aleo-dev-toolkit/
+
+# Wave2 submission files
+wave2-submission-id.md
+wave2-submission.md
+wave2-form-content.md
