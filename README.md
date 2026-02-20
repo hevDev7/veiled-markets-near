@@ -50,14 +50,22 @@ A prediction market protocol where users trade outcome shares with complete priv
 ## Architecture
 
 ```
-Frontend (React + Vite + TypeScript)
-    |
-Shield Wallet (ProvableHQ Adapter)
-    |
-Smart Contract (veiled_markets_v16.aleo)
-    |
-Aleo Blockchain (Testnet)
+┌──────────────┐     ┌───────────────────────┐     ┌──────────────────┐
+│   Frontend   │────▶│   Shield / Leo /      │────▶│   Aleo Testnet   │
+│  React/Vite  │     │   Puzzle Wallet       │     │                  │
+│  TypeScript  │     │  (ProvableHQ adapter) │     │  veiled_markets  │
+│              │     └───────────────────────┘     │  _v16.aleo       │
+│  Components: │                                   │                  │
+│  - Dashboard │     ┌───────────────────────┐     │  Dependencies:   │
+│  - Market    │────▶│  Supabase (encrypted) │     │  - credits.aleo  │
+│  - My Bets   │     │  Bet sync + registry  │     │  - test_usdcx_   │
+│  - Resolve   │     └───────────────────────┘     │    stablecoin    │
+└──────────────┘                                   └──────────────────┘
 ```
+
+- **Contract (Leo):** 31 transitions, FPMM AMM (complete-set minting/burning), 2–4 outcome markets, LP provision, dispute mechanism, multi-sig treasury.
+- **Frontend (React/Vite/TS):** Wallet-agnostic via adapter pattern. WASM support with COOP/COEP headers for `@provablehq/sdk`.
+- **Storage:** Supabase with AES-256-GCM client-side encryption for bet data sync across devices. Sensitive fields (outcome, amount, shares) are encrypted with a wallet-derived key before storage.
 
 ### Monorepo Structure
 
