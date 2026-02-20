@@ -290,6 +290,14 @@ export function DashboardHeader() {
                           </p>
                         </div>
                       )}
+                      {wallet.balance.usdcxPrivate > 0n && (
+                        <div className="flex justify-between items-center mt-1">
+                          <p className="text-xs text-surface-500">USDCX (Private)</p>
+                          <p className="text-sm font-medium text-white">
+                            {formatCredits(wallet.balance.usdcxPrivate)} USDCX
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 

@@ -35,6 +35,7 @@ export interface WalletBalance {
   public: bigint;
   private: bigint;
   usdcxPublic: bigint;
+  usdcxPrivate: bigint;
 }
 
 export interface TransactionRequest {
@@ -338,18 +339,18 @@ export class PuzzleWalletAdapter {
         publicBalance = await fetchPublicBalance(this.account.address);
       }
 
-      return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
+      return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
     } catch (err) {
       devWarn('Puzzle Wallet: getBalance failed:', err);
       if (this.account?.address) {
         try {
           const publicBalance = await fetchPublicBalance(this.account.address);
-          return { public: publicBalance, private: 0n, usdcxPublic: 0n };
+          return { public: publicBalance, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
         } catch {
           devWarn('Puzzle Wallet: fetchPublicBalance also failed');
         }
       }
-      return { public: 0n, private: 0n, usdcxPublic: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
     }
   }
 
@@ -587,7 +588,7 @@ export class LeoWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -788,7 +789,7 @@ export class LeoWalletAdapter {
       devWarn('Leo Wallet: ⚠️ Private records are encrypted and may not be accessible via SDK');
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1243,7 +1244,7 @@ export class FoxWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -1270,7 +1271,7 @@ export class FoxWalletAdapter {
       // Private records might require decrypt permission
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1430,7 +1431,7 @@ export class SoterWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -1457,7 +1458,7 @@ export class SoterWalletAdapter {
       // Private records might require decrypt permission
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1646,7 +1647,7 @@ export class ShieldWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -1693,7 +1694,7 @@ export class ShieldWalletAdapter {
       }
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -2006,6 +2007,7 @@ export class WalletManager {
         public: 10000000000n, // 10,000 credits
         private: 5000000000n,  // 5,000 credits
         usdcxPublic: 5000000000n, // 5,000 USDCX demo
+        usdcxPrivate: 1000000000n, // 1,000 USDCX private demo
       };
     }
 

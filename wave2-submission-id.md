@@ -1,79 +1,147 @@
 # Veiled Markets — Submission Wave 2
 
-## Pembaruan di Wave Ini
+## 1. Gambaran Proyek
 
+**Nama:** Veiled Markets
 **Live Demo:** https://veiledmarkets.xyz
 **Kontrak:** [`veiled_markets_v16.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_v16.aleo)
+**GitHub:** https://github.com/hevDev7/veiled-markets-near
 
-Sejak Wave 1 (v2), kami telah mengirimkan 14 iterasi kontrak dan men-deploy `veiled_markets_v16.aleo` di Aleo Testnet, menghadirkan siklus trading lengkap — beli, jual, resolusi, dispute, dan klaim — seluruhnya on-chain dengan integrasi wallet.
+### Masalah
 
-**Private Buy:** `buy_shares_private` memanggil `credits.aleo/transfer_private_to_public` secara internal. Alamat dan jumlah transaksi pengguna tidak pernah terekspos di on-chain; posisi yang dibeli dikembalikan sebagai record `OutcomeShare` terenkripsi di wallet, menjaga pilihan outcome dan jumlahnya tetap sepenuhnya privat.
+Prediction market adalah alat yang powerful untuk penemuan informasi, tetapi platform yang ada (Polymarket, Kalshi) mengekspos identitas, posisi, dan ukuran trading setiap peserta secara on-chain atau di order book publik. Ini menciptakan masalah nyata:
 
-**Sell Shares:** `sell_shares` menggunakan pendekatan `tokens_desired` — pengguna menentukan jumlah collateral yang ingin diterima, dan kontrak menghitung shares yang dibutuhkan melalui formula FPMM, menghindari komputasi `sqrt` on-chain. Collateral dikembalikan sebagai record `credits.aleo` privat melalui `transfer_public_to_private`, menyembunyikan identitas penjual dan jumlah yang diterima.
+- **Front-running & MEV:** Taruhan yang terlihat memungkinkan bot mengekstrak nilai dari pengguna biasa.
+- **Tekanan sosial:** Peserta di market yang sensitif secara politis menghadapi risiko pembalasan ketika posisi mereka terlihat publik.
+- **Sensor diri:** Pengguna menghindari market tentang topik kontroversial karena wallet mereka terhubung dengan taruhan mereka.
 
-**Penguatan Privasi:** Lima transisi tambahan ditingkatkan ke privasi penuh. `redeem_shares` dan `claim_refund` kini menggunakan `transfer_public_to_private` — identitas pemenang dan penerima refund sepenuhnya tersembunyi. `add_liquidity` dan `dispute_resolution` kini menerima record `credits.aleo` privat sebagai input melalui `transfer_private_to_public` — deposit LP dan bond dispute tidak lagi mengekspos alamat on-chain. Transisi `withdraw_lp_resolved` ditambahkan untuk menutup jalur yang hilang di mana token LP tidak memiliki rute penarikan setelah resolusi market.
+Arsitektur zero-knowledge Aleo menyelesaikan ini dengan membiarkan kontrak memverifikasi kebenaran tanpa mengungkapkan siapa yang bertaruh apa.
 
-**Dual-Token Markets:** Kreator memilih ALEO (`1u8`) atau USDCX (`2u8`) saat pembuatan market. Market ALEO sepenuhnya privat di sisi beli; market USDCX menggunakan `transfer_public_as_signer`, sehingga alamat pembeli terlihat. Biaya gas selalu dalam ALEO terlepas dari jenis token.
+### Mengapa Privasi Penting
 
-**Market Resolution:** Tab Resolve 3-langkah memandu resolver melalui Close → Resolve → Finalize dengan status TX langsung dan hitung mundur blok. Panel otomatis mendeteksi market yang kedaluwarsa tanpa resolusi dan menampilkan banner Emergency Cancel. Alur Dispute lengkap memungkinkan siapa saja menaruh bond 1 ALEO untuk menantang outcome resolusi.
+Dalam prediction market, privasi bukan kemewahan — ini prasyarat untuk partisipasi yang jujur. Ketika outcome-nya sensitif (pemilu, peristiwa korporat, ramalan geopolitik), taruhan publik menjadi sinyal yang mendistorsi hal yang ingin diukur oleh market itu sendiri. Veiled Markets memastikan jumlah transaksi, pilihan outcome, dan identitas pemenang tersembunyi melalui private record Aleo dan zero-knowledge proof, menghasilkan sinyal harga yang lebih bersih.
 
-**Klaim & Pelacakan:** Merombak `ClaimWinningsModal` dan My Bets dengan tab Unredeemed untuk penukaran saham dan klaim pengembalian dana berbasis wallet. Dashboard mendapatkan filter "Needs Resolution" dan timer hitung mundur langsung yang diperbarui setiap detik dari block height.
+### Product Market Fit & Go-To-Market
 
-**Deployment:** Live di https://veiledmarkets.xyz dengan build stabil dan header COOP/COEP untuk dukungan WASM.
+**Target pengguna:** Trader crypto-native yang sudah menggunakan prediction market tetapi menginginkan privasi posisi; peserta governance DAO yang membutuhkan signaling tanpa paksaan; analis dan peneliti yang membutuhkan estimasi probabilitas jujur dari crowd.
 
----
+**Tesis PMF:** Prediction market yang menjaga privasi adalah ceruk yang belum terlayani — tidak ada produk live yang menawarkan taruhan sepenuhnya privat dengan pricing berbasis AMM di chain ZK-native. Veiled Markets adalah prediction market FPMM pertama di Aleo.
 
-## Menanggapi Feedback Wave 1
-
-Reviewer Wave 1 (alex_aleo) mengangkat tiga masalah spesifik, yang semuanya telah diselesaikan pada wave ini:
-
-**1. Kebocoran privasi pada fungsi betting** — Reviewer mencatat bahwa `place_bet` memanggil `transfer_public_as_signer` yang mengekspos alamat dan jumlah pengguna di on-chain, dan merekomendasikan penggunaan Credits record privat dengan `transfer_private_to_public`. Hal ini telah diimplementasikan sepenuhnya: transisi `buy_shares_private` yang baru menerima record `credits.aleo` privat dari pengguna dan memanggil `transfer_private_to_public` secara internal. Alamat wallet dan jumlah transaksi pengguna kini sepenuhnya tersembunyi — hanya alamat program yang terlihat sebagai penerima di on-chain.
-
-**2. Model payout tidak mencerminkan odds saat bet dilakukan** — Model payout parimutuel yang digunakan di v2 tidak mencerminkan harga pada saat transaksi. Ini telah diganti dengan **FPMM (Fixed Product Market Maker) ala Gnosis** di v14/v16. Harga implied kini diturunkan dari cadangan pool pada saat transaksi berlangsung, dan record `OutcomeShare` menyimpan jumlah saham yang dihitung oleh formula FPMM saat eksekusi — memberikan posisi yang adil dan akurat secara harga kepada pengguna.
-
-**3. Create market stuck loading** — Guard pengiriman (`isSubmitting` state + tombol dinonaktifkan setelah klik pertama) telah ditambahkan untuk mencegah double-submission. Deployment produksi kini stabil dengan market terbuka untuk trading di https://veiledmarkets.xyz.
+**Rencana GTM:**
+- **Wave 2–4:** Bangun traksi via Aleo testnet dengan market terbuka, kumpulkan feedback dari komunitas Aleo dan juri buildathon.
+- **Wave 5–7:** Luncurkan creator tools agar siapa saja bisa deploy market. Integrasi dengan ekosistem DeFi Aleo (USDCX, USAD stablecoin). Terbitkan TypeScript SDK untuk embedding pihak ketiga.
+- **Wave 8–10:** Deployment mainnet. Bermitra dengan DAO untuk prediction market governance. Target liputan media crypto untuk peluncuran.
 
 ---
 
-*Program ini terdiri dari 10 gelombang. Milestone didistribusikan secara bertahap di seluruh gelombang yang tersisa.*
+## 2. Demo Berfungsi
 
-## Peningkatan Privasi yang Diimplementasikan
+| Komponen | Status | Link |
+|----------|--------|------|
+| Frontend | Live | https://veiledmarkets.xyz |
+| Kontrak (Testnet) | Deployed | [`veiled_markets_v16.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_v16.aleo) |
+| Integrasi Wallet | Shield Wallet (utama), Leo Wallet, Puzzle Wallet | Terhubung via adapter ProvableHQ |
 
-Semua lima upgrade privasi prioritas tinggi diimplementasikan di wave ini. Kontrak kini menggunakan `transfer_public_to_private` (program mengembalikan record credits privat ke pengguna) dan `transfer_private_to_public` (pengguna menyediakan record credits privat ke program) di seluruh transisi:
+**Fitur utama yang bisa ditest dari UI:**
+- Buat Market dengan likuiditas awal ALEO (memanggil `credits.aleo/transfer_public_as_signer`)
+- Beli Shares secara privat via `buy_shares_private` (memanggil `credits.aleo/transfer_private_to_public`)
+- Jual Shares via `sell_shares` (memanggil `credits.aleo/transfer_public_to_private`)
+- Resolusi Market (alur 3 langkah Close → Resolve → Finalize)
+- Dispute Resolution (bond 1 ALEO via private credits record)
+- Klaim Kemenangan / Klaim Refund (pembayaran privat via `transfer_public_to_private`)
+- Dukungan dual-token: ALEO dan USDCX (`test_usdcx_stablecoin.aleo`)
 
-**Prioritas 1 — `redeem_shares` → `transfer_public_to_private`** *(Dampak tertinggi — diimplementasikan)*
-Identitas pemenang adalah data paling sensitif. Payout kini dikembalikan sebagai record credits privat — tidak ada yang bisa mengetahui siapa yang mengklaim kemenangan dari market yang sudah diselesaikan.
-
-**Prioritas 2 — `sell_shares` → `transfer_public_to_private`** *(Dampak tinggi — diimplementasikan)*
-Collateral kini dikembalikan sebagai record credits privat, menyembunyikan alamat penjual dan jumlah yang diterima.
-
-**Prioritas 3 — `add_liquidity` → input credits privat** *(Dampak sedang — diimplementasikan)*
-Kini menerima record `credits.aleo` privat dan memanggil `transfer_private_to_public` secara internal — identitas LP dan jumlah deposit sepenuhnya tersembunyi.
-
-**Prioritas 4 — `claim_refund` → `transfer_public_to_private`** *(Dampak sedang — diimplementasikan)*
-Klaim refund kini mengembalikan record credits privat, memutus hubungan antara penerimaan refund dan partisipasi awal.
-
-**Prioritas 5 — `dispute_resolution` → bond credits privat** *(Dampak lebih rendah — diimplementasikan)*
-Kini menerima record `credits.aleo` privat untuk bond melalui `transfer_private_to_public` — alamat disputer tidak lagi terekspos.
-
-**Prioritas 6 — Privasi penuh USDCX** *(Butuh pembaruan stablecoin — Wave 6)*
-Market USDCX tidak bisa sepenuhnya privat sampai `test_usdcx_stablecoin.aleo` mendukung `transfer_private_to_public`. Ini memerlukan upgrade terkoordinasi pada kontrak stablecoin.
+**Integrasi Shield Wallet:** Shield Wallet terintegrasi sebagai wallet utama. Semua alur transaksi (buat market, beli shares, jual shares, resolve, dispute, klaim) bekerja melalui adapter ProvableHQ Shield dengan `executeTransaction()`. Shield menangani otorisasi signer bersarang untuk transisi anak seperti `credits.aleo/transfer_public_as_signer`. Alur koneksi wallet mendeteksi Shield secara otomatis melalui injeksi `window.shield` / `window.shieldWallet` dan terhubung dengan `DecryptPermission.AutoDecrypt` di jaringan `testnetbeta`.
 
 ---
 
-## Milestone Wave 3
+## 3. Dokumentasi Teknis
 
-Wave 3 akan menghadirkan dukungan UI penuh untuk **market multi-outcome** dengan 3 dan 4 outcome di luar biner Yes/No, termasuk alur beli/jual yang diperbarui dan tampilan breakdown pool. **Halaman analitik market** akan menampilkan tren volume, statistik partisipasi, dan grafik per market. **Halaman profil pengguna** akan menampilkan riwayat betting, pelacakan PnL, dan statistik per alamat wallet. Frontend akan diperbarui untuk mendukung input record `credits.aleo` privat pada `add_liquidity` dan `dispute_resolution`. Kami juga akan menerbitkan **dokumentasi API** dan panduan self-hosting.
+**Repository GitHub:** https://github.com/hevDev7/veiled-markets-near
 
-## Milestone Wave 4
+### Arsitektur
 
-Wave 4 akan berfokus pada kedalaman produk dan jangkauan developer. **Leaderboard** akan meranking peserta berdasarkan volume dan akurasi prediksi. **Komentar dan diskusi market** akan ditambahkan sebagai thread di halaman market. **Sistem notifikasi** akan memberi peringatan untuk resolusi, deadline, dan dispute. **Market stablecoin USDCX** akan sepenuhnya live dengan alur beli, jual, dan tukar yang lengkap. Terakhir, kami akan menerbitkan **TypeScript SDK `@veiled-markets/sdk`** untuk integrasi pihak ketiga.
+```
+┌──────────────┐     ┌───────────────────────┐     ┌──────────────────┐
+│   Frontend   │────▶│   Shield / Leo /      │────▶│   Aleo Testnet   │
+│  React/Vite  │     │   Puzzle Wallet       │     │                  │
+│  TypeScript  │     │  (adapter ProvableHQ) │     │  veiled_markets  │
+│              │     └───────────────────────┘     │  _v16.aleo       │
+│  Komponen:   │                                   │                  │
+│  - Dashboard │     ┌───────────────────────┐     │  Dependensi:     │
+│  - Market    │────▶│  Supabase (terenkripsi)│     │  - credits.aleo  │
+│  - My Bets   │     │  Sinkronisasi bet     │     │  - test_usdcx_   │
+│  - Resolve   │     └───────────────────────┘     │    stablecoin    │
+└──────────────┘                                   └──────────────────┘
+```
 
-## Milestone Wave 5–10 (Rencana Jangka Panjang)
+- **Kontrak (Leo):** 30 transisi, AMM FPMM (complete-set minting/burning), market 2–4 outcome, LP provision, mekanisme dispute, multi-sig treasury.
+- **Frontend (React/Vite/TS):** Wallet-agnostik via pola adapter. Dukungan WASM dengan header COOP/COEP untuk `@provablehq/sdk`.
+- **Storage:** Supabase dengan enkripsi AES-256-GCM di sisi client untuk sinkronisasi data bet antar perangkat. Field sensitif (outcome, amount, shares) dienkripsi dengan kunci yang diturunkan dari wallet sebelum disimpan.
 
-- **Wave 5** — UI responsif mobile, LP provision UI dengan input credits privat, dashboard creator fee, otomatisasi indexer via cron
-- **Wave 6** — Privasi USDCX penuh (butuh upgrade stablecoin), governance on-chain (tarif fee, whitelist resolver)
-- **Wave 7** — Mekanisme voting DAO, UI manajemen protocol treasury
-- **Wave 8** — Audit keamanan, optimasi biaya deploy, penyesuaian parameter fee untuk mainnet
-- **Wave 9** — Deployment Mainnet, penguatan produksi, program bug bounty
-- **Wave 10** — Peluncuran publik, integrasi ekosistem, pembuatan market terbuka untuk semua
+### Model Privasi
+
+Semua transfer nilai menggunakan sistem private record Aleo:
+
+| Operasi | Metode Privasi | Apa yang Tersembunyi |
+|---------|---------------|---------------------|
+| Beli shares | `transfer_private_to_public` (user → program) | Alamat pembeli, jumlah |
+| Jual shares | `transfer_public_to_private` (program → user) | Alamat penjual, jumlah diterima |
+| Tukar kemenangan | `transfer_public_to_private` (program → user) | Identitas pemenang, jumlah payout |
+| Klaim refund | `transfer_public_to_private` (program → user) | Penerima refund |
+| Tambah likuiditas | `transfer_private_to_public` (user → program) | Identitas LP, jumlah deposit |
+| Bond dispute | `transfer_private_to_public` (user → program) | Identitas disputer |
+
+Record `OutcomeShare` adalah record privat Aleo — hanya wallet pemilik yang bisa mendekripsi pilihan outcome dan jumlah share. Di on-chain, pengamat hanya melihat alamat program sebagai counterparty.
+
+---
+
+## 4. Catatan Perubahan (Wave 2)
+
+### Apa yang Dibangun Sejak Wave 1
+
+Sejak Wave 1 (v2), kami mengirimkan **14 iterasi kontrak** dan men-deploy `veiled_markets_v16.aleo` di Aleo Testnet, menghadirkan siklus trading lengkap:
+
+**Mesin AMM FPMM:** Mengganti model parimutuel dengan Fixed Product Market Maker ala Gnosis. Complete-set minting untuk pembelian, pendekatan `tokens_desired` untuk penjualan (menghindari `sqrt` on-chain). Mendukung market 2, 3, dan 4 outcome. Fee per-trade: 0,5% protokol + 0,5% kreator + 1% LP = 2% total.
+
+**Overhaul Privasi Penuh:** Enam transisi ditingkatkan untuk menggunakan record `credits.aleo` privat:
+- `buy_shares_private` → `transfer_private_to_public` (pembeli tersembunyi)
+- `sell_shares` → `transfer_public_to_private` (penjual tersembunyi)
+- `redeem_shares` → `transfer_public_to_private` (pemenang tersembunyi)
+- `claim_refund` → `transfer_public_to_private` (penerima tersembunyi)
+- `add_liquidity` → `transfer_private_to_public` (LP tersembunyi)
+- `dispute_resolution` → `transfer_private_to_public` (disputer tersembunyi)
+
+**Dual-Token Markets:** Dukungan ALEO (beli sepenuhnya privat) dan USDCX (`test_usdcx_stablecoin.aleo`). Tipe token diatur saat pembuatan market.
+
+**UI Resolusi Market:** Tab Resolve 3 langkah (Close → Resolve → Finalize) dengan status TX langsung, hitung mundur blok, deteksi Emergency Cancel, dan alur Dispute lengkap.
+
+**Integrasi Shield Wallet:** Shield Wallet adalah wallet utama, menangani semua alur transaksi termasuk transisi anak `credits.aleo` bersarang. Leo Wallet dan Puzzle Wallet juga didukung melalui pola adapter.
+
+**Klaim & Pelacakan:** Merombak My Bets dengan tab Unredeemed, penukaran share berbasis wallet, filter "Needs Resolution", dan timer hitung mundur langsung.
+
+### Feedback Wave 1 yang Ditindaklanjuti
+
+Reviewer (alex_aleo) mengangkat tiga masalah — semua telah diselesaikan:
+
+1. **Kebocoran privasi pada fungsi betting** — `place_bet` mengekspos alamat user via `transfer_public_as_signer`. Diperbaiki: `buy_shares_private` kini menggunakan `transfer_private_to_public` dengan credits record privat. Alamat user sepenuhnya tersembunyi.
+
+2. **Model payout tidak mencerminkan odds saat bet** — Model parimutuel diganti dengan FPMM. Harga diturunkan dari cadangan pool saat transaksi, dan record `OutcomeShare` menyimpan jumlah share yang dihitung oleh formula FPMM.
+
+3. **Create market stuck loading** — Ditambahkan guard `isSubmitting` + tombol dinonaktifkan untuk mencegah double-submission. Deployment produksi stabil.
+
+### Keterbatasan / Fitur yang Belum Selesai
+
+- **Privasi beli USDCX:** Market USDCX menggunakan `transfer_public_as_signer` (alamat pembeli terlihat). Kontrak stablecoin sebenarnya mendukung `transfer_private_to_public`, tetapi memerlukan Merkle proof freeze-list (2x tree 16-depth) yang belum diintegrasikan di kontrak kami. Direncanakan untuk Wave 5.
+- **UI multi-outcome:** Kontrak mendukung market 3 dan 4 outcome, tetapi alur beli/jual di frontend saat ini hanya merender market biner (Yes/No). UI multi-outcome direncanakan untuk Wave 3.
+- **UI LP Provision:** Transisi `add_liquidity` dan `remove_liquidity` ada di on-chain tetapi belum memiliki UI frontend. Direncanakan untuk Wave 5.
+- **Responsivitas mobile:** Frontend dioptimalkan untuk desktop. Perbaikan layout mobile direncanakan untuk Wave 5.
+- **Indexer/analytics:** Belum ada backend indexer untuk data historis market atau analytics volume. Direncanakan untuk Wave 3–4.
+
+### Target Wave Selanjutnya (Wave 3)
+
+- UI lengkap untuk market 3 dan 4 outcome (beli/jual/breakdown pool)
+- Halaman analytics market (tren volume, statistik partisipasi)
+- Halaman profil pengguna (riwayat betting, pelacakan PnL)
+- Dukungan frontend untuk input credits record privat pada `add_liquidity` dan `dispute_resolution`
+- Dokumentasi API dan panduan self-hosting

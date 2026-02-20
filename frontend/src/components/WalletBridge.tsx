@@ -140,7 +140,7 @@ export function WalletBridge() {
           connecting: false,
           address: null,
           network: 'testnet',
-          balance: { public: 0n, private: 0n, usdcxPublic: 0n },
+          balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n },
           walletType: null,
           isDemoMode: false,
           encryptionKey: null,

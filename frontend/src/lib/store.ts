@@ -162,7 +162,7 @@ const initialWalletState: WalletState = {
   connecting: false,
   address: null,
   network: 'testnet',
-  balance: { public: 0n, private: 0n, usdcxPublic: 0n },
+  balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n },
   walletType: null,
   isDemoMode: false,
   encryptionKey: null,
@@ -542,12 +542,133 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         // USDCX balance is non-critical
       }
 
-      const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic }
+      // Fetch USDCX private balance from Token records (non-blocking)
+      // USDCX Token record has `amount` field (u128), not `microcredits`
+      let usdcxPrivate = 0n
+      const usdcxProgramId = config.usdcxProgramId || 'test_usdcx_stablecoin.aleo'
+
+      // Helper: parse USDCX amount from record (looks for `amount` field)
+      const parseUsdcxAmount = (text: string): bigint => {
+        const patterns = [
+          /amount["\s:]+(\d+)u128/,
+          /amount["\s:]+(\d+)u64/,
+          /amount["\s:]+(\d+)/,
+          /"amount"\s*:\s*"?(\d+)/,
+        ]
+        for (const pattern of patterns) {
+          const match = text.match(pattern)
+          if (match) return BigInt(match[1])
+        }
+        return 0n
+      }
+
+      // Helper: sum USDCX Token records
+      const sumUsdcxRecords = (records: any, label: string): bigint => {
+        const arr = Array.isArray(records) ? records : (records?.records || [])
+        if (arr.length === 0) return 0n
+        let sum = 0n
+        devLog(`[Balance] ${label}: ${arr.length} USDCX records`)
+        for (const r of arr) {
+          if (isRecordSpent(r)) continue
+          if (r && typeof r === 'object') {
+            const amt = r.amount ?? r.data?.amount
+            if (amt !== undefined) {
+              const cleaned = String(amt).replace(/[ui]\d+\.?\w*$/i, '').trim()
+              const digits = cleaned.replace(/[^\d]/g, '')
+              if (digits) { sum += BigInt(digits); continue }
+            }
+          }
+          const text = typeof r === 'string' ? r
+            : (r?.plaintext || r?.data || r?.record || r?.content || JSON.stringify(r))
+          sum += parseUsdcxAmount(String(text))
+        }
+        return sum
+      }
+
+      // USDCX Method 1: adapter requestRecords
+      if (usdcxPrivate === 0n && (window as any).__aleoRequestRecords) {
+        try {
+          devLog('[Balance] USDCX M1: adapter requestRecords...')
+          const records = await (window as any).__aleoRequestRecords(usdcxProgramId, true)
+          usdcxPrivate = sumUsdcxRecords(records, 'USDCX-M1')
+        } catch {
+          devLog('[Balance] USDCX M1 failed')
+        }
+      }
+
+      // USDCX Method 2: Direct wallet window object
+      if (usdcxPrivate === 0n) {
+        const walletObjs: Array<{ name: string; obj: any }> = []
+        const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
+        const leoObj = (window as any).leoWallet || (window as any).leo
+        const foxObj = (window as any).foxwallet?.aleo
+
+        if (connectedType === 'shield' && shieldObj) walletObjs.push({ name: 'Shield', obj: shieldObj })
+        else if (connectedType === 'leo' && leoObj) walletObjs.push({ name: 'Leo', obj: leoObj })
+        else if (connectedType === 'fox' && foxObj) walletObjs.push({ name: 'Fox', obj: foxObj })
+
+        for (const { name: wName, obj: wObj } of walletObjs) {
+          if (usdcxPrivate > 0n) break
+
+          // 2a: requestRecordPlaintexts
+          if (typeof wObj.requestRecordPlaintexts === 'function') {
+            try {
+              devLog(`[Balance] USDCX M2a: ${wName} requestRecordPlaintexts(${usdcxProgramId})...`)
+              const result = await wObj.requestRecordPlaintexts(usdcxProgramId)
+              usdcxPrivate = sumUsdcxRecords(result, `USDCX-M2a-${wName}`)
+            } catch (err) {
+              devLog(`[Balance] USDCX M2a ${wName} failed:`, err)
+            }
+          }
+
+          // 2b: requestRecords
+          if (usdcxPrivate === 0n && typeof wObj.requestRecords === 'function') {
+            try {
+              devLog(`[Balance] USDCX M2b: ${wName} requestRecords(${usdcxProgramId})...`)
+              const result = await wObj.requestRecords(usdcxProgramId)
+              usdcxPrivate = sumUsdcxRecords(result, `USDCX-M2b-${wName}`)
+            } catch (err) {
+              devLog(`[Balance] USDCX M2b ${wName} failed:`, err)
+            }
+          }
+
+          // 2c: getRecords (some wallets)
+          if (usdcxPrivate === 0n && typeof wObj.getRecords === 'function') {
+            try {
+              devLog(`[Balance] USDCX M2c: ${wName} getRecords(${usdcxProgramId})...`)
+              const result = await wObj.getRecords(usdcxProgramId)
+              usdcxPrivate = sumUsdcxRecords(result, `USDCX-M2c-${wName}`)
+            } catch (err) {
+              devLog(`[Balance] USDCX M2c ${wName} failed:`, err)
+            }
+          }
+        }
+      }
+
+      // USDCX Method 3: walletManager.getRecords fallback
+      if (usdcxPrivate === 0n) {
+        try {
+          devLog('[Balance] USDCX M3: walletManager.getRecords...')
+          const records = await walletManager.getRecords(usdcxProgramId)
+          usdcxPrivate = sumUsdcxRecords(records, 'USDCX-M3')
+        } catch {
+          // Non-critical
+        }
+      }
+
+      if (usdcxPrivate > 0n) {
+        devLog(`[Balance] USDCX private total: ${Number(usdcxPrivate) / 1_000_000} USDCX`)
+      } else {
+        devLog('[Balance] USDCX private: 0 (no Token records found or wallet does not support custom program records)')
+      }
+
+      const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic, usdcxPrivate }
 
       devLog('[Balance] Final:', {
         public: `${Number(publicBalance) / 1_000_000} ALEO`,
         private: `${Number(privateBalance) / 1_000_000} ALEO`,
         usdcxPublic: `${Number(usdcxPublic) / 1_000_000} USDCX`,
+        usdcxPrivate: `${Number(usdcxPrivate) / 1_000_000} USDCX`,
       })
 
       set({
