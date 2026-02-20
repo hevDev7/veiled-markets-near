@@ -55,7 +55,6 @@ import {
 } from '@/lib/amm'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
-import { OddsChart } from '@/components/OddsChart'
 import { OutcomeSelector } from '@/components/OutcomeSelector'
 import { ProbabilityDonut } from '@/components/ProbabilityDonut'
 import { LiquidityPanel } from '@/components/LiquidityPanel'
@@ -751,11 +750,15 @@ export function MarketDetail() {
               >
                 <h2 className="text-lg font-semibold text-white mb-4">Market Sentiment</h2>
 
-                {/* Donut chart for probability visualization */}
+                {/* Donut chart + pool data visualization */}
                 <ProbabilityDonut
                   numOutcomes={numOutcomes}
                   outcomeLabels={outcomeLabels}
                   prices={prices}
+                  reserves={[market.yesReserve, market.noReserve, market.reserve3, market.reserve4].slice(0, market.numOutcomes)}
+                  totalVolume={market.totalVolume}
+                  totalBets={market.totalBets}
+                  tokenSymbol={market.tokenType || 'ALEO'}
                   className="mb-6"
                 />
 
@@ -772,23 +775,6 @@ export function MarketDetail() {
                 />
               </motion.div>
 
-              {/* Odds History Chart */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
-                className="glass-card p-6"
-              >
-                <OddsChart
-                  numOutcomes={market.numOutcomes}
-                  outcomeLabels={outcomeLabels}
-                  reserves={[market.yesReserve, market.noReserve, market.reserve3, market.reserve4].slice(0, market.numOutcomes)}
-                  prices={prices}
-                  totalVolume={market.totalVolume}
-                  totalBets={market.totalBets}
-                  tokenSymbol={market.tokenType || 'ALEO'}
-                />
-              </motion.div>
 
               {/* Tab panels: Liquidity, Dispute, Creator Fees */}
               <motion.div
