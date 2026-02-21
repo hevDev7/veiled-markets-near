@@ -7,7 +7,6 @@ import {
   AlertCircle,
   Clock,
   ArrowRight,
-  ShieldAlert,
 } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
@@ -17,7 +16,6 @@ import {
   buildCloseMarketInputs,
   buildResolveMarketInputs,
   buildFinalizeResolutionInputs,
-  buildEmergencyCancelInputs,
   getCurrentBlockHeight,
   MARKET_STATUS,
   type MarketResolutionData,
@@ -165,31 +163,6 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     }
   }
 
-  const handleEmergencyCancel = async () => {
-    setIsSubmitting(true)
-    setError(null)
-    try {
-      const inputs = buildEmergencyCancelInputs(market.id)
-      const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
-        function: 'cancel_market',
-        inputs,
-        fee: 0.5,
-      })
-      if (result?.transactionId) {
-        setTransactionId(result.transactionId)
-        onResolutionChange?.()
-      } else {
-        throw new Error('No transaction ID returned from wallet')
-      }
-    } catch (err: unknown) {
-      console.error('Emergency cancel failed:', err)
-      setError(err instanceof Error ? err.message : 'Failed to emergency cancel')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
   const resetState = () => {
     setTransactionId(null)
     setError(null)
@@ -318,41 +291,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
           </div>
         ) : (
           <>
-            {/* Emergency Cancel Banner — shown when past resolution deadline */}
-            {isPastResolutionDeadline && (
-              <div className="mb-4 p-4 rounded-xl bg-no-500/10 border border-no-500/20 space-y-3">
-                <div className="flex items-start gap-3">
-                  <ShieldAlert className="w-5 h-5 text-no-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-no-400">Resolution Deadline Passed</p>
-                    <p className="text-xs text-surface-400 mt-1">
-                      This market has passed its resolution deadline (block {market.resolutionDeadline.toString()}).
-                      {currentStep === 'resolve'
-                        ? ' The resolver can no longer submit a resolution.'
-                        : ''}
-                      {' '}Anyone can emergency cancel this market to allow bettors to claim refunds.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={handleEmergencyCancel}
-                  disabled={isSubmitting}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-no-500/20 hover:bg-no-500/30 border border-no-500/30 text-no-400 font-medium text-sm transition-colors"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Confirm in Wallet...</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShieldAlert className="w-4 h-4" />
-                      <span>Emergency Cancel Market</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
+            {/* Emergency Cancel Banner — hidden from public UI (admin-only via CLI) */}
 
             {/* Step 1: Close Market */}
             {currentStep === 'close' && (

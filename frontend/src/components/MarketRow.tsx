@@ -14,6 +14,7 @@ interface MarketRowProps {
 export function MarketRow({ market, index, onClick }: MarketRowProps) {
     const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
+    const statusInfo = getMarketStatusInfo(market.status, isExpired)
 
     return (
         <motion.div
@@ -43,8 +44,11 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                                 <span className="text-xs text-brand-400 font-mono">PRIVATE</span>
                             </div>
                             {isExpired && (
-                                <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-no-500/20 text-no-400 border border-no-500/30">
-                                    EXPIRED
+                                <span className={cn(
+                                    "px-2 py-0.5 text-[10px] font-mono font-bold rounded border",
+                                    statusInfo.badgeClass
+                                )}>
+                                    {statusInfo.label}
                                 </span>
                             )}
                         </div>
@@ -181,6 +185,24 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
             </div>
         </motion.div>
     )
+}
+
+/** Get status badge info based on on-chain market status */
+function getMarketStatusInfo(status: number, isExpired: boolean): { label: string; badgeClass: string } {
+    switch (status) {
+        case 3: // RESOLVED
+            return { label: 'RESOLVED', badgeClass: 'bg-brand-500/20 text-brand-400 border-brand-500/30' }
+        case 4: // CANCELLED
+            return { label: 'CANCELLED', badgeClass: 'bg-no-500/20 text-no-400 border-no-500/30' }
+        case 2: // CLOSED
+            return { label: 'CLOSED', badgeClass: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' }
+        case 5: // PENDING RESOLUTION
+            return { label: 'PENDING', badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/30' }
+        default:
+            return isExpired
+                ? { label: 'ENDED', badgeClass: 'bg-no-500/20 text-no-400 border-no-500/30' }
+                : { label: 'ACTIVE', badgeClass: 'bg-yes-500/20 text-yes-400 border-yes-500/30' }
+    }
 }
 
 /** Live countdown hook — updates every second when deadlineTimestamp is available */

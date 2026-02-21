@@ -52,7 +52,7 @@ export function Dashboard() {
     const navigate = useNavigate()
     const { wallet } = useWalletStore()
     const { markets, isLoading, isRefreshing, fetchMarkets, addMarket } = useRealMarketsStore()
-    const { userBets, pendingBets, fetchUserBets } = useBetsStore()
+    const { userBets, pendingBets, fetchUserBets, syncBetStatuses } = useBetsStore()
 
     const [selectedCategory, setSelectedCategory] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
@@ -70,6 +70,7 @@ export function Dashboard() {
     useEffect(() => {
         fetchMarkets()
         fetchUserBets() // Fetch user's bet records
+        syncBetStatuses() // Promote stale pending bets → user_bets (and sync to Supabase)
 
         // Check for pending markets and update banner
         setPendingInfo(getPendingMarketsInfo())
@@ -106,11 +107,15 @@ export function Dashboard() {
         // Refresh markets every 30 seconds
         const refreshInterval = setInterval(fetchMarkets, 30000)
 
+        // Sync bet statuses every 60 seconds (promote pending → active → Supabase)
+        const syncInterval = setInterval(syncBetStatuses, 60_000)
+
         return () => {
             clearInterval(pendingInterval)
             clearInterval(refreshInterval)
+            clearInterval(syncInterval)
         }
-    }, [fetchMarkets, fetchUserBets, addMarket])
+    }, [fetchMarkets, fetchUserBets, addMarket, syncBetStatuses])
 
     const filteredMarkets = markets
         .filter(market => {

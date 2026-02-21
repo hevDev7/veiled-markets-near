@@ -197,9 +197,9 @@ export async function upsertBets(bets: Bet[], address: string, encryptionKey: Cr
     const { error } = await supabase
       .from('user_bets')
       .upsert(rows, { onConflict: 'id,address' })
-    if (error) devWarn('[Supabase] upsertBets error:', error.message)
+    if (error) console.error('[Supabase] upsertBets error:', error.message, error.details, error.hint)
   } catch (e) {
-    devWarn('[Supabase] upsertBets exception:', e)
+    console.error('[Supabase] upsertBets exception:', e)
   }
 }
 
