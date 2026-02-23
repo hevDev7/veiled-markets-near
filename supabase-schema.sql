@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS market_registry (
 -- ALTER TABLE market_registry ADD COLUMN IF NOT EXISTS ipfs_cid TEXT;
 -- ALTER TABLE market_registry ADD COLUMN IF NOT EXISTS outcome_labels TEXT;
 
+-- IMPORTANT: Drop the outcome check constraint if it exists.
+-- The outcome field stores ENCRYPTED values (AES-256-GCM ciphertext),
+-- so any CHECK constraint on plain-text values will fail.
+-- Run this in Supabase SQL Editor:
+-- ALTER TABLE user_bets DROP CONSTRAINT IF EXISTS user_bets_outcome_check;
+-- ALTER TABLE pending_bets DROP CONSTRAINT IF EXISTS pending_bets_outcome_check;
+
 -- ============================================================================
 -- Row Level Security (RLS) — Optional but recommended
 -- ============================================================================

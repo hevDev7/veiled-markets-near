@@ -199,7 +199,14 @@ export async function upsertBets(bets: Bet[], address: string, encryptionKey: Cr
     const { error } = await supabase
       .from('user_bets')
       .upsert(rows, { onConflict: 'id,address' })
-    if (error) console.error('[Supabase] upsertBets error:', error.message, error.details, error.hint)
+    if (error) {
+      // Constraint violations (e.g. outcome_check) are non-critical — log once quietly
+      if (error.message?.includes('check constraint')) {
+        devWarn('[Supabase] upsertBets constraint violation (run migration to fix):', error.message)
+      } else {
+        console.error('[Supabase] upsertBets error:', error.message, error.details, error.hint)
+      }
+    }
   } catch (e) {
     console.error('[Supabase] upsertBets exception:', e)
   }

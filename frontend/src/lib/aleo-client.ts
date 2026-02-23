@@ -563,12 +563,15 @@ function extractFinalizeArguments(value: string): string[] {
 /**
  * Parse Aleo struct value from API response
  */
-function parseAleoStruct(value: string): Record<string, string> {
+function parseAleoStruct(value: string | any): Record<string, string> {
   if (!value) return {};
+
+  // Ensure we have a string (API can return non-string via JSON.parse)
+  const strValue = typeof value === 'string' ? value : String(value);
 
   // Value is already a clean string with actual newlines (not \n)
   // Remove outer braces
-  const inner = value.replace(/^\{|\}$/g, '').trim();
+  const inner = strValue.replace(/^\{|\}$/g, '').trim();
   const result: Record<string, string> = {};
 
   // Split by actual newlines
@@ -594,10 +597,13 @@ function parseAleoStruct(value: string): Record<string, string> {
 /**
  * Parse Aleo value (remove type suffix)
  */
-function parseAleoValue(value: string): string | number | bigint | boolean {
-  if (!value) return value;
+function parseAleoValue(value: string | number | boolean | null | undefined): string | number | bigint | boolean {
+  if (value === null || value === undefined) return value as any;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
 
-  const trimmed = value.trim().replace(/"/g, '');
+  // Ensure we have a string (API can return non-string via JSON.parse)
+  const strValue = typeof value === 'string' ? value : String(value);
+  const trimmed = strValue.trim().replace(/"/g, '');
 
   // Handle field type
   if (trimmed.endsWith('field')) {
@@ -676,18 +682,26 @@ export async function getMappingValue<T>(
     // Parse the JSON string first (API returns JSON-encoded string)
     const cleanData = JSON.parse(data);
 
+    // API returns null for non-existent keys
+    if (cleanData === null || cleanData === undefined) return null;
+
     let result: T;
     // If it's a struct (starts with {), parse it
     if (typeof cleanData === 'string' && cleanData.trim().startsWith('{')) {
       result = parseAleoStruct(cleanData) as T;
     } else {
-      // Otherwise parse as simple value
+      // Otherwise parse as simple value (coerce non-strings safely)
       result = parseAleoValue(cleanData) as T;
     }
 
     setCachedMapping(cacheKey, result);
     return result;
   } catch (error) {
+    // Suppress AbortError (timeout) noise — these are expected on slow testnet API
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      devWarn(`Timeout fetching mapping ${mappingName}[${key}]`);
+      return null;
+    }
     console.error(`Failed to fetch mapping ${mappingName}[${key}]:`, error);
     return null;
   }
