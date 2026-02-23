@@ -48,6 +48,10 @@ export interface AppConfig {
   showTestnetBanner: boolean;
   debug: boolean;
 
+  // IPFS / Pinata
+  pinataJwt: string | null;
+  pinataGateway: string;
+
   // App
   appName: string;
   appDescription: string;
@@ -120,6 +124,10 @@ function loadConfig(): AppConfig {
     enableBetting: getEnvBool('VITE_ENABLE_BETTING', true),
     showTestnetBanner: getEnvBool('VITE_SHOW_TESTNET_BANNER', true),
     debug: getEnvBool('VITE_DEBUG', false),
+
+    // IPFS / Pinata
+    pinataJwt: getEnv('VITE_PINATA_JWT') || null,
+    pinataGateway: getEnv('VITE_PINATA_GATEWAY', 'https://gateway.pinata.cloud'),
 
     // App
     appName: getEnv('VITE_APP_NAME', 'Veiled Markets'),

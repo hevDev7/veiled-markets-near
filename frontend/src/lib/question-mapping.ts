@@ -1,9 +1,10 @@
 import { devLog } from './logger'
 // ============================================================================
-// QUESTION HASH TO TEXT MAPPING
+// QUESTION HASH TO TEXT MAPPING (DEPRECATED)
 // ============================================================================
-// Maps on-chain question hashes to human-readable questions
-// This is needed because blockchain only stores hashes, not full text
+// DEPRECATED: New markets use IPFS (Pinata) for metadata storage.
+// This file is only kept for legacy markets that predate IPFS integration.
+// Do NOT add new entries here — they are stored via IPFS + Supabase automatically.
 // ============================================================================
 
 /**
@@ -62,6 +63,11 @@ export function initializeQuestionMappings(): void {
             'v13 Test Market #3 (10 ALEO)',
         '203062924841093475657167492352758050834126761259472774201227535115909615529field':
             'v13 Test Market #4 (4 ALEO)',
+        // v16 Markets
+        '165883322325996755783327542868659318920617125945968052068595979002561098149field':
+            'v16 Market #1 (Crypto)',
+        '254245454576077222504075846193933517141788713965373809753159770242046615943field':
+            'v16 Market #2 (Crypto)',
     };
 
     // Store in localStorage

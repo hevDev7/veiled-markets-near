@@ -26,6 +26,8 @@ export interface MarketRegistryEntry {
   creator_address: string
   transaction_id?: string
   created_at: number  // epoch ms
+  ipfs_cid?: string
+  outcome_labels?: string  // JSON-encoded string[]
 }
 
 // Initialize Supabase client (null if env vars not configured)

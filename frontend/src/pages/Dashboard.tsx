@@ -29,7 +29,7 @@ import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
 import { cn, formatCredits } from '@/lib/utils'
-import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets } from '@/lib/aleo-client'
+import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
 
 const categories = [
@@ -58,7 +58,7 @@ export function Dashboard() {
     const [searchQuery, setSearchQuery] = useState('')
     const [sortBy, setSortBy] = useState('volume')
     const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false)
-    const [pendingInfo, setPendingInfo] = useState<{ count: number; questions: string[] }>({ count: 0, questions: [] })
+    const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
 
     useEffect(() => {
@@ -79,7 +79,7 @@ export function Dashboard() {
         const tryResolvePending = () => {
             // Only run if there are pending markets
             if (!hasPendingMarkets()) {
-                setPendingInfo({ count: 0, questions: [] })
+                setPendingInfo({ count: 0, questions: [], statuses: [], retryCounts: [] })
                 return
             }
 
@@ -332,48 +332,71 @@ export function Dashboard() {
                         {/* Right Content - Markets */}
                         <div className="space-y-4">
                             {/* Pending Markets Banner */}
-                            {pendingInfo.count > 0 && (
+                            {pendingInfo.count > 0 && (() => {
+                                const allFailed = pendingInfo.statuses.every(s => s === 'likely_failed')
+                                const borderColor = allFailed ? 'border-red-500/20' : 'border-yellow-500/20'
+                                const bgColor = allFailed ? 'bg-red-500/10' : 'bg-yellow-500/10'
+
+                                return (
                                 <motion.div
                                     initial={{ opacity: 0, y: -10 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4"
+                                    className={`${bgColor} border ${borderColor} rounded-xl p-4`}
                                 >
                                     <div className="flex items-start gap-3">
                                         <div className="mt-0.5">
-                                            {isResolvingPending ? (
+                                            {allFailed ? (
+                                                <Activity className="w-5 h-5 text-red-400" />
+                                            ) : isResolvingPending ? (
                                                 <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
                                             ) : (
                                                 <Clock className="w-5 h-5 text-yellow-400" />
                                             )}
                                         </div>
                                         <div className="flex-1">
-                                            <p className="text-sm font-medium text-yellow-300 font-mono">
-                                                {pendingInfo.count} PENDING MARKET{pendingInfo.count > 1 ? 'S' : ''} AWAITING CONFIRMATION
+                                            <p className={`text-sm font-medium font-mono ${allFailed ? 'text-red-300' : 'text-yellow-300'}`}>
+                                                {allFailed
+                                                    ? `${pendingInfo.count} MARKET${pendingInfo.count > 1 ? 'S' : ''} LIKELY FAILED`
+                                                    : `${pendingInfo.count} PENDING MARKET${pendingInfo.count > 1 ? 'S' : ''} AWAITING CONFIRMATION`}
                                             </p>
                                             <p className="text-xs text-surface-400 mt-1">
-                                                {isResolvingPending
-                                                    ? 'Scanning blockchain for your market...'
-                                                    : 'Your market was submitted but hasn\'t been found on-chain yet. Auto-retrying every 60 seconds.'}
+                                                {allFailed
+                                                    ? 'Transaction was likely rejected on-chain. You can dismiss this or check your wallet.'
+                                                    : isResolvingPending
+                                                        ? 'Scanning blockchain for your market...'
+                                                        : 'Your market was submitted but hasn\'t been found on-chain yet. Auto-retrying every 60 seconds.'}
                                             </p>
-                                            {pendingInfo.questions.map((q, i) => (
-                                                <p key={i} className="text-xs text-yellow-400/70 mt-1 font-mono truncate">
-                                                    &gt; {q}
-                                                </p>
-                                            ))}
+                                            {pendingInfo.questions.map((q, i) => {
+                                                const status = pendingInfo.statuses[i] || 'pending'
+                                                const retries = pendingInfo.retryCounts[i] || 0
+                                                return (
+                                                    <div key={i} className="flex items-center gap-2 mt-1">
+                                                        <p className={`text-xs font-mono truncate flex-1 ${status === 'likely_failed' ? 'text-red-400/70' : 'text-yellow-400/70'}`}>
+                                                            &gt; {q}
+                                                        </p>
+                                                        {status === 'likely_failed' ? (
+                                                            <span className="text-[10px] font-mono text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded shrink-0">FAILED</span>
+                                                        ) : retries > 0 ? (
+                                                            <span className="text-[10px] font-mono text-surface-500 shrink-0">#{retries}</span>
+                                                        ) : null}
+                                                    </div>
+                                                )
+                                            })}
                                         </div>
                                         <button
                                             onClick={() => {
                                                 clearPendingMarkets()
-                                                setPendingInfo({ count: 0, questions: [] })
+                                                setPendingInfo({ count: 0, questions: [], statuses: [], retryCounts: [] })
                                             }}
-                                            className="text-yellow-400/50 hover:text-yellow-400 text-xs font-mono px-2 py-1 rounded border border-yellow-500/20 hover:border-yellow-500/40 transition-all"
+                                            className={`${allFailed ? 'text-red-400/50 hover:text-red-400 border-red-500/20 hover:border-red-500/40' : 'text-yellow-400/50 hover:text-yellow-400 border-yellow-500/20 hover:border-yellow-500/40'} text-xs font-mono px-2 py-1 rounded border transition-all`}
                                             title="Dismiss pending markets"
                                         >
                                             DISMISS
                                         </button>
                                     </div>
                                 </motion.div>
-                            )}
+                                )
+                            })()}
 
                             {/* Search Bar */}
                             <motion.div

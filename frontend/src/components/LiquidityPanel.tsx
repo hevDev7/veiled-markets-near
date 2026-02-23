@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildAddLiquidityInputs, buildRemoveLiquidityInputs } from '@/lib/aleo-client'
+import { buildAddLiquidityInputs, buildRemoveLiquidityInputs, buildWithdrawLpResolvedInputs, buildClaimLpRefundInputs, MARKET_STATUS } from '@/lib/aleo-client'
 import { calculateLPSharesOut, calculateLPTokensOut } from '@/lib/amm'
 import { TransactionLink } from './TransactionLink'
 
@@ -12,13 +12,19 @@ interface LiquidityPanelProps {
   market: Market
 }
 
-type LiquidityTab = 'add' | 'remove'
+type LiquidityTab = 'add' | 'remove' | 'withdraw'
 
 export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const { wallet } = useWalletStore()
   const { executeTransaction } = useAleoTransaction()
 
-  const [activeTab, setActiveTab] = useState<LiquidityTab>('add')
+  const isResolved = market.status === MARKET_STATUS.RESOLVED
+  const isCancelled = market.status === MARKET_STATUS.CANCELLED
+  const isMarketEnded = market.status !== MARKET_STATUS.ACTIVE
+
+  const [activeTab, setActiveTab] = useState<LiquidityTab>(
+    isResolved || isCancelled ? 'withdraw' : 'add'
+  )
   const [amount, setAmount] = useState('')
   const [lpSharesInput, setLpSharesInput] = useState('')
   const [lpTokenRecord, setLpTokenRecord] = useState('')
@@ -31,6 +37,11 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   // Total liquidity and LP shares from on-chain pool data
   const totalLiquidity = market.totalLiquidity ?? (market.yesReserve + market.noReserve)
   const totalLPShares = market.totalLPShares ?? totalLiquidity
+
+  // For resolved/cancelled markets, show actual remaining collateral (after winner claims)
+  const displayLiquidity = (isResolved || isCancelled) && market.remainingCredits !== undefined
+    ? market.remainingCredits
+    : totalLiquidity
 
   const amountMicro = amount
     ? BigInt(Math.floor(parseFloat(amount) * 1_000_000))
@@ -122,6 +133,41 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     }
   }
 
+  const handleWithdrawLpResolved = async () => {
+    if (!lpTokenRecord) return
+
+    setIsSubmitting(true)
+    setError(null)
+
+    try {
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      const builder = isCancelled ? buildClaimLpRefundInputs : buildWithdrawLpResolvedInputs
+      const { functionName, inputs } = builder(
+        lpTokenRecord,
+        0n, // min_tokens_out — 0 = accept any
+        tokenType,
+      )
+
+      const result = await executeTransaction({
+        program: CONTRACT_INFO.programId,
+        function: functionName,
+        inputs,
+        fee: 0.5,
+      })
+
+      if (result?.transactionId) {
+        setTransactionId(result.transactionId)
+      } else {
+        throw new Error('No transaction ID returned from wallet')
+      }
+    } catch (err: unknown) {
+      console.error('Failed to withdraw LP:', err)
+      setError(err instanceof Error ? err.message : 'Failed to withdraw LP')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const resetState = () => {
     setAmount('')
     setLpSharesInput('')
@@ -135,8 +181,6 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     resetState()
   }
 
-  const isMarketActive = market.status === 1
-
   return (
     <div className="glass-card overflow-hidden">
       {/* Header */}
@@ -148,37 +192,49 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
           <div>
             <h3 className="text-lg font-semibold text-white">Liquidity</h3>
             <p className="text-sm text-surface-400">
-              Pool: {formatCredits(totalLiquidity)} {tokenSymbol}
+              {(isResolved || isCancelled) ? 'Remaining' : 'Pool'}: {formatCredits(displayLiquidity)} {tokenSymbol}
             </p>
           </div>
         </div>
 
         {/* Tabs */}
         <div className="flex bg-surface-800/50 rounded-xl p-1">
-          <button
-            onClick={() => handleTabChange('add')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
-              activeTab === 'add'
-                ? 'bg-brand-500/20 text-brand-400'
-                : 'text-surface-400 hover:text-surface-300'
-            )}
-          >
-            <Plus className="w-4 h-4" />
-            Add
-          </button>
-          <button
-            onClick={() => handleTabChange('remove')}
-            className={cn(
-              'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
-              activeTab === 'remove'
-                ? 'bg-brand-500/20 text-brand-400'
-                : 'text-surface-400 hover:text-surface-300'
-            )}
-          >
-            <Minus className="w-4 h-4" />
-            Remove
-          </button>
+          {(isResolved || isCancelled) ? (
+            <button
+              onClick={() => handleTabChange('withdraw')}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium bg-brand-500/20 text-brand-400"
+            >
+              <Minus className="w-4 h-4" />
+              Withdraw LP
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => handleTabChange('add')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
+                  activeTab === 'add'
+                    ? 'bg-brand-500/20 text-brand-400'
+                    : 'text-surface-400 hover:text-surface-300'
+                )}
+              >
+                <Plus className="w-4 h-4" />
+                Add
+              </button>
+              <button
+                onClick={() => handleTabChange('remove')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium transition-all',
+                  activeTab === 'remove'
+                    ? 'bg-brand-500/20 text-brand-400'
+                    : 'text-surface-400 hover:text-surface-300'
+                )}
+              >
+                <Minus className="w-4 h-4" />
+                Remove
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -194,7 +250,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
               <Check className="w-8 h-8 text-yes-400" />
             </div>
             <h4 className="text-lg font-semibold text-white mb-2">
-              {activeTab === 'add' ? 'Liquidity Added' : 'Liquidity Removed'}
+              {activeTab === 'add' ? 'Liquidity Added' : activeTab === 'withdraw' ? 'LP Withdrawn' : 'Liquidity Removed'}
             </h4>
             <TransactionLink
               transactionId={transactionId}
@@ -211,18 +267,57 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
           </motion.div>
         ) : (
           <>
-            {!isMarketActive && (
-              <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-4">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
-                  <p className="text-sm text-yellow-400">
-                    This market is no longer active. Liquidity modifications may be limited.
+            {activeTab === 'withdraw' ? (
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-2">
+                  <div className="flex items-center gap-2">
+                    <Droplets className="w-5 h-5 text-brand-400 flex-shrink-0" />
+                    <p className="text-sm text-brand-400">
+                      {isCancelled
+                        ? 'This market was cancelled. Claim your LP tokens back.'
+                        : 'This market has been resolved. Withdraw your LP share.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* LP Token Record */}
+                <div>
+                  <label className="block text-sm text-surface-400 mb-2">
+                    LP Token Record
+                  </label>
+                  <textarea
+                    value={lpTokenRecord}
+                    onChange={(e) => setLpTokenRecord(e.target.value)}
+                    placeholder="Paste your LPToken record here..."
+                    className="input-field w-full h-24 resize-none text-sm font-mono"
+                  />
+                  <p className="text-xs text-surface-500 mt-1">
+                    Find your LPToken record in your wallet's records section.
                   </p>
                 </div>
-              </div>
-            )}
 
-            {activeTab === 'add' ? (
+                <button
+                  onClick={handleWithdrawLpResolved}
+                  disabled={!lpTokenRecord || isSubmitting}
+                  className={cn(
+                    'w-full flex items-center justify-center gap-2 btn-primary',
+                    !lpTokenRecord && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Confirm in Wallet...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Minus className="w-5 h-5" />
+                      <span>{isCancelled ? 'Claim LP Refund' : 'Withdraw LP'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : activeTab === 'add' ? (
               <div className="space-y-4">
                 {/* Amount Input */}
                 <div>
@@ -295,10 +390,10 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
                 <button
                   onClick={handleAddLiquidity}
-                  disabled={!amount || parseFloat(amount) <= 0 || isSubmitting || !isMarketActive}
+                  disabled={!amount || parseFloat(amount) <= 0 || isSubmitting || !!isMarketEnded}
                   className={cn(
                     'w-full flex items-center justify-center gap-2 btn-primary',
-                    (!amount || parseFloat(amount) <= 0 || !isMarketActive) && 'opacity-50 cursor-not-allowed'
+                    (!amount || parseFloat(amount) <= 0 || !!isMarketEnded) && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   {isSubmitting ? (

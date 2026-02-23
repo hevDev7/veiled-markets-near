@@ -80,8 +80,14 @@ CREATE TABLE IF NOT EXISTS market_registry (
   category INTEGER,
   creator_address TEXT,
   transaction_id TEXT,
-  created_at BIGINT
+  created_at BIGINT,
+  ipfs_cid TEXT,
+  outcome_labels TEXT
 );
+
+-- Migration for existing tables (run if table already exists)
+-- ALTER TABLE market_registry ADD COLUMN IF NOT EXISTS ipfs_cid TEXT;
+-- ALTER TABLE market_registry ADD COLUMN IF NOT EXISTS outcome_labels TEXT;
 
 -- ============================================================================
 -- Row Level Security (RLS) — Optional but recommended

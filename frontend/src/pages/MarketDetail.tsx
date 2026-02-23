@@ -622,6 +622,7 @@ export function MarketDetail() {
   const showDispute = market.status === MARKET_STATUS.PENDING_RESOLUTION && resolution
   const showCreatorFees = market.status === MARKET_STATUS.RESOLVED && fees && wallet.address === market.creator
   const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired
+  const showLiquidity = canTrade || market.status === MARKET_STATUS.RESOLVED || market.status === MARKET_STATUS.CANCELLED
 
   // Re-fetch market + resolution data after a resolution action
   const refreshExtras = async () => {
@@ -718,10 +719,15 @@ export function MarketDetail() {
                   <div className="p-4 rounded-xl bg-surface-800/30">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
                       <Droplets className="w-4 h-4" />
-                      <span>Liquidity</span>
+                      <span>{(market.status === MARKET_STATUS.RESOLVED || market.status === MARKET_STATUS.CANCELLED) ? 'Remaining' : 'Liquidity'}</span>
                     </div>
                     <p className="text-lg font-bold text-white">
-                      {formatCredits(market.totalLiquidity ?? 0n)} {tokenSymbol}
+                      {formatCredits(
+                        (market.status === MARKET_STATUS.RESOLVED || market.status === MARKET_STATUS.CANCELLED)
+                          && market.remainingCredits !== undefined
+                          ? market.remainingCredits
+                          : (market.totalLiquidity ?? 0n)
+                      )} {tokenSymbol}
                     </p>
                   </div>
                   <div className="p-4 rounded-xl bg-surface-800/30">
@@ -760,7 +766,12 @@ export function MarketDetail() {
                   outcomeLabels={outcomeLabels}
                   prices={prices}
                   reserves={[market.yesReserve, market.noReserve, market.reserve3, market.reserve4].slice(0, market.numOutcomes)}
-                  totalLiquidity={market.totalLiquidity ?? 0n}
+                  totalLiquidity={
+                    (market.status === MARKET_STATUS.RESOLVED || market.status === MARKET_STATUS.CANCELLED)
+                      && market.remainingCredits !== undefined
+                      ? market.remainingCredits
+                      : (market.totalLiquidity ?? 0n)
+                  }
                   totalVolume={market.totalVolume}
                   tokenSymbol={market.tokenType || 'ALEO'}
                   className="mb-6"
@@ -788,7 +799,7 @@ export function MarketDetail() {
               >
                 {/* Tab buttons */}
                 <div className="flex gap-2 mb-4">
-                  {canTrade && (
+                  {showLiquidity && (
                     <button
                       onClick={() => setActiveTab('liquidity')}
                       className={cn(
@@ -799,7 +810,7 @@ export function MarketDetail() {
                       )}
                     >
                       <Droplets className="w-4 h-4" />
-                      Liquidity
+                      {canTrade ? 'Liquidity' : 'Withdraw LP'}
                     </button>
                   )}
                   {showDispute && (
@@ -847,7 +858,7 @@ export function MarketDetail() {
                 </div>
 
                 {/* Tab content */}
-                {activeTab === 'liquidity' && canTrade && (
+                {activeTab === 'liquidity' && showLiquidity && (
                   <LiquidityPanel market={market} />
                 )}
                 {activeTab === 'dispute' && showDispute && resolution && (

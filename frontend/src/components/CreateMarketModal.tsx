@@ -31,6 +31,8 @@ import {
   updatePendingMarketTxId,
 } from '@/lib/aleo-client'
 import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
+import { uploadMarketMetadata, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
+import { saveIPFSCid } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
 
 interface CreateMarketModalProps {
@@ -344,6 +346,36 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
       devLog('Registered market:', { questionHash, question: formData.question, transactionId })
 
+      // ============================================================
+      // Upload metadata to IPFS (Pinata) — non-blocking
+      // Failure doesn't prevent market creation
+      // ============================================================
+      let ipfsCid: string | null = null
+      if (isPinataAvailable()) {
+        const ipfsMetadata: MarketMetadataIPFS = {
+          version: 1,
+          question: formData.question,
+          description: formData.description || '',
+          category: formData.category,
+          outcomeLabels: activeLabels,
+          resolutionSource: formData.resolutionSource || '',
+          questionHash,
+          creator: wallet.address!,
+          tokenType: formData.tokenType as 'ALEO' | 'USDCX',
+          createdAt: Date.now(),
+        }
+
+        try {
+          ipfsCid = await uploadMarketMetadata(ipfsMetadata)
+          if (ipfsCid) {
+            devLog('[CreateMarket] IPFS CID:', ipfsCid)
+            saveIPFSCid(questionHash, ipfsCid)
+          }
+        } catch (err) {
+          devWarn('[CreateMarket] IPFS upload failed:', err)
+        }
+      }
+
       // Use transaction ID as market ID reference for UI
       setMarketId(transactionId)
       setStep('success')
@@ -374,6 +406,8 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           creator_address: wallet.address!,
           transaction_id: transactionId,
           created_at: Date.now(),
+          ipfs_cid: ipfsCid || undefined,
+          outcome_labels: JSON.stringify(activeLabels),
         }).catch(err => devWarn('[CreateMarket] Early Supabase register failed:', err))
       }
 
@@ -391,8 +425,9 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           resolved = true
           devLog('[CreateMarket] Market ID found:', actualMarketId)
 
-          // Also register outcome labels by market ID (so market-store can look up by either key)
+          // Also register outcome labels and IPFS CID by market ID
           registerOutcomeLabels(actualMarketId, activeLabels)
+          if (ipfsCid) saveIPFSCid(actualMarketId, ipfsCid)
 
           // Update Supabase: register real market ID AND delete stale pending_ entry
           if (isSupabaseAvailable()) {
@@ -406,6 +441,8 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               creator_address: wallet.address!,
               transaction_id: onChainTxId || transactionId,
               created_at: Date.now(),
+              ipfs_cid: ipfsCid || undefined,
+              outcome_labels: JSON.stringify(activeLabels),
             }).catch(err => devWarn('[CreateMarket] Supabase update failed:', err))
 
             // Delete the pending_ placeholder entry created earlier

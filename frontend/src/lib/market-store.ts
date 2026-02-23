@@ -61,6 +61,7 @@ async function transformMarketData(
     pool: AMMPoolData,
     currentBlock: bigint,
     resolution?: MarketResolutionData,
+    marketCredits?: bigint,
 ): Promise<Market> {
     const numOutcomes = market.num_outcomes || 2
 
@@ -173,6 +174,7 @@ async function transformMarketData(
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,
         tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX',
+        remainingCredits: marketCredits,
     }
 }
 
@@ -223,8 +225,8 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
 
             // Transform to Market format (v12: pass resolution for challenge window)
             const markets: Market[] = await Promise.all(
-                blockchainMarkets.map(({ market, pool, resolution }) =>
-                    transformMarketData(market, pool, currentBlock, resolution)
+                blockchainMarkets.map(({ market, pool, resolution, marketCredits }) =>
+                    transformMarketData(market, pool, currentBlock, resolution, marketCredits)
                 )
             )
 
@@ -261,6 +263,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 marketData.pool,
                 currentBlock,
                 marketData.resolution,
+                marketData.marketCredits,
             )
 
             set((state) => ({
@@ -284,6 +287,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 marketData.pool,
                 currentBlock,
                 marketData.resolution,
+                marketData.marketCredits,
             )
 
             set((state) => ({

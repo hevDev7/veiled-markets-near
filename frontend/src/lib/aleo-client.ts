@@ -799,6 +799,17 @@ export async function getMarketDispute(marketId: string): Promise<DisputeDataRes
 }
 
 /**
+ * Fetch remaining collateral for a market (market_credits mapping).
+ * This reflects actual funds held after winner claims and LP withdrawals.
+ * Different from amm_pools.total_liquidity which is frozen after resolution.
+ */
+export async function getMarketCredits(marketId: string): Promise<bigint | null> {
+  const data = await getMappingValue<string>('market_credits', marketId);
+  if (data === null || data === undefined) return null;
+  return BigInt(parseAleoValue(data) as bigint);
+}
+
+/**
  * Check if a user has claimed for a market
  */
 export async function hasUserClaimed(_marketId: string, _userAddress: string): Promise<boolean> {
@@ -1409,6 +1420,8 @@ interface PendingMarket {
   questionText: string
   transactionId: string   // wallet event ID (shield_, UUID, or at1...)
   createdAt: number
+  retryCount?: number     // number of scan attempts (auto-remove after MAX_PENDING_RETRIES)
+  status?: 'pending' | 'scanning' | 'likely_failed'
 }
 
 export function savePendingMarket(pending: PendingMarket): void {
@@ -1481,6 +1494,8 @@ export async function clearAllStaleData(): Promise<string> {
       'veiled_markets_ids',
       'veiled_markets_questions',
       'veiled_markets_txs',
+      'veiled_markets_ipfs_cids',
+      'veiled_markets_outcome_labels',
     ]
     for (const key of keys) {
       if (localStorage.getItem(key)) {
@@ -1495,6 +1510,9 @@ export async function clearAllStaleData(): Promise<string> {
   Object.keys(QUESTION_TEXT_MAP).forEach(k => delete QUESTION_TEXT_MAP[k])
   Object.keys(MARKET_TX_MAP).forEach(k => delete MARKET_TX_MAP[k])
   Object.keys(MARKET_METADATA_MAP).forEach(k => delete MARKET_METADATA_MAP[k])
+  Object.keys(IPFS_CID_MAP).forEach(k => delete IPFS_CID_MAP[k])
+  Object.keys(OUTCOME_LABELS_MAP).forEach(k => delete OUTCOME_LABELS_MAP[k])
+  import('./ipfs').then(({ clearIPFSCache }) => clearIPFSCache()).catch(() => {})
   cleared.push('in-memory caches')
 
   // Clear Supabase
@@ -1515,36 +1533,48 @@ export function hasPendingMarkets(): boolean {
     const saved = localStorage.getItem('veiled_markets_pending')
     if (!saved) return false
     const list: PendingMarket[] = JSON.parse(saved)
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000 // 7 days
-    return list.some(p => p.createdAt > cutoff)
+    return list.length > 0
   } catch {
     return false
   }
 }
 
+export interface PendingMarketInfo {
+  count: number
+  questions: string[]
+  statuses: Array<'pending' | 'scanning' | 'likely_failed'>
+  retryCounts: number[]
+}
+
 /**
  * Get count and details of pending markets
  */
-export function getPendingMarketsInfo(): { count: number; questions: string[] } {
-  if (typeof window === 'undefined') return { count: 0, questions: [] }
+export function getPendingMarketsInfo(): PendingMarketInfo {
+  if (typeof window === 'undefined') return { count: 0, questions: [], statuses: [], retryCounts: [] }
   try {
     const saved = localStorage.getItem('veiled_markets_pending')
-    if (!saved) return { count: 0, questions: [] }
+    if (!saved) return { count: 0, questions: [], statuses: [], retryCounts: [] }
     const list: PendingMarket[] = JSON.parse(saved)
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000 // 7 days
-    const active = list.filter(p => p.createdAt > cutoff)
     return {
-      count: active.length,
-      questions: active.map(p => p.questionText),
+      count: list.length,
+      questions: list.map(p => p.questionText),
+      statuses: list.map(p => p.status || 'pending'),
+      retryCounts: list.map(p => p.retryCount || 0),
     }
   } catch {
-    return { count: 0, questions: [] }
+    return { count: 0, questions: [], statuses: [], retryCounts: [] }
   }
 }
+
+// Max scan attempts before marking as likely_failed
+const MAX_PENDING_RETRIES = 10
+// Max scan attempts before auto-removing (likely_failed + a few more)
+const MAX_PENDING_RETRIES_BEFORE_REMOVE = 15
 
 /**
  * Resolve all pending markets via blockchain scan.
  * Called on Dashboard load and periodically. Returns resolved market IDs.
+ * Tracks retry count per market — auto-removes after MAX_PENDING_RETRIES_BEFORE_REMOVE attempts.
  */
 export async function resolvePendingMarkets(): Promise<string[]> {
   if (typeof window === 'undefined') return []
@@ -1554,9 +1584,20 @@ export async function resolvePendingMarkets(): Promise<string[]> {
     const list: PendingMarket[] = JSON.parse(saved)
     if (list.length === 0) return []
 
-    // Remove entries older than 7 days (likely failed)
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
-    const active = list.filter(p => p.createdAt > cutoff)
+    // Remove entries older than 24 hours (reduced from 7 days — most markets confirm in <5 min)
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000
+    // Also remove entries that exceeded max retries
+    const active = list.filter(p => {
+      if (p.createdAt < cutoff) {
+        devLog('[Pending] Auto-removing expired (>24h):', p.questionText.slice(0, 40))
+        return false
+      }
+      if ((p.retryCount || 0) >= MAX_PENDING_RETRIES_BEFORE_REMOVE) {
+        devLog('[Pending] Auto-removing after', p.retryCount, 'retries:', p.questionText.slice(0, 40))
+        return false
+      }
+      return true
+    })
     if (active.length !== list.length) {
       localStorage.setItem('veiled_markets_pending', JSON.stringify(active))
     }
@@ -1566,6 +1607,13 @@ export async function resolvePendingMarkets(): Promise<string[]> {
     const resolved: string[] = []
 
     for (const pending of active) {
+      // Skip markets already marked as likely_failed — they still show in banner but don't scan
+      if (pending.status === 'likely_failed') continue
+
+      // Increment retry count
+      pending.retryCount = (pending.retryCount || 0) + 1
+      pending.status = 'scanning'
+
       try {
         // First: if pending already has an on-chain tx ID, resolve directly from tx.
         // This is faster and more reliable than block scanning.
@@ -1617,7 +1665,18 @@ export async function resolvePendingMarkets(): Promise<string[]> {
       } catch (err) {
         devWarn('[Pending] Failed to resolve:', pending.questionHash.slice(0, 20), err)
       }
+
+      // Mark as likely_failed after MAX_PENDING_RETRIES if not resolved
+      if (!resolved.includes(pending.questionHash) && pending.retryCount >= MAX_PENDING_RETRIES) {
+        pending.status = 'likely_failed'
+        devLog('[Pending] Marked as likely_failed after', pending.retryCount, 'attempts:', pending.questionText.slice(0, 40))
+      } else if (pending.status === 'scanning') {
+        pending.status = 'pending' // Reset from scanning back to pending
+      }
     }
+
+    // Persist updated retry counts and statuses
+    localStorage.setItem('veiled_markets_pending', JSON.stringify(active))
 
     return resolved
   } catch (e) {
@@ -1804,6 +1863,25 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
           resolutionSource: entry.resolution_source || undefined,
         };
       }
+      // Populate IPFS CID mapping
+      if (entry.ipfs_cid) {
+        IPFS_CID_MAP[entry.market_id] = entry.ipfs_cid;
+        if (entry.question_hash) {
+          IPFS_CID_MAP[entry.question_hash] = entry.ipfs_cid;
+        }
+      }
+      // Populate outcome labels from Supabase
+      if (entry.outcome_labels) {
+        try {
+          const labels = JSON.parse(entry.outcome_labels);
+          if (Array.isArray(labels)) {
+            OUTCOME_LABELS_MAP[entry.market_id] = labels;
+            if (entry.question_hash) {
+              OUTCOME_LABELS_MAP[entry.question_hash] = labels;
+            }
+          }
+        } catch { /* invalid JSON, skip */ }
+      }
     }
 
     devLog(`[Supabase] Loaded ${ids.length} markets from registry`);
@@ -1829,18 +1907,67 @@ export async function initializeMarketIds(): Promise<void> {
   const allIds = new Set([...KNOWN_MARKET_IDS, ...indexedIds, ...supabaseIds]);
   KNOWN_MARKET_IDS = Array.from(allIds);
 
-  // Persist merged question texts to localStorage
+  // Persist merged data to localStorage
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
       localStorage.setItem('veiled_markets_txs', JSON.stringify(MARKET_TX_MAP));
       localStorage.setItem('veiled_markets_ids', JSON.stringify(KNOWN_MARKET_IDS));
+      localStorage.setItem('veiled_markets_ipfs_cids', JSON.stringify(IPFS_CID_MAP));
+      localStorage.setItem('veiled_markets_outcome_labels', JSON.stringify(OUTCOME_LABELS_MAP));
     } catch (e) {
       devWarn('Failed to persist merged data to localStorage:', e);
     }
   }
 
   devLog(`[Markets] Initialized ${KNOWN_MARKET_IDS.length} total markets`);
+
+  // Fetch IPFS metadata for markets with CIDs but missing question text (non-blocking)
+  const cidsToFetch: Array<{ cid: string; keys: string[] }> = [];
+  for (const marketId of KNOWN_MARKET_IDS) {
+    const cid = IPFS_CID_MAP[marketId];
+    if (cid && !QUESTION_TEXT_MAP[marketId]) {
+      cidsToFetch.push({ cid, keys: [marketId] });
+    }
+  }
+
+  if (cidsToFetch.length > 0) {
+    import('./ipfs').then(async ({ fetchMultipleMetadata }) => {
+      const uniqueCids = [...new Set(cidsToFetch.map(c => c.cid))];
+      const results = await fetchMultipleMetadata(uniqueCids);
+
+      for (const [cid, metadata] of results) {
+        // Find all keys associated with this CID
+        for (const [key, value] of Object.entries(IPFS_CID_MAP)) {
+          if (value === cid) {
+            QUESTION_TEXT_MAP[key] = metadata.question;
+            if (metadata.questionHash) {
+              QUESTION_TEXT_MAP[metadata.questionHash] = metadata.question;
+            }
+            MARKET_METADATA_MAP[key] = {
+              description: metadata.description || undefined,
+              resolutionSource: metadata.resolutionSource || undefined,
+            };
+            if (metadata.outcomeLabels?.length > 0) {
+              OUTCOME_LABELS_MAP[key] = metadata.outcomeLabels;
+              if (metadata.questionHash) {
+                OUTCOME_LABELS_MAP[metadata.questionHash] = metadata.outcomeLabels;
+              }
+            }
+          }
+        }
+      }
+
+      // Re-persist after IPFS enrichment
+      if (typeof window !== 'undefined' && results.size > 0) {
+        try {
+          localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
+          localStorage.setItem('veiled_markets_outcome_labels', JSON.stringify(OUTCOME_LABELS_MAP));
+        } catch { /* ignore */ }
+      }
+      devLog(`[IPFS] Enriched ${results.size} markets from IPFS`);
+    }).catch(err => devWarn('[IPFS] Batch fetch failed:', err));
+  }
 }
 
 /**
@@ -1887,6 +2014,46 @@ export function getOutcomeLabels(key: string): string[] | null {
 }
 
 /**
+ * IPFS CID mapping
+ * Maps question_hash (or market_id) to IPFS CID for metadata retrieval
+ */
+let IPFS_CID_MAP: Record<string, string> = {};
+
+// Load saved IPFS CIDs from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('veiled_markets_ipfs_cids');
+    if (saved) {
+      IPFS_CID_MAP = JSON.parse(saved);
+      devLog('Loaded IPFS CIDs from localStorage');
+    }
+  } catch (e) {
+    devWarn('Failed to load IPFS CIDs from localStorage:', e);
+  }
+}
+
+/**
+ * Save IPFS CID for a market (keyed by question hash or market ID)
+ */
+export function saveIPFSCid(key: string, cid: string): void {
+  IPFS_CID_MAP[key] = cid;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('veiled_markets_ipfs_cids', JSON.stringify(IPFS_CID_MAP));
+    } catch (e) {
+      devWarn('Failed to save IPFS CID to localStorage:', e);
+    }
+  }
+}
+
+/**
+ * Get IPFS CID for a market (by question hash or market ID)
+ */
+export function getIPFSCid(key: string): string | null {
+  return IPFS_CID_MAP[key] || null;
+}
+
+/**
  * Get question text from hash
  */
 export function getQuestionText(questionHash: string): string {
@@ -1908,6 +2075,7 @@ export async function fetchAllMarkets(): Promise<Array<{
   market: MarketData;
   pool: MarketPoolData;
   resolution?: MarketResolutionData;
+  marketCredits?: bigint;
 }>> {
   devLog('fetchAllMarkets: Fetching known markets...');
 
@@ -1934,10 +2102,19 @@ export async function fetchMarketById(marketId: string) {
       return null;
     }
 
+    // For resolved/cancelled markets, fetch actual remaining collateral
+    let marketCredits: bigint | undefined;
+    const status = market.status;
+    if (status === 3 || status === 4) { // RESOLVED or CANCELLED
+      const credits = await getMarketCredits(marketId);
+      if (credits !== null) marketCredits = credits;
+    }
+
     return {
       market,
       pool,
       resolution: resolution || undefined,
+      marketCredits,
     };
   } catch (error) {
     console.error(`Failed to fetch market ${marketId}:`, error);
@@ -1971,6 +2148,22 @@ export function buildClaimLpRefundInputs(
 ): { functionName: string; inputs: string[] } {
   return {
     functionName: getLpRefundFunction(tokenType),
+    inputs: [lpTokenRecord, `${minTokensOut}u128`],
+  };
+}
+
+/**
+ * Build inputs for withdraw_lp_resolved (v16 - LP withdrawal from resolved/finalized market)
+ * withdraw_lp_resolved(lp_token: LPToken, min_tokens_out: u128)
+ */
+export function buildWithdrawLpResolvedInputs(
+  lpTokenRecord: string,
+  minTokensOut: bigint,
+  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+): { functionName: string; inputs: string[] } {
+  const functionName = tokenType === 'USDCX' ? 'withdraw_lp_resolved_usdcx' : 'withdraw_lp_resolved';
+  return {
+    functionName,
     inputs: [lpTokenRecord, `${minTokensOut}u128`],
   };
 }

@@ -71,6 +71,9 @@ export interface Market {
   challengeDeadline?: bigint
   finalized?: boolean
 
+  // Remaining collateral after winner claims (only for resolved/cancelled markets)
+  remainingCredits?: bigint
+
   creator?: string
   resolver?: string
   timeRemaining?: string
