@@ -139,8 +139,8 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         </button>
       </div>
 
-      {/* On-chain Verification Link */}
-      {market.transactionId && (
+      {/* On-chain Verification Link (only for real at1... tx IDs) */}
+      {market.transactionId && market.transactionId.startsWith('at1') && (
         <a
           href={`${config.explorerUrl}/transaction/${market.transactionId}`}
           target="_blank"

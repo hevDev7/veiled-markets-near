@@ -126,8 +126,8 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                         </div>
                     </div>
 
-                    {/* On-chain Verification Link */}
-                    {market.transactionId && (
+                    {/* On-chain Verification Link (only for real at1... tx IDs) */}
+                    {market.transactionId && market.transactionId.startsWith('at1') && (
                         <a
                             href={`${config.explorerUrl}/transaction/${market.transactionId}`}
                             target="_blank"
@@ -173,8 +173,8 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                     </div>
                 </div>
 
-                {/* Mobile Verification Link */}
-                {market.transactionId && (
+                {/* Mobile Verification Link (only for real at1... tx IDs) */}
+                {market.transactionId && market.transactionId.startsWith('at1') && (
                     <a
                         href={`${config.explorerUrl}/transaction/${market.transactionId}`}
                         target="_blank"
