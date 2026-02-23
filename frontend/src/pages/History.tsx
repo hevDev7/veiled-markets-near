@@ -28,12 +28,7 @@ export function History() {
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState<HistoryFilter>('all')
 
-  // Redirect to landing if not connected
-  useEffect(() => {
-    if (!wallet.connected) {
-      navigate('/')
-    }
-  }, [wallet.connected, navigate])
+  // Redirect handled by ProtectedRoute wrapper in App.tsx
 
   useEffect(() => {
     const loadBets = async () => {

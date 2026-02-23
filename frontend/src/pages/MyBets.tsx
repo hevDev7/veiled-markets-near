@@ -81,12 +81,7 @@ export function MyBets() {
     settled: settledBets.length,
   }
 
-  // Redirect to landing if not connected
-  useEffect(() => {
-    if (!wallet.connected) {
-      navigate('/')
-    }
-  }, [wallet.connected, navigate])
+  // Redirect handled by ProtectedRoute wrapper in App.tsx
 
   // Load bets and sync statuses on mount
   useEffect(() => {

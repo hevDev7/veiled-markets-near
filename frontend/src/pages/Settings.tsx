@@ -13,8 +13,7 @@ import {
   Database,
   Loader2,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { DashboardHeader } from '@/components/DashboardHeader'
@@ -24,21 +23,15 @@ import { cn, formatCredits } from '@/lib/utils'
 import { clearAllStaleData } from '@/lib/aleo-client'
 
 export function Settings() {
-  const navigate = useNavigate()
   const { wallet, refreshBalance } = useWalletStore()
-  const { connected: providerConnected, connecting: providerConnecting } = useWallet()
+  const { connected: providerConnected } = useWallet()
   const [copied, setCopied] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
   const [clearResult, setClearResult] = useState<string | null>(null)
   const isConnected = wallet.connected || providerConnected
 
-  // Redirect to landing if not connected
-  useEffect(() => {
-    if (!isConnected && !providerConnecting) {
-      navigate('/')
-    }
-  }, [isConnected, providerConnecting, navigate])
+  // Redirect handled by ProtectedRoute wrapper in App.tsx
 
   const handleCopy = () => {
     if (wallet.address) {

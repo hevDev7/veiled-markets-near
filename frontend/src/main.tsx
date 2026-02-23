@@ -14,8 +14,7 @@ import { initializeQuestionMappings } from './lib/question-mapping'
 import { initializeMarketIds } from './lib/aleo-client'
 import { config } from './lib/config'
 
-// Clear stale wallet session to prevent hung autoConnect on reload
-try { localStorage.removeItem('walletName') } catch { /* noop */ }
+// Keep walletName in localStorage so autoConnect can reconnect on refresh
 
 // Initialize question hash to text mappings on app startup
 initializeQuestionMappings()
@@ -32,7 +31,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <AleoWalletProvider
       wallets={wallets}
       network={Network.TESTNET}
-      autoConnect={false}
+      autoConnect={true}
       decryptPermission={DecryptPermission.AutoDecrypt}
       programs={[
         config.programId,

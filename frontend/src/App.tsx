@@ -19,8 +19,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // Give wallet auto-connect a short grace period before redirecting.
-    const timeout = window.setTimeout(() => setCanRedirect(true), 800)
+    // Give wallet auto-connect enough time to reconnect before redirecting.
+    const timeout = window.setTimeout(() => setCanRedirect(true), 2500)
     return () => window.clearTimeout(timeout)
   }, [isConnected, providerConnecting])
 

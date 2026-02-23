@@ -61,11 +61,7 @@ export function Dashboard() {
     const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
 
-    useEffect(() => {
-        if (!wallet.connected) {
-            navigate('/')
-        }
-    }, [wallet.connected, navigate])
+    // Redirect handled by ProtectedRoute wrapper in App.tsx
 
     useEffect(() => {
         fetchMarkets()

@@ -168,7 +168,7 @@ export function MarketDetail() {
   const { marketId } = useParams<{ marketId: string }>()
   const { wallet } = useWalletStore()
   const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
-  const { markets, fetchMarkets } = useRealMarketsStore()
+  const { markets, fetchMarkets, isLoading: marketsLoading } = useRealMarketsStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [market, setMarket] = useState<Market | null>(null)
@@ -201,12 +201,14 @@ export function MarketDetail() {
   const [fetchRecordError, setFetchRecordError] = useState<string | null>(null)
   const [showPasteInput, setShowPasteInput] = useState(false)
 
-  // Redirect to landing if not connected
+  // Redirect handled by ProtectedRoute wrapper in App.tsx
+
+  // Fetch markets if not loaded yet (e.g. page refresh directly on /market/:id)
   useEffect(() => {
-    if (!wallet.connected) {
-      navigate('/')
+    if (markets.length === 0) {
+      fetchMarkets()
     }
-  }, [wallet.connected, navigate])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Find market
   useEffect(() => {
@@ -455,6 +457,22 @@ export function MarketDetail() {
   if (!wallet.connected) return null
 
   if (!market) {
+    // Still loading markets — show spinner instead of "Not Found"
+    if (marketsLoading || markets.length === 0) {
+      return (
+        <div className="min-h-screen bg-surface-950 flex flex-col">
+          <DashboardHeader />
+          <main className="flex-1 pt-20 flex items-center justify-center">
+            <div className="text-center">
+              <RefreshCw className="w-10 h-10 text-brand-400 mx-auto mb-4 animate-spin" />
+              <p className="text-surface-400">Loading market data...</p>
+            </div>
+          </main>
+          <Footer />
+        </div>
+      )
+    }
+
     return (
       <div className="min-h-screen bg-surface-950 flex flex-col">
         <DashboardHeader />
