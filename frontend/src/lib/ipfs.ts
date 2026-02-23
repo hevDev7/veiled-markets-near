@@ -12,6 +12,9 @@ const PINATA_API_URL = 'https://api.pinata.cloud'
 const PINATA_GATEWAY = (import.meta.env.VITE_PINATA_GATEWAY as string) || 'https://gateway.pinata.cloud'
 const PUBLIC_GATEWAY = 'https://ipfs.io'
 
+// Log Pinata status at module load (visible even in production for debugging)
+console.log('[IPFS] Pinata JWT configured:', !!PINATA_JWT, PINATA_JWT ? `(${PINATA_JWT.length} chars, starts: ${PINATA_JWT.slice(0, 10)}...)` : '(empty)')
+
 // In-memory cache: CID → metadata (immutable once pinned, never expires)
 const metadataCache = new Map<string, MarketMetadataIPFS>()
 
@@ -42,9 +45,11 @@ export async function uploadMarketMetadata(
   metadata: MarketMetadataIPFS,
 ): Promise<string | null> {
   if (!isPinataAvailable()) {
-    devWarn('[IPFS] Pinata JWT not configured, skipping upload')
+    console.warn('[IPFS] Pinata JWT not configured, skipping upload. JWT present:', !!PINATA_JWT, 'Length:', PINATA_JWT?.length ?? 0)
     return null
   }
+
+  console.log('[IPFS] Uploading metadata for:', metadata.question.slice(0, 50))
 
   try {
     const response = await fetch(`${PINATA_API_URL}/pinning/pinJSONToIPFS`, {
@@ -69,13 +74,13 @@ export async function uploadMarketMetadata(
 
     if (!response.ok) {
       const errorText = await response.text()
-      devWarn('[IPFS] Pinata upload failed:', response.status, errorText)
+      console.warn('[IPFS] Pinata upload failed:', response.status, errorText)
       return null
     }
 
     const result = await response.json()
     const cid: string = result.IpfsHash
-    devLog('[IPFS] Uploaded metadata, CID:', cid)
+    console.log('[IPFS] Uploaded metadata, CID:', cid)
 
     metadataCache.set(cid, metadata)
     return cid
