@@ -498,7 +498,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
             // can use resolveMarketFromTransaction directly on next Dashboard load
             updatePendingMarketTxId(questionHash, onChainTxId)
 
-            const marketId = await waitForMarketCreation(
+            const result = await waitForMarketCreation(
               onChainTxId,
               questionHash,
               formData.question,
@@ -506,7 +506,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               15000,
               createProgramId,
             )
-            if (marketId && !resolved) onMarketFound(marketId, onChainTxId)
+            if (result && !resolved) onMarketFound(result.marketId, result.transactionId)
           }
         }
 
@@ -521,7 +521,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           if (resolved) return
 
           // Deep blockchain scan with progressive depth
-          const marketId = await waitForMarketCreation(
+          const scanResult = await waitForMarketCreation(
             'scan',
             questionHash,
             formData.question,
@@ -529,7 +529,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
             15000,
             createProgramId,
           )
-          if (marketId && !resolved) onMarketFound(marketId, transactionId)
+          if (scanResult && !resolved) onMarketFound(scanResult.marketId, scanResult.transactionId)
 
           // For Shield: if first round didn't find it, wait and try again
           // Aleo testnet can take 2-5 minutes for finalization
@@ -537,7 +537,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
             devLog('[CreateMarket] Shield scan round 1 complete — waiting 60s for round 2...')
             await new Promise(r => setTimeout(r, 60_000))
             if (resolved) return
-            const marketId2 = await waitForMarketCreation(
+            const scanResult2 = await waitForMarketCreation(
               'scan',
               questionHash,
               formData.question,
@@ -545,7 +545,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               15000,
               createProgramId,
             )
-            if (marketId2 && !resolved) onMarketFound(marketId2, transactionId)
+            if (scanResult2 && !resolved) onMarketFound(scanResult2.marketId, scanResult2.transactionId)
           }
         }
 
@@ -571,7 +571,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                     (result?.transactionId || result?.txId || result?.id)
                   if (txId && typeof txId === 'string' && txId.startsWith('at1')) {
                     devLog(`[CreateMarket] Shield.${method} returned at1 ID:`, txId)
-                    const marketId = await waitForMarketCreation(
+                    const s3result = await waitForMarketCreation(
                       txId,
                       questionHash,
                       formData.question,
@@ -579,7 +579,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                       15000,
                       createProgramId,
                     )
-                    if (marketId && !resolved) onMarketFound(marketId, txId)
+                    if (s3result && !resolved) onMarketFound(s3result.marketId, s3result.transactionId)
                     return
                   }
                 } catch { /* method not available or failed */ }
@@ -596,7 +596,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               if (adapterResult?.transactionId?.startsWith('at1')) {
                 const txId = adapterResult.transactionId
                 devLog('[CreateMarket] Adapter resolved Shield TX to:', txId)
-                const marketId = await waitForMarketCreation(
+                const adapterScanResult = await waitForMarketCreation(
                   txId,
                   questionHash,
                   formData.question,
@@ -604,7 +604,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                   15000,
                   createProgramId,
                 )
-                if (marketId && !resolved) onMarketFound(marketId, txId)
+                if (adapterScanResult && !resolved) onMarketFound(adapterScanResult.marketId, adapterScanResult.transactionId)
               }
             } catch { /* adapter not available */ }
           }

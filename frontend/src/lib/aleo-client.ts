@@ -311,7 +311,7 @@ export async function waitForMarketCreation(
   maxAttempts: number = 20,
   intervalMs: number = 15000,
   programId: string = PROGRAM_ID
-): Promise<string | null> {
+): Promise<ScanResult | null> {
   devLog('[waitForMarket] Waiting for market creation:', transactionId, '| program:', programId);
 
   // Strategy 1: If we have an on-chain tx ID, poll the RPC directly
@@ -328,7 +328,7 @@ export async function waitForMarketCreation(
           registerQuestionText(marketId, questionText);
           registerMarketTransaction(marketId, transactionId);
           registerQuestionText(questionHash, questionText);
-          return marketId;
+          return { marketId, transactionId };
         }
         devWarn('[waitForMarket] TX confirmed but no market ID in outputs');
         return null;
@@ -363,13 +363,14 @@ export async function waitForMarketCreation(
 
     try {
       devLog(`[waitForMarket] Scan attempt ${i + 1}/${scanSchedule.length} (${blocks} blocks)...`);
-      const marketId = await scanBlockchainForMarket(questionHash, blocks, programId);
-      if (marketId) {
-        devLog('[waitForMarket] Found market via blockchain scan! ID:', marketId);
-        addKnownMarketId(marketId);
-        registerQuestionText(marketId, questionText);
+      const scanResult = await scanBlockchainForMarket(questionHash, blocks, programId);
+      if (scanResult) {
+        devLog('[waitForMarket] Found market via blockchain scan! ID:', scanResult.marketId, 'TX:', scanResult.transactionId);
+        addKnownMarketId(scanResult.marketId);
+        registerQuestionText(scanResult.marketId, questionText);
         registerQuestionText(questionHash, questionText);
-        return marketId;
+        registerMarketTransaction(scanResult.marketId, scanResult.transactionId);
+        return scanResult;
       }
     } catch (err) {
       devWarn(`[waitForMarket] Scan attempt ${i + 1} error:`, err);
@@ -390,7 +391,7 @@ async function scanBlockchainForMarket(
   questionHash: string,
   blocksToScan: number = 500,
   programId: string = PROGRAM_ID
-): Promise<string | null> {
+): Promise<ScanResult | null> {
   try {
     const latestHeight = await getCurrentBlockHeight();
     const startHeight = Number(latestHeight);
@@ -438,17 +439,17 @@ async function scanBlockchainForMarket(
 
 /**
  * Scan a single block with 1 retry on failure.
- * Returns: string (market_id) if found, null if scanned but not found, undefined if fetch failed.
+ * Returns: ScanResult if found, null if scanned but not found, undefined if fetch failed.
  */
 async function scanBlockForCreateMarketWithRetry(
   blockHeight: number,
   questionHash: string,
   programId: string = PROGRAM_ID
-): Promise<string | null | undefined> {
+): Promise<ScanResult | null | undefined> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = await scanBlockForCreateMarket(blockHeight, questionHash, programId);
-      return result; // null (not found) or string (found)
+      return result; // null (not found) or ScanResult (found)
     } catch {
       if (attempt === 0) {
         await new Promise(r => setTimeout(r, 500)); // Brief pause before retry
@@ -456,6 +457,12 @@ async function scanBlockForCreateMarketWithRetry(
     }
   }
   return undefined; // Both attempts failed
+}
+
+/** Result of a blockchain scan: market_id + on-chain transaction ID */
+export interface ScanResult {
+  marketId: string
+  transactionId: string  // Real at1... on-chain TX ID
 }
 
 /**
@@ -466,7 +473,7 @@ async function scanBlockForCreateMarket(
   blockHeight: number,
   questionHash: string,
   programId: string = PROGRAM_ID
-): Promise<string | null> {
+): Promise<ScanResult | null> {
   const url = `${API_BASE_URL}/block/${blockHeight}`;
   const response = await fetchWithTimeout(url, 10000);
   if (!response.ok) {
@@ -479,6 +486,7 @@ async function scanBlockForCreateMarket(
 
   for (const txWrapper of transactions) {
     const tx = txWrapper.transaction || txWrapper;
+    const txId = tx.id || txWrapper.id || '';  // Extract at1... transaction ID
     const transitions = tx.execution?.transitions || [];
 
     for (const transition of transitions) {
@@ -497,8 +505,8 @@ async function scanBlockForCreateMarket(
           const foundMarketId = args[0];     // market_id
 
           if (foundQuestionHash === questionHash && foundMarketId) {
-            devLog(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}...`);
-            return foundMarketId;
+            devLog(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}... tx=${txId.slice(0, 15)}...`);
+            return { marketId: foundMarketId, transactionId: txId };
           }
         }
       }
@@ -1617,10 +1625,27 @@ export async function resolvePendingMarkets(): Promise<string[]> {
     }
     if (active.length === 0) return []
 
-    devLog(`[Pending] Resolving ${active.length} pending market(s)...`)
+    // Auto-dismiss pending markets whose question already exists in loaded markets.
+    // This handles the case where the market was found by background fetch but pending wasn't cleared.
+    const knownQuestions = new Set(
+      Object.values(QUESTION_TEXT_MAP).filter(Boolean).map(q => q.toLowerCase())
+    )
+    const stillPending = active.filter(p => {
+      if (knownQuestions.has(p.questionText.toLowerCase())) {
+        devLog('[Pending] Auto-dismissing (market already loaded):', p.questionText.slice(0, 40))
+        return false
+      }
+      return true
+    })
+    if (stillPending.length !== active.length) {
+      localStorage.setItem('veiled_markets_pending', JSON.stringify(stillPending))
+    }
+    if (stillPending.length === 0) return []
+
+    devLog(`[Pending] Resolving ${stillPending.length} pending market(s)...`)
     const resolved: string[] = []
 
-    for (const pending of active) {
+    for (const pending of stillPending) {
       // Skip markets already marked as likely_failed — they still show in banner but don't scan
       if (pending.status === 'likely_failed') continue
 
@@ -1632,6 +1657,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
         // First: if pending already has an on-chain tx ID, resolve directly from tx.
         // This is faster and more reliable than block scanning.
         let marketId: string | null = null
+        let realTxId: string = pending.transactionId
         if (pending.transactionId.startsWith('at1')) {
           marketId = await resolveMarketFromTransaction(pending.transactionId, pending.questionText)
         }
@@ -1641,18 +1667,23 @@ export async function resolvePendingMarkets(): Promise<string[]> {
           // Use deeper scan for older pending markets
           const ageMs = Date.now() - pending.createdAt
           const blocksToScan = Math.min(2000, Math.max(500, Math.floor(ageMs / config.msPerBlock) + 200))
-          marketId = await scanBlockchainForMarket(pending.questionHash, blocksToScan)
+          const scanResult = await scanBlockchainForMarket(pending.questionHash, blocksToScan)
+          if (scanResult) {
+            marketId = scanResult.marketId
+            realTxId = scanResult.transactionId || pending.transactionId
+          }
         }
 
         if (marketId) {
-          devLog('[Pending] Resolved:', pending.questionHash.slice(0, 20), '→', marketId.slice(0, 20))
+          devLog('[Pending] Resolved:', pending.questionHash.slice(0, 20), '→', marketId.slice(0, 20), 'tx:', realTxId.slice(0, 15))
           addKnownMarketId(marketId)
           registerQuestionText(marketId, pending.questionText)
           registerQuestionText(pending.questionHash, pending.questionText)
+          if (realTxId.startsWith('at1')) registerMarketTransaction(marketId, realTxId)
           removePendingMarket(pending.questionHash)
           resolved.push(marketId)
 
-          // Update Supabase: register with real market ID and clean up pending entry
+          // Update Supabase: register with real market ID and real TX ID
           try {
             const supabaseMod = await import('./supabase')
             if (supabaseMod.isSupabaseAvailable()) {
@@ -1663,7 +1694,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
                 question_text: pending.questionText,
                 category: 0, // Unknown from pending context
                 creator_address: '',
-                transaction_id: pending.transactionId,
+                transaction_id: realTxId,
                 created_at: pending.createdAt,
               })
               // Delete stale pending_ entry if it exists

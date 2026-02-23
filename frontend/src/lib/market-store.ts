@@ -224,11 +224,23 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
             ])
 
             // Transform to Market format (v12: pass resolution for challenge window)
-            const markets: Market[] = await Promise.all(
+            const allMarkets: Market[] = await Promise.all(
                 blockchainMarkets.map(({ market, pool, resolution, marketCredits }) =>
                     transformMarketData(market, pool, currentBlock, resolution, marketCredits)
                 )
             )
+
+            // Deduplicate markets with the same question (can happen from double-submission).
+            // Keep the one with highest liquidity (most established).
+            const deduped = new Map<string, Market>()
+            for (const m of allMarkets) {
+                const key = m.question
+                const existing = deduped.get(key)
+                if (!existing || m.totalLiquidity > existing.totalLiquidity) {
+                    deduped.set(key, m)
+                }
+            }
+            const markets = Array.from(deduped.values())
 
             set({
                 markets,
