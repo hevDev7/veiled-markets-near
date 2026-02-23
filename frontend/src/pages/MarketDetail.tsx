@@ -139,6 +139,30 @@ function MarketStatusBadge({ status }: { status: number }) {
   )
 }
 
+const DESC_LIMIT = 150
+
+function ExpandableDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const needsTruncation = text.length > DESC_LIMIT
+
+  return (
+    <div className="mb-6">
+      <p className="text-surface-400">
+        {expanded || !needsTruncation ? text : `${text.slice(0, DESC_LIMIT)}...`}
+      </p>
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-brand-400 hover:text-brand-300 text-sm mt-1 flex items-center gap-1 transition-colors"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+          <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', expanded && 'rotate-180')} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function MarketDetail() {
   const navigate = useNavigate()
   const { marketId } = useParams<{ marketId: string }>()
@@ -702,7 +726,7 @@ export function MarketDetail() {
                 </h1>
 
                 {market.description && (
-                  <p className="text-surface-400 mb-6">{market.description}</p>
+                  <ExpandableDescription text={market.description} />
                 )}
 
                 {/* Stats */}
