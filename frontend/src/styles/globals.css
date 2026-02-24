@@ -182,25 +182,27 @@
 
   .btn-secondary {
     @apply px-6 py-3 bg-surface-800 hover:bg-surface-700
-           text-white font-medium rounded-xl 
+           text-white font-medium rounded-xl
            border border-surface-700 hover:border-surface-600
-           transition-all duration-200;
+           transition-all duration-200 active:scale-[0.98];
   }
 
   .btn-yes {
-    @apply px-6 py-3 bg-gradient-to-r from-yes-600 to-yes-500 
+    @apply px-6 py-3 bg-gradient-to-r from-yes-600 to-yes-500
            hover:from-yes-500 hover:to-yes-400
-           text-white font-semibold rounded-xl 
+           text-white font-semibold rounded-xl
            transition-all duration-200 shadow-lg shadow-yes-500/25
-           hover:shadow-xl hover:shadow-yes-500/30;
+           hover:shadow-xl hover:shadow-yes-500/30
+           active:scale-[0.98];
   }
 
   .btn-no {
-    @apply px-6 py-3 bg-gradient-to-r from-no-600 to-no-500 
+    @apply px-6 py-3 bg-gradient-to-r from-no-600 to-no-500
            hover:from-no-500 hover:to-no-400
-           text-white font-semibold rounded-xl 
+           text-white font-semibold rounded-xl
            transition-all duration-200 shadow-lg shadow-no-500/25
-           hover:shadow-xl hover:shadow-no-500/30;
+           hover:shadow-xl hover:shadow-no-500/30
+           active:scale-[0.98];
   }
 
   /* Badge styling */
@@ -236,9 +238,46 @@
 
   /* Privacy indicator */
   .privacy-indicator {
-    @apply inline-flex items-center gap-1.5 px-2 py-1 rounded-lg 
+    @apply inline-flex items-center gap-1.5 px-2 py-1 rounded-lg
            bg-brand-500/10 text-brand-400 text-xs font-medium
            border border-brand-500/20;
+  }
+
+  /* Skeleton shimmer loading */
+  .skeleton {
+    @apply bg-surface-800/60 rounded-lg relative overflow-hidden;
+  }
+
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.04) 40%,
+      rgba(255, 255, 255, 0.08) 50%,
+      rgba(255, 255, 255, 0.04) 60%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Tooltip styles */
+  .tooltip-content {
+    @apply px-3 py-2 text-xs text-surface-200 bg-surface-800 border border-surface-700
+           rounded-lg shadow-xl max-w-xs leading-relaxed z-50;
+    animation: tooltip-in 0.15s ease-out;
+  }
+
+  @keyframes tooltip-in {
+    0% { opacity: 0; transform: scale(0.96); }
+    100% { opacity: 1; transform: scale(1); }
   }
 }
 

@@ -198,19 +198,19 @@ export function MyBets() {
   const emptyConfig: Record<BetFilter, { title: string; subtitle: string }> = {
     all: {
       title: 'No bets yet',
-      subtitle: "You haven't placed any bets yet.",
+      subtitle: "You haven't placed any bets. Browse active markets to make your first prediction.",
     },
     accepted: {
       title: 'No active bets',
-      subtitle: "You don't have any active predictions at the moment.",
+      subtitle: "Accepted bets appear here after on-chain confirmation (usually 1-3 minutes).",
     },
     unredeemed: {
       title: 'No unredeemed bets',
-      subtitle: "You don't have any winnings to claim right now.",
+      subtitle: "When you win a bet, you can claim your winnings here.",
     },
     settled: {
       title: 'No settled bets',
-      subtitle: "You don't have any settled bets at the moment.",
+      subtitle: "Settled bets appear here after markets are resolved and winnings are claimed.",
     },
   }
 
@@ -272,8 +272,28 @@ export function MyBets() {
 
           {/* Content */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="w-8 h-8 text-brand-500 animate-spin" />
+            <div className="space-y-3">
+              {[...Array(4)].map((_, i) => (
+                <div
+                  key={i}
+                  className="glass-card rounded-2xl p-5"
+                  style={{ animationDelay: `${i * 150}ms` }}
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="skeleton w-10 h-10 rounded-xl flex-shrink-0" />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="skeleton h-4 w-2/3 rounded" />
+                      <div className="skeleton h-3 w-1/3 rounded" />
+                      <div className="flex gap-4 mt-3">
+                        <div className="skeleton h-3 w-20 rounded" />
+                        <div className="skeleton h-3 w-20 rounded" />
+                        <div className="skeleton h-3 w-16 rounded" />
+                      </div>
+                    </div>
+                    <div className="skeleton h-8 w-20 rounded-lg flex-shrink-0" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : displayBets.length === 0 ? (
             <motion.div

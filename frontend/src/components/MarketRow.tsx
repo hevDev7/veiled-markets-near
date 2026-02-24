@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 
 interface MarketRowProps {
     market: Market
@@ -14,7 +16,7 @@ interface MarketRowProps {
 export function MarketRow({ market, index, onClick }: MarketRowProps) {
     const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
-    const statusInfo = getMarketStatusInfo(market.status, isExpired)
+    const statusVariant = getStatusVariant(market.status, isExpired)
 
     return (
         <motion.div
@@ -44,12 +46,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                                 <span className="text-xs text-brand-400 font-mono">PRIVATE</span>
                             </div>
                             {isExpired && (
-                                <span className={cn(
-                                    "px-2 py-0.5 text-[10px] font-mono font-bold rounded border",
-                                    statusInfo.badgeClass
-                                )}>
-                                    {statusInfo.label}
-                                </span>
+                                <StatusBadge variant={statusVariant} />
                             )}
                         </div>
                     </div>
@@ -79,7 +76,8 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
 
                 {/* Middle: Stats */}
                 <div className="hidden md:flex items-center gap-6">
-                    <div className="text-center">
+                    <Tooltip content="Total value of all trades in this market">
+                      <div className="text-center">
                         <div className="flex items-center gap-1.5 text-surface-400 mb-1">
                             <TrendingUp className="w-3.5 h-3.5" />
                             <span className="text-xs font-mono text-surface-500">VOLUME</span>
@@ -87,9 +85,15 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                         <p className="text-sm font-bold text-white font-mono">
                             {formatCredits(market.totalVolume, 0)}
                         </p>
-                    </div>
+                      </div>
+                    </Tooltip>
 
-                    <div className="text-center">
+                    <Tooltip content={
+                      (market.status === 3 || market.status === 4)
+                        ? "Remaining funds in the market pool"
+                        : "Available funds in the market's AMM pool"
+                    }>
+                      <div className="text-center">
                         <div className="flex items-center gap-1.5 text-surface-400 mb-1">
                             <span className="text-xs font-mono text-surface-500">
                                 {(market.status === 3 || market.status === 4) ? 'REMAINING' : 'LIQUIDITY'}
@@ -100,15 +104,18 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                                 ? market.remainingCredits
                                 : (market.totalLiquidity ?? 0n), 0
                         )}</p>
-                    </div>
+                      </div>
+                    </Tooltip>
 
-                    <div className="text-center">
+                    <Tooltip content="Time remaining until trading closes">
+                      <div className="text-center">
                         <div className="flex items-center gap-1.5 text-surface-400 mb-1">
                             <Clock className="w-3.5 h-3.5" />
                             <span className="text-xs font-mono text-surface-500">TIME</span>
                         </div>
                         <p className="text-sm font-bold text-white font-mono">{timeRemaining}</p>
-                    </div>
+                      </div>
+                    </Tooltip>
                 </div>
 
                 {/* Right: Payouts & Arrow */}
@@ -195,24 +202,6 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
             </div>
         </motion.div>
     )
-}
-
-/** Get status badge info based on on-chain market status */
-function getMarketStatusInfo(status: number, isExpired: boolean): { label: string; badgeClass: string } {
-    switch (status) {
-        case 3: // RESOLVED
-            return { label: 'RESOLVED', badgeClass: 'bg-brand-500/20 text-brand-400 border-brand-500/30' }
-        case 4: // CANCELLED
-            return { label: 'CANCELLED', badgeClass: 'bg-no-500/20 text-no-400 border-no-500/30' }
-        case 2: // CLOSED
-            return { label: 'CLOSED', badgeClass: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' }
-        case 5: // PENDING RESOLUTION
-            return { label: 'PENDING', badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/30' }
-        default:
-            return isExpired
-                ? { label: 'ENDED', badgeClass: 'bg-no-500/20 text-no-400 border-no-500/30' }
-                : { label: 'ACTIVE', badgeClass: 'bg-yes-500/20 text-yes-400 border-yes-500/30' }
-    }
 }
 
 /** Live countdown hook — updates every second when deadlineTimestamp is available */

@@ -62,6 +62,8 @@ import { DisputePanel } from '@/components/DisputePanel'
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
 import { cn, formatCredits, getTokenSymbol, sanitizeUrl, safeHostname, isValidAleoAddress } from '@/lib/utils'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { devWarn } from '../lib/logger'
 
 const categoryNames: Record<number, string> = {
@@ -123,20 +125,9 @@ function CopyableText({ text, displayText }: { text: string; displayText?: strin
 }
 
 // Status label component
-function MarketStatusBadge({ status }: { status: number }) {
-  const labels: Record<number, { text: string; color: string }> = {
-    1: { text: 'Active', color: 'bg-yes-500/10 text-yes-400 border-yes-500/20' },
-    2: { text: 'Closed', color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
-    3: { text: 'Resolved', color: 'bg-brand-500/10 text-brand-400 border-brand-500/20' },
-    4: { text: 'Cancelled', color: 'bg-no-500/10 text-no-400 border-no-500/20' },
-    5: { text: 'Pending Resolution', color: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
-  }
-  const label = labels[status] || labels[1]
-  return (
-    <span className={cn('px-2 py-0.5 text-xs font-medium rounded-full border', label.color)}>
-      {label.text}
-    </span>
-  )
+function MarketStatusBadgeWrapper({ status }: { status: number }) {
+  const variant = getStatusVariant(status, false)
+  return <StatusBadge variant={variant} size="md" />
 }
 
 const DESC_LIMIT = 150
@@ -457,15 +448,45 @@ export function MarketDetail() {
   if (!wallet.connected) return null
 
   if (!market) {
-    // Still loading markets — show spinner instead of "Not Found"
+    // Still loading markets — show skeleton instead of "Not Found"
     if (marketsLoading || markets.length === 0) {
       return (
         <div className="min-h-screen bg-surface-950 flex flex-col">
           <DashboardHeader />
-          <main className="flex-1 pt-20 flex items-center justify-center">
-            <div className="text-center">
-              <RefreshCw className="w-10 h-10 text-brand-400 mx-auto mb-4 animate-spin" />
-              <p className="text-surface-400">Loading market data...</p>
+          <main className="flex-1 pt-20">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              <div className="skeleton h-8 w-32 rounded-lg mb-6" />
+              <div className="grid lg:grid-cols-[1fr_380px] gap-8">
+                <div className="space-y-6">
+                  <div className="glass-card p-6 space-y-4">
+                    <div className="flex gap-2">
+                      <div className="skeleton h-6 w-20 rounded-full" />
+                      <div className="skeleton h-6 w-16 rounded-full" />
+                    </div>
+                    <div className="skeleton h-7 w-4/5 rounded" />
+                    <div className="skeleton h-4 w-full rounded" />
+                    <div className="skeleton h-4 w-2/3 rounded" />
+                    <div className="space-y-2 mt-4">
+                      <div className="flex justify-between">
+                        <div className="skeleton h-4 w-16 rounded" />
+                        <div className="skeleton h-4 w-16 rounded" />
+                      </div>
+                      <div className="skeleton h-3 w-full rounded-full" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-4 mt-4">
+                      <div className="skeleton h-16 rounded-xl" />
+                      <div className="skeleton h-16 rounded-xl" />
+                      <div className="skeleton h-16 rounded-xl" />
+                    </div>
+                  </div>
+                </div>
+                <div className="glass-card p-6 space-y-4 h-fit">
+                  <div className="skeleton h-5 w-24 rounded" />
+                  <div className="skeleton h-12 w-full rounded-xl" />
+                  <div className="skeleton h-12 w-full rounded-xl" />
+                  <div className="skeleton h-10 w-full rounded-xl" />
+                </div>
+              </div>
             </div>
           </main>
           <Footer />
@@ -719,7 +740,7 @@ export function MarketDetail() {
                     )}>
                       {categoryNames[market.category]}
                     </span>
-                    <MarketStatusBadge status={market.status} />
+                    <MarketStatusBadgeWrapper status={market.status} />
                     {market.tags?.map(tag => (
                       <span
                         key={tag}
@@ -1183,10 +1204,10 @@ export function MarketDetail() {
                               key={amount}
                               onClick={() => setBuyAmount(amount.toString())}
                               className={cn(
-                                "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                                "px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-95",
                                 parseFloat(buyAmount) === amount
                                   ? "bg-brand-500 text-white"
-                                  : "bg-surface-800/50 text-surface-400 hover:text-white"
+                                  : "bg-surface-800/50 text-surface-400 hover:text-white hover:bg-surface-700/50"
                               )}
                             >
                               {amount}
@@ -1196,14 +1217,18 @@ export function MarketDetail() {
 
                         {/* Slippage Tolerance */}
                         <div className="mt-4">
-                          <label className="text-xs text-surface-500 mb-1.5 block">Slippage Tolerance</label>
+                          <Tooltip content="Maximum price change you'll accept between order and execution">
+                            <label className="text-xs text-surface-500 mb-1.5 block cursor-help w-fit">
+                              Slippage Tolerance
+                            </label>
+                          </Tooltip>
                           <div className="flex gap-2">
                             {SLIPPAGE_PRESETS.map(s => (
                               <button
                                 key={s}
                                 onClick={() => setSlippage(s)}
                                 className={cn(
-                                  'px-3 py-1 rounded-lg text-xs font-medium transition-all',
+                                  'px-3 py-1 rounded-lg text-xs font-medium transition-all active:scale-95',
                                   slippage === s
                                     ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
                                     : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
@@ -1230,9 +1255,11 @@ export function MarketDetail() {
                               : <>Public Balance: {formatCredits(wallet.balance.public)} ALEO</>
                             }
                           </p>
-                          <p className="text-xs text-surface-600">
-                            Transaction fee: 0.5 ALEO (from public balance)
-                          </p>
+                          <Tooltip content="Gas fee paid to Aleo network validators for processing your transaction" side="bottom">
+                            <p className="text-xs text-surface-600 cursor-help w-fit">
+                              Transaction fee: 0.5 ALEO (from public balance)
+                            </p>
+                          </Tooltip>
                         </div>
                       </motion.div>
                     )}
@@ -1294,7 +1321,7 @@ export function MarketDetail() {
                       className={cn(
                         "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
                         selectedOutcome && buyAmountMicro > 0n
-                          ? "bg-brand-500 hover:bg-brand-400 text-white"
+                          ? "bg-brand-500 hover:bg-brand-400 text-white active:scale-[0.98]"
                           : "bg-surface-800 text-surface-500 cursor-not-allowed"
                       )}
                     >

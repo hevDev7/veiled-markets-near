@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
+import { Tooltip } from '@/components/ui/Tooltip'
+import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 
 interface MarketCardProps {
   market: Market
@@ -14,7 +16,7 @@ interface MarketCardProps {
 export function MarketCard({ market, index, onClick }: MarketCardProps) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const isExpired = timeRemaining === 'Ended' || market.status !== 1
-  const statusInfo = getMarketStatusInfo(market.status, isExpired)
+  const statusVariant = getStatusVariant(market.status, isExpired)
 
   return (
     <motion.div
@@ -31,12 +33,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           <span className="text-lg">{getCategoryEmoji(market.category)}</span>
           <span className="category-badge">{getCategoryName(market.category)}</span>
           {isExpired && (
-            <span className={cn(
-              "px-2 py-0.5 text-[10px] font-mono font-bold rounded border",
-              statusInfo.badgeClass
-            )}>
-              {statusInfo.label}
-            </span>
+            <StatusBadge variant={statusVariant} />
           )}
           {market.tags?.slice(0, 2).map(tag => (
             <span
@@ -89,31 +86,37 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="text-center p-2 rounded-lg bg-surface-800/50">
-          <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
-            <TrendingUp className="w-3.5 h-3.5" />
+        <Tooltip content="Total value of all trades in this market" side="bottom">
+          <div className="text-center p-2 rounded-lg bg-surface-800/50">
+            <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
+              <TrendingUp className="w-3.5 h-3.5" />
+            </div>
+            <p className="text-sm font-semibold text-white">
+              {formatCredits(market.totalVolume, 0)}
+            </p>
+            <p className="text-[10px] text-surface-500 uppercase">Volume</p>
           </div>
-          <p className="text-sm font-semibold text-white">
-            {formatCredits(market.totalVolume, 0)}
-          </p>
-          <p className="text-[10px] text-surface-500 uppercase">Volume</p>
-        </div>
+        </Tooltip>
 
-        <div className="text-center p-2 rounded-lg bg-surface-800/50">
-          <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
-            <Users className="w-3.5 h-3.5" />
+        <Tooltip content="Number of bets placed on this market" side="bottom">
+          <div className="text-center p-2 rounded-lg bg-surface-800/50">
+            <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
+              <Users className="w-3.5 h-3.5" />
+            </div>
+            <p className="text-sm font-semibold text-white">{market.totalBets}</p>
+            <p className="text-[10px] text-surface-500 uppercase">Bets</p>
           </div>
-          <p className="text-sm font-semibold text-white">{market.totalBets}</p>
-          <p className="text-[10px] text-surface-500 uppercase">Bets</p>
-        </div>
+        </Tooltip>
 
-        <div className="text-center p-2 rounded-lg bg-surface-800/50">
-          <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
-            <Clock className="w-3.5 h-3.5" />
+        <Tooltip content="Time remaining until trading closes" side="bottom">
+          <div className="text-center p-2 rounded-lg bg-surface-800/50">
+            <div className="flex items-center justify-center gap-1 text-surface-400 mb-1">
+              <Clock className="w-3.5 h-3.5" />
+            </div>
+            <p className="text-sm font-semibold text-white">{timeRemaining}</p>
+            <p className="text-[10px] text-surface-500 uppercase">Left</p>
           </div>
-          <p className="text-sm font-semibold text-white">{timeRemaining}</p>
-          <p className="text-[10px] text-surface-500 uppercase">Left</p>
-        </div>
+        </Tooltip>
       </div>
 
       {/* Potential Payouts */}
@@ -160,19 +163,6 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
       )}
     </motion.div>
   )
-}
-
-/** Get status badge info based on on-chain market status */
-function getMarketStatusInfo(status: number, isExpired: boolean): { label: string; badgeClass: string } {
-  switch (status) {
-    case 3: return { label: 'RESOLVED', badgeClass: 'bg-brand-500/20 text-brand-400 border-brand-500/30' }
-    case 4: return { label: 'CANCELLED', badgeClass: 'bg-no-500/20 text-no-400 border-no-500/30' }
-    case 2: return { label: 'CLOSED', badgeClass: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' }
-    case 5: return { label: 'PENDING', badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/30' }
-    default: return isExpired
-      ? { label: 'ENDED', badgeClass: 'bg-no-500/20 text-no-400 border-no-500/30' }
-      : { label: 'ACTIVE', badgeClass: 'bg-yes-500/20 text-yes-400 border-yes-500/30' }
-  }
 }
 
 /** Live countdown hook — updates every second when deadlineTimestamp is available */
