@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion'
-import { Droplets, Plus, Minus, Loader2, AlertCircle, Check } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { Droplets, Plus, Minus, Loader2, AlertCircle, Check, RefreshCw, Edit3, Info } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { buildAddLiquidityInputs, buildRemoveLiquidityInputs, buildWithdrawLpResolvedInputs, buildClaimLpRefundInputs, MARKET_STATUS } from '@/lib/aleo-client'
 import { calculateLPSharesOut, calculateLPTokensOut } from '@/lib/amm'
+import { fetchLPTokenRecords, type ParsedLPToken } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
 
 interface LiquidityPanelProps {
@@ -21,6 +22,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const isResolved = market.status === MARKET_STATUS.RESOLVED
   const isCancelled = market.status === MARKET_STATUS.CANCELLED
   const isMarketEnded = market.status !== MARKET_STATUS.ACTIVE
+  const isCreator = wallet.address && market.creator && wallet.address === market.creator
 
   const [activeTab, setActiveTab] = useState<LiquidityTab>(
     isResolved || isCancelled ? 'withdraw' : 'add'
@@ -31,6 +33,49 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [transactionId, setTransactionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // LP Token record fetching
+  const [lpTokens, setLpTokens] = useState<ParsedLPToken[]>([])
+  const [selectedLPIndex, setSelectedLPIndex] = useState<number>(-1)
+  const [isFetchingLP, setIsFetchingLP] = useState(false)
+  const [lpFetchError, setLpFetchError] = useState<string | null>(null)
+  const [showManualPaste, setShowManualPaste] = useState(false)
+  const lpFetchedRef = useRef(false)
+
+  const fetchLPTokens = useCallback(async () => {
+    if (!wallet.connected) return
+    setIsFetchingLP(true)
+    setLpFetchError(null)
+    try {
+      // Timeout after 8s — requestRecords can hang if wallet has no records for this program
+      const records = await Promise.race([
+        fetchLPTokenRecords(CONTRACT_INFO.programId, market.id),
+        new Promise<ParsedLPToken[]>((resolve) => setTimeout(() => resolve([]), 8_000)),
+      ])
+      lpFetchedRef.current = true
+      setLpTokens(records)
+      if (records.length > 0) {
+        setSelectedLPIndex(0)
+        setLpTokenRecord(records[0].plaintext)
+        setShowManualPaste(false)
+      } else {
+        setSelectedLPIndex(-1)
+        setLpTokenRecord('')
+      }
+    } catch (err) {
+      lpFetchedRef.current = true
+      setLpFetchError(err instanceof Error ? err.message : 'Failed to fetch LP tokens')
+    } finally {
+      setIsFetchingLP(false)
+    }
+  }, [wallet.connected, market.id])
+
+  // Auto-fetch LP tokens once when switching to remove/withdraw tab
+  useEffect(() => {
+    if ((activeTab === 'remove' || activeTab === 'withdraw') && wallet.connected && !lpFetchedRef.current && !isFetchingLP) {
+      fetchLPTokens()
+    }
+  }, [activeTab, wallet.connected, isFetchingLP, fetchLPTokens])
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
 
@@ -280,21 +325,33 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                   </div>
                 </div>
 
-                {/* LP Token Record */}
-                <div>
-                  <label className="block text-sm text-surface-400 mb-2">
-                    LP Token Record
-                  </label>
-                  <textarea
-                    value={lpTokenRecord}
-                    onChange={(e) => setLpTokenRecord(e.target.value)}
-                    placeholder="Paste your LPToken record here..."
-                    className="input-field w-full h-24 resize-none text-sm font-mono"
-                  />
-                  <p className="text-xs text-surface-500 mt-1">
-                    Find your LPToken record in your wallet's records section.
-                  </p>
-                </div>
+                {/* LP Token Record — auto-fetch or manual */}
+                <LPTokenSelector
+                  lpTokens={lpTokens}
+                  selectedLPIndex={selectedLPIndex}
+                  isFetchingLP={isFetchingLP}
+                  lpFetchError={lpFetchError}
+                  showManualPaste={showManualPaste}
+                  lpTokenRecord={lpTokenRecord}
+                  onSelect={(idx: number) => {
+                    setSelectedLPIndex(idx)
+                    setLpTokenRecord(lpTokens[idx].plaintext)
+                  }}
+                  onManualChange={setLpTokenRecord}
+                  onToggleManual={() => setShowManualPaste(!showManualPaste)}
+                  onRefresh={fetchLPTokens}
+                  tokenSymbol={tokenSymbol}
+                />
+
+                {/* Non-creator notice */}
+                {!isCreator && wallet.connected && (
+                  <div className="flex items-start gap-2.5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <Info className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-yellow-300/90 leading-relaxed">
+                      Your wallet is not the creator of this market. You can only withdraw LP if you previously added liquidity via <span className="font-mono font-semibold">add_liquidity</span> and hold an LP Token record for this market.
+                    </p>
+                  </div>
+                )}
 
                 <button
                   onClick={handleWithdrawLpResolved}
@@ -318,6 +375,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                 </button>
               </div>
             ) : activeTab === 'add' ? (
+              /* ---- ADD TAB ---- */
               <div className="space-y-4">
                 {/* Amount Input */}
                 <div>
@@ -411,18 +469,33 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* LP Token Record */}
-                <div>
-                  <label className="block text-sm text-surface-400 mb-2">
-                    LP Token Record
-                  </label>
-                  <textarea
-                    value={lpTokenRecord}
-                    onChange={(e) => setLpTokenRecord(e.target.value)}
-                    placeholder="Paste your LPToken record here..."
-                    className="input-field w-full h-24 resize-none text-sm font-mono"
-                  />
-                </div>
+                {/* LP Token Record — auto-fetch or manual */}
+                <LPTokenSelector
+                  lpTokens={lpTokens}
+                  selectedLPIndex={selectedLPIndex}
+                  isFetchingLP={isFetchingLP}
+                  lpFetchError={lpFetchError}
+                  showManualPaste={showManualPaste}
+                  lpTokenRecord={lpTokenRecord}
+                  onSelect={(idx: number) => {
+                    setSelectedLPIndex(idx)
+                    setLpTokenRecord(lpTokens[idx].plaintext)
+                  }}
+                  onManualChange={setLpTokenRecord}
+                  onToggleManual={() => setShowManualPaste(!showManualPaste)}
+                  onRefresh={fetchLPTokens}
+                  tokenSymbol={tokenSymbol}
+                />
+
+                {/* Non-creator notice */}
+                {!isCreator && wallet.connected && (
+                  <div className="flex items-start gap-2.5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <Info className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-yellow-300/90 leading-relaxed">
+                      Your wallet is not the creator of this market. You can only remove LP if you previously added liquidity via <span className="font-mono font-semibold">add_liquidity</span> and hold an LP Token record for this market.
+                    </p>
+                  </div>
+                )}
 
                 {/* LP Shares to Remove */}
                 <div>
@@ -488,6 +561,152 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// LP Token Selector — auto-fetch from wallet + manual paste fallback
+// ============================================================================
+
+interface LPTokenSelectorProps {
+  lpTokens: ParsedLPToken[]
+  selectedLPIndex: number
+  isFetchingLP: boolean
+  lpFetchError: string | null
+  showManualPaste: boolean
+  lpTokenRecord: string
+  onSelect: (idx: number) => void
+  onManualChange: (value: string) => void
+  onToggleManual: () => void
+  onRefresh: () => void
+  tokenSymbol: string
+}
+
+function LPTokenSelector({
+  lpTokens,
+  selectedLPIndex,
+  isFetchingLP,
+  lpFetchError,
+  showManualPaste,
+  lpTokenRecord,
+  onSelect,
+  onManualChange,
+  onToggleManual,
+  onRefresh,
+  tokenSymbol,
+}: LPTokenSelectorProps) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-sm text-surface-400">LP Token Record</label>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onRefresh}
+            disabled={isFetchingLP}
+            className="flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={cn('w-3 h-3', isFetchingLP && 'animate-spin')} />
+            {isFetchingLP ? 'Fetching...' : 'Refresh'}
+          </button>
+          <button
+            onClick={onToggleManual}
+            className="flex items-center gap-1 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+          >
+            <Edit3 className="w-3 h-3" />
+            {showManualPaste ? 'Auto' : 'Paste'}
+          </button>
+        </div>
+      </div>
+
+      {showManualPaste ? (
+        /* Manual paste fallback */
+        <div>
+          <textarea
+            value={lpTokenRecord}
+            onChange={(e) => onManualChange(e.target.value)}
+            placeholder="Paste your LPToken record plaintext here..."
+            className="input-field w-full h-24 resize-none text-sm font-mono"
+          />
+          <p className="text-xs text-surface-500 mt-1">
+            Paste the record from your wallet or block explorer.
+          </p>
+        </div>
+      ) : isFetchingLP ? (
+        /* Loading state */
+        <div className="flex items-center justify-center gap-2 p-6 rounded-xl bg-surface-800/50 border border-surface-700/50">
+          <Loader2 className="w-4 h-4 animate-spin text-brand-400" />
+          <span className="text-sm text-surface-400">Fetching LP tokens from wallet...</span>
+        </div>
+      ) : lpFetchError ? (
+        /* Error state */
+        <div className="p-4 rounded-xl bg-no-500/10 border border-no-500/20">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-no-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-no-400">{lpFetchError}</p>
+              <button
+                onClick={onToggleManual}
+                className="text-xs text-surface-400 hover:text-surface-300 mt-1 underline"
+              >
+                Paste record manually instead
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : lpTokens.length === 0 ? (
+        /* No records found */
+        <div className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 text-center">
+          <p className="text-sm text-surface-400 mb-2">No LP tokens found for this market</p>
+          <p className="text-xs text-surface-500 mb-3">
+            LP tokens are created when you add liquidity or create a market.
+          </p>
+          <button
+            onClick={onToggleManual}
+            className="text-xs text-brand-400 hover:text-brand-300 underline"
+          >
+            Paste record manually
+          </button>
+        </div>
+      ) : (
+        /* LP Token list */
+        <div className="space-y-2">
+          {lpTokens.map((lp, idx) => (
+            <button
+              key={idx}
+              onClick={() => onSelect(idx)}
+              className={cn(
+                'w-full text-left p-3 rounded-xl border transition-all',
+                selectedLPIndex === idx
+                  ? 'bg-brand-500/10 border-brand-500/30'
+                  : 'bg-surface-800/50 border-surface-700/50 hover:border-surface-600'
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Droplets className="w-4 h-4 text-accent-400" />
+                  <span className="text-sm font-semibold text-white">
+                    {formatCredits(lp.lpShares)} LP shares
+                  </span>
+                </div>
+                <span className="text-xs text-surface-500 font-mono">
+                  {tokenSymbol}
+                </span>
+              </div>
+              {lp.marketId && (
+                <p className="text-[10px] text-surface-500 font-mono mt-1 truncate">
+                  Market: {lp.marketId.slice(0, 20)}...
+                </p>
+              )}
+            </button>
+          ))}
+          {lpTokens.length > 0 && (
+            <p className="text-xs text-surface-500 text-center">
+              {lpTokens.length} LP token{lpTokens.length > 1 ? 's' : ''} found
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -403,3 +403,189 @@ export async function fetchOutcomeShareRecords(
   devLog(`[Sell] Returning ${allRecords.length} OutcomeShare record(s)`)
   return allRecords
 }
+
+// ============================================================================
+// LP TOKEN RECORDS
+// ============================================================================
+
+/**
+ * Parsed LPToken record
+ */
+export interface ParsedLPToken {
+  plaintext: string
+  marketId: string | null
+  lpShares: bigint
+  lpNonce: string | null
+  tokenType: number
+  owner: string | null
+}
+
+/**
+ * Parse an LPToken record plaintext string into structured data.
+ * Format: "{ owner: aleo1xxx.private, market_id: 123field.private, lp_shares: 5000000u128.private, lp_nonce: 456field.private, token_type: 1u8.private, _nonce: ...group.public }"
+ */
+function parseLPToken(text: string): ParsedLPToken | null {
+  const sharesMatch = text.match(/lp_shares:\s*(\d+)u128/)
+  if (!sharesMatch) return null
+  const marketMatch = text.match(/market_id:\s*(\d+field)/)
+  const nonceMatch = text.match(/lp_nonce:\s*(\d+field)/)
+  const tokenMatch = text.match(/token_type:\s*(\d+)u8/)
+  const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/)
+  return {
+    plaintext: text,
+    marketId: marketMatch ? marketMatch[1] : null,
+    lpShares: BigInt(sharesMatch[1]),
+    lpNonce: nonceMatch ? nonceMatch[1] : null,
+    tokenType: tokenMatch ? parseInt(tokenMatch[1]) : 1,
+    owner: ownerMatch ? ownerMatch[1] : null,
+  }
+}
+
+/**
+ * Extract LPToken records from a list of raw wallet records.
+ * Filters for records containing "lp_shares:" and "lp_nonce:" (LPToken fields).
+ */
+function extractLPTokenRecords(records: any[]): ParsedLPToken[] {
+  const results: ParsedLPToken[] = []
+  for (const record of records) {
+    if (!record) continue
+    if (record.spent === true || record.is_spent === true) continue
+    if (record.status === 'spent' || record.status === 'Spent') continue
+
+    let plaintext: string | null = null
+
+    if (typeof record === 'string') {
+      if (record.includes('lp_shares:') && record.includes('lp_nonce:')) plaintext = record
+    } else if (typeof record === 'object') {
+      // Try known plaintext fields
+      for (const key of ['plaintext', 'data', 'content']) {
+        if (record[key] != null) {
+          const val = String(record[key])
+          if (val.includes('lp_shares:') && val.includes('lp_nonce:')) {
+            plaintext = val
+            break
+          }
+        }
+      }
+      // Scan all string fields
+      if (!plaintext) {
+        for (const key of Object.keys(record)) {
+          const val = record[key]
+          if (val == null) continue
+          const valStr = String(val)
+          if (valStr.includes('lp_shares:') && valStr.includes('lp_nonce:') && valStr.includes('{') && !valStr.startsWith('{"')) {
+            plaintext = valStr
+            break
+          }
+        }
+      }
+    }
+
+    if (plaintext) {
+      const parsed = parseLPToken(plaintext)
+      if (parsed && parsed.lpShares > 0n) results.push(parsed)
+    }
+  }
+  return results
+}
+
+/**
+ * Fetch LPToken records from the wallet for a given program.
+ * Returns parsed records. Optionally filters by marketId.
+ */
+export async function fetchLPTokenRecords(
+  programId: string,
+  marketId?: string,
+): Promise<ParsedLPToken[]> {
+  devLog(`[LP] === Fetching LPToken records for ${programId} ===`)
+
+  let allRecords: ParsedLPToken[] = []
+
+  // Strategy 1: Adapter requestRecords with plaintext=true
+  const adapterRecords = (window as any).__aleoRequestRecords
+  if (typeof adapterRecords === 'function') {
+    try {
+      devLog('[LP] Strategy 1: adapter requestRecords(program, true)')
+      const records = await adapterRecords(programId, true)
+      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
+      devLog(`[LP] Strategy 1 → Got ${recordsArr.length} record(s)`)
+      allRecords = extractLPTokenRecords(recordsArr)
+      if (allRecords.length > 0) {
+        devLog(`[LP] Found ${allRecords.length} LPToken record(s)`)
+      }
+    } catch (err) {
+      devLog('[LP] Strategy 1 failed:', err)
+    }
+  }
+
+  // Strategy 2: Adapter requestRecordPlaintexts
+  if (allRecords.length === 0) {
+    const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
+    if (typeof adapterPlaintexts === 'function') {
+      try {
+        devLog('[LP] Strategy 2: adapter requestRecordPlaintexts(program)')
+        const records = await adapterPlaintexts(programId)
+        const recordsArr = Array.isArray(records) ? records : (records?.records || [])
+        devLog(`[LP] Strategy 2 → Got ${recordsArr.length} record(s)`)
+        allRecords = extractLPTokenRecords(recordsArr)
+      } catch (err) {
+        devLog('[LP] Strategy 2 failed:', err)
+      }
+    }
+  }
+
+  // Strategy 3: Adapter requestRecords with plaintext=false + decrypt
+  if (allRecords.length === 0) {
+    if (typeof adapterRecords === 'function') {
+      try {
+        devLog('[LP] Strategy 3: adapter requestRecords(program, false) + decrypt')
+        const records = await adapterRecords(programId, false)
+        const recordsArr = Array.isArray(records) ? records : (records?.records || [])
+        devLog(`[LP] Strategy 3 → Got ${recordsArr.length} record(s)`)
+
+        // Try parsing as-is first
+        allRecords = extractLPTokenRecords(recordsArr)
+
+        // Try decrypting if no results
+        if (allRecords.length === 0) {
+          const decryptFn = (window as any).__aleoDecrypt
+          if (typeof decryptFn === 'function') {
+            for (let idx = 0; idx < recordsArr.length; idx++) {
+              const record = recordsArr[idx]
+              if (!record) continue
+              if (record.spent === true || record.is_spent === true) continue
+              if (record.status === 'spent' || record.status === 'Spent') continue
+              const ciphertext = record.ciphertext || record.recordCiphertext || record.record_ciphertext || record.data
+              if (!ciphertext || typeof ciphertext !== 'string') continue
+              try {
+                const decrypted = await decryptFn(ciphertext)
+                const textStr = String(decrypted)
+                if (textStr.includes('lp_shares:') && textStr.includes('lp_nonce:')) {
+                  const parsed = parseLPToken(textStr)
+                  if (parsed && parsed.lpShares > 0n) {
+                    allRecords.push(parsed)
+                    devLog(`[LP] Strategy 3: decrypted LPToken record ${idx}`)
+                  }
+                }
+              } catch {
+                // Skip records that fail to decrypt
+              }
+            }
+          }
+        }
+      } catch (err) {
+        devLog('[LP] Strategy 3 failed:', err)
+      }
+    }
+  }
+
+  // Filter by market if specified
+  if (marketId && allRecords.length > 0) {
+    const filtered = allRecords.filter(r => !r.marketId || r.marketId === marketId)
+    devLog(`[LP] Filtered to ${filtered.length} record(s) for market ${marketId.slice(0, 20)}...`)
+    return filtered
+  }
+
+  devLog(`[LP] Returning ${allRecords.length} LPToken record(s)`)
+  return allRecords
+}
