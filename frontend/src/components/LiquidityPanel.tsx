@@ -116,10 +116,15 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
     try {
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      // CRITICAL: expected_lp_shares is stored in the LP Token record output.
+      // If 0, the LP Token will have 0 shares — useless for remove_liquidity.
+      // Apply 1% slippage buffer to the frontend estimate.
+      const slippageBuffer = lpSharesOut * 1n / 100n
+      const expectedLpShares = lpSharesOut > slippageBuffer ? lpSharesOut - slippageBuffer : 1n
       const { functionName, inputs } = buildAddLiquidityInputs(
         market.id,
         amountMicro,
-        0n, // expectedLpShares — 0 = accept any amount
+        expectedLpShares,
         tokenType,
       )
 
@@ -151,10 +156,15 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
     try {
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      // CRITICAL: min_tokens_out is used as the ACTUAL transfer amount in the transition.
+      // Pass the estimated tokensOut (with 1% slippage buffer) — NOT 0.
+      // If 0 is passed, credits.aleo/transfer_public transfers 0 ALEO to the user.
+      const slippageBuffer = tokensOut * 1n / 100n // 1% slippage
+      const minTokensOut = tokensOut > slippageBuffer ? tokensOut - slippageBuffer : 0n
       const { functionName, inputs } = buildRemoveLiquidityInputs(
         lpTokenRecord,
         lpSharesMicro,
-        0n, // minTokensOut — 0 = accept any amount
+        minTokensOut,
         tokenType,
       )
 
@@ -186,10 +196,20 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
     try {
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      // CRITICAL: min_tokens_out is used as the ACTUAL transfer amount in the transition.
+      // Estimate LP share value from on-chain pool data, apply 2% slippage buffer.
+      // For cancelled markets, each LP share = proportional to total_liquidity / total_lp_shares.
+      const selectedLP = lpTokens.length > 0 && selectedLPIndex >= 0 ? lpTokens[selectedLPIndex] : null
+      const lpSharesForWithdraw = selectedLP ? selectedLP.lpShares : 0n
+      const estimatedOut = totalLPShares > 0n
+        ? (lpSharesForWithdraw * displayLiquidity) / totalLPShares
+        : 0n
+      const slippageBuffer = estimatedOut * 2n / 100n // 2% slippage for resolved/cancelled
+      const minTokensOut = estimatedOut > slippageBuffer ? estimatedOut - slippageBuffer : 1n
       const builder = isCancelled ? buildClaimLpRefundInputs : buildWithdrawLpResolvedInputs
       const { functionName, inputs } = builder(
         lpTokenRecord,
-        0n, // min_tokens_out — 0 = accept any
+        minTokensOut,
         tokenType,
       )
 
