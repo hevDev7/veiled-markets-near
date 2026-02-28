@@ -32,7 +32,7 @@ import {
 } from '@/lib/aleo-client'
 import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
 import { uploadMarketMetadata, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
-import { saveIPFSCid } from '@/lib/aleo-client'
+import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
 
 interface CreateMarketModalProps {
@@ -420,7 +420,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const resolveAndRegister = async () => {
         let resolved = false
 
-        const onMarketFound = (actualMarketId: string, onChainTxId: string) => {
+        const onMarketFound = async (actualMarketId: string, onChainTxId: string) => {
           if (resolved) return
           resolved = true
           devLog('[CreateMarket] Market ID found:', actualMarketId)
@@ -428,6 +428,18 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           // Also register outcome labels and IPFS CID by market ID
           registerOutcomeLabels(actualMarketId, activeLabels)
           if (ipfsCid) saveIPFSCid(actualMarketId, ipfsCid)
+
+          // Fetch on-chain creator address (wallet.address may be stale if user switched accounts)
+          let creatorAddress = wallet.address!
+          try {
+            const onChainMarket = await getMarket(actualMarketId)
+            if (onChainMarket?.creator) {
+              devLog('[CreateMarket] On-chain creator:', onChainMarket.creator, '| wallet.address:', wallet.address)
+              creatorAddress = onChainMarket.creator
+            }
+          } catch (err) {
+            devWarn('[CreateMarket] Failed to fetch on-chain creator, using wallet.address:', err)
+          }
 
           // Update Supabase: register real market ID AND delete stale pending_ entry
           if (isSupabaseAvailable()) {
@@ -438,7 +450,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
               description: formData.description || undefined,
               resolution_source: formData.resolutionSource || undefined,
               category: formData.category,
-              creator_address: wallet.address!,
+              creator_address: creatorAddress,
               transaction_id: onChainTxId || transactionId,
               created_at: Date.now(),
               ipfs_cid: ipfsCid || undefined,
