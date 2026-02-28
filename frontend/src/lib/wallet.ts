@@ -1833,6 +1833,9 @@ export class ShieldWalletAdapter {
 
   onAccountChange(callback: (account: WalletAccount | null) => void): () => void {
     const shieldWallet = this.getShieldWallet();
+    const cleanups: (() => void)[] = [];
+
+    // 1. Listen for disconnect events
     if (shieldWallet && typeof shieldWallet.on === 'function') {
       const handler = () => {
         this.account = null;
@@ -1840,13 +1843,42 @@ export class ShieldWalletAdapter {
         callback(null);
       };
       shieldWallet.on('disconnect', handler);
-      return () => {
+      cleanups.push(() => {
         if (typeof shieldWallet.off === 'function') {
           shieldWallet.off('disconnect', handler);
         }
-      };
+      });
     }
-    return () => {};
+
+    // 2. Poll for account changes (Shield doesn't emit account-switch events)
+    //    Check every 3 seconds if the active address has changed
+    const pollInterval = setInterval(async () => {
+      if (!this.connected || !shieldWallet) return;
+      try {
+        let currentAddress: string | null = null;
+        if (shieldWallet.publicKey) {
+          currentAddress = shieldWallet.publicKey;
+        } else if (typeof shieldWallet.getAccount === 'function') {
+          const acc = await shieldWallet.getAccount();
+          currentAddress = acc?.address || acc?.publicKey || acc;
+        } else if (typeof shieldWallet.getAddress === 'function') {
+          currentAddress = await shieldWallet.getAddress();
+        }
+
+        if (currentAddress && typeof currentAddress === 'string' && currentAddress.startsWith('aleo1')) {
+          if (this.account && this.account.address !== currentAddress) {
+            devLog('Shield Wallet: Account changed from', this.account.address?.slice(0, 12), 'to', currentAddress.slice(0, 12));
+            this.account = { address: currentAddress, network: 'testnet' };
+            callback(this.account);
+          }
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    }, 3000);
+    cleanups.push(() => clearInterval(pollInterval));
+
+    return () => cleanups.forEach(fn => fn());
   }
 
   onNetworkChange(_callback: (network: NetworkType) => void): () => void {

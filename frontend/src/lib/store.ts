@@ -171,6 +171,9 @@ const initialWalletState: WalletState = {
   encryptionKey: null,
 }
 
+// Track listener cleanup functions to prevent duplicate listeners on reconnect
+const _listenerCleanups: (() => void)[] = []
+
 export const useWalletStore = create<WalletStore>((set, get) => ({
   wallet: initialWalletState,
   error: null,
@@ -200,9 +203,16 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       })
 
       // Set up event listeners for real wallets
+      // Clean up previous listeners first to prevent duplicates
+      if (_listenerCleanups.length > 0) {
+        _listenerCleanups.forEach(fn => fn())
+        _listenerCleanups.length = 0
+      }
+
       if (!walletManager.isDemoMode()) {
-        walletManager.onAccountChange((newAccount: WalletAccount | null) => {
+        const unsubAccount = walletManager.onAccountChange((newAccount: WalletAccount | null) => {
           if (newAccount) {
+            devLog('[Store] Account changed to:', newAccount.address?.slice(0, 12))
             set({
               wallet: {
                 ...get().wallet,
@@ -210,13 +220,16 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
                 network: newAccount.network,
               },
             })
+            // Refresh balance for the new account
+            setTimeout(() => get().refreshBalance(), 300)
           } else {
             // Account disconnected
             get().disconnect()
           }
         })
+        _listenerCleanups.push(unsubAccount)
 
-        walletManager.onNetworkChange((network: NetworkType) => {
+        const unsubNetwork = walletManager.onNetworkChange((network: NetworkType) => {
           set({
             wallet: {
               ...get().wallet,
@@ -224,6 +237,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             },
           })
         })
+        _listenerCleanups.push(unsubNetwork)
       }
     } catch (error: unknown) {
       console.error('Store connect error:', error)
