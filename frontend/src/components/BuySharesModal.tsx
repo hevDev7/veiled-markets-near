@@ -5,8 +5,8 @@ import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
-import { fetchCreditsRecord } from '@/lib/credits-record'
+import { buildBuySharesInputs, buildDefaultMerkleProofs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
+import { fetchCreditsRecord, fetchUsdcxTokenRecord } from '@/lib/credits-record'
 import { calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
 import { devWarn } from '../lib/logger'
 
@@ -146,18 +146,29 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const expectedShares = minSharesOut
 
       if (isUsdcx) {
-        // USDCX: buy_shares_usdcx uses transfer_public_as_signer (no record needed)
-        const availableBalance = wallet.balance.usdcxPublic
-        if (!wallet.isDemoMode && amountMicro > availableBalance) {
-          throw new Error(
-            `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX public balance.`
-          )
+        // USDCX: buy_shares_private_usdcx with Token record + Merkle proofs (private)
+        // Fallback to buy_shares_usdcx (public) if no private Token record available
+        const usdcxTokenRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
+        if (usdcxTokenRecord) {
+          const merkleProofs = buildDefaultMerkleProofs()
+          const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'USDCX', undefined, usdcxTokenRecord, merkleProofs)
+          functionName = result.functionName
+          inputs = result.inputs
+          setPrivacyMode('private')
+        } else {
+          // Fallback: public USDCX (transfer_public_as_signer)
+          const availableBalance = wallet.balance.usdcxPublic
+          if (!wallet.isDemoMode && amountMicro > availableBalance) {
+            throw new Error(
+              `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
+              `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX (public + private).`
+            )
+          }
+          const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'USDCX')
+          functionName = result.functionName
+          inputs = result.inputs
+          setPrivacyMode('public')
         }
-        const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'USDCX')
-        functionName = result.functionName
-        inputs = result.inputs
-        setPrivacyMode('public')
       } else {
         // ALEO: buy_shares_private uses transfer_private_to_public (needs credits record)
         // Need enough for bet amount + gas fee buffer (0.5 ALEO = 500,000 microcredits)
@@ -392,14 +403,14 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                             <div className="flex justify-between text-xs mt-2">
                               <span className="text-surface-500">
                                 {isUsdcx
-                                  ? `Balance: ${formatCredits(wallet.balance.usdcxPublic)} USDCX`
+                                  ? `Balance: ${formatCredits(wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate)} USDCX (private: ${formatCredits(wallet.balance.usdcxPrivate)})`
                                   : `Balance: ${formatCredits(wallet.balance.public + wallet.balance.private)} ALEO (private: ${formatCredits(wallet.balance.private)})`
                                 }
                               </span>
                               <button
                                 onClick={() => {
-                                  // For ALEO private buy, use total balance minus gas buffer
-                                  const bal = isUsdcx ? wallet.balance.usdcxPublic : (wallet.balance.public + wallet.balance.private)
+                                  // Use total balance (public + private) minus gas buffer
+                                  const bal = isUsdcx ? (wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate) : (wallet.balance.public + wallet.balance.private)
                                   const usable = bal > 700_000n ? bal - 700_000n : 0n
                                   setAmount((Number(usable) / 1_000_000).toString())
                                 }}

@@ -28,6 +28,7 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
   buildBuySharesInputs,
+  buildDefaultMerkleProofs,
   buildSellSharesInputs,
   getCurrentBlockHeight,
   getMarketResolution,
@@ -554,8 +555,9 @@ export function MarketDetail() {
       // Pre-flight: Balance verification
       const feeInMicro = 700_000n
       if (isUsdcx) {
-        if (buyAmountMicro > wallet.balance.usdcxPublic) {
-          throw new Error(`Insufficient USDCX balance. You need ${buyAmount} USDCX but only have ${(Number(wallet.balance.usdcxPublic) / 1_000_000).toFixed(2)} USDCX.`)
+        const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+        if (buyAmountMicro > totalUsdcx) {
+          throw new Error(`Insufficient USDCX balance. You need ${buyAmount} USDCX but only have ${(Number(totalUsdcx) / 1_000_000).toFixed(2)} USDCX.`)
         }
         // Gas fees always in ALEO
         const publicBalance = wallet.balance.public
@@ -573,8 +575,18 @@ export function MarketDetail() {
         // expectedShares = minShares (conservative) so record quantity <= actual shares_out
         const expectedShares = tradePreview.minShares
         let creditsRecord: string | undefined
+        let usdcxTokenRecord: string | undefined
+        let merkleProofs: string | undefined
 
-        if (tokenType !== 'USDCX') {
+        if (tokenType === 'USDCX') {
+          // USDCX: try private first (Token record + Merkle proofs)
+          const { fetchUsdcxTokenRecord } = await import('@/lib/credits-record')
+          const record = await fetchUsdcxTokenRecord(Number(buyAmountMicro))
+          if (record) {
+            usdcxTokenRecord = record
+            merkleProofs = buildDefaultMerkleProofs()
+          }
+        } else {
           // ALEO: buy_shares_private needs credits record
           const { fetchCreditsRecord } = await import('@/lib/credits-record')
           const gasBuffer = 500_000
@@ -597,12 +609,14 @@ export function MarketDetail() {
           tradePreview.minShares,
           tokenType as 'ALEO' | 'USDCX',
           creditsRecord,
+          usdcxTokenRecord,
+          merkleProofs,
         )
         functionName = result.functionName
         inputs = result.inputs
       }
 
-      devWarn('[Trade] Submitting:', { function: functionName, mode: tokenType === 'USDCX' ? 'PUBLIC' : 'PRIVATE', inputs })
+      devWarn('[Trade] Submitting:', { function: functionName, mode: functionName.includes('private') ? 'PRIVATE' : 'PUBLIC', inputs })
 
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,

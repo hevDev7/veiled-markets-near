@@ -5,8 +5,8 @@ import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildBuySharesInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
-import { fetchCreditsRecord } from '@/lib/credits-record'
+import { buildBuySharesInputs, buildDefaultMerkleProofs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
+import { fetchCreditsRecord, fetchUsdcxTokenRecord } from '@/lib/credits-record'
 import { devWarn } from '../lib/logger'
 
 interface BettingModalProps {
@@ -69,17 +69,28 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       let inputs: string[]
 
       if (tokenType === 'USDCX') {
-        const availableBalance = wallet.balance.usdcxPublic
-        if (!wallet.isDemoMode && amountMicro > availableBalance) {
-          throw new Error(
-            `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX public balance.`
-          )
+        // Try private USDCX first (Token record + Merkle proofs)
+        const usdcxTokenRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
+        if (usdcxTokenRecord) {
+          const merkleProofs = buildDefaultMerkleProofs()
+          const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX', undefined, usdcxTokenRecord, merkleProofs)
+          functionName = betResult.functionName
+          inputs = betResult.inputs
+          setPrivacyMode('private')
+        } else {
+          // Fallback: public USDCX
+          const availableBalance = wallet.balance.usdcxPublic
+          if (!wallet.isDemoMode && amountMicro > availableBalance) {
+            throw new Error(
+              `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
+              `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX (public + private).`
+            )
+          }
+          const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
+          functionName = betResult.functionName
+          inputs = betResult.inputs
+          setPrivacyMode('public')
         }
-        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
-        functionName = betResult.functionName
-        inputs = betResult.inputs
-        setPrivacyMode('public')
       } else {
         // ALEO: buy_shares_private with credits record
         const gasBuffer = 500_000
@@ -349,7 +360,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           <div className="flex justify-between text-sm">
                             <span className="text-surface-500">
                               {isUsdcx
-                                ? `Balance: ${formatCredits(wallet.balance.usdcxPublic)} USDCX`
+                                ? `Balance: ${formatCredits(wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate)} USDCX (private: ${formatCredits(wallet.balance.usdcxPrivate)})`
                                 : `Public: ${formatCredits(wallet.balance.public)} ALEO`
                               }
                             </span>
@@ -357,7 +368,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                               onClick={() => {
                                 // All bets use public balance (private mode disabled)
                                 if (isUsdcx) {
-                                  const usable = wallet.balance.usdcxPublic
+                                  const usable = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
                                   setBetAmount((Number(usable) / 1_000_000).toString())
                                 } else {
                                   // Public balance minus gas reserve (~0.7 ALEO for tx fee)
@@ -400,8 +411,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           <p className="text-sm font-medium text-brand-300">Secure Transaction</p>
                           <p className="text-xs text-surface-400 mt-1">
                             {isUsdcx
-                              ? 'USDCX market — bet uses public USDCX transfer.'
-                              : 'Bet uses transfer_public_as_signer. ZK proofs verify your transaction on-chain.'
+                              ? 'USDCX market — private Token record used when available. Your address stays hidden on-chain.'
+                              : 'Bet uses private credits record. ZK proofs verify your transaction on-chain.'
                             }
                           </p>
                         </div>

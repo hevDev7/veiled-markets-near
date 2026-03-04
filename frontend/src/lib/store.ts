@@ -11,6 +11,7 @@ import {
 } from './wallet'
 import {
   buildBuySharesInputs,
+  buildDefaultMerkleProofs,
   CONTRACT_INFO,
   getMarket,
   getMarketResolution,
@@ -1469,11 +1470,14 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       // Build inputs for the veiled_markets_v17.aleo contract
       // ALEO: buy_shares_private (needs credits record)
-      // USDCX: buy_shares_usdcx (no record needed)
+      // USDCX: buy_shares_private_usdcx (needs Token record + Merkle proofs), fallback to buy_shares_usdcx
       const tokenType = market?.tokenType || 'ALEO'
       const outcomeNum = outcome === 'yes' ? 1 : 2
 
       let creditsRecord: string | undefined
+      let usdcxTokenRecord: string | undefined
+      let merkleProofs: string | undefined
+
       if (tokenType === 'ALEO') {
         const { fetchCreditsRecord } = await import('./credits-record')
         const gasBuffer = 500_000
@@ -1486,6 +1490,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           )
         }
         creditsRecord = record
+      } else if (tokenType === 'USDCX') {
+        const { fetchUsdcxTokenRecord } = await import('./credits-record')
+        const record = await fetchUsdcxTokenRecord(Number(amount))
+        if (record) {
+          usdcxTokenRecord = record
+          merkleProofs = buildDefaultMerkleProofs()
+        }
       }
 
       const { functionName: betFunctionName, inputs } = buildBuySharesInputs(
@@ -1496,6 +1507,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         0n, // minSharesOut
         tokenType as 'ALEO' | 'USDCX',
         creditsRecord,
+        usdcxTokenRecord,
+        merkleProofs,
       )
 
       devLog('=== PLACE BET DEBUG ===')
@@ -1517,7 +1530,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       // Request transaction through wallet
       // ALEO: buy_shares_private (privacy-preserving, transfer_private_to_public)
-      // USDCX: buy_shares_usdcx (transfer_public_as_signer)
+      // USDCX: buy_shares_private_usdcx (private Token record) or buy_shares_usdcx (public fallback)
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
         functionName: betFunctionName,
