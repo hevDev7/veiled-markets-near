@@ -851,22 +851,8 @@ export function MarketDetail() {
                   }
                   totalVolume={market.totalVolume}
                   tokenSymbol={market.tokenType || 'ALEO'}
-                  className="mb-6"
-                />
-
-                {/* Outcome price cards for selection */}
-                <OutcomeSelector
-                  numOutcomes={numOutcomes}
-                  outcomeLabels={outcomeLabels}
-                  prices={prices}
-                  selectedOutcome={selectedOutcome}
-                  onSelect={(o) => {
-                    setSelectedOutcome(o)
-                  }}
-                  disabled={!canTrade}
                 />
               </motion.div>
-
 
               {/* Tab panels: Liquidity, Dispute, Creator Fees */}
               <motion.div
