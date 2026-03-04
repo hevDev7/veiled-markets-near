@@ -1,11 +1,19 @@
 import { motion } from 'framer-motion'
 import { Clock, TrendingUp, Shield, ChevronRight, ExternalLink } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
+import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
+
+const OUTCOME_COLORS = [
+  { text: 'text-yes-400', bar: 'bg-yes-500', bg: 'bg-yes-500/10', border: 'border-yes-500/20' },
+  { text: 'text-no-400', bar: 'bg-no-500', bg: 'bg-no-500/10', border: 'border-no-500/20' },
+  { text: 'text-purple-400', bar: 'bg-purple-500', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+  { text: 'text-yellow-400', bar: 'bg-yellow-500', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
+]
 
 interface MarketRowProps {
     market: Market
@@ -17,6 +25,32 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
     const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
     const statusVariant = getStatusVariant(market.status, isExpired)
+
+    const numOutcomes = market.numOutcomes ?? 2
+    const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
+
+    const prices = useMemo(() => {
+        const reserves: AMMReserves = {
+            reserve_1: market.yesReserve ?? 0n,
+            reserve_2: market.noReserve ?? 0n,
+            reserve_3: market.reserve3 ?? 0n,
+            reserve_4: market.reserve4 ?? 0n,
+            num_outcomes: numOutcomes,
+        }
+        return calculateAllPrices(reserves)
+    }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
+
+    const isBinary = numOutcomes === 2
+
+    // Find leading outcome (highest probability) for compact multi-outcome display
+    const leadingIdx = useMemo(() => {
+        let maxIdx = 0
+        for (let i = 1; i < prices.length; i++) {
+            if ((prices[i] ?? 0) > (prices[maxIdx] ?? 0)) maxIdx = i
+        }
+        return maxIdx
+    }, [prices])
+    const leadingPct = (prices[leadingIdx] ?? 0) * 100
 
     return (
         <motion.div
@@ -57,20 +91,48 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
 
                     {/* Odds Bar - Compact */}
                     <div className="max-w-md">
-                        <div className="flex justify-between text-xs mb-1.5 font-mono">
-                            <span className="text-yes-400">
-                                YES {formatPercentage(market.yesPercentage)}
-                            </span>
-                            <span className="text-no-400">
-                                NO {formatPercentage(market.noPercentage)}
-                            </span>
-                        </div>
-                        <div className="h-1.5 rounded-full overflow-hidden bg-surface-800">
-                            <div
-                                className="h-full bg-gradient-to-r from-yes-600 to-yes-400 transition-all duration-500"
-                                style={{ width: `${market.yesPercentage}%` }}
-                            />
-                        </div>
+                        {isBinary ? (
+                            <>
+                                <div className="flex justify-between text-xs mb-1.5 font-mono">
+                                    <span className="text-yes-400">
+                                        {outcomeLabels[0].toUpperCase()} {formatPercentage(market.yesPercentage)}
+                                    </span>
+                                    <span className="text-no-400">
+                                        {outcomeLabels[1].toUpperCase()} {formatPercentage(market.noPercentage)}
+                                    </span>
+                                </div>
+                                <div className="h-1.5 rounded-full overflow-hidden bg-surface-800">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-yes-600 to-yes-400 transition-all duration-500"
+                                        style={{ width: `${market.yesPercentage}%` }}
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="flex items-center gap-2 text-xs mb-1.5 font-mono">
+                                    {/* Leading outcome */}
+                                    <span className={cn('font-bold', OUTCOME_COLORS[leadingIdx]?.text || 'text-yes-400')}>
+                                        {outcomeLabels[leadingIdx]} {formatPercentage(leadingPct)}
+                                    </span>
+                                    <span className="text-surface-600">|</span>
+                                    <span className="text-surface-400">{numOutcomes} outcomes</span>
+                                </div>
+                                <div className="h-1.5 rounded-full overflow-hidden bg-surface-800 flex">
+                                    {outcomeLabels.map((_, i) => {
+                                        const pct = (prices[i] ?? 0) * 100
+                                        const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
+                                        return (
+                                            <div
+                                                key={i}
+                                                className={cn('h-full transition-all duration-500', colors.bar)}
+                                                style={{ width: `${pct}%` }}
+                                            />
+                                        )
+                                    })}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -121,16 +183,31 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                 {/* Right: Payouts & Arrow */}
                 <div className="flex items-center gap-4">
                     <div className="hidden lg:flex items-center gap-2">
-                        <div className="px-3 py-1.5 rounded-lg bg-yes-500/10 border border-yes-500/20">
-                            <span className="text-xs font-mono text-yes-400">
-                                YES {market.potentialYesPayout.toFixed(2)}x
-                            </span>
-                        </div>
-                        <div className="px-3 py-1.5 rounded-lg bg-no-500/10 border border-no-500/20">
-                            <span className="text-xs font-mono text-no-400">
-                                NO {market.potentialNoPayout.toFixed(2)}x
-                            </span>
-                        </div>
+                        {isBinary ? (
+                            <>
+                                <div className={cn('px-3 py-1.5 rounded-lg', 'bg-yes-500/10 border border-yes-500/20')}>
+                                    <span className="text-xs font-mono text-yes-400">
+                                        {outcomeLabels[0].toUpperCase()} {market.potentialYesPayout.toFixed(2)}x
+                                    </span>
+                                </div>
+                                <div className={cn('px-3 py-1.5 rounded-lg', 'bg-no-500/10 border border-no-500/20')}>
+                                    <span className="text-xs font-mono text-no-400">
+                                        {outcomeLabels[1].toUpperCase()} {market.potentialNoPayout.toFixed(2)}x
+                                    </span>
+                                </div>
+                            </>
+                        ) : (() => {
+                            const leadPrice = prices[leadingIdx] ?? (1 / numOutcomes)
+                            const leadPayout = leadPrice > 0 ? 1 / leadPrice : 2.0
+                            const colors = OUTCOME_COLORS[leadingIdx] || OUTCOME_COLORS[0]
+                            return (
+                                <div className={cn('px-3 py-1.5 rounded-lg', colors.bg, 'border', colors.border)}>
+                                    <span className={cn('text-xs font-mono', colors.text)}>
+                                        TOP {leadPayout.toFixed(2)}x
+                                    </span>
+                                </div>
+                            )
+                        })()}
                     </div>
 
                     {/* On-chain Verification Link (only for real at1... tx IDs) */}

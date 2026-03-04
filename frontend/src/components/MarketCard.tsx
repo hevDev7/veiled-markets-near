@@ -1,11 +1,20 @@
 import { motion } from 'framer-motion'
 import { Clock, Users, TrendingUp, Shield, Zap, ExternalLink } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
+import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
+
+// Colors for up to 4 outcomes
+const OUTCOME_COLORS = [
+  { text: 'text-yes-400', bg: 'bg-yes-500/10', border: 'border-yes-500/20', bar: 'bg-yes-500', hoverBg: 'hover:bg-yes-500/20', hoverBorder: 'hover:border-yes-500/40' },
+  { text: 'text-no-400', bg: 'bg-no-500/10', border: 'border-no-500/20', bar: 'bg-no-500', hoverBg: 'hover:bg-no-500/20', hoverBorder: 'hover:border-no-500/40' },
+  { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', bar: 'bg-purple-500', hoverBg: 'hover:bg-purple-500/20', hoverBorder: 'hover:border-purple-500/40' },
+  { text: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', bar: 'bg-yellow-500', hoverBg: 'hover:bg-yellow-500/20', hoverBorder: 'hover:border-yellow-500/40' },
+]
 
 interface MarketCardProps {
   market: Market
@@ -17,6 +26,22 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const isExpired = timeRemaining === 'Ended' || market.status !== 1
   const statusVariant = getStatusVariant(market.status, isExpired)
+
+  const numOutcomes = market.numOutcomes ?? 2
+  const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
+
+  const prices = useMemo(() => {
+    const reserves: AMMReserves = {
+      reserve_1: market.yesReserve ?? 0n,
+      reserve_2: market.noReserve ?? 0n,
+      reserve_3: market.reserve3 ?? 0n,
+      reserve_4: market.reserve4 ?? 0n,
+      num_outcomes: numOutcomes,
+    }
+    return calculateAllPrices(reserves)
+  }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
+
+  const isBinary = numOutcomes === 2
 
   return (
     <motion.div
@@ -63,25 +88,62 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         {market.question}
       </h3>
 
-      {/* Odds Bar */}
+      {/* Odds Display */}
       <div className="mb-4">
-        <div className="flex justify-between text-sm mb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-yes-400 font-semibold">Yes</span>
-            <span className="text-white font-bold">{formatPercentage(market.yesPercentage)}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-white font-bold">{formatPercentage(market.noPercentage)}</span>
-            <span className="text-no-400 font-semibold">No</span>
-          </div>
-        </div>
-
-        <div className="odds-bar">
-          <div
-            className="odds-bar-yes"
-            style={{ width: `${market.yesPercentage}%` }}
-          />
-        </div>
+        {isBinary ? (
+          <>
+            <div className="flex justify-between text-sm mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-yes-400 font-semibold">{outcomeLabels[0]}</span>
+                <span className="text-white font-bold">{formatPercentage(market.yesPercentage)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-white font-bold">{formatPercentage(market.noPercentage)}</span>
+                <span className="text-no-400 font-semibold">{outcomeLabels[1]}</span>
+              </div>
+            </div>
+            <div className="odds-bar">
+              <div
+                className="odds-bar-yes"
+                style={{ width: `${market.yesPercentage}%` }}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Compact 2-column outcome chips */}
+            <div className="grid grid-cols-2 gap-1.5 mb-2">
+              {outcomeLabels.map((label, i) => {
+                const pct = (prices[i] ?? 0) * 100
+                const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
+                return (
+                  <div key={i} className={cn(
+                    'flex items-center gap-2 px-2.5 py-1.5 rounded-lg',
+                    'bg-surface-800/60 border border-surface-700/50'
+                  )}>
+                    <div className={cn('w-2 h-2 rounded-full flex-shrink-0', colors.bar)} />
+                    <span className="text-xs text-surface-300 truncate">{label}</span>
+                    <span className={cn('text-xs font-bold ml-auto', colors.text)}>{formatPercentage(pct)}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {/* Segmented bar */}
+            <div className="h-1.5 rounded-full overflow-hidden bg-surface-800 flex">
+              {outcomeLabels.map((_, i) => {
+                const pct = (prices[i] ?? 0) * 100
+                const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
+                return (
+                  <div
+                    key={i}
+                    className={cn('h-full transition-all duration-500', colors.bar)}
+                    style={{ width: `${pct}%` }}
+                  />
+                )
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Stats */}
@@ -120,27 +182,48 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
       </div>
 
       {/* Potential Payouts */}
-      <div className="flex gap-2">
-        <button className={cn(
-          'flex-1 py-2.5 rounded-lg font-medium text-sm',
-          'bg-yes-500/10 text-yes-400 border border-yes-500/20',
-          'hover:bg-yes-500/20 hover:border-yes-500/40 transition-all',
-          'flex items-center justify-center gap-2'
-        )}>
-          <Zap className="w-4 h-4" />
-          <span>Yes {market.potentialYesPayout.toFixed(2)}x</span>
-        </button>
-
-        <button className={cn(
-          'flex-1 py-2.5 rounded-lg font-medium text-sm',
-          'bg-no-500/10 text-no-400 border border-no-500/20',
-          'hover:bg-no-500/20 hover:border-no-500/40 transition-all',
-          'flex items-center justify-center gap-2'
-        )}>
-          <Zap className="w-4 h-4" />
-          <span>No {market.potentialNoPayout.toFixed(2)}x</span>
-        </button>
-      </div>
+      {isBinary ? (
+        <div className="grid grid-cols-2 gap-2">
+          <button className={cn(
+            'flex-1 py-2.5 rounded-lg font-medium text-sm',
+            'bg-yes-500/10 text-yes-400 border border-yes-500/20',
+            'hover:bg-yes-500/20 hover:border-yes-500/40 transition-all',
+            'flex items-center justify-center gap-2'
+          )}>
+            <Zap className="w-4 h-4" />
+            <span>{outcomeLabels[0]} {market.potentialYesPayout.toFixed(2)}x</span>
+          </button>
+          <button className={cn(
+            'flex-1 py-2.5 rounded-lg font-medium text-sm',
+            'bg-no-500/10 text-no-400 border border-no-500/20',
+            'hover:bg-no-500/20 hover:border-no-500/40 transition-all',
+            'flex items-center justify-center gap-2'
+          )}>
+            <Zap className="w-4 h-4" />
+            <span>{outcomeLabels[1]} {market.potentialNoPayout.toFixed(2)}x</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-1.5">
+          {outcomeLabels.map((label, i) => {
+            const price = prices[i] ?? (1 / numOutcomes)
+            const payout = price > 0 ? 1 / price : 2.0
+            const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
+            return (
+              <button key={i} className={cn(
+                'py-2 px-2.5 rounded-lg font-medium text-xs',
+                colors.bg, colors.text, 'border', colors.border,
+                colors.hoverBg, colors.hoverBorder, 'transition-all',
+                'flex items-center justify-center gap-1.5 truncate'
+              )}>
+                <Zap className="w-3.5 h-3.5 flex-shrink-0" />
+                <span className="truncate">{label}</span>
+                <span className="font-bold flex-shrink-0">{payout.toFixed(1)}x</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* On-chain Verification Link (only for real at1... tx IDs) */}
       {market.transactionId && market.transactionId.startsWith('at1') && (
