@@ -961,14 +961,57 @@ export function buildBuySharesPrivateInputs(
 
 /**
  * Build default Merkle proofs for USDCX freeze-list non-inclusion.
- * Uses all-zero siblings for empty freeze list (testnet default).
+ * Proves the sender is NOT in the freeze list (Sealance sorted Merkle tree).
+ *
+ * The freeze list tree has one entry: the zero address (0field) at index 0.
+ * Root = hash.psd4([1field, 0field, 0field]) = 3642222...853field
+ *
+ * Both proofs use leaf_index=1 (NOT 0). This triggers the "address is greater
+ * than the last entry" path in verify_non_inclusion. With leaf_index=0, the
+ * contract checks owner < siblings[0] which fails for any real address.
+ *
  * Each MerkleProof: { siblings: [field; 16], leaf_index: u32 }
- * 2 proofs required: one for sender, one for recipient.
+ * 2 identical proofs required (same-index non-inclusion).
  */
 export function buildDefaultMerkleProofs(): string {
   const zeros = Array(16).fill('0field').join(', ');
-  const proof = `{ siblings: [${zeros}], leaf_index: 0u32 }`;
+  const proof = `{ siblings: [${zeros}], leaf_index: 1u32 }`;
   return `[${proof}, ${proof}]`;
+}
+
+/**
+ * Build dynamic Merkle proofs using the Sealance SDK.
+ * Generates correct non-inclusion proofs for any freeze list state.
+ * Falls back to buildDefaultMerkleProofs() if SDK fails.
+ *
+ * @param ownerAddress - The bettor's Aleo address
+ * @param freezeListAddresses - Addresses in the freeze list (default: [zero address])
+ */
+export async function buildMerkleProofsForAddress(
+  ownerAddress: string,
+  freezeListAddresses: string[] = ['aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc'],
+): Promise<string> {
+  try {
+    const sdk = await import('@provablehq/sdk');
+    const sealance = new sdk.SealanceMerkleTree();
+
+    // Generate leaves (sorts, pads) — depth 16 gives [field; 16] siblings
+    const leaves = sealance.generateLeaves(freezeListAddresses, 16);
+    const tree = sealance.buildTree(leaves);
+
+    // Get adjacent leaf indices bounding the target address
+    const [leftIdx, rightIdx] = sealance.getLeafIndices(tree, ownerAddress);
+
+    // Generate sibling paths
+    const leftProof = sealance.getSiblingPath(tree, leftIdx, 16);
+    const rightProof = sealance.getSiblingPath(tree, rightIdx, 16);
+
+    // Format for Aleo transaction
+    return sealance.formatMerkleProof([leftProof, rightProof]);
+  } catch (error) {
+    devWarn('SDK Merkle proof generation failed, using default proofs:', error);
+    return buildDefaultMerkleProofs();
+  }
 }
 
 /**
