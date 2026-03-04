@@ -106,7 +106,7 @@ export interface Bet {
   type?: 'buy' | 'sell'       // Trade type (default 'buy')
   marketQuestion?: string
   lockedMultiplier?: number    // Payout multiplier locked at time of bet
-  sharesReceived?: bigint      // Shares received from buy (v16 FPMM)
+  sharesReceived?: bigint      // Shares received from buy (v17 FPMM)
   sharesSold?: bigint          // Shares burned in sell
   tokensReceived?: bigint      // Net tokens received from sell (after fees)
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
@@ -799,7 +799,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v16.aleo program.
+// in the veiled_markets_v17.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1467,7 +1467,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v16.aleo contract
+      // Build inputs for the veiled_markets_v17.aleo contract
       // ALEO: buy_shares_private (needs credits record)
       // USDCX: buy_shares_usdcx (no record needed)
       const tokenType = market?.tokenType || 'ALEO'

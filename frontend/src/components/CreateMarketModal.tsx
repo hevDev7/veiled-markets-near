@@ -235,7 +235,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       devLog('Deadline block height:', deadlineBlockHeight.toString())
       devLog('Resolution block height:', resolutionBlockHeight.toString())
 
-      // Build transaction inputs for v16 create_market
+      // Build transaction inputs for v17 create_market
       // create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
       // Token type is determined by function name: create_market (ALEO) vs create_market_usdcx (USDCX)
       const input0 = String(questionHash);
@@ -315,7 +315,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         program: createProgramId,
         function: createFunctionName,
         inputs,
-        fee: 3.0, // 3.0 ALEO for create_market (v16: 1969 stmts, complex finalize + nested transfer)
+        fee: 3.0, // 3.0 ALEO for create_market (v17: 1933 stmts, complex finalize + nested transfer)
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
