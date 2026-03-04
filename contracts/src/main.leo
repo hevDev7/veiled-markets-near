@@ -1,16 +1,16 @@
 // ============================================================================
-// VEILED MARKETS v17 - Privacy-Preserving Prediction Market Protocol
+// VEILED MARKETS v18 - Privacy-Preserving Prediction Market Protocol
 // ============================================================================
 // FPMM (Fixed Product Market Maker) with complete-set minting/burning.
 // Privacy-first: buy, sell, redeem, refund all use private credits records.
 // USDCX dual-token markets supported. Dispute bond always in ALEO.
 //
-// v17 changes from v16:
-// - REMOVED: remove_liquidity transitions (LP locked until finalize/cancel)
-// - FIX: add_liquidity LP share pricing uses total_reserves for consistency
-// - FIX: claim_lp_refund uses total_reserves + consistent min_tokens_out accounting
-// - FIX: program_credits accounting uses min_tokens_out (matches actual transfer)
-// - PRIVACY: removed bettor_key and LP provider address from finalize
+// v18 security fixes from v17:
+// - FIX: init_multisig restricted to deployer + unique signer validation
+// - FIX: ProposalSeed includes recipient + token_type (prevents replay/redirect)
+// - FIX: propose_treasury_withdrawal adds token_type + nonce parameters
+// - FIX: execute_proposal/exec_proposal_usdcx validate token_type + cleanup approvals
+// - FIX: cancel_market excludes STATUS_PENDING_RESOLUTION from emergency cancel
 //
 // 30 transitions
 // ============================================================================
@@ -19,7 +19,7 @@ import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 // import test_usad_stablecoin.aleo;  // USAD disabled (snarkVM 31-transition limit)
 
-program veiled_markets_v17.aleo {
+program veiled_markets_v18.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -55,6 +55,7 @@ program veiled_markets_v17.aleo {
 
     const MULTISIG_CONFIG_KEY: u8 = 0u8;
     const ACTION_WITHDRAW: u8 = 1u8;
+    const DEPLOYER: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
 
     // ========================================================================
     // RECORDS
@@ -158,6 +159,7 @@ program veiled_markets_v17.aleo {
         action: u8,
         amount: u128,
         recipient: address,
+        token_type: u8,
         proposed_at: u64,
     }
 
@@ -190,6 +192,8 @@ program veiled_markets_v17.aleo {
         proposer: address,
         action: u8,
         amount: u128,
+        recipient: address,
+        token_type: u8,
         nonce: u64,
     }
 
@@ -1672,9 +1676,11 @@ program veiled_markets_v17.aleo {
             && market.status == MARKET_STATUS_ACTIVE;
 
         // Path B: Emergency cancel — anyone, past resolution_deadline
+        // Excludes RESOLVED, CANCELLED, and PENDING_RESOLUTION (challenge window)
         let is_emergency: bool = current_height > market.resolution_deadline
             && market.status != MARKET_STATUS_RESOLVED
-            && market.status != MARKET_STATUS_CANCELLED;
+            && market.status != MARKET_STATUS_CANCELLED
+            && market.status != STATUS_PENDING_RESOLUTION;
 
         assert(is_creator_cancel || is_emergency);
 
@@ -2868,6 +2874,10 @@ program veiled_markets_v17.aleo {
     ) {
         let config_exists: bool = multisig_config.contains(MULTISIG_CONFIG_KEY);
         assert(!config_exists);
+        assert(caller == DEPLOYER);
+        assert(signer_1 != signer_2);
+        assert(signer_1 != signer_3);
+        assert(signer_2 != signer_3);
 
         multisig_config.set(MULTISIG_CONFIG_KEY, SignerConfig {
             signer_1: signer_1,
@@ -2884,18 +2894,23 @@ program veiled_markets_v17.aleo {
     async transition propose_treasury_withdrawal(
         public amount: u128,
         public recipient: address,
+        public token_type: u8,
+        public nonce: u64,
     ) -> (field, Future) {
         assert(amount > 0u128);
+        assert(token_type == TOKEN_ALEO || token_type == TOKEN_USDCX);
 
         let proposal_id: field = BHP256::hash_to_field(ProposalSeed {
             proposer: self.caller,
             action: ACTION_WITHDRAW,
             amount: amount,
-            nonce: 0u64,
+            recipient: recipient,
+            token_type: token_type,
+            nonce: nonce,
         });
 
         return (proposal_id, propose_withdrawal_fin(
-            proposal_id, amount, recipient, self.caller
+            proposal_id, amount, recipient, self.caller, token_type
         ));
     }
 
@@ -2904,6 +2919,7 @@ program veiled_markets_v17.aleo {
         amount: u128,
         recipient: address,
         proposer: address,
+        token_type: u8,
     ) {
         let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
         let is_signer: bool = proposer == config.signer_1 || proposer == config.signer_2 || proposer == config.signer_3;
@@ -2912,7 +2928,8 @@ program veiled_markets_v17.aleo {
         let exists: bool = multisig_proposals.contains(proposal_id);
         assert(!exists);
 
-        let treasury_balance: u128 = protocol_treasury.get_or_use(0u8, 0u128);
+        let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
+        let treasury_balance: u128 = protocol_treasury.get_or_use(credit_key, 0u128);
         assert(treasury_balance >= amount);
 
         let current_height: u64 = block.height as u64;
@@ -2922,6 +2939,7 @@ program veiled_markets_v17.aleo {
             action: ACTION_WITHDRAW,
             amount: amount,
             recipient: recipient,
+            token_type: token_type,
             proposed_at: current_height,
         });
 
@@ -2992,6 +3010,7 @@ program veiled_markets_v17.aleo {
 
         assert(proposal.amount == amount);
         assert(proposal.recipient == recipient);
+        assert(proposal.token_type == TOKEN_ALEO);
 
         // Count approvals
         let key_1: field = BHP256::hash_to_field(ApprovalKey {
@@ -3026,6 +3045,9 @@ program veiled_markets_v17.aleo {
         program_credits.set(credit_key, current_held - amount);
 
         multisig_proposals.remove(proposal_id);
+        multisig_approvals.remove(key_1);
+        multisig_approvals.remove(key_2);
+        multisig_approvals.remove(key_3);
     }
 
     // ========================================================================
@@ -3059,6 +3081,7 @@ program veiled_markets_v17.aleo {
 
         assert(proposal.amount == amount);
         assert(proposal.recipient == recipient);
+        assert(proposal.token_type == TOKEN_USDCX);
 
         let key_1: field = BHP256::hash_to_field(ApprovalKey {
             proposal_id: proposal_id,
@@ -3092,6 +3115,9 @@ program veiled_markets_v17.aleo {
         program_credits.set(1u8, current_held - amount);
 
         multisig_proposals.remove(proposal_id);
+        multisig_approvals.remove(key_1);
+        multisig_approvals.remove(key_2);
+        multisig_approvals.remove(key_3);
     }
 
     /* USAD EXEC_PROPOSAL DISABLED (snarkVM 31-transition limit)

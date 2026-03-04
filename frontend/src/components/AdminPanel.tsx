@@ -6,7 +6,6 @@ import {
   Play,
   Loader2,
   AlertCircle,
-  ChevronDown,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useWalletStore, CONTRACT_INFO } from '@/lib/store'
@@ -17,7 +16,6 @@ import { TransactionLink } from './TransactionLink'
 import { devWarn } from '../lib/logger'
 
 type AdminAction = 'propose' | 'approve' | 'execute'
-type ProposalAction = 'withdraw_protocol_fees' | 'update_fee_bps' | 'emergency_pause'
 
 interface TreasuryBalances {
   aleo: bigint
@@ -36,13 +34,14 @@ export function AdminPanel() {
   const [isLoadingBalances, setIsLoadingBalances] = useState(true)
 
   // Propose form
-  const [proposalAction, setProposalAction] = useState<ProposalAction>('withdraw_protocol_fees')
   const [proposalAmount, setProposalAmount] = useState('')
   const [proposalRecipient, setProposalRecipient] = useState('')
-  const [showActionDropdown, setShowActionDropdown] = useState(false)
+  const [proposalTokenType, setProposalTokenType] = useState<'aleo' | 'usdcx'>('aleo')
 
   // Approve/Execute form
   const [proposalId, setProposalId] = useState('')
+  const [executeAmount, setExecuteAmount] = useState('')
+  const [executeRecipient, setExecuteRecipient] = useState('')
 
   // Transaction state
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -84,12 +83,6 @@ export function AdminPanel() {
     }
   }, [])
 
-  const actionLabels: Record<ProposalAction, string> = {
-    withdraw_protocol_fees: 'Withdraw Protocol Fees',
-    update_fee_bps: 'Update Fee Rate',
-    emergency_pause: 'Emergency Pause',
-  }
-
   const handlePropose = async () => {
     setIsSubmitting(true)
     setError(null)
@@ -99,23 +92,20 @@ export function AdminPanel() {
         ? BigInt(Math.floor(parseFloat(proposalAmount) * 1_000_000))
         : 0n
 
-      // Build propose_withdrawal inputs
-      // propose_withdrawal(action: u8, amount: u128, recipient: address)
-      const actionMap: Record<ProposalAction, number> = {
-        withdraw_protocol_fees: 1,
-        update_fee_bps: 2,
-        emergency_pause: 3,
-      }
+      // propose_treasury_withdrawal(amount: u128, recipient: address, token_type: u8, nonce: u64)
+      const tokenTypeValue = proposalTokenType === 'aleo' ? 1 : 2
+      const nonce = Date.now()
 
       const inputs = [
-        `${actionMap[proposalAction]}u8`,
         `${amountMicro}u128`,
         proposalRecipient || wallet.address!,
+        `${tokenTypeValue}u8`,
+        `${nonce}u64`,
       ]
 
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
-        function: 'propose_withdrawal',
+        function: 'propose_treasury_withdrawal',
         inputs,
         fee: 0.5,
       })
@@ -161,16 +151,19 @@ export function AdminPanel() {
   }
 
   const handleExecute = async () => {
-    if (!proposalId) return
+    if (!proposalId || !executeAmount || !executeRecipient) return
 
     setIsSubmitting(true)
     setError(null)
 
     try {
+      // execute_proposal(proposal_id: field, amount: u128, recipient: address)
+      const amountMicro = BigInt(Math.floor(parseFloat(executeAmount) * 1_000_000))
+
       const result = await executeTransaction({
         program: CONTRACT_INFO.programId,
         function: 'execute_proposal',
-        inputs: [proposalId],
+        inputs: [proposalId, `${amountMicro}u128`, executeRecipient],
         fee: 0.5,
       })
 
@@ -193,6 +186,8 @@ export function AdminPanel() {
     setProposalAmount('')
     setProposalRecipient('')
     setProposalId('')
+    setExecuteAmount('')
+    setExecuteRecipient('')
   }
 
   return (
@@ -296,38 +291,25 @@ export function AdminPanel() {
             {/* Propose */}
             {activeAction === 'propose' && (
               <div className="space-y-4">
-                {/* Action Type Dropdown */}
-                <div className="relative">
-                  <label className="block text-sm text-surface-400 mb-2">Action Type</label>
-                  <button
-                    onClick={() => setShowActionDropdown(!showActionDropdown)}
-                    className="input-field w-full flex items-center justify-between"
-                  >
-                    <span>{actionLabels[proposalAction]}</span>
-                    <ChevronDown className={cn(
-                      'w-4 h-4 text-surface-400 transition-transform',
-                      showActionDropdown && 'rotate-180'
-                    )} />
-                  </button>
-                  {showActionDropdown && (
-                    <div className="absolute z-10 mt-1 w-full bg-surface-800 border border-surface-700 rounded-xl overflow-hidden shadow-xl">
-                      {(Object.entries(actionLabels) as Array<[ProposalAction, string]>).map(([key, label]) => (
-                        <button
-                          key={key}
-                          onClick={() => {
-                            setProposalAction(key)
-                            setShowActionDropdown(false)
-                          }}
-                          className={cn(
-                            'w-full px-4 py-3 text-left text-sm transition-colors hover:bg-surface-700',
-                            proposalAction === key ? 'text-brand-400' : 'text-white'
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                {/* Token Type */}
+                <div>
+                  <label className="block text-sm text-surface-400 mb-2">Token Type</label>
+                  <div className="flex gap-2">
+                    {(['aleo', 'usdcx'] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setProposalTokenType(t)}
+                        className={cn(
+                          'flex-1 py-2 rounded-lg text-sm font-medium transition-all border',
+                          proposalTokenType === t
+                            ? 'border-brand-500 bg-brand-500/10 text-brand-400'
+                            : 'border-surface-700 text-surface-400 hover:text-surface-300'
+                        )}
+                      >
+                        {t.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Amount */}
@@ -342,7 +324,7 @@ export function AdminPanel() {
                       className="input-field text-lg font-semibold pr-20"
                     />
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 text-sm">
-                      tokens
+                      {proposalTokenType.toUpperCase()}
                     </div>
                   </div>
                 </div>
@@ -445,23 +427,51 @@ export function AdminPanel() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-sm text-surface-400 mb-2">Amount</label>
+                  <input
+                    type="number"
+                    value={executeAmount}
+                    onChange={(e) => setExecuteAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="input-field text-lg font-semibold"
+                  />
+                  <p className="text-xs text-surface-500 mt-1">
+                    Must match the proposed amount exactly.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-surface-400 mb-2">Recipient Address</label>
+                  <input
+                    type="text"
+                    value={executeRecipient}
+                    onChange={(e) => setExecuteRecipient(e.target.value)}
+                    placeholder="aleo1..."
+                    className="input-field text-sm font-mono"
+                  />
+                  <p className="text-xs text-surface-500 mt-1">
+                    Must match the proposed recipient exactly.
+                  </p>
+                </div>
+
                 <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
                   <AlertCircle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-yellow-300">Execution Requirements</p>
                     <p className="text-xs text-surface-400 mt-1">
                       The proposal must have met the required approval threshold before it can
-                      be executed. If the threshold is not met, this transaction will fail.
+                      be executed. Amount and recipient must match the proposal exactly.
                     </p>
                   </div>
                 </div>
 
                 <button
                   onClick={handleExecute}
-                  disabled={isSubmitting || !proposalId}
+                  disabled={isSubmitting || !proposalId || !executeAmount || !executeRecipient}
                   className={cn(
                     'w-full flex items-center justify-center gap-2 btn-primary',
-                    !proposalId && 'opacity-50 cursor-not-allowed'
+                    (!proposalId || !executeAmount || !executeRecipient) && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   {isSubmitting ? (

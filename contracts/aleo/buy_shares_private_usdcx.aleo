@@ -38,12 +38,12 @@ function buy_shares_private_usdcx:
     gte r2 1000u128 into r11;
     assert.eq r11 true;
     cast self.caller r0 r1 r3 r5 2u8 into r12 as OutcomeShare.record;
-    call test_usdcx_stablecoin.aleo/transfer_private_to_public veiled_markets_v17.aleo r2 r6 r7 into r13 r14 r15;
+    call test_usdcx_stablecoin.aleo/transfer_private_to_public veiled_markets_v18.aleo r2 r6 r7 into r13 r14 r15;
     async buy_shares_private_usdcx r15 r0 r1 r2 r3 r4 into r16;
     output r12 as OutcomeShare.record;
     output r13 as test_usdcx_stablecoin.aleo/ComplianceRecord.record;
     output r14 as test_usdcx_stablecoin.aleo/Token.record;
-    output r16 as veiled_markets_v17.aleo/buy_shares_private_usdcx.future;
+    output r16 as veiled_markets_v18.aleo/buy_shares_private_usdcx.future;
 
 finalize buy_shares_private_usdcx:
     input r0 as test_usdcx_stablecoin.aleo/transfer_private_to_public.future;

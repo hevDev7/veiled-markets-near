@@ -9,7 +9,7 @@
 Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiledmarkets.xyz)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v17.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v18.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -32,10 +32,10 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 
 | Field | Value |
 |---|---|
-| **Program** | `veiled_markets_v17.aleo` |
+| **Program** | `veiled_markets_v18.aleo` |
 | **Network** | Aleo Testnet |
 | **Transitions** | 30 |
-| **Deploy TX** | `at1kc2dwpw9ddjuvn7y89xxpugdmn92jt624xqthzkmyxsnrpsm9sfqv5xrwn` |
+| **Deploy TX** | `at1xkr8v408ct8dql2d7ngqxghzx6j4lfwf8x5dturth53mc6cycuzsqd7klu` |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
 
 ## Architecture
@@ -45,7 +45,7 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 │   Frontend   │────▶│   Shield / Leo /      │────▶│   Aleo Testnet   │
 │  React/Vite  │     │   Puzzle Wallet       │     │                  │
 │  TypeScript  │     │  (ProvableHQ adapter) │     │  veiled_markets  │
-│              │     └───────────────────────┘     │  _v16.aleo       │
+│              │     └───────────────────────┘     │  _v18.aleo       │
 │  Components: │                                   │                  │
 │  - Dashboard │     ┌───────────────────────┐     │  Dependencies:   │
 │  - Market    │────▶│  Supabase (encrypted) │     │  - credits.aleo  │
@@ -120,7 +120,7 @@ npm run dev
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets_v17.aleo
+VITE_PROGRAM_ID=veiled_markets_v18.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 ```
@@ -130,7 +130,7 @@ VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 ```bash
 cd contracts && leo build              # Build (29 transitions from Leo)
 ./scripts/inject_private_usdcx.sh      # Inject post-build transition (30 total)
-snarkos developer deploy veiled_markets_v17.aleo --path build/ --network 1 --broadcast  # Deploy (~63 ALEO)
+snarkos developer deploy veiled_markets_v18.aleo --path build/ --network 1 --broadcast  # Deploy (~63 ALEO)
 ```
 
 ## Tech Stack
@@ -160,6 +160,6 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v17.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
+[Live Demo](https://veiledmarkets.xyz) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v18.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
 
 </div>

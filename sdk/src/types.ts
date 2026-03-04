@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Type Definitions (v12)
 // ============================================================================
-// Matches the Leo contract: veiled_markets_v13.aleo
+// Matches the Leo contract: veiled_markets_v18.aleo
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -252,7 +252,7 @@ export interface AddLiquidityParams {
 // RemoveLiquidityParams removed in v17 — LP locked until finalize/cancel
 
 /**
- * Buy shares private USDCX parameters (v17)
+ * Buy shares private USDCX parameters (v18)
  * Requires a private Token record + freeze-list Merkle proofs
  */
 export interface BuySharesPrivateUsdcxParams extends BuySharesParams {
