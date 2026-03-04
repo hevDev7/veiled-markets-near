@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Bet } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Bet, outcomeToIndex } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
@@ -289,10 +289,20 @@ function HistoryCard({
   market?: { question: string }
   index: number
 }) {
-  const isYes = bet.outcome === 'yes'
+  const outcomeIdx = outcomeToIndex(bet.outcome)
   const isWon = bet.status === 'won'
   const isLost = bet.status === 'lost'
   const isRefunded = bet.status === 'refunded'
+
+  const OUTCOME_BADGE_COLORS = [
+    { bg: 'bg-yes-500/10', text: 'text-yes-300' },
+    { bg: 'bg-no-500/10', text: 'text-no-300' },
+    { bg: 'bg-purple-500/10', text: 'text-purple-300' },
+    { bg: 'bg-yellow-500/10', text: 'text-yellow-300' },
+  ]
+  const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
+  const outcomeLabel = defaultLabels[outcomeIdx - 1] || bet.outcome.toUpperCase()
+  const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
 
   const StatusIcon = isWon ? Trophy : isLost ? XCircle : RefreshCcw
   const statusColor = isWon ? 'yes' : isLost ? 'no' : 'accent'
@@ -338,11 +348,9 @@ function HistoryCard({
             </span>
             <span className={cn(
               "px-2 py-0.5 text-xs font-medium rounded-full",
-              isYes
-                ? "bg-yes-500/10 text-yes-300"
-                : "bg-no-500/10 text-no-300"
+              badgeColors.bg, badgeColors.text
             )}>
-              {isYes ? 'YES' : 'NO'}
+              {outcomeLabel}
             </span>
           </div>
           <h3 className="font-medium text-white truncate">

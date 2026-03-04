@@ -47,7 +47,7 @@ interface CommitBetOptions {
   privateKey: string
   marketId: string
   amount: number        // microcredits
-  outcome: 'yes' | 'no'
+  outcome: string
   priorityFee?: number
   creditsRecordPlaintext?: string
 }
@@ -60,7 +60,7 @@ interface RevealBetOptions {
   marketId: string
   betAmountRecordPlaintext: string
   amount: number        // microcredits
-  outcome: 'yes' | 'no'
+  outcome: string
   priorityFee?: number
 }
 
@@ -448,7 +448,7 @@ export function useSDKTransaction() {
     const rpcUrl = rawRpcUrl.replace(/\/(testnet|mainnet)\/?$/, '')
 
     const userNonce = generateNonce()
-    const outcomeNum = options.outcome === 'yes' ? 1 : 2
+    const outcomeNum = options.outcome === 'yes' ? 1 : options.outcome === 'no' ? 2 : parseInt(options.outcome.replace('outcome_', '')) || 1
 
     const worker = createWorkerWithHandlers(requestId, rpcUrl, async (resp) => {
       const txId = resp.txId!
@@ -496,7 +496,7 @@ export function useSDKTransaction() {
     const rawRpcUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet'
     const rpcUrl = rawRpcUrl.replace(/\/(testnet|mainnet)\/?$/, '')
 
-    const outcomeNum = options.outcome === 'yes' ? 1 : 2
+    const outcomeNum = options.outcome === 'yes' ? 1 : options.outcome === 'no' ? 2 : parseInt(options.outcome.replace('outcome_', '')) || 1
 
     const worker = createWorkerWithHandlers(requestId, rpcUrl, async (resp) => {
       const txId = resp.txId!

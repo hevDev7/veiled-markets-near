@@ -1,7 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp,
-  TrendingDown,
   ArrowDownToLine,
   Clock,
   Loader2,
@@ -18,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Bet } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Bet, outcomeToIndex, outcomeToString } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
@@ -50,7 +49,7 @@ export function MyBets() {
   const [importTxId, setImportTxId] = useState('')
   const [importMarketId, setImportMarketId] = useState('')
   const [importAmount, setImportAmount] = useState('')
-  const [importOutcome, setImportOutcome] = useState<'yes' | 'no'>('yes')
+  const [importOutcome, setImportOutcome] = useState<string>('yes')
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState(false)
 
@@ -444,30 +443,37 @@ export function MyBets() {
                   <label className="block text-xs font-medium text-surface-400 mb-1.5">
                     Prediction
                   </label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setImportOutcome('yes')}
-                      className={cn(
-                        'flex-1 py-2.5 rounded-lg text-sm font-medium transition-all',
-                        importOutcome === 'yes'
-                          ? 'bg-yes-500 text-white'
-                          : 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50'
-                      )}
-                    >
-                      YES
-                    </button>
-                    <button
-                      onClick={() => setImportOutcome('no')}
-                      className={cn(
-                        'flex-1 py-2.5 rounded-lg text-sm font-medium transition-all',
-                        importOutcome === 'no'
-                          ? 'bg-no-500 text-white'
-                          : 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50'
-                      )}
-                    >
-                      NO
-                    </button>
-                  </div>
+                  {(() => {
+                    const selectedMarket = markets.find(m => m.id === importMarketId)
+                    const numOutcomes = selectedMarket?.numOutcomes ?? 2
+                    const labels = selectedMarket?.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
+                    const btnColors = [
+                      { active: 'bg-yes-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
+                      { active: 'bg-no-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
+                      { active: 'bg-purple-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
+                      { active: 'bg-yellow-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
+                    ]
+                    return (
+                      <div className={cn('grid gap-2', numOutcomes <= 2 ? 'grid-cols-2' : 'grid-cols-2')}>
+                        {labels.map((label, i) => {
+                          const key = outcomeToString(i + 1)
+                          const colors = btnColors[i] || btnColors[0]
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => setImportOutcome(key)}
+                              className={cn(
+                                'py-2.5 rounded-lg text-sm font-medium transition-all',
+                                importOutcome === key ? colors.active : colors.inactive
+                              )}
+                            >
+                              {label.toUpperCase()}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {/* Error */}
@@ -517,19 +523,30 @@ function BetCard({
   showClaimAction,
 }: {
   bet: Bet
-  market?: { question: string; tokenType?: 'ALEO' | 'USDCX' }
+  market?: { question: string; tokenType?: 'ALEO' | 'USDCX'; numOutcomes?: number; outcomeLabels?: string[] }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
   showClaimAction: boolean
 }) {
   const isSell = bet.type === 'sell'
   const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
-  const isYes = bet.outcome === 'yes'
+  const outcomeIdx = outcomeToIndex(bet.outcome) // 1-indexed
   const isPending = bet.status === 'pending'
   const isWon = bet.status === 'won'
   const isLost = bet.status === 'lost'
   const isRefunded = bet.status === 'refunded'
   const isActive = bet.status === 'active'
+
+  // Resolve outcome label from market data
+  const OUTCOME_BADGE_COLORS = [
+    { bg: 'bg-yes-500/15', text: 'text-yes-400' },
+    { bg: 'bg-no-500/15', text: 'text-no-400' },
+    { bg: 'bg-purple-500/15', text: 'text-purple-400' },
+    { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
+  ]
+  const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
+  const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || defaultLabels[outcomeIdx - 1] || bet.outcome.toUpperCase()
+  const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
 
   return (
     <motion.div
@@ -553,7 +570,9 @@ function BetCard({
           isWon ? "bg-yes-500/10" :
           isLost ? "bg-no-500/10" :
           isRefunded ? "bg-orange-500/10" :
-          isYes ? "bg-yes-500/10" : "bg-no-500/10"
+          outcomeIdx === 1 ? "bg-yes-500/10" :
+          outcomeIdx === 2 ? "bg-no-500/10" :
+          outcomeIdx === 3 ? "bg-purple-500/10" : "bg-yellow-500/10"
         )}>
           {isSell ? (
             <ArrowDownToLine className="w-5 h-5 text-purple-400" />
@@ -563,10 +582,8 @@ function BetCard({
             <XCircle className="w-5 h-5 text-no-400" />
           ) : isRefunded ? (
             <RefreshCcw className="w-5 h-5 text-orange-400" />
-          ) : isYes ? (
-            <TrendingUp className="w-5 h-5 text-yes-400" />
           ) : (
-            <TrendingDown className="w-5 h-5 text-no-400" />
+            <TrendingUp className={cn('w-5 h-5', badgeColors.text)} />
           )}
         </div>
 
@@ -580,9 +597,9 @@ function BetCard({
             ) : (
               <span className={cn(
                 "px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase",
-                isYes ? "bg-yes-500/15 text-yes-400" : "bg-no-500/15 text-no-400"
+                badgeColors.bg, badgeColors.text
               )}>
-                {isYes ? 'YES' : 'NO'}
+                {outcomeLabel}
               </span>
             )}
             {isPending && (
@@ -661,7 +678,7 @@ function BetCard({
                   <p className="text-xs text-surface-500">Shares</p>
                   <p className={cn(
                     "text-sm font-bold",
-                    isYes ? "text-yes-400" : "text-no-400"
+                    badgeColors.text
                   )}>
                     {bet.sharesReceived
                       ? formatCredits(bet.sharesReceived)

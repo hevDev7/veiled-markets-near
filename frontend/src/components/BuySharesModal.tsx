@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Shield, ShieldAlert, TrendingUp, Check, Loader2, AlertCircle, Settings2 } from 'lucide-react'
 import { useState, useMemo } from 'react'
-import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/store'
+import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO, outcomeToString } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
@@ -222,7 +222,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           id: txResult.transactionId,
           marketId: market.id,
           amount: amountMicro,
-          outcome: selectedOutcome === 1 ? 'yes' : selectedOutcome === 2 ? 'no' : `outcome_${selectedOutcome}` as any,
+          outcome: outcomeToString(selectedOutcome),
           placedAt: Date.now(),
           status: 'pending',
           marketQuestion: market.question,

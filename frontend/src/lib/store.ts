@@ -101,7 +101,7 @@ export interface Bet {
   id: string
   marketId: string
   amount: bigint
-  outcome: 'yes' | 'no'
+  outcome: string             // 'yes' | 'no' | 'outcome_3' | 'outcome_4' (1-indexed via outcomeToIndex)
   placedAt: number
   status: 'pending' | 'active' | 'won' | 'lost' | 'refunded'
   type?: 'buy' | 'sell'       // Trade type (default 'buy')
@@ -111,9 +111,24 @@ export interface Bet {
   sharesSold?: bigint          // Shares burned in sell
   tokensReceived?: bigint      // Net tokens received from sell (after fees)
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
-  winningOutcome?: 'yes' | 'no' // From resolution data
+  winningOutcome?: string      // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
   tokenType?: 'ALEO' | 'USDCX' // v12: token denomination
+}
+
+/** Convert 1-indexed outcome number to string key */
+export function outcomeToString(outcomeNum: number): string {
+  if (outcomeNum === 1) return 'yes'
+  if (outcomeNum === 2) return 'no'
+  return `outcome_${outcomeNum}`
+}
+
+/** Convert outcome string key to 1-indexed number */
+export function outcomeToIndex(outcome: string): number {
+  if (outcome === 'yes') return 1
+  if (outcome === 'no') return 2
+  const match = outcome.match(/^outcome_(\d+)$/)
+  return match ? parseInt(match[1]) : 1
 }
 
 // Phase 2: Commit-Reveal Scheme Records (SDK-based)
@@ -121,7 +136,7 @@ export interface CommitmentRecord {
   id: string                        // crypto.randomUUID()
   marketId: string
   amount: bigint
-  outcome: 'yes' | 'no'
+  outcome: string
   commitmentHash: string            // BHP256 hash (stored on-chain)
   userNonce: string                 // field value
   bettor: string                    // address
@@ -1128,7 +1143,7 @@ interface BetsStore {
   commitmentRecords: CommitmentRecord[]  // Phase 2: Store commitments for reveal
 
   // Actions
-  placeBet: (marketId: string, amount: bigint, outcome: 'yes' | 'no') => Promise<string>  // Legacy method
+  placeBet: (marketId: string, amount: bigint, outcome: string) => Promise<string>  // Legacy method
   addPendingBet: (bet: Bet) => void  // Save bet from external tx (e.g. BettingModal)
   confirmPendingBet: (pendingBetId: string, confirmedTxId?: string) => void
   removePendingBet: (pendingBetId: string) => void
@@ -1347,8 +1362,8 @@ async function refreshSharesFromWallet(
     const records = await fetchOutcomeShareRecords(CONTRACT_INFO.programId, bet.marketId)
     if (records.length === 0) return
 
-    // Match by outcome (1-indexed: yes=1, no=2)
-    const outcomeNum = bet.outcome === 'yes' ? 1 : 2
+    // Match by outcome (1-indexed)
+    const outcomeNum = outcomeToIndex(bet.outcome)
     const matching = records.filter(r => r.outcome === outcomeNum)
     if (matching.length === 0) return
 
@@ -1472,7 +1487,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       // ALEO: buy_shares_private (needs credits record)
       // USDCX: buy_shares_private_usdcx (needs Token record + Merkle proofs), fallback to buy_shares_usdcx
       const tokenType = market?.tokenType || 'ALEO'
-      const outcomeNum = outcome === 'yes' ? 1 : 2
+      const outcomeNum = outcomeToIndex(outcome)
 
       let creditsRecord: string | undefined
       let usdcxTokenRecord: string | undefined
@@ -1546,9 +1561,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }, 1000)
 
       // Calculate locked multiplier for display
-      const lockedMultiplier = outcome === 'yes'
+      const idx = outcomeToIndex(outcome) - 1 // 0-indexed
+      const lockedMultiplier = idx === 0
         ? market?.potentialYesPayout
-        : market?.potentialNoPayout
+        : idx === 1
+          ? market?.potentialNoPayout
+          : undefined
 
       // Add to pending bets with market question and locked odds
       const newBet: Bet = {
@@ -1869,7 +1887,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
             id: r.id,
             marketId: r.data.market_id,
             amount: BigInt(r.data.amount),
-            outcome: r.data.outcome === '1u8' ? 'yes' : 'no',
+            outcome: outcomeToString(parseInt(r.data.outcome)),
             placedAt: parseInt(r.data.placed_at),
             status: 'active' as const,
             marketQuestion: getMarketQuestion(r.data.market_id),
@@ -2003,7 +2021,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     const marketIds = [...new Set(activeBets.map(b => b.marketId))]
       .filter(id => id.endsWith('field'))
 
-    const updates: Array<{ betId: string; newStatus: Bet['status']; payoutAmount?: bigint; winningOutcome?: 'yes' | 'no' }> = []
+    const updates: Array<{ betId: string; newStatus: Bet['status']; payoutAmount?: bigint; winningOutcome?: string }> = []
 
     for (const marketId of marketIds) {
       try {
@@ -2022,7 +2040,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           const resolution = await getMarketResolution(marketId)
           if (!resolution) continue
 
-          const winningOutcome: 'yes' | 'no' = resolution.winning_outcome === 1 ? 'yes' : 'no'
+          const winningOutcome = outcomeToString(resolution.winning_outcome)
 
           for (const bet of marketBets) {
             if (bet.outcome === winningOutcome) {

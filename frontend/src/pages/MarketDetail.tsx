@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
@@ -377,7 +377,7 @@ export function MarketDetail() {
         setSellStep('pending')
 
         // Record sell in My Bets
-        const outcomeStr = parsedShareRecord.outcome === 1 ? 'yes' : 'no' as const
+        const outcomeStr = outcomeToString(parsedShareRecord.outcome)
         addPendingBet({
           id: result.transactionId,
           marketId: market.id,
@@ -632,7 +632,7 @@ export function MarketDetail() {
           id: submittedTxId,
           marketId: market.id,
           amount: buyAmountMicro,
-          outcome: selectedOutcome === 1 ? 'yes' : 'no',
+          outcome: outcomeToString(selectedOutcome ?? 1),
           placedAt: Date.now(),
           status: 'pending',
           marketQuestion: market.question,

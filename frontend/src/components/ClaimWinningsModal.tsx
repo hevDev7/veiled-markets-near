@@ -15,7 +15,7 @@ import {
   ClipboardPaste,
 } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
-import { type Bet, useBetsStore, useWalletStore, CONTRACT_INFO } from '@/lib/store'
+import { type Bet, useBetsStore, useWalletStore, CONTRACT_INFO, outcomeToIndex } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { getRedeemFunction, getRefundFunction } from '@/lib/aleo-client'
@@ -303,14 +303,23 @@ export function ClaimWinningsModal({
                       </p>
                       <div className="flex items-center justify-between">
                         <div>
-                          <span className={cn(
-                            "text-xs font-medium px-2 py-0.5 rounded-full",
-                            bet.outcome === 'yes'
-                              ? "bg-yes-500/20 text-yes-400"
-                              : "bg-no-500/20 text-no-400"
-                          )}>
-                            {bet.outcome.toUpperCase()}
-                          </span>
+                          {(() => {
+                            const idx = outcomeToIndex(bet.outcome)
+                            const colors = [
+                              'bg-yes-500/20 text-yes-400',
+                              'bg-no-500/20 text-no-400',
+                              'bg-purple-500/20 text-purple-400',
+                              'bg-yellow-500/20 text-yellow-400',
+                            ]
+                            return (
+                              <span className={cn(
+                                "text-xs font-medium px-2 py-0.5 rounded-full",
+                                colors[idx - 1] || colors[0]
+                              )}>
+                                {bet.outcome.toUpperCase()}
+                              </span>
+                            )
+                          })()}
                           <span className="text-sm text-surface-400 ml-2">
                             Shares: {formatCredits(bet.amount)} {tokenSymbol}
                           </span>
