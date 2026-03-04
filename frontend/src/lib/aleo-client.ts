@@ -902,6 +902,8 @@ export function buildBuySharesInputs(
   minSharesOut: bigint,
   tokenType: 'ALEO' | 'USDCX' = 'ALEO',
   creditsRecord?: string,
+  usdcxTokenRecord?: string,
+  merkleProofs?: string,
 ): { functionName: string; inputs: string[] } {
   const shareNonce = generateRandomNonce();
 
@@ -915,6 +917,16 @@ export function buildBuySharesInputs(
   ];
 
   if (tokenType === 'USDCX') {
+    // Private USDCX: requires Token record + Merkle proofs
+    if (usdcxTokenRecord && merkleProofs) {
+      inputs.push(usdcxTokenRecord);
+      inputs.push(merkleProofs);
+      return {
+        functionName: 'buy_shares_private_usdcx',
+        inputs,
+      };
+    }
+    // Public USDCX: uses transfer_public_as_signer
     return {
       functionName: 'buy_shares_usdcx',
       inputs,
@@ -945,6 +957,18 @@ export function buildBuySharesPrivateInputs(
   creditsRecord: string,
 ): { functionName: string; inputs: string[] } {
   return buildBuySharesInputs(marketId, outcome, amountIn, expectedShares, minSharesOut, 'ALEO', creditsRecord);
+}
+
+/**
+ * Build default Merkle proofs for USDCX freeze-list non-inclusion.
+ * Uses all-zero siblings for empty freeze list (testnet default).
+ * Each MerkleProof: { siblings: [field; 16], leaf_index: u32 }
+ * 2 proofs required: one for sender, one for recipient.
+ */
+export function buildDefaultMerkleProofs(): string {
+  const zeros = Array(16).fill('0field').join(', ');
+  const proof = `{ siblings: [${zeros}], leaf_index: 0u32 }`;
+  return `[${proof}, ${proof}]`;
 }
 
 /**
@@ -997,27 +1021,8 @@ export function buildAddLiquidityInputs(
   };
 }
 
-/**
- * Build inputs for remove_liquidity (v16 LP withdrawal)
- * remove_liquidity(lp_token: LPToken, shares_to_remove, min_tokens_out)
- */
-export function buildRemoveLiquidityInputs(
-  lpTokenRecord: string,
-  sharesToRemove: bigint,
-  minTokensOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
-): { functionName: string; inputs: string[] } {
-  const inputs = [
-    lpTokenRecord,
-    `${sharesToRemove}u128`,
-    `${minTokensOut}u128`,
-  ];
-
-  return {
-    functionName: tokenType === 'USDCX' ? 'remove_liquidity_usdcx' : 'remove_liquidity',
-    inputs,
-  };
-}
+// remove_liquidity removed in v17 — LP locked until finalize/cancel
+// Use withdraw_lp_resolved (resolved markets) or claim_lp_refund (cancelled markets)
 
 /**
  * Build inputs for dispute_resolution (v16 - bond always in ALEO)

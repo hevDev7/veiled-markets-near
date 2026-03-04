@@ -214,18 +214,6 @@ describe('VeiledMarketsClient', () => {
     });
   });
 
-  describe('buildRemoveLiquidityInputs', () => {
-    it('should build valid remove liquidity inputs', () => {
-      const result = client.buildRemoveLiquidityInputs({
-        lpTokenRecord: 'lp_record_data',
-        sharesToRemove: 2000000n,
-      });
-
-      expect(result.functionName).toBe('remove_liquidity');
-      expect(result.inputs).toEqual(['lp_record_data', '2000000u128']);
-    });
-  });
-
   describe('buildResolveMarketInputs', () => {
     it('should build valid resolve market inputs', () => {
       const inputs = client.buildResolveMarketInputs('market_id', Outcome.Yes);

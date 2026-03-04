@@ -462,28 +462,30 @@ export function isPriceValid(price: number): boolean {
 
 /**
  * Calculate LP shares for adding liquidity
- * lp_shares = (amount * total_lp_shares) / total_liquidity
+ * lp_shares = (amount * total_lp_shares) / total_reserves
+ * v17: Uses total_reserves (sum of AMM reserves) instead of total_liquidity
  */
 export function calculateLPSharesOut(
     amount: bigint,
     totalLPShares: bigint,
-    totalLiquidity: bigint,
+    totalReserves: bigint,
 ): bigint {
-    if (totalLiquidity === 0n) return amount
-    return (amount * totalLPShares) / totalLiquidity
+    if (totalReserves === 0n) return amount
+    return (amount * totalLPShares) / totalReserves
 }
 
 /**
  * Calculate tokens returned when removing LP shares
- * tokens_out = (shares_to_remove * total_liquidity) / total_lp_shares
+ * tokens_out = (shares_to_remove * total_reserves) / total_lp_shares
+ * v17: Uses total_reserves (sum of AMM reserves) instead of total_liquidity
  */
 export function calculateLPTokensOut(
     sharesToRemove: bigint,
     totalLPShares: bigint,
-    totalLiquidity: bigint,
+    totalReserves: bigint,
 ): bigint {
     if (totalLPShares === 0n) return 0n
-    return (sharesToRemove * totalLiquidity) / totalLPShares
+    return (sharesToRemove * totalReserves) / totalLPShares
 }
 
 /**

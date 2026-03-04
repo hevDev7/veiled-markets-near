@@ -201,13 +201,11 @@ Treasury withdrawal proposal. Stored in `multisig_proposals` mapping.
 | `DisputeClaimKey` | market_id, claimer, dispute_nonce | `claim_dispute_bond` |
 | `ProposalSeed` | proposer, action, amount, nonce | `propose_treasury_withdrawal` |
 | `ApprovalKey` | proposal_id, signer | `approve_proposal`, `execute_proposal` |
-| `BettorKey` | market_id, bettor | `buy_shares` — unique bettor tracking |
-
 ---
 
 ## 4. Mappings (On-Chain State)
 
-15 mappings total.
+14 mappings total.
 
 | # | Mapping | Key Type | Value Type | Description |
 |---|---------|----------|------------|-------------|
@@ -225,7 +223,6 @@ Treasury withdrawal proposal. Stored in `multisig_proposals` mapping.
 | 12 | `multisig_proposals` | field | MultiSigProposal | Pending multi-sig proposals |
 | 13 | `multisig_approvals` | field | bool | Per-signer proposal approvals |
 | 14 | `lp_positions` | field | bool | Tracks claimed LP positions (claim_key → bool) |
-| 15 | `market_bettors` | field | bool | Unique bettor tracking (bettor_key → bool) |
 
 ---
 

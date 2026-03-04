@@ -249,12 +249,15 @@ export interface AddLiquidityParams {
   amount: bigint;
 }
 
+// RemoveLiquidityParams removed in v17 — LP locked until finalize/cancel
+
 /**
- * Remove liquidity parameters
+ * Buy shares private USDCX parameters (v17)
+ * Requires a private Token record + freeze-list Merkle proofs
  */
-export interface RemoveLiquidityParams {
-  lpTokenRecord: string;         // Encrypted LPToken record
-  sharesToRemove: bigint;
+export interface BuySharesPrivateUsdcxParams extends BuySharesParams {
+  tokenRecord: string;           // Serialized USDCX Token record
+  merkleProofs: string;          // Serialized [MerkleProof; 2] (freeze-list proofs)
 }
 
 /**

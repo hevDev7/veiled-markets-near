@@ -14,9 +14,9 @@ import {
   type MarketWithStats,
   type CreateMarketParams,
   type BuySharesParams,
+  type BuySharesPrivateUsdcxParams,
   type SellSharesParams,
   type AddLiquidityParams,
-  type RemoveLiquidityParams,
   type TransactionResult,
   type VeiledMarketsConfig,
   type OutcomeShare,
@@ -266,6 +266,27 @@ export class VeiledMarketsClient {
     };
   }
 
+  buildBuySharesPrivateUsdcxInputs(params: BuySharesPrivateUsdcxParams): {
+    functionName: string;
+    inputs: string[];
+  } {
+    const nonce = `${BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))}field`;
+
+    return {
+      functionName: 'buy_shares_private_usdcx',
+      inputs: [
+        params.marketId,
+        `${params.outcome}u8`,
+        `${params.amountIn}u128`,
+        `${params.minSharesOut ?? 0n}u128`,
+        `${params.minSharesOut ?? 0n}u128`,
+        nonce,
+        params.tokenRecord,
+        params.merkleProofs,
+      ],
+    };
+  }
+
   buildSellSharesInputs(params: SellSharesParams, tokenType: TokenType = TokenType.ALEO): {
     functionName: string;
     inputs: string[];
@@ -301,22 +322,7 @@ export class VeiledMarketsClient {
     };
   }
 
-  buildRemoveLiquidityInputs(params: RemoveLiquidityParams, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'remove_liquidity_usdcx'
-      : 'remove_liquidity';
-
-    return {
-      functionName,
-      inputs: [
-        params.lpTokenRecord,
-        `${params.sharesToRemove}u128`,
-      ],
-    };
-  }
+  // buildRemoveLiquidityInputs removed in v17 — LP locked until finalize/cancel
 
   buildCloseMarketInputs(marketId: string): string[] {
     return [marketId];
