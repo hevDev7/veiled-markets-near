@@ -15,6 +15,7 @@ import { useWalletStore, useBetsStore, type Bet, outcomeToIndex } from '@/lib/st
 import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
+import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 
 type HistoryFilter = 'all' | 'won' | 'lost' | 'refunded'
@@ -210,6 +211,22 @@ export function History() {
 
           {/* History List */}
           {isLoading ? (
+            <>
+            {/* Stats skeleton */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="glass-card p-6">
+                  <div className="flex items-center gap-3">
+                    <div className="skeleton w-12 h-12 rounded-xl" />
+                    <div className="space-y-2">
+                      <div className="skeleton h-3 w-12 rounded" />
+                      <div className="skeleton h-6 w-16 rounded" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Bet card skeletons */}
             <div className="space-y-4">
               {[...Array(4)].map((_, i) => (
                 <div
@@ -232,34 +249,20 @@ export function History() {
                 </div>
               ))}
             </div>
+            </>
           ) : displayBets.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="glass-card rounded-2xl py-16 text-center"
-            >
-              <div className="w-16 h-16 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-4 float">
-                <Clock className="w-8 h-8 text-surface-500" />
-              </div>
-              <h3 className="text-lg font-semibold text-white mb-2">
-                {filter === 'won' ? 'No wins yet' : filter === 'lost' ? 'No losses recorded' : filter === 'refunded' ? 'No refunds' : 'No history yet'}
-              </h3>
-              <p className="text-surface-400 text-sm mb-6 max-w-sm mx-auto">
-                {filter === 'won'
-                  ? 'Your winning predictions will appear here. Keep predicting!'
-                  : filter === 'lost'
-                    ? 'Lost bets appear here after market resolution.'
-                    : filter === 'refunded'
-                      ? 'Refunded bets from cancelled markets will appear here.'
-                      : 'Your completed bets will appear here after markets resolve.'}
-              </p>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="btn-primary text-sm px-6 py-2.5"
-              >
-                Browse Markets
-              </button>
-            </motion.div>
+            <EmptyState
+              icon={<Clock className="w-8 h-8 text-surface-500" />}
+              title={filter === 'won' ? 'No wins yet' : filter === 'lost' ? 'No losses recorded' : filter === 'refunded' ? 'No refunds' : 'No history yet'}
+              subtitle={filter === 'won'
+                ? 'Your winning predictions will appear here. Keep predicting!'
+                : filter === 'lost'
+                  ? 'Lost bets appear here after market resolution.'
+                  : filter === 'refunded'
+                    ? 'Refunded bets from cancelled markets will appear here.'
+                    : 'Your completed bets will appear here after markets resolve.'}
+              action={{ label: 'Browse Markets', onClick: () => navigate('/dashboard') }}
+            />
           ) : (
             <div className="space-y-4">
               {displayBets.map((bet, index) => (

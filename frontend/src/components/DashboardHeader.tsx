@@ -13,8 +13,10 @@ import {
   Bell,
   Gamepad2,
   RefreshCw,
+  Menu,
+  X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
@@ -32,8 +34,15 @@ export function DashboardHeader() {
   const { wallet, refreshBalance } = useWalletStore()
   const { disconnect: providerDisconnect } = useWallet()
   const [showDropdown, setShowDropdown] = useState(false)
+  const [showMobileMenu, setShowMobileMenu] = useState(false)
   const [copied, setCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+
+  // Close mobile menu on route change
+  useEffect(() => {
+    setShowMobileMenu(false)
+  }, [location.pathname])
+
   const handleCopy = () => {
     if (wallet.address) {
       navigator.clipboard.writeText(wallet.address)
@@ -120,7 +129,7 @@ export function DashboardHeader() {
 
           {/* Right Side */}
           <motion.div
-            className="flex items-center gap-3"
+            className="flex items-center gap-2 sm:gap-3"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
@@ -148,8 +157,16 @@ export function DashboardHeader() {
               <span>ZK Protected</span>
             </div>
 
+            {/* Mobile Menu Button */}
+            <button
+              onClick={() => setShowMobileMenu(!showMobileMenu)}
+              className="md:hidden p-2 rounded-lg hover:bg-surface-800/50 text-surface-400 hover:text-white transition-colors"
+            >
+              {showMobileMenu ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+
             {/* Notifications */}
-            <button className="p-2 rounded-lg hover:bg-surface-800/50 text-surface-400 hover:text-white transition-colors relative">
+            <button className="hidden sm:block p-2 rounded-lg hover:bg-surface-800/50 text-surface-400 hover:text-white transition-colors relative">
               <Bell className="w-5 h-5" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-brand-500 rounded-full" />
             </button>
@@ -337,6 +354,46 @@ export function DashboardHeader() {
           </motion.div>
         </div>
       </div>
+
+      {/* Mobile Menu Dropdown */}
+      {showMobileMenu && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="md:hidden absolute top-full left-0 right-0 bg-surface-950/95 backdrop-blur-xl border-b border-surface-800/50 p-4"
+        >
+          <nav className="space-y-1">
+            {navItems.map((item) => {
+              const isActive = location.pathname === item.href
+              return (
+                <Link
+                  key={item.name}
+                  to={item.href}
+                  onClick={() => setShowMobileMenu(false)}
+                  className={cn(
+                    'flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors',
+                    isActive
+                      ? 'text-white bg-surface-800/80'
+                      : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
+                  )}
+                >
+                  <item.icon className="w-5 h-5" />
+                  {item.name}
+                </Link>
+              )
+            })}
+          </nav>
+          <div className="mt-3 pt-3 border-t border-surface-800/50 flex items-center gap-2">
+            <div className={cn(
+              'w-2 h-2 rounded-full',
+              wallet.network === 'mainnet' ? 'bg-yes-400' : 'bg-accent-400'
+            )} />
+            <span className="text-xs text-surface-400 capitalize">{wallet.network}</span>
+            <Shield className="w-3 h-3 text-brand-400 ml-2" />
+            <span className="text-xs text-surface-400">ZK Protected</span>
+          </div>
+        </motion.div>
+      )}
     </header>
   )
 }

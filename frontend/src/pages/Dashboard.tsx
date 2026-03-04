@@ -27,6 +27,7 @@ import { MarketRow } from '@/components/MarketRow'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
+import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
@@ -496,29 +497,15 @@ export function Dashboard() {
                                         ))}
                                     </div>
                                 ) : filteredMarkets.length === 0 ? (
-                                    <div
-                                        className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-12 text-center"
-                                    >
-                                        <div className="w-16 h-16 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-4 float">
-                                            <Search className="w-8 h-8 text-surface-500" />
-                                        </div>
-                                        <h3 className="text-lg font-semibold text-white mb-2">No markets found</h3>
-                                        <p className="text-surface-400 text-sm mb-6">
-                                            {searchQuery
-                                                ? `No results for "${searchQuery}". Try a different search term.`
-                                                : selectedCategory !== 0
-                                                    ? 'No markets in this category yet.'
-                                                    : 'No active markets at the moment.'}
-                                        </p>
-                                        {(searchQuery || selectedCategory !== 0) && (
-                                            <button
-                                                onClick={() => { setSearchQuery(''); setSelectedCategory(0); setSortBy('volume') }}
-                                                className="btn-secondary text-sm px-5 py-2"
-                                            >
-                                                Clear Filters
-                                            </button>
-                                        )}
-                                    </div>
+                                    <EmptyState
+                                        icon={<Search className="w-8 h-8 text-surface-500" />}
+                                        title={searchQuery ? `No results for "${searchQuery}"` : selectedCategory !== 0 ? 'No markets in this category' : 'No active markets'}
+                                        subtitle={searchQuery ? 'Try a different search term or browse all markets.' : selectedCategory !== 0 ? 'No markets in this category yet. Check back soon!' : 'No active markets at the moment. Create the first one!'}
+                                        action={(searchQuery || selectedCategory !== 0)
+                                            ? { label: 'Clear Filters', onClick: () => { setSearchQuery(''); setSelectedCategory(0); setSortBy('volume') } }
+                                            : { label: 'Create Market', onClick: () => setIsCreateMarketOpen(true) }
+                                        }
+                                    />
                                 ) : (
                                     <div className="space-y-3">
                                         {filteredMarkets.map((market, index) => (

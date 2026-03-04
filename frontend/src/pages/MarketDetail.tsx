@@ -6,6 +6,7 @@ import {
   ExternalLink,
   Share2,
   Bookmark,
+  BookmarkCheck,
   AlertCircle,
   CheckCircle2,
   Loader2,
@@ -20,10 +21,11 @@ import {
   Wallet,
   RefreshCw,
   ChevronDown,
+  Activity,
 } from 'lucide-react'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString, outcomeToIndex } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
@@ -40,6 +42,7 @@ import {
   type MarketFeesData,
   type DisputeDataResult,
 } from '@/lib/aleo-client'
+import { OddsChart } from '@/components/OddsChart'
 // fetchCreditsRecord dynamically imported where needed for buy_shares_private
 import type { ParsedOutcomeShare } from '@/lib/credits-record'
 import {
@@ -159,7 +162,7 @@ export function MarketDetail() {
   const navigate = useNavigate()
   const { marketId } = useParams<{ marketId: string }>()
   const { wallet } = useWalletStore()
-  const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
+  const { addPendingBet, confirmPendingBet, removePendingBet, userBets, pendingBets } = useBetsStore()
   const { markets, fetchMarkets, isLoading: marketsLoading } = useRealMarketsStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
@@ -192,6 +195,22 @@ export function MarketDetail() {
   const [isFetchingRecords, setIsFetchingRecords] = useState(false)
   const [fetchRecordError, setFetchRecordError] = useState<string | null>(null)
   const [showPasteInput, setShowPasteInput] = useState(false)
+
+  // Share & Bookmark state
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [isBookmarked, setIsBookmarked] = useState(() => {
+    const saved = localStorage.getItem('veiled_bookmarks')
+    return saved ? (JSON.parse(saved) as string[]).includes(marketId || '') : false
+  })
+
+  // Ref for mobile scroll-to-trading
+  const tradingPanelRef = useRef<HTMLDivElement>(null)
+
+  // User's positions on this market
+  const myPositions = useMemo(() => {
+    const allBets = [...userBets, ...pendingBets]
+    return allBets.filter(b => b.marketId === market?.id && (b.status === 'active' || b.status === 'pending'))
+  }, [userBets, pendingBets, market?.id])
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -457,35 +476,50 @@ export function MarketDetail() {
           <main className="flex-1 pt-20">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
               <div className="skeleton h-8 w-32 rounded-lg mb-6" />
-              <div className="grid lg:grid-cols-[1fr_380px] gap-8">
-                <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Header skeleton */}
                   <div className="glass-card p-6 space-y-4">
                     <div className="flex gap-2">
                       <div className="skeleton h-6 w-20 rounded-full" />
                       <div className="skeleton h-6 w-16 rounded-full" />
                     </div>
-                    <div className="skeleton h-7 w-4/5 rounded" />
+                    <div className="skeleton h-8 w-4/5 rounded" />
                     <div className="skeleton h-4 w-full rounded" />
                     <div className="skeleton h-4 w-2/3 rounded" />
-                    <div className="space-y-2 mt-4">
-                      <div className="flex justify-between">
-                        <div className="skeleton h-4 w-16 rounded" />
-                        <div className="skeleton h-4 w-16 rounded" />
-                      </div>
-                      <div className="skeleton h-3 w-full rounded-full" />
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 mt-4">
-                      <div className="skeleton h-16 rounded-xl" />
-                      <div className="skeleton h-16 rounded-xl" />
-                      <div className="skeleton h-16 rounded-xl" />
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                      {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-16 rounded-xl" />)}
                     </div>
                   </div>
+                  {/* Donut skeleton */}
+                  <div className="glass-card p-6">
+                    <div className="flex flex-col sm:flex-row items-center gap-6">
+                      <div className="skeleton w-48 h-48 rounded-full flex-shrink-0" />
+                      <div className="flex-1 space-y-3 w-full">
+                        {[...Array(3)].map((_, i) => <div key={i} className="skeleton h-8 rounded-lg" />)}
+                      </div>
+                    </div>
+                  </div>
+                  {/* Pool breakdown skeleton */}
+                  <div className="glass-card p-6 space-y-4">
+                    <div className="skeleton h-5 w-32 rounded" />
+                    {[...Array(2)].map((_, i) => <div key={i} className="skeleton h-8 rounded-lg" />)}
+                  </div>
                 </div>
-                <div className="glass-card p-6 space-y-4 h-fit">
-                  <div className="skeleton h-5 w-24 rounded" />
-                  <div className="skeleton h-12 w-full rounded-xl" />
-                  <div className="skeleton h-12 w-full rounded-xl" />
-                  <div className="skeleton h-10 w-full rounded-xl" />
+                {/* Sidebar skeleton */}
+                <div className="space-y-4">
+                  <div className="glass-card p-6 space-y-4">
+                    <div className="flex gap-2">
+                      <div className="skeleton h-10 flex-1 rounded-lg" />
+                      <div className="skeleton h-10 flex-1 rounded-lg" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="skeleton h-20 rounded-xl" />
+                      <div className="skeleton h-20 rounded-xl" />
+                    </div>
+                    <div className="skeleton h-12 rounded-xl" />
+                    <div className="skeleton h-12 rounded-lg" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -765,11 +799,39 @@ export function MarketDetail() {
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors">
-                      <Share2 className="w-4 h-4 text-surface-400" />
+                    <button
+                      onClick={async () => {
+                        const url = window.location.href
+                        if (navigator.share) {
+                          try { await navigator.share({ title: market.question, url }) } catch {}
+                        } else {
+                          await navigator.clipboard.writeText(url)
+                          setLinkCopied(true)
+                          setTimeout(() => setLinkCopied(false), 2000)
+                        }
+                      }}
+                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
+                      title={linkCopied ? 'Link copied!' : 'Share'}
+                    >
+                      {linkCopied
+                        ? <Check className="w-4 h-4 text-yes-400" />
+                        : <Share2 className="w-4 h-4 text-surface-400" />
+                      }
                     </button>
-                    <button className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors">
-                      <Bookmark className="w-4 h-4 text-surface-400" />
+                    <button
+                      onClick={() => {
+                        const saved = JSON.parse(localStorage.getItem('veiled_bookmarks') || '[]') as string[]
+                        const updated = isBookmarked ? saved.filter(id => id !== market.id) : [...saved, market.id]
+                        localStorage.setItem('veiled_bookmarks', JSON.stringify(updated))
+                        setIsBookmarked(!isBookmarked)
+                      }}
+                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
+                      title={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
+                    >
+                      {isBookmarked
+                        ? <BookmarkCheck className="w-4 h-4 text-yellow-400" />
+                        : <Bookmark className="w-4 h-4 text-surface-400" />
+                      }
                     </button>
                   </div>
                 </div>
@@ -853,6 +915,68 @@ export function MarketDetail() {
                   tokenSymbol={market.tokenType || 'ALEO'}
                 />
               </motion.div>
+
+              {/* Pool Breakdown Chart */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+              >
+                <OddsChart
+                  numOutcomes={numOutcomes}
+                  outcomeLabels={outcomeLabels}
+                  reserves={[market.yesReserve, market.noReserve, market.reserve3 || 0n, market.reserve4 || 0n].slice(0, numOutcomes)}
+                  prices={prices}
+                  totalVolume={market.totalVolume}
+                  totalBets={market.totalBets}
+                  tokenSymbol={tokenSymbol}
+                  className="glass-card p-6"
+                />
+              </motion.div>
+
+              {/* User's Positions on this market */}
+              {myPositions.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.18 }}
+                  className="glass-card p-6"
+                >
+                  <h3 className="text-lg font-semibold text-white mb-4">Your Positions</h3>
+                  <div className="space-y-2">
+                    {myPositions.map(bet => {
+                      const idx = outcomeToIndex(bet.outcome) - 1
+                      const label = outcomeLabels[idx] || bet.outcome.toUpperCase()
+                      const badgeColors = [
+                        'bg-yes-500/15 text-yes-400 border-yes-500/30',
+                        'bg-no-500/15 text-no-400 border-no-500/30',
+                        'bg-purple-500/15 text-purple-400 border-purple-500/30',
+                        'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+                      ]
+                      return (
+                        <div key={bet.id} className="flex items-center justify-between p-3 rounded-xl bg-surface-800/30">
+                          <div className="flex items-center gap-2">
+                            <span className={cn('px-2 py-0.5 text-xs font-medium rounded-full border', badgeColors[idx] || badgeColors[0])}>
+                              {label}
+                            </span>
+                            {bet.status === 'pending' && (
+                              <span className="flex items-center gap-1 text-xs text-accent-400">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Pending
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-white">{formatCredits(bet.amount)} {tokenSymbol}</p>
+                            {bet.sharesReceived ? (
+                              <p className="text-xs text-surface-400">{formatCredits(bet.sharesReceived)} shares</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </motion.div>
+              )}
 
               {/* Tab panels: Liquidity, Dispute, Creator Fees */}
               <motion.div
@@ -1019,10 +1143,44 @@ export function MarketDetail() {
                   </div>
                 </div>
               </motion.div>
+
+              {/* Market Activity */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="glass-card p-6"
+              >
+                <div className="flex items-center gap-2 mb-4">
+                  <Activity className="w-5 h-5 text-surface-400" />
+                  <h3 className="text-lg font-semibold text-white">Market Activity</h3>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-surface-400">Total Volume</span>
+                    <span className="text-white font-medium font-mono">{formatCredits(market.totalVolume)} {tokenSymbol}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-surface-400">Total Bets</span>
+                    <span className="text-white font-medium font-mono">{market.totalBets}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-surface-400">Liquidity</span>
+                    <span className="text-white font-medium font-mono">{formatCredits(market.totalLiquidity)} {tokenSymbol}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-surface-400">LP Shares</span>
+                    <span className="text-white font-medium font-mono">{formatCredits(market.totalLPShares)}</span>
+                  </div>
+                </div>
+                <p className="text-xs text-surface-600 mt-4 text-center">
+                  Detailed activity feed coming soon
+                </p>
+              </motion.div>
             </div>
 
             {/* Trading Panel (Right Sidebar) */}
-            <div className="lg:col-span-1">
+            <div className="lg:col-span-1" ref={tradingPanelRef}>
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1706,6 +1864,34 @@ export function MarketDetail() {
       </main>
 
       <Footer />
+
+      {/* Mobile sticky trade CTA — only when market is active and tradeable */}
+      {canTrade && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden p-4 bg-surface-950/90 backdrop-blur-xl border-t border-surface-800/50">
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setTradeMode('buy')
+                tradingPanelRef.current?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              className="flex-1 btn-yes py-3 text-sm font-semibold"
+            >
+              <ShoppingCart className="w-4 h-4 inline mr-1.5" />
+              Buy Shares
+            </button>
+            <button
+              onClick={() => {
+                setTradeMode('sell')
+                tradingPanelRef.current?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              className="flex-1 btn-no py-3 text-sm font-semibold"
+            >
+              <TrendingDown className="w-4 h-4 inline mr-1.5" />
+              Sell Shares
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

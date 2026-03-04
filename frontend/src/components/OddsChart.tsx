@@ -15,7 +15,7 @@ interface OddsChartProps {
   outcomeLabels: string[]
   reserves: bigint[]        // [reserve_1, reserve_2, ...] per outcome
   prices: number[]          // [price_1, price_2, ...] 0-1 range
-  totalVolume: bigint
+  totalVolume?: bigint      // kept for backwards compat, no longer displayed
   totalBets: number
   tokenSymbol?: string
   className?: string
@@ -26,7 +26,6 @@ export function OddsChart({
   outcomeLabels,
   reserves,
   prices,
-  totalVolume,
   totalBets,
   tokenSymbol = 'ALEO',
   className,
@@ -90,11 +89,11 @@ export function OddsChart({
         {/* Divider */}
         <div className="border-t border-surface-700/50 my-4" />
 
-        {/* Total Pool */}
+        {/* Total Pool (sum of share reserves) */}
         <div className="flex justify-between items-center">
           <span className="text-surface-400 text-sm">Total Pool</span>
           <span className="text-white font-bold text-lg font-mono">
-            {formatCredits(totalVolume)} {tokenSymbol}
+            {formatCredits(totalPool)} {tokenSymbol}
           </span>
         </div>
       </div>

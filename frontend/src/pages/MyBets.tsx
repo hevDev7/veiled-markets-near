@@ -22,6 +22,7 @@ import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
+import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
 
@@ -295,27 +296,12 @@ export function MyBets() {
               ))}
             </div>
           ) : displayBets.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="glass-card rounded-2xl py-16 text-center"
-            >
-              <div className="flex justify-center mb-4">
-                <Search className="w-12 h-12 text-surface-500" />
-              </div>
-              <h3 className="text-lg font-semibold text-white mb-2">
-                {emptyConfig[filter].title}
-              </h3>
-              <p className="text-surface-400 text-sm mb-6">
-                {emptyConfig[filter].subtitle}
-              </p>
-              <button
-                onClick={() => navigate('/dashboard')}
-                className="btn-primary text-sm px-6 py-2.5"
-              >
-                Place a Bet
-              </button>
-            </motion.div>
+            <EmptyState
+              icon={<Search className="w-8 h-8 text-surface-500" />}
+              title={emptyConfig[filter].title}
+              subtitle={emptyConfig[filter].subtitle}
+              action={{ label: 'Place a Bet', onClick: () => navigate('/dashboard') }}
+            />
           ) : (
             <AnimatePresence mode="wait">
               <motion.div
