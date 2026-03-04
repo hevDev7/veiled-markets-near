@@ -308,10 +308,10 @@ export function Dashboard() {
                                             key={option.id}
                                             onClick={() => setSortBy(option.id)}
                                             className={cn(
-                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all font-mono',
+                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium font-mono border',
                                                 sortBy === option.id
-                                                    ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
-                                                    : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
+                                                    ? 'bg-accent-500/20 text-accent-400 border-accent-500/30'
+                                                    : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
                                             )}
                                         >
                                             <option.icon className="w-4 h-4" />
