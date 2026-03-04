@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
     Search,
     TrendingUp,
@@ -19,7 +19,7 @@ import {
     Loader2,
     Gavel,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
@@ -111,6 +111,24 @@ export function Dashboard() {
             clearInterval(syncInterval)
         }
     }, [fetchMarkets, fetchUserBets, addMarket, syncBetStatuses])
+
+    // Compute category counts (active markets only, respecting sort mode)
+    const categoryCounts = useMemo(() => {
+        const counts: Record<number, number> = {}
+        for (const market of markets) {
+            if (sortBy === 'needs_resolution') {
+                const isEnded = market.timeRemaining === 'Ended' || market.status !== 1
+                if (!isEnded) continue
+            } else {
+                if (market.status !== 1 || market.timeRemaining === 'Ended') continue
+            }
+            if (searchQuery !== '' && !market.question.toLowerCase().includes(searchQuery.toLowerCase())) continue
+            counts[market.category] = (counts[market.category] || 0) + 1
+        }
+        // "All Markets" (id=0) = total of all categories
+        counts[0] = Object.values(counts).reduce((sum, c) => sum + c, 0)
+        return counts
+    }, [markets, sortBy, searchQuery])
 
     const filteredMarkets = markets
         .filter(market => {
@@ -257,20 +275,22 @@ export function Dashboard() {
                                             key={category.id}
                                             onClick={() => setSelectedCategory(category.id)}
                                             className={cn(
-                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all font-mono',
+                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium font-mono border',
                                                 selectedCategory === category.id
-                                                    ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                                                    : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
+                                                    ? 'bg-brand-500/20 text-brand-400 border-brand-500/30'
+                                                    : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
                                             )}
                                         >
                                             <category.icon className="w-4 h-4" />
-                                            <span>{category.name.toUpperCase()}</span>
-                                            {selectedCategory === category.id && (
-                                                <motion.div
-                                                    layoutId="activeCategory"
-                                                    className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-400"
-                                                />
-                                            )}
+                                            <span className="flex-1 text-left">{category.name.toUpperCase()}</span>
+                                            <span className={cn(
+                                                'text-xs tabular-nums px-1.5 py-0.5 rounded-md',
+                                                selectedCategory === category.id
+                                                    ? 'bg-brand-500/30 text-brand-300'
+                                                    : 'bg-surface-800 text-surface-500'
+                                            )}>
+                                                {categoryCounts[category.id] || 0}
+                                            </span>
                                         </button>
                                     ))}
                                 </div>
@@ -431,7 +451,7 @@ export function Dashboard() {
                             </motion.div>
 
                             {/* Markets List */}
-                            <AnimatePresence mode="wait">
+                            <>
                                 {isLoading ? (
                                     <div className="space-y-3">
                                         {[...Array(5)].map((_, i) => (
@@ -476,10 +496,7 @@ export function Dashboard() {
                                         ))}
                                     </div>
                                 ) : filteredMarkets.length === 0 ? (
-                                    <motion.div
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        exit={{ opacity: 0 }}
+                                    <div
                                         className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-12 text-center"
                                     >
                                         <div className="w-16 h-16 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-4 float">
@@ -501,7 +518,7 @@ export function Dashboard() {
                                                 Clear Filters
                                             </button>
                                         )}
-                                    </motion.div>
+                                    </div>
                                 ) : (
                                     <div className="space-y-3">
                                         {filteredMarkets.map((market, index) => (
@@ -514,7 +531,7 @@ export function Dashboard() {
                                         ))}
                                     </div>
                                 )}
-                            </AnimatePresence>
+                            </>
 
                             {/* Load More */}
                             {filteredMarkets.length > 0 && (

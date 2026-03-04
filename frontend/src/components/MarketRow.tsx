@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion'
 import { Clock, TrendingUp, Shield, ChevronRight, ExternalLink } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { type Market } from '@/lib/store'
@@ -21,7 +20,7 @@ interface MarketRowProps {
     onClick: () => void
 }
 
-export function MarketRow({ market, index, onClick }: MarketRowProps) {
+export function MarketRow({ market, onClick }: MarketRowProps) {
     const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
     const statusVariant = getStatusVariant(market.status, isExpired)
@@ -53,10 +52,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
     const leadingPct = (prices[leadingIdx] ?? 0) * 100
 
     return (
-        <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.3, delay: index * 0.05 }}
+        <div
             onClick={onClick}
             className={cn(
                 "group relative bg-surface-900/50 backdrop-blur-sm rounded-lg border border-surface-800/50",
@@ -277,7 +273,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                     </a>
                 )}
             </div>
-        </motion.div>
+        </div>
     )
 }
 
