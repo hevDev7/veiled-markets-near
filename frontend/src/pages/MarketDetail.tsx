@@ -21,11 +21,10 @@ import {
   Wallet,
   RefreshCw,
   ChevronDown,
-  Activity,
 } from 'lucide-react'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString, outcomeToIndex } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
@@ -162,7 +161,7 @@ export function MarketDetail() {
   const navigate = useNavigate()
   const { marketId } = useParams<{ marketId: string }>()
   const { wallet } = useWalletStore()
-  const { addPendingBet, confirmPendingBet, removePendingBet, userBets, pendingBets } = useBetsStore()
+  const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
   const { markets, fetchMarkets, isLoading: marketsLoading } = useRealMarketsStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
@@ -205,12 +204,6 @@ export function MarketDetail() {
 
   // Ref for mobile scroll-to-trading
   const tradingPanelRef = useRef<HTMLDivElement>(null)
-
-  // User's positions on this market
-  const myPositions = useMemo(() => {
-    const allBets = [...userBets, ...pendingBets]
-    return allBets.filter(b => b.marketId === market?.id && (b.status === 'active' || b.status === 'pending'))
-  }, [userBets, pendingBets, market?.id])
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -934,50 +927,6 @@ export function MarketDetail() {
                 />
               </motion.div>
 
-              {/* User's Positions on this market */}
-              {myPositions.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.18 }}
-                  className="glass-card p-6"
-                >
-                  <h3 className="text-lg font-semibold text-white mb-4">Your Positions</h3>
-                  <div className="space-y-2">
-                    {myPositions.map(bet => {
-                      const idx = outcomeToIndex(bet.outcome) - 1
-                      const label = outcomeLabels[idx] || bet.outcome.toUpperCase()
-                      const badgeColors = [
-                        'bg-yes-500/15 text-yes-400 border-yes-500/30',
-                        'bg-no-500/15 text-no-400 border-no-500/30',
-                        'bg-purple-500/15 text-purple-400 border-purple-500/30',
-                        'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-                      ]
-                      return (
-                        <div key={bet.id} className="flex items-center justify-between p-3 rounded-xl bg-surface-800/30">
-                          <div className="flex items-center gap-2">
-                            <span className={cn('px-2 py-0.5 text-xs font-medium rounded-full border', badgeColors[idx] || badgeColors[0])}>
-                              {label}
-                            </span>
-                            {bet.status === 'pending' && (
-                              <span className="flex items-center gap-1 text-xs text-accent-400">
-                                <Loader2 className="w-3 h-3 animate-spin" /> Pending
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-medium text-white">{formatCredits(bet.amount)} {tokenSymbol}</p>
-                            {bet.sharesReceived ? (
-                              <p className="text-xs text-surface-400">{formatCredits(bet.sharesReceived)} shares</p>
-                            ) : null}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </motion.div>
-              )}
-
               {/* Tab panels: Liquidity, Dispute, Creator Fees */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -1144,39 +1093,6 @@ export function MarketDetail() {
                 </div>
               </motion.div>
 
-              {/* Market Activity */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="glass-card p-6"
-              >
-                <div className="flex items-center gap-2 mb-4">
-                  <Activity className="w-5 h-5 text-surface-400" />
-                  <h3 className="text-lg font-semibold text-white">Market Activity</h3>
-                </div>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-surface-400">Total Volume</span>
-                    <span className="text-white font-medium font-mono">{formatCredits(market.totalVolume)} {tokenSymbol}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-surface-400">Total Bets</span>
-                    <span className="text-white font-medium font-mono">{market.totalBets}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-surface-400">Liquidity</span>
-                    <span className="text-white font-medium font-mono">{formatCredits(market.totalLiquidity)} {tokenSymbol}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-surface-400">LP Shares</span>
-                    <span className="text-white font-medium font-mono">{formatCredits(market.totalLPShares)}</span>
-                  </div>
-                </div>
-                <p className="text-xs text-surface-600 mt-4 text-center">
-                  Detailed activity feed coming soon
-                </p>
-              </motion.div>
             </div>
 
             {/* Trading Panel (Right Sidebar) */}

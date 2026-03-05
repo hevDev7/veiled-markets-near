@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
-import { BarChart3 } from 'lucide-react'
+import { BarChart3, Info } from 'lucide-react'
+import { useState } from 'react'
 import { cn, formatCredits } from '@/lib/utils'
 
 // Color config per outcome (1-indexed, matching OutcomeSelector)
@@ -90,12 +91,7 @@ export function OddsChart({
         <div className="border-t border-surface-700/50 my-4" />
 
         {/* Total Pool (sum of share reserves) */}
-        <div className="flex justify-between items-center">
-          <span className="text-surface-400 text-sm">Total Pool</span>
-          <span className="text-white font-bold text-lg font-mono">
-            {formatCredits(totalPool)} {tokenSymbol}
-          </span>
-        </div>
+        <TotalPoolRow totalPool={totalPool} tokenSymbol={tokenSymbol} />
       </div>
 
       {/* Stats Row — payouts per outcome */}
@@ -140,6 +136,34 @@ export function OddsChart({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function TotalPoolRow({ totalPool, tokenSymbol }: { totalPool: bigint; tokenSymbol: string }) {
+  const [showTooltip, setShowTooltip] = useState(false)
+
+  return (
+    <div className="flex justify-between items-center">
+      <div className="relative flex items-center gap-1.5">
+        <span className="text-surface-400 text-sm">Total Pool</span>
+        <button
+          onMouseEnter={() => setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+          onClick={() => setShowTooltip(v => !v)}
+          className="text-surface-500 hover:text-surface-300 transition-colors"
+        >
+          <Info className="w-3.5 h-3.5" />
+        </button>
+        {showTooltip && (
+          <div className="absolute left-0 bottom-full mb-2 w-64 p-3 rounded-lg bg-surface-800 border border-surface-700 shadow-xl z-10 text-xs text-surface-300 leading-relaxed">
+            Sum of all outcome share reserves held by the AMM. This grows with each buy due to complete-set minting and may exceed the actual collateral locked in the contract.
+          </div>
+        )}
+      </div>
+      <span className="text-white font-bold text-lg font-mono">
+        {formatCredits(totalPool)} {tokenSymbol}
+      </span>
     </div>
   )
 }
