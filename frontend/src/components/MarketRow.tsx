@@ -75,6 +75,21 @@ export function MarketRow({ market, onClick }: MarketRowProps) {
                                 <Shield className="w-3 h-3 text-brand-400" />
                                 <span className="text-xs text-brand-400 font-mono">PRIVATE</span>
                             </div>
+                            {market.tags?.slice(0, 2).map(tag => (
+                                <span
+                                    key={tag}
+                                    className={cn(
+                                        "px-1.5 py-0.5 text-[10px] font-bold font-mono rounded",
+                                        tag === 'Hot' || tag === 'Trending' || tag === 'Featured'
+                                            ? "bg-accent-500/20 text-accent-400"
+                                            : tag === 'Ending Soon'
+                                                ? "bg-no-500/20 text-no-400"
+                                                : "bg-surface-700/50 text-surface-400"
+                                    )}
+                                >
+                                    {tag.toUpperCase()}
+                                </span>
+                            ))}
                             {isExpired && (
                                 <StatusBadge variant={statusVariant} />
                             )}

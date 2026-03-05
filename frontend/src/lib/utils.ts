@@ -94,8 +94,9 @@ export function getCategoryName(category: number): string {
     2: 'Sports',
     3: 'Crypto',
     4: 'Entertainment',
-    5: 'Science & Tech',
+    5: 'Tech',
     6: 'Economics',
+    7: 'Science',
     99: 'Other',
   }
   return categories[category] || 'Other'
@@ -112,6 +113,7 @@ export function getCategoryEmoji(category: number): string {
     4: '🎬',
     5: '🔬',
     6: '📈',
+    7: '🧪',
     99: '🎯',
   }
   return emojis[category] || '🎯'

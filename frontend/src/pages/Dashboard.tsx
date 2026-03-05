@@ -18,12 +18,17 @@ import {
     Vote,
     Loader2,
     Gavel,
+    LayoutGrid,
+    List,
+    Film,
+    FlaskConical,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { MarketRow } from '@/components/MarketRow'
+import { MarketCard } from '@/components/MarketCard'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
@@ -39,6 +44,8 @@ const categories = [
     { id: 2, name: 'Sports', icon: Trophy },
     { id: 5, name: 'Tech', icon: Cpu },
     { id: 1, name: 'Politics', icon: Vote },
+    { id: 4, name: 'Entertainment', icon: Film },
+    { id: 7, name: 'Science', icon: FlaskConical },
 ]
 
 const sortOptions = [
@@ -57,6 +64,7 @@ export function Dashboard() {
     const [selectedCategory, setSelectedCategory] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
     const [sortBy, setSortBy] = useState('volume')
+    const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
     const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false)
     const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
@@ -237,7 +245,14 @@ export function Dashboard() {
                             <StatTicker
                                 icon={<Trophy className="w-4 h-4" />}
                                 label="WINNINGS"
-                                value="0 ALEO"
+                                value={(() => {
+                                    const wonBets = userBets.filter(b => b.status === 'won' || b.status === 'claimed')
+                                    const totalWon = wonBets.reduce((sum, b) => {
+                                        const payout = b.payoutAmount ? parseFloat(b.payoutAmount) : 0
+                                        return sum + payout
+                                    }, 0)
+                                    return `${(totalWon / 1_000_000).toFixed(1)} ALEO`
+                                })()}
                                 color="text-accent-400"
                                 delay={0.2}
                             />
@@ -421,7 +436,7 @@ export function Dashboard() {
                                 transition={{ delay: 0.1 }}
                                 className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4"
                             >
-                                <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-3">
                                     <div className="relative flex-1">
                                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-surface-500" />
                                         <input
@@ -431,6 +446,33 @@ export function Dashboard() {
                                             onChange={(e) => setSearchQuery(e.target.value)}
                                             className="w-full pl-12 pr-4 py-3 bg-surface-800/50 border border-surface-700/50 rounded-lg focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20 transition-all outline-none placeholder-surface-500 text-white font-mono text-sm"
                                         />
+                                    </div>
+                                    {/* View Mode Toggle */}
+                                    <div className="flex items-center bg-surface-800/50 border border-surface-700/50 rounded-lg p-1">
+                                        <button
+                                            onClick={() => setViewMode('list')}
+                                            className={cn(
+                                                'p-2 rounded-md transition-all',
+                                                viewMode === 'list'
+                                                    ? 'bg-brand-500/20 text-brand-400'
+                                                    : 'text-surface-500 hover:text-surface-300'
+                                            )}
+                                            title="List view"
+                                        >
+                                            <List className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('grid')}
+                                            className={cn(
+                                                'p-2 rounded-md transition-all',
+                                                viewMode === 'grid'
+                                                    ? 'bg-brand-500/20 text-brand-400'
+                                                    : 'text-surface-500 hover:text-surface-300'
+                                            )}
+                                            title="Grid view"
+                                        >
+                                            <LayoutGrid className="w-4 h-4" />
+                                        </button>
                                     </div>
                                 </div>
 
@@ -506,10 +548,21 @@ export function Dashboard() {
                                             : { label: 'Create Market', onClick: () => setIsCreateMarketOpen(true) }
                                         }
                                     />
-                                ) : (
+                                ) : viewMode === 'list' ? (
                                     <div className="space-y-3">
                                         {filteredMarkets.map((market, index) => (
                                             <MarketRow
+                                                key={market.id}
+                                                market={market}
+                                                index={index}
+                                                onClick={() => handleMarketClick(market)}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                                        {filteredMarkets.map((market, index) => (
+                                            <MarketCard
                                                 key={market.id}
                                                 market={market}
                                                 index={index}
