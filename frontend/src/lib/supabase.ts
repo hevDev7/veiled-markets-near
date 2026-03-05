@@ -358,6 +358,66 @@ export async function updateMarketRegistry(
   }
 }
 
+// ---- Price Snapshot Operations ----
+// Note: Price snapshots are PUBLIC data — no encryption needed.
+
+/**
+ * Insert a price snapshot for a market.
+ */
+export async function upsertPriceSnapshot(
+  marketId: string,
+  timestamp: number,
+  prices: number[]
+): Promise<void> {
+  if (!supabase) return
+  try {
+    const { error } = await supabase
+      .from('price_snapshots')
+      .upsert([{ market_id: marketId, timestamp, prices }], {
+        onConflict: 'market_id,timestamp',
+      })
+    if (error) devWarn('[Supabase] upsertPriceSnapshot error:', error.message)
+  } catch (e) {
+    devWarn('[Supabase] upsertPriceSnapshot exception:', e)
+  }
+}
+
+/**
+ * Fetch price snapshots for a market, optionally filtered by time.
+ * Returns snapshots sorted by timestamp ascending.
+ */
+export async function fetchPriceSnapshots(
+  marketId: string,
+  since?: number
+): Promise<{ timestamp: number; prices: number[] }[]> {
+  if (!supabase) return []
+  try {
+    let query = supabase
+      .from('price_snapshots')
+      .select('timestamp, prices')
+      .eq('market_id', marketId)
+      .order('timestamp', { ascending: true })
+      .limit(500)
+
+    if (since) {
+      query = query.gte('timestamp', since)
+    }
+
+    const { data, error } = await query
+    if (error) {
+      devWarn('[Supabase] fetchPriceSnapshots error:', error.message)
+      return []
+    }
+    return (data || []).map(row => ({
+      timestamp: row.timestamp as number,
+      prices: row.prices as number[],
+    }))
+  } catch (e) {
+    devWarn('[Supabase] fetchPriceSnapshots exception:', e)
+    return []
+  }
+}
+
 /**
  * Clear all data from Supabase tables (used when switching program versions).
  * Deletes: market_registry, user_bets, pending_bets, commitment_records
@@ -370,7 +430,7 @@ export async function clearAllSupabaseData(): Promise<{ deleted: string[]; error
     return { deleted, errors }
   }
 
-  const tables = ['market_registry', 'user_bets', 'pending_bets', 'commitment_records']
+  const tables = ['market_registry', 'user_bets', 'pending_bets', 'commitment_records', 'price_snapshots']
   for (const table of tables) {
     try {
       // Delete all rows (neq '' matches all non-null primary keys)

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -9,7 +9,7 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { cn } from '@/lib/utils'
-import { getPriceHistory, type PriceSnapshot } from '@/lib/price-history'
+import { getPriceHistory, fetchPriceHistoryAsync, type PriceSnapshot } from '@/lib/price-history'
 
 const OUTCOME_COLORS = ['#22c55e', '#ef4444', '#a855f7', '#eab308']
 
@@ -39,14 +39,30 @@ export function ProbabilityChart({
 }: ProbabilityChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>('all')
 
-  const history = useMemo(() => getPriceHistory(marketId), [marketId])
+  // Instant render from localStorage
+  const localHistory = useMemo(() => getPriceHistory(marketId), [marketId])
+
+  // Async fetch from Supabase for cross-device consistency
+  const [remoteHistory, setRemoteHistory] = useState<PriceSnapshot[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const cutoff = timeRange === 'all' ? undefined : Date.now() - TIME_RANGES.find(r => r.key === timeRange)!.ms
+    fetchPriceHistoryAsync(marketId, cutoff).then(data => {
+      if (!cancelled) setRemoteHistory(data)
+    })
+    return () => { cancelled = true }
+  }, [marketId, timeRange])
+
+  // Use Supabase data when available, fallback to localStorage
+  const history = remoteHistory ?? localHistory
 
   // Build chart data: history + current point
   const chartData = useMemo(() => {
     const now = Date.now()
     const cutoff = timeRange === 'all' ? 0 : now - TIME_RANGES.find(r => r.key === timeRange)!.ms
 
-    // Filter by time range
+    // Filter by time range (for localStorage data that isn't pre-filtered)
     const filtered = history.filter(s => s.t >= cutoff)
 
     // Add current prices as latest point
@@ -70,6 +86,7 @@ export function ProbabilityChart({
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
   }
 
+  const isLoading = remoteHistory === null
   const hasData = chartData.length >= 2
 
   return (
@@ -92,7 +109,11 @@ export function ProbabilityChart({
         ))}
       </div>
 
-      {hasData ? (
+      {isLoading ? (
+        <div className="h-[180px] flex items-center justify-center rounded-lg bg-surface-800/20">
+          <div className="w-5 h-5 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
+        </div>
+      ) : hasData ? (
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />

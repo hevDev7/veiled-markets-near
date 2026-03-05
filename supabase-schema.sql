@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS market_registry (
 -- ALTER TABLE user_bets DROP CONSTRAINT IF EXISTS user_bets_outcome_check;
 -- ALTER TABLE pending_bets DROP CONSTRAINT IF EXISTS pending_bets_outcome_check;
 
+-- 5. Price Snapshots (public price history for charts)
+CREATE TABLE IF NOT EXISTS price_snapshots (
+  market_id TEXT NOT NULL,
+  timestamp BIGINT NOT NULL,
+  prices JSONB NOT NULL,  -- array of outcome prices [0.25, 0.35, 0.20, 0.20]
+  PRIMARY KEY (market_id, timestamp)
+);
+
+-- Index for time-range queries
+CREATE INDEX IF NOT EXISTS idx_price_snapshots_time ON price_snapshots (market_id, timestamp DESC);
+
 -- ============================================================================
 -- Row Level Security (RLS) — Optional but recommended
 -- ============================================================================
@@ -111,3 +122,4 @@ CREATE POLICY "Allow all for anon" ON user_bets FOR ALL USING (true) WITH CHECK 
 CREATE POLICY "Allow all for anon" ON pending_bets FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for anon" ON commitment_records FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all for anon" ON market_registry FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for anon" ON price_snapshots FOR ALL USING (true) WITH CHECK (true);
