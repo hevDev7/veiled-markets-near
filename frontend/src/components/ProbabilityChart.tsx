@@ -22,6 +22,22 @@ const TIME_RANGES: { key: TimeRange; label: string; ms: number }[] = [
   { key: 'all', label: 'All', ms: 0 },
 ]
 
+/** Pulsing dot rendered only on the last data point */
+function PulsingDot({ cx, cy, index, dataLength, color }: {
+  cx?: number; cy?: number; index?: number; dataLength: number; color: string
+}) {
+  if (index !== dataLength - 1 || cx == null || cy == null) return null
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={6} fill={color} opacity={0.2}>
+        <animate attributeName="r" values="4;8;4" dur="2s" repeatCount="indefinite" />
+        <animate attributeName="opacity" values="0.3;0.1;0.3" dur="2s" repeatCount="indefinite" />
+      </circle>
+      <circle cx={cx} cy={cy} r={3} fill={color} />
+    </g>
+  )
+}
+
 interface ProbabilityChartProps {
   marketId: string
   numOutcomes: number
@@ -162,7 +178,16 @@ export function ProbabilityChart({
                     dataKey={`o${i}`}
                     stroke={OUTCOME_COLORS[i] || OUTCOME_COLORS[0]}
                     strokeWidth={2}
-                    dot={false}
+                    dot={(props: any) => (
+                      <PulsingDot
+                        key={props.index}
+                        cx={props.cx}
+                        cy={props.cy}
+                        index={props.index}
+                        dataLength={chartData.length}
+                        color={OUTCOME_COLORS[i] || OUTCOME_COLORS[0]}
+                      />
+                    )}
                     activeDot={{ r: 4, strokeWidth: 0 }}
                   />
                 ))}
