@@ -96,9 +96,15 @@ export function MarketRow({ market, onClick }: MarketRowProps) {
                         </div>
                     </div>
 
-                    <h3 className="text-base font-semibold text-white group-hover:text-brand-300 transition-colors mb-2">
+                    <h3 className="text-base font-semibold text-white group-hover:text-brand-300 transition-colors mb-1">
                         {market.question}
                     </h3>
+
+                    {market.description && (
+                        <p className="text-xs text-surface-500 mb-2">
+                            {market.description.length > 60 ? market.description.slice(0, 60) + '...' : market.description}
+                        </p>
+                    )}
 
                     {/* Odds Bar - Compact */}
                     <div className="max-w-md">

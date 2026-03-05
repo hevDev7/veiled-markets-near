@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
     Search,
     TrendingUp,
@@ -22,10 +22,16 @@ import {
     List,
     Film,
     FlaskConical,
+    Bookmark,
+    ChevronRight,
+    Bell,
+    X,
+    Coins,
+    PieChart,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market, type Bet } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { MarketRow } from '@/components/MarketRow'
 import { MarketCard } from '@/components/MarketCard'
@@ -33,9 +39,35 @@ import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
 import { EmptyState } from '@/components/EmptyState'
-import { cn, formatCredits } from '@/lib/utils'
+import { cn, formatCredits, getCategoryEmoji } from '@/lib/utils'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
+import { getPriceHistory, type PriceSnapshot } from '@/lib/price-history'
 import { devLog, devWarn } from '../lib/logger'
+
+// ── localStorage helpers for bookmarks ──
+const BOOKMARKS_KEY = 'veiled_bookmarks'
+
+function getBookmarks(): string[] {
+    try { return JSON.parse(localStorage.getItem(BOOKMARKS_KEY) || '[]') } catch { return [] }
+}
+
+// ── Notification types ──
+interface Notification {
+    id: string
+    type: 'expiring' | 'won' | 'lost' | 'resolved'
+    message: string
+    marketId?: string
+    time: number
+    read: boolean
+}
+
+// ── Activity Feed types ──
+interface ActivityItem {
+    id: string
+    message: string
+    time: number
+    marketId: string
+}
 
 const categories = [
     { id: 0, name: 'All Markets', icon: Flame },
@@ -68,6 +100,12 @@ export function Dashboard() {
     const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false)
     const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
+    const [tokenFilter, setTokenFilter] = useState<'all' | 'ALEO' | 'USDCX'>('all')
+    const [visibleCount, setVisibleCount] = useState(10)
+    const [expandPositions, setExpandPositions] = useState(false)
+    const [notifications, setNotifications] = useState<Notification[]>([])
+    const [showNotifications, setShowNotifications] = useState(false)
+    const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
 
     // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -121,6 +159,92 @@ export function Dashboard() {
         }
     }, [fetchMarkets, fetchUserBets, addMarket, syncBetStatuses])
 
+    // Generate notifications from market/bet state
+    useEffect(() => {
+        const notifs: Notification[] = []
+
+        // Markets expiring within 1 hour
+        for (const m of markets) {
+            if (m.status === 1 && m.deadlineTimestamp) {
+                const hoursLeft = (m.deadlineTimestamp - Date.now()) / 3_600_000
+                if (hoursLeft > 0 && hoursLeft <= 1) {
+                    notifs.push({
+                        id: `exp-${m.id}`,
+                        type: 'expiring',
+                        message: `"${m.question.slice(0, 40)}..." expires in < 1 hour`,
+                        marketId: m.id,
+                        time: Date.now(),
+                        read: false,
+                    })
+                }
+            }
+        }
+
+        // Bet results
+        for (const b of userBets) {
+            if (b.status === 'won') {
+                notifs.push({
+                    id: `won-${b.id}`,
+                    type: 'won',
+                    message: `You won on "${(b.marketQuestion || 'a market').slice(0, 35)}..."`,
+                    marketId: b.marketId,
+                    time: b.placedAt,
+                    read: false,
+                })
+            } else if (b.status === 'lost') {
+                notifs.push({
+                    id: `lost-${b.id}`,
+                    type: 'lost',
+                    message: `You lost on "${(b.marketQuestion || 'a market').slice(0, 35)}..."`,
+                    marketId: b.marketId,
+                    time: b.placedAt,
+                    read: false,
+                })
+            }
+        }
+
+        setNotifications(notifs.slice(0, 10))
+    }, [markets, userBets])
+
+    // Generate activity feed from recent market activity
+    useEffect(() => {
+        const feed: ActivityItem[] = []
+        for (const m of markets) {
+            if (m.totalBets > 0 && m.status === 1) {
+                feed.push({
+                    id: `act-${m.id}`,
+                    message: `${m.totalBets} bet${m.totalBets > 1 ? 's' : ''} on "${m.question.slice(0, 30)}..."`,
+                    time: m.deadlineTimestamp ? m.deadlineTimestamp - Number(m.deadline) * 1000 : Date.now(),
+                    marketId: m.id,
+                })
+            }
+        }
+        setActivityFeed(feed.sort((a, b) => b.time - a.time).slice(0, 5))
+    }, [markets])
+
+    const handleMarketClick = useCallback((market: Market) => {
+        navigate(`/market/${market.id}`)
+    }, [navigate])
+
+    // Bookmarks
+    const bookmarkedIds = useMemo(() => getBookmarks(), [markets])
+
+    const bookmarkedMarkets = useMemo(() =>
+        bookmarkedIds.map(id => markets.find(m => m.id === id)).filter(Boolean) as Market[]
+    , [bookmarkedIds, markets])
+
+    // Portfolio value calculation
+    const portfolioValue = useMemo(() => {
+        let total = 0
+        for (const bet of userBets) {
+            if (bet.status === 'active') {
+                const amount = Number(bet.amount) / 1_000_000
+                total += amount
+            }
+        }
+        return total
+    }, [userBets])
+
     // Compute category counts (active markets only, respecting sort mode)
     const categoryCounts = useMemo(() => {
         const counts: Record<number, number> = {}
@@ -153,6 +277,8 @@ export function Dashboard() {
             if (selectedCategory !== 0 && market.category !== selectedCategory) return false
             // Search filter
             if (searchQuery !== '' && !market.question.toLowerCase().includes(searchQuery.toLowerCase())) return false
+            // Token type filter
+            if (tokenFilter !== 'all' && (market.tokenType || 'ALEO') !== tokenFilter) return false
             return true
         })
         .sort((a, b) => {
@@ -171,9 +297,9 @@ export function Dashboard() {
             }
         })
 
-    const handleMarketClick = (market: Market) => {
-        navigate(`/market/${market.id}`)
-    }
+    // Paginated markets
+    const paginatedMarkets = useMemo(() => filteredMarkets.slice(0, visibleCount), [filteredMarkets, visibleCount])
+    const hasMore = filteredMarkets.length > visibleCount
 
     if (!wallet.connected) {
         return null
@@ -203,72 +329,92 @@ export function Dashboard() {
             <DashboardHeader />
 
             <main className="pt-20 relative z-10">
-                {/* Command Center Header */}
-                <div className="border-b border-brand-500/10 bg-surface-900/30 backdrop-blur-xl">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-                        <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-lg bg-brand-500/10 flex items-center justify-center">
-                                    <Terminal className="w-5 h-5 text-brand-400" />
+                {/* Main Content */}
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+                    {/* Command Center Header — full width */}
+                    <div className="rounded-xl border border-brand-500/10 bg-surface-900/30 backdrop-blur-xl p-6 mb-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-lg bg-brand-500/10 flex items-center justify-center">
+                                        <Terminal className="w-5 h-5 text-brand-400" />
+                                    </div>
+                                    <div>
+                                        <h1 className="text-xl font-bold text-white font-mono">COMMAND_CENTER</h1>
+                                        <p className="text-xs text-surface-500 font-mono">SYSTEM_ACTIVE • ZK_ENABLED</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h1 className="text-xl font-bold text-white font-mono">COMMAND_CENTER</h1>
-                                    <p className="text-xs text-surface-500 font-mono">SYSTEM_ACTIVE • ZK_ENABLED</p>
+
+                                <div className="flex items-center gap-2">
+                                    {/* Notification Bell */}
+                                    <button
+                                        onClick={() => setShowNotifications(!showNotifications)}
+                                        className="relative p-2 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all"
+                                    >
+                                        <Bell className="w-4 h-4" />
+                                        {notifications.length > 0 && (
+                                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center">
+                                                {notifications.length}
+                                            </span>
+                                        )}
+                                    </button>
+
+                                    <button
+                                        onClick={() => setIsCreateMarketOpen(true)}
+                                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-400 hover:bg-brand-500/20 transition-all font-mono text-sm"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        <span>NEW_MARKET</span>
+                                    </button>
                                 </div>
                             </div>
 
-                            <button
-                                onClick={() => setIsCreateMarketOpen(true)}
-                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-400 hover:bg-brand-500/20 transition-all font-mono text-sm"
-                            >
-                                <Plus className="w-4 h-4" />
-                                <span>NEW_MARKET</span>
-                            </button>
-                        </div>
-
-                        {/* Stats - Horizontal Ticker Style */}
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                            <StatTicker
-                                icon={<Wallet className="w-4 h-4" />}
-                                label="BALANCE"
-                                value={`${formatCredits(wallet.balance.public + wallet.balance.private)} ALEO`}
-                                color="text-brand-400"
-                                delay={0}
-                            />
-                            <StatTicker
-                                icon={<Activity className="w-4 h-4" />}
-                                label="ACTIVE_BETS"
-                                value={String(userBets.filter(b => b.status === 'active').length + pendingBets.length)}
-                                color="text-yes-400"
-                                delay={0.1}
-                            />
-                            <StatTicker
-                                icon={<Trophy className="w-4 h-4" />}
-                                label="WINNINGS"
-                                value={(() => {
-                                    const wonBets = userBets.filter(b => b.status === 'won' || b.status === 'claimed')
-                                    const totalWon = wonBets.reduce((sum, b) => {
-                                        const payout = b.payoutAmount ? parseFloat(b.payoutAmount) : 0
-                                        return sum + payout
-                                    }, 0)
-                                    return `${(totalWon / 1_000_000).toFixed(1)} ALEO`
-                                })()}
-                                color="text-accent-400"
-                                delay={0.2}
-                            />
-                            <StatTicker
-                                icon={<Zap className="w-4 h-4" />}
-                                label="TOTAL_VOLUME"
-                                value={`${(Number(markets.reduce((sum, m) => sum + m.totalVolume, 0n)) / 1_000_000).toFixed(1)} ALEO`}
-                                color="text-surface-400"
-                                delay={0.3}
-                            />
-                        </div>
+                            {/* Stats */}
+                            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                                <StatTicker
+                                    icon={<Wallet className="w-4 h-4" />}
+                                    label="BALANCE"
+                                    value={`${formatCredits(wallet.balance.public + wallet.balance.private)} ALEO`}
+                                    color="text-brand-400"
+                                    delay={0}
+                                />
+                                <StatTicker
+                                    icon={<Activity className="w-4 h-4" />}
+                                    label="ACTIVE_BETS"
+                                    value={String(userBets.filter(b => b.status === 'active').length + pendingBets.length)}
+                                    color="text-yes-400"
+                                    delay={0.1}
+                                />
+                                <StatTicker
+                                    icon={<PieChart className="w-4 h-4" />}
+                                    label="PORTFOLIO"
+                                    value={`${portfolioValue.toFixed(1)} ALEO`}
+                                    color="text-brand-300"
+                                    delay={0.15}
+                                />
+                                <StatTicker
+                                    icon={<Trophy className="w-4 h-4" />}
+                                    label="WINNINGS"
+                                    value={(() => {
+                                        const wonBets = userBets.filter(b => b.status === 'won' || b.status === 'claimed')
+                                        const totalWon = wonBets.reduce((sum, b) => {
+                                            const payout = b.payoutAmount ? Number(b.payoutAmount) : 0
+                                            return sum + payout
+                                        }, 0)
+                                        return `${(totalWon / 1_000_000).toFixed(1)} ALEO`
+                                    })()}
+                                    color="text-accent-400"
+                                    delay={0.2}
+                                />
+                                <StatTicker
+                                    icon={<Zap className="w-4 h-4" />}
+                                    label="TOTAL_VOLUME"
+                                    value={`${(Number(markets.reduce((sum, m) => sum + m.totalVolume, 0n)) / 1_000_000).toFixed(1)} ALEO`}
+                                    color="text-surface-400"
+                                    delay={0.3}
+                                />
+                            </div>
                     </div>
-                </div>
-
-                {/* Main Content */}
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
                     {/* Sidebar + Content Layout */}
                     <div className="grid lg:grid-cols-[280px_1fr] gap-6">
@@ -277,7 +423,7 @@ export function Dashboard() {
                         <motion.div
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
-                            className="space-y-4"
+                            className="space-y-4 self-start lg:sticky lg:top-24"
                         >
                             {/* Categories */}
                             <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
@@ -337,6 +483,30 @@ export function Dashboard() {
                                 </div>
                             </div>
 
+                            {/* Token Type Filter */}
+                            <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Coins className="w-4 h-4 text-yellow-400" />
+                                    <h3 className="text-sm font-bold text-white font-mono uppercase">Token</h3>
+                                </div>
+                                <div className="flex gap-1">
+                                    {(['all', 'ALEO', 'USDCX'] as const).map((t) => (
+                                        <button
+                                            key={t}
+                                            onClick={() => setTokenFilter(t)}
+                                            className={cn(
+                                                'flex-1 px-2 py-2 rounded-lg text-xs font-mono font-medium border transition-all',
+                                                tokenFilter === t
+                                                    ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                                                    : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
+                                            )}
+                                        >
+                                            {t === 'all' ? 'ALL' : t}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             {/* Privacy Status */}
                             <div className="bg-gradient-to-br from-brand-500/10 to-accent-500/10 backdrop-blur-sm rounded-xl border border-brand-500/20 p-4">
                                 <div className="flex items-center gap-2 mb-3">
@@ -362,6 +532,124 @@ export function Dashboard() {
 
                         {/* Right Content - Markets */}
                         <div className="space-y-4">
+
+                            {/* My Active Positions — collapsed by default, max 3 shown */}
+                            {(userBets.filter(b => b.status === 'active').length + pendingBets.length) > 0 && (() => {
+                                const allPositions = [...pendingBets, ...userBets.filter(b => b.status === 'active')]
+                                const displayed = expandPositions ? allPositions : allPositions.slice(0, 3)
+                                const hasMorePositions = allPositions.length > 3
+
+                                return (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-brand-500/20 p-4"
+                                >
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <Activity className="w-4 h-4 text-brand-400" />
+                                            <h3 className="text-sm font-bold text-white font-mono">
+                                                YOUR_POSITIONS ({allPositions.length})
+                                            </h3>
+                                        </div>
+                                        <button
+                                            onClick={() => navigate('/bets')}
+                                            className="text-xs font-mono text-brand-400 hover:text-brand-300 flex items-center gap-1 transition-colors"
+                                        >
+                                            VIEW_ALL <ChevronRight className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {displayed.map((bet) => {
+                                            const market = markets.find(m => m.id === bet.marketId)
+                                            return (
+                                                <div
+                                                    key={bet.id}
+                                                    onClick={() => market && handleMarketClick(market)}
+                                                    className="flex items-center gap-3 p-2 rounded-lg bg-surface-800/30 hover:bg-surface-800/50 cursor-pointer transition-colors"
+                                                >
+                                                    <span className="text-lg">{market ? getCategoryEmoji(market.category) : '🎯'}</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs text-white font-medium truncate">
+                                                            {bet.marketQuestion || market?.question || 'Unknown Market'}
+                                                        </p>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className={cn(
+                                                                'text-[10px] font-mono font-bold px-1.5 py-0.5 rounded',
+                                                                bet.outcome === 'yes' ? 'bg-yes-500/20 text-yes-400' :
+                                                                bet.outcome === 'no' ? 'bg-no-500/20 text-no-400' :
+                                                                'bg-purple-500/20 text-purple-400'
+                                                            )}>
+                                                                {bet.outcome.toUpperCase()}
+                                                            </span>
+                                                            <span className="text-[10px] font-mono text-surface-500">
+                                                                {formatCredits(bet.amount)} {bet.tokenType || 'ALEO'}
+                                                            </span>
+                                                            {bet.status === 'pending' && (
+                                                                <span className="text-[10px] font-mono text-yellow-400">PENDING</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <ChevronRight className="w-3.5 h-3.5 text-surface-500" />
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                    {hasMorePositions && !expandPositions && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setExpandPositions(true) }}
+                                            className="w-full mt-2 py-1.5 text-[10px] font-mono text-brand-400 hover:text-brand-300 transition-colors"
+                                        >
+                                            SHOW_ALL ({allPositions.length - 3} more)
+                                        </button>
+                                    )}
+                                    {hasMorePositions && expandPositions && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setExpandPositions(false) }}
+                                            className="w-full mt-2 py-1.5 text-[10px] font-mono text-surface-500 hover:text-surface-300 transition-colors"
+                                        >
+                                            COLLAPSE
+                                        </button>
+                                    )}
+                                </motion.div>
+                                )
+                            })()}
+
+                            {/* Bookmarked Markets */}
+                            {bookmarkedMarkets.length > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-yellow-500/20 p-4"
+                                >
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Bookmark className="w-4 h-4 text-yellow-400" />
+                                        <h3 className="text-sm font-bold text-white font-mono">
+                                            WATCHLIST ({bookmarkedMarkets.length})
+                                        </h3>
+                                    </div>
+                                    <div className="flex gap-2 overflow-x-auto pb-1">
+                                        {bookmarkedMarkets.slice(0, 4).map(market => (
+                                            <button
+                                                key={market.id}
+                                                onClick={() => handleMarketClick(market)}
+                                                className="flex-shrink-0 px-3 py-2 rounded-lg bg-surface-800/40 border border-surface-700/50 hover:border-yellow-500/30 transition-colors text-left max-w-[200px]"
+                                            >
+                                                <p className="text-xs text-white font-medium truncate">{market.question}</p>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className="text-[10px] font-mono text-yes-400">
+                                                        {market.yesPercentage.toFixed(0)}%
+                                                    </span>
+                                                    <span className="text-[10px] text-surface-500">
+                                                        {formatCredits(market.totalVolume, 0)} vol
+                                                    </span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </motion.div>
+                            )}
+
                             {/* Pending Markets Banner */}
                             {pendingInfo.count > 0 && (() => {
                                 const allFailed = pendingInfo.statuses.every(s => s === 'likely_failed')
@@ -479,7 +767,8 @@ export function Dashboard() {
                                 {/* Market Count */}
                                 <div className="mt-3 pt-3 border-t border-surface-800/50 flex items-center justify-between text-xs font-mono">
                                     <span className="text-surface-500">
-                                        SHOWING {filteredMarkets.length} OF {markets.length} MARKETS
+                                        SHOWING {Math.min(visibleCount, filteredMarkets.length)} OF {filteredMarkets.length} MARKETS
+                                        {tokenFilter !== 'all' && <span className="text-yellow-400 ml-1">({tokenFilter})</span>}
                                     </span>
                                     <div className="flex items-center gap-2">
                                         <div className={cn(
@@ -550,7 +839,7 @@ export function Dashboard() {
                                     />
                                 ) : viewMode === 'list' ? (
                                     <div className="space-y-3">
-                                        {filteredMarkets.map((market, index) => (
+                                        {paginatedMarkets.map((market, index) => (
                                             <MarketRow
                                                 key={market.id}
                                                 market={market}
@@ -561,7 +850,7 @@ export function Dashboard() {
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                                        {filteredMarkets.map((market, index) => (
+                                        {paginatedMarkets.map((market, index) => (
                                             <MarketCard
                                                 key={market.id}
                                                 market={market}
@@ -574,18 +863,103 @@ export function Dashboard() {
                             </>
 
                             {/* Load More */}
-                            {filteredMarkets.length > 0 && (
+                            {hasMore && (
+                                <div className="text-center pt-4">
+                                    <button
+                                        onClick={() => setVisibleCount(prev => prev + 10)}
+                                        className="px-6 py-3 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all font-mono text-sm"
+                                    >
+                                        LOAD_MORE ({filteredMarkets.length - visibleCount} remaining)
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Activity Feed */}
+                            {activityFeed.length > 0 && (
                                 <motion.div
                                     initial={{ opacity: 0 }}
-                                    whileInView={{ opacity: 1 }}
-                                    viewport={{ once: true }}
-                                    className="text-center pt-4"
+                                    animate={{ opacity: 1 }}
+                                    className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4"
                                 >
-                                    <button className="px-6 py-3 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all font-mono text-sm">
-                                        LOAD_MORE_MARKETS
-                                    </button>
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <Zap className="w-4 h-4 text-accent-400" />
+                                        <h3 className="text-sm font-bold text-white font-mono">MARKET_ACTIVITY</h3>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {activityFeed.map(item => (
+                                            <div
+                                                key={item.id}
+                                                onClick={() => {
+                                                    const m = markets.find(mk => mk.id === item.marketId)
+                                                    if (m) handleMarketClick(m)
+                                                }}
+                                                className="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-800/30 cursor-pointer transition-colors"
+                                            >
+                                                <div className="w-1.5 h-1.5 rounded-full bg-accent-400 flex-shrink-0" />
+                                                <p className="text-xs text-surface-300 font-mono flex-1 truncate">{item.message}</p>
+                                                <ChevronRight className="w-3 h-3 text-surface-500 flex-shrink-0" />
+                                            </div>
+                                        ))}
+                                    </div>
                                 </motion.div>
                             )}
+
+                            {/* Notification Panel */}
+                            <AnimatePresence>
+                                {showNotifications && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        className="fixed top-20 right-4 z-50 w-80 bg-surface-900/95 backdrop-blur-xl rounded-xl border border-surface-700/50 shadow-2xl p-4"
+                                    >
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <Bell className="w-4 h-4 text-brand-400" />
+                                                <h3 className="text-sm font-bold text-white font-mono">NOTIFICATIONS</h3>
+                                            </div>
+                                            <button onClick={() => setShowNotifications(false)} className="text-surface-500 hover:text-white">
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                        {notifications.length === 0 ? (
+                                            <p className="text-xs text-surface-500 font-mono text-center py-4">NO_NEW_NOTIFICATIONS</p>
+                                        ) : (
+                                            <div className="space-y-2 max-h-64 overflow-y-auto">
+                                                {notifications.map(n => (
+                                                    <div
+                                                        key={n.id}
+                                                        onClick={() => {
+                                                            if (n.marketId) {
+                                                                const m = markets.find(mk => mk.id === n.marketId)
+                                                                if (m) handleMarketClick(m)
+                                                            }
+                                                            setShowNotifications(false)
+                                                        }}
+                                                        className={cn(
+                                                            'p-2 rounded-lg cursor-pointer transition-colors text-xs font-mono',
+                                                            n.type === 'won' ? 'bg-yes-500/10 hover:bg-yes-500/20' :
+                                                            n.type === 'lost' ? 'bg-no-500/10 hover:bg-no-500/20' :
+                                                            n.type === 'expiring' ? 'bg-yellow-500/10 hover:bg-yellow-500/20' :
+                                                            'bg-surface-800/30 hover:bg-surface-800/50'
+                                                        )}
+                                                    >
+                                                        <span className={cn(
+                                                            n.type === 'won' ? 'text-yes-400' :
+                                                            n.type === 'lost' ? 'text-no-400' :
+                                                            n.type === 'expiring' ? 'text-yellow-400' :
+                                                            'text-surface-300'
+                                                        )}>
+                                                            {n.type === 'won' ? '🏆 ' : n.type === 'lost' ? '❌ ' : n.type === 'expiring' ? '⏰ ' : '📊 '}
+                                                            {n.message}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
                     </div>
                 </div>
