@@ -894,6 +894,7 @@ export function MarketDetail() {
 
                 {/* Donut chart + pool data visualization */}
                 <ProbabilityDonut
+                  marketId={market.id}
                   numOutcomes={numOutcomes}
                   outcomeLabels={outcomeLabels}
                   prices={prices}

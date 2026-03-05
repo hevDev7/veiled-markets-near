@@ -1,7 +1,9 @@
 import { motion } from 'framer-motion'
 import { cn, formatCredits } from '@/lib/utils'
+import { ProbabilityChart } from './ProbabilityChart'
 
 interface ProbabilityDonutProps {
+  marketId: string
   numOutcomes: number
   outcomeLabels: string[]
   prices: number[] // 0-1 range per outcome
@@ -20,6 +22,7 @@ const DONUT_COLORS = [
 ]
 
 export function ProbabilityDonut({
+  marketId,
   numOutcomes,
   outcomeLabels,
   prices,
@@ -60,8 +63,8 @@ export function ProbabilityDonut({
   const hasPoolData = reserves && reserves.length > 0
 
   return (
-    <div className={cn('flex flex-col items-center', className)}>
-      {/* Donut + Pool info side by side on larger screens */}
+    <div className={cn('flex flex-col', className)}>
+      {/* Top: Donut + Chart side by side */}
       <div className="flex flex-col sm:flex-row items-center gap-6 w-full">
         {/* Donut Chart */}
         <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
@@ -100,70 +103,36 @@ export function ProbabilityDonut({
           </div>
         </div>
 
-        {/* Pool data + legend */}
-        <div className="flex-1 w-full space-y-3">
-          {/* Per-outcome pool info */}
-          {segments.map((seg, i) => {
-            const colors = DONUT_COLORS[i] || DONUT_COLORS[0]
-            const reserve = hasPoolData ? reserves[i] ?? 0n : null
-            const price = prices[i] ?? (1 / numOutcomes)
-            const payout = price > 0 ? 1 / price : numOutcomes
-
-            return (
-              <div
-                key={i}
-                className={cn(
-                  'flex items-center justify-between p-3 rounded-lg border',
-                  colors.bg,
-                  colors.border,
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="w-3 h-3 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: seg.color }}
-                  />
-                  <div>
-                    <span className={cn('text-sm font-semibold', colors.label)}>
-                      {seg.label}
-                    </span>
-                    <span className="text-sm text-surface-400 ml-2">
-                      {seg.pct.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  {reserve !== null && (
-                    <div className="text-sm font-mono text-surface-300">
-                      {formatCredits(reserve)} {tokenSymbol}
-                    </div>
-                  )}
-                  <div className="text-xs text-surface-500">
-                    {payout.toFixed(2)}x payout
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-
-          {/* Total liquidity + volume */}
-          {hasPoolData && (
-            <div className="flex items-center justify-between pt-2 border-t border-surface-700/50">
-              <span className="text-sm text-surface-400">Total Liquidity</span>
-              <span className="text-sm font-bold font-mono text-white">
-                {formatCredits(totalLiquidity ?? 0n)} {tokenSymbol}
-              </span>
-            </div>
-          )}
-          {totalVolume !== undefined && totalVolume > 0n && (
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-surface-400">Volume</span>
-              <span className="text-sm font-bold font-mono text-surface-300">
-                {formatCredits(totalVolume)} {tokenSymbol}
-              </span>
-            </div>
-          )}
+        {/* Probability Line Chart */}
+        <div className="flex-1 w-full min-w-0">
+          <ProbabilityChart
+            marketId={marketId}
+            numOutcomes={numOutcomes}
+            outcomeLabels={outcomeLabels}
+            currentPrices={prices}
+          />
         </div>
+      </div>
+
+      {/* Bottom: stats */}
+      <div className="mt-4 space-y-2">
+        {/* Total liquidity + volume */}
+        {hasPoolData && (
+          <div className="flex items-center justify-between pt-2 border-t border-surface-700/50">
+            <span className="text-sm text-surface-400">Total Liquidity</span>
+            <span className="text-sm font-bold font-mono text-white">
+              {formatCredits(totalLiquidity ?? 0n)} {tokenSymbol}
+            </span>
+          </div>
+        )}
+        {totalVolume !== undefined && totalVolume > 0n && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-surface-400">Volume</span>
+            <span className="text-sm font-bold font-mono text-surface-300">
+              {formatCredits(totalVolume)} {tokenSymbol}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )

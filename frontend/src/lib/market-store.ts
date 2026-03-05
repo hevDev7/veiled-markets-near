@@ -7,6 +7,7 @@
 
 import { create } from 'zustand'
 import type { Market } from './store'
+import { recordPriceSnapshot } from './price-history'
 import {
     fetchAllMarkets,
     getCurrentBlockHeight,
@@ -242,6 +243,16 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
             }
             const markets = Array.from(deduped.values())
 
+            // Record price snapshots for chart history
+            for (const m of markets) {
+                const allPrices = calculateAllPrices({
+                    reserve_1: m.yesReserve, reserve_2: m.noReserve,
+                    reserve_3: m.reserve3, reserve_4: m.reserve4,
+                    num_outcomes: m.numOutcomes,
+                })
+                recordPriceSnapshot(m.id, allPrices)
+            }
+
             set({
                 markets,
                 isLoading: false,
@@ -301,6 +312,14 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 marketData.resolution,
                 marketData.marketCredits,
             )
+
+            // Record price snapshot for chart
+            const allPrices = calculateAllPrices({
+                reserve_1: updatedMarket.yesReserve, reserve_2: updatedMarket.noReserve,
+                reserve_3: updatedMarket.reserve3, reserve_4: updatedMarket.reserve4,
+                num_outcomes: updatedMarket.numOutcomes,
+            })
+            recordPriceSnapshot(marketId, allPrices)
 
             set((state) => ({
                 markets: state.markets.map((m) =>
