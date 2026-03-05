@@ -171,8 +171,8 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         }
       } else {
         // ALEO: buy_shares_private uses transfer_private_to_public (needs credits record)
-        // Need enough for bet amount + gas fee buffer (0.5 ALEO = 500,000 microcredits)
-        const gasBuffer = 500_000
+        // Need enough for bet amount + gas fee buffer (1.5 ALEO = 1,500,000 microcredits)
+        const gasBuffer = 1_500_000
         const totalNeeded = Number(amountMicro) + gasBuffer
         const creditsRecord = await fetchCreditsRecord(totalNeeded)
         if (!creditsRecord) {
@@ -197,7 +197,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         program: CONTRACT_INFO.programId,
         function: functionName!,
         inputs: inputs!,
-        fee: 0.5,
+        fee: 1.5,
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(

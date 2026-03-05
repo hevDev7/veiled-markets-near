@@ -381,7 +381,7 @@ export function MarketDetail() {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
@@ -649,7 +649,7 @@ export function MarketDetail() {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
