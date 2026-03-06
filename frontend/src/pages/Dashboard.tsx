@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market, outcomeToIndex } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { MarketRow } from '@/components/MarketRow'
 import { MarketCard } from '@/components/MarketCard'
@@ -553,8 +553,8 @@ export function Dashboard() {
                         <div className="space-y-4">
 
                             {/* My Active Positions — collapsed by default, max 3 shown */}
-                            {(userBets.filter(b => b.status === 'active').length + pendingBets.length) > 0 && (() => {
-                                const allPositions = [...pendingBets, ...userBets.filter(b => b.status === 'active')]
+                            {(userBets.filter(b => b.status === 'active' && b.type !== 'sell').length + pendingBets.filter(b => b.type !== 'sell').length) > 0 && (() => {
+                                const allPositions = [...pendingBets.filter(b => b.type !== 'sell'), ...userBets.filter(b => b.status === 'active' && b.type !== 'sell')]
                                 const displayed = expandPositions ? allPositions : allPositions.slice(0, 3)
                                 const hasMorePositions = allPositions.length > 3
 
@@ -593,14 +593,25 @@ export function Dashboard() {
                                                             {bet.marketQuestion || market?.question || 'Unknown Market'}
                                                         </p>
                                                         <div className="flex items-center gap-2 mt-0.5">
-                                                            <span className={cn(
-                                                                'text-[10px] font-mono font-bold px-1.5 py-0.5 rounded',
-                                                                bet.outcome === 'yes' ? 'bg-yes-500/20 text-yes-400' :
-                                                                bet.outcome === 'no' ? 'bg-no-500/20 text-no-400' :
-                                                                'bg-purple-500/20 text-purple-400'
-                                                            )}>
-                                                                {bet.outcome.toUpperCase()}
-                                                            </span>
+                                                            {(() => {
+                                                                const idx = outcomeToIndex(bet.outcome)
+                                                                const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
+                                                                const label = market?.outcomeLabels?.[idx - 1]?.toUpperCase() || defaultLabels[idx - 1] || bet.outcome.toUpperCase()
+                                                                const colorMap = [
+                                                                    'bg-yes-500/20 text-yes-400',
+                                                                    'bg-no-500/20 text-no-400',
+                                                                    'bg-purple-500/20 text-purple-400',
+                                                                    'bg-yellow-500/20 text-yellow-400',
+                                                                ]
+                                                                return (
+                                                                    <span className={cn(
+                                                                        'text-[10px] font-mono font-bold px-1.5 py-0.5 rounded',
+                                                                        colorMap[idx - 1] || colorMap[0]
+                                                                    )}>
+                                                                        {label}
+                                                                    </span>
+                                                                )
+                                                            })()}
                                                             <span className="text-[10px] font-mono text-surface-500">
                                                                 {formatCredits(bet.amount)} {bet.tokenType || 'ALEO'}
                                                             </span>

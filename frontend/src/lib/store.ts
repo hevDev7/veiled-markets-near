@@ -1271,15 +1271,11 @@ function savePendingBetsToStorage(bets: Bet[]) {
     const key = getPendingBetsKey(address)
     localStorage.setItem(key, JSON.stringify(serializable))
     devWarn(`[Bets] Saved ${bets.length} pending bets to localStorage key: ${key}`)
-    // Sync to Supabase ONLY if encryption key is available (privacy protection)
-    // Without encryption, sensitive fields (outcome, amount) would be plaintext in DB.
-    // Data will be synced later via flushToSupabase() once key is derived.
-    if (isSupabaseAvailable() && encryptionKey) {
+    // Sync to Supabase (encrypted if key available, plaintext otherwise)
+    if (isSupabaseAvailable()) {
       sbUpsertPendingBets(bets, address, encryptionKey).catch(err =>
         devWarn('[Supabase] Failed to sync pending bets:', err)
       )
-    } else if (isSupabaseAvailable() && !encryptionKey) {
-      devWarn('[Bets] Supabase sync deferred — encryption key not yet available')
     }
   } catch (e) {
     console.error('[Bets] Failed to save pending bets to storage:', e)
@@ -1293,13 +1289,11 @@ function saveBetsToStorage(bets: Bet[]) {
   try {
     const serializable = bets.map(serializeBetForStorage)
     localStorage.setItem(getBetsKey(address), JSON.stringify(serializable))
-    // Sync to Supabase ONLY if encryption key is available (privacy protection)
-    if (isSupabaseAvailable() && encryptionKey) {
+    // Sync to Supabase (encrypted if key available, plaintext otherwise)
+    if (isSupabaseAvailable()) {
       sbUpsertBets(bets, address, encryptionKey).catch(err =>
         devWarn('[Supabase] Failed to sync bets:', err)
       )
-    } else if (isSupabaseAvailable() && !encryptionKey) {
-      devWarn('[Bets] Supabase sync deferred — encryption key not yet available')
     }
   } catch (e) {
     console.error('Failed to save bets to storage:', e)
@@ -1336,8 +1330,8 @@ function saveCommitmentRecordsToStorage(records: CommitmentRecord[]) {
       betAmountRecordPlaintext: '[REDACTED]',
     }))
     localStorage.setItem(getCommitmentsKey(address), JSON.stringify(serializable))
-    // Sync to Supabase ONLY if encryption key is available (privacy protection)
-    if (isSupabaseAvailable() && encryptionKey) {
+    // Sync to Supabase (encrypted if key available, plaintext otherwise)
+    if (isSupabaseAvailable()) {
       sbUpsertCommitments(records, address, encryptionKey).catch(err =>
         devWarn('[Supabase] Failed to sync commitments:', err)
       )
@@ -2102,10 +2096,10 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   // no plaintext data leaks into the database.
   flushToSupabase: async () => {
     const { address, encryptionKey } = useWalletStore.getState().wallet
-    if (!address || !encryptionKey || !isSupabaseAvailable()) return
+    if (!address || !isSupabaseAvailable()) return
 
     const { userBets, pendingBets, commitmentRecords } = get()
-    devWarn(`[Bets] Flushing to Supabase (encrypted): ${userBets.length} bets, ${pendingBets.length} pending, ${commitmentRecords.length} commitments`)
+    devWarn(`[Bets] Flushing to Supabase: ${userBets.length} bets, ${pendingBets.length} pending, ${commitmentRecords.length} commitments`)
 
     try {
       await Promise.all([
@@ -2113,7 +2107,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         pendingBets.length > 0 ? sbUpsertPendingBets(pendingBets, address, encryptionKey) : Promise.resolve(),
         commitmentRecords.length > 0 ? sbUpsertCommitments(commitmentRecords, address, encryptionKey) : Promise.resolve(),
       ])
-      devWarn('[Bets] Supabase flush complete (all data encrypted)')
+      devWarn('[Bets] Supabase flush complete')
     } catch (err) {
       devWarn('[Bets] Supabase flush failed:', err)
     }
