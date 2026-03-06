@@ -12,6 +12,9 @@ const navItems = [
 export function MobileNav() {
   const location = useLocation()
 
+  // Hide on market detail and landing pages to avoid overlapping sticky CTAs
+  if (location.pathname.startsWith('/market/') || location.pathname === '/') return null
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden">
       <div className="bg-surface-950/90 backdrop-blur-xl border-t border-surface-800/50">

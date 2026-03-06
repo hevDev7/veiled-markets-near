@@ -38,7 +38,7 @@ const TABS: { key: BetFilter; label: string }[] = [
 export function MyBets() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
-  const { userBets, pendingBets, fetchUserBets, syncBetStatuses, addPendingBet } = useBetsStore()
+  const { userBets, pendingBets, fetchUserBets, syncBetStatuses, addPendingBet, removePendingBet } = useBetsStore()
   const { markets } = useRealMarketsStore()
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState<BetFilter>('all')
@@ -222,7 +222,7 @@ export function MyBets() {
     <div className="min-h-screen bg-surface-950 flex flex-col">
       <DashboardHeader />
 
-      <main className="flex-1 pt-20">
+      <main className="flex-1 pt-20 pb-20 md:pb-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Page Header */}
           <div className="flex items-center justify-between mb-6">
@@ -319,6 +319,7 @@ export function MyBets() {
                     market={getMarketInfo(bet.marketId)}
                     index={index}
                     onClaim={(mode) => openClaimModal(bet, mode)}
+                    onRemove={bet.status === 'pending' ? () => removePendingBet(bet.id) : undefined}
                     showClaimAction={filter === 'unredeemed' || filter === 'all'}
                   />
                 ))}
@@ -506,12 +507,14 @@ function BetCard({
   market,
   index,
   onClaim,
+  onRemove,
   showClaimAction,
 }: {
   bet: Bet
   market?: { question: string; tokenType?: 'ALEO' | 'USDCX'; numOutcomes?: number; outcomeLabels?: string[] }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
+  onRemove?: () => void
   showClaimAction: boolean
 }) {
   const isSell = bet.type === 'sell'
@@ -709,11 +712,22 @@ function BetCard({
               <ExternalLink className="w-3.5 h-3.5 text-surface-500" />
             </a>
           ) : (
-            <div
-              className="p-1.5 cursor-help"
-              title="Transaction pending"
-            >
-              <Clock className="w-3.5 h-3.5 text-surface-600" />
+            <div className="flex items-center gap-1">
+              <div
+                className="p-1.5 cursor-help"
+                title="Transaction pending"
+              >
+                <Clock className="w-3.5 h-3.5 text-surface-600" />
+              </div>
+              {isPending && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemove?.() }}
+                  className="p-1.5 rounded-lg hover:bg-no-500/20 transition-colors"
+                  title="Remove this bet (if transaction was rejected)"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-surface-500 hover:text-no-400" />
+                </button>
+              )}
             </div>
           )}
         </div>

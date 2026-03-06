@@ -22,6 +22,14 @@ import { WalletCompatibilityLab } from '@/components/WalletCompatibilityLab'
 import { cn, formatCredits } from '@/lib/utils'
 import { clearAllStaleData } from '@/lib/aleo-client'
 
+function getSetting(key: string, fallback: string): string {
+  try { return localStorage.getItem(key) || fallback } catch { return fallback }
+}
+
+function setSetting(key: string, value: string) {
+  try { localStorage.setItem(key, value) } catch {}
+}
+
 export function Settings() {
   const { wallet, refreshBalance } = useWalletStore()
   const { connected: providerConnected } = useWallet()
@@ -68,7 +76,7 @@ export function Settings() {
     <div className="min-h-screen bg-surface-950 flex flex-col">
       <DashboardHeader />
 
-      <main className="flex-1 pt-20">
+      <main className="flex-1 pt-20 pb-20 md:pb-0">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Page Header */}
           <motion.div
@@ -200,7 +208,11 @@ export function Settings() {
                   title="Language"
                   description="Choose your preferred language"
                   action={
-                    <select className="bg-surface-800 border border-surface-700 rounded-lg px-3 py-2 text-white text-sm">
+                    <select
+                      className="bg-surface-800 border border-surface-700 rounded-lg px-3 py-2 text-white text-sm"
+                      defaultValue={getSetting('veiled_pref_language', 'en')}
+                      onChange={(e) => setSetting('veiled_pref_language', e.target.value)}
+                    >
                       <option value="en">English</option>
                       <option value="id">Bahasa Indonesia</option>
                       <option value="zh">中文</option>
@@ -244,16 +256,19 @@ export function Settings() {
                   title="Market Resolution Alerts"
                   description="Get notified when markets you bet on resolve"
                   defaultChecked={true}
+                  storageKey="veiled_pref_resolution_alerts"
                 />
                 <ToggleSetting
                   title="Price Movement Alerts"
                   description="Get notified of significant odds changes"
                   defaultChecked={false}
+                  storageKey="veiled_pref_price_alerts"
                 />
                 <ToggleSetting
                   title="New Market Alerts"
                   description="Get notified when new markets are created"
                   defaultChecked={false}
+                  storageKey="veiled_pref_new_market_alerts"
                 />
               </div>
             </motion.div>
@@ -386,12 +401,30 @@ function ToggleSetting({
   title,
   description,
   defaultChecked = false,
+  storageKey,
 }: {
   title: string
   description: string
   defaultChecked?: boolean
+  storageKey?: string
 }) {
-  const [checked, setChecked] = useState(defaultChecked)
+  const [checked, setChecked] = useState(() => {
+    if (storageKey) {
+      try {
+        const saved = localStorage.getItem(storageKey)
+        if (saved !== null) return saved === 'true'
+      } catch {}
+    }
+    return defaultChecked
+  })
+
+  const toggle = () => {
+    const next = !checked
+    setChecked(next)
+    if (storageKey) {
+      try { localStorage.setItem(storageKey, String(next)) } catch {}
+    }
+  }
 
   return (
     <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
@@ -400,7 +433,7 @@ function ToggleSetting({
         <p className="text-sm text-surface-400">{description}</p>
       </div>
       <button
-        onClick={() => setChecked(!checked)}
+        onClick={toggle}
         className={cn(
           "w-12 h-6 rounded-full transition-colors relative",
           checked ? "bg-brand-500" : "bg-surface-700"

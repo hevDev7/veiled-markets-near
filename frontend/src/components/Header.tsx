@@ -143,7 +143,8 @@ export function Header() {
                         </span>
                         <button
                           onClick={handleCopy}
-                          className="p-1.5 rounded-lg hover:bg-surface-800 transition-colors"
+                          aria-label="Copy address"
+                          className="p-1.5 rounded-lg hover:bg-surface-800 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
                         >
                           {copied ? (
                             <Check className="w-4 h-4 text-yes-400" />

@@ -13,7 +13,7 @@ import {
   Clock,
   ExternalLink,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useWalletStore } from '@/lib/store'
 import { config } from '@/lib/config'
 import { cn, sanitizeUrl } from '@/lib/utils'
@@ -86,6 +86,27 @@ const initialFormData: MarketFormData = {
 // Use the centralized config program ID — do NOT hardcode version here
 const CREATE_MARKET_PROGRAM_ID = CONTRACT_INFO.programId
 
+const DRAFT_KEY = 'veiled_create_market_draft'
+
+function saveDraft(data: MarketFormData) {
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)) } catch {}
+}
+
+function loadDraft(): MarketFormData | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY) } catch {}
+}
+
+function hasFormContent(data: MarketFormData): boolean {
+  return data.question.trim() !== '' || data.description.trim() !== ''
+}
+
 export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketModalProps) {
   const { wallet } = useWalletStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
@@ -96,13 +117,31 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
   const [isSlowTransaction, setIsSlowTransaction] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (isOpen && step === 'details') {
+      const draft = loadDraft()
+      if (draft && hasFormContent(draft)) {
+        setFormData(draft)
+      }
+    }
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const updateForm = (updates: Partial<MarketFormData>) => {
-    setFormData(prev => ({ ...prev, ...updates }))
+    setFormData(prev => {
+      const next = { ...prev, ...updates }
+      saveDraft(next)
+      return next
+    })
   }
 
   const handleClose = () => {
+    if (step !== 'success' && hasFormContent(formData)) {
+      if (!window.confirm('You have unsaved market data. Discard draft?')) return
+    }
     setStep('details')
     setFormData(initialFormData)
+    clearDraft()
     setError(null)
     setMarketId(null)
     setIsSubmitting(false)
@@ -378,6 +417,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
       // Use transaction ID as market ID reference for UI
       setMarketId(transactionId)
+      clearDraft()
       setStep('success')
 
       // ============================================================

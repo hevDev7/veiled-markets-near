@@ -31,7 +31,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market, type Bet } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { MarketRow } from '@/components/MarketRow'
 import { MarketCard } from '@/components/MarketCard'
@@ -41,7 +41,6 @@ import { CreateMarketModal } from '@/components/CreateMarketModal'
 import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits, getCategoryEmoji } from '@/lib/utils'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
-import { getPriceHistory, type PriceSnapshot } from '@/lib/price-history'
 import { devLog, devWarn } from '../lib/logger'
 
 // ── localStorage helpers for bookmarks ──
@@ -52,13 +51,24 @@ function getBookmarks(): string[] {
 }
 
 // ── Notification types ──
+function dismissedKey(address: string) {
+    return `veiled_dismissed_notifs_${address.slice(-8)}`
+}
+
+function getDismissedNotifs(address: string): Set<string> {
+    try { return new Set(JSON.parse(localStorage.getItem(dismissedKey(address)) || '[]')) } catch { return new Set() }
+}
+
+function saveDismissedNotifs(address: string, ids: Set<string>) {
+    try { localStorage.setItem(dismissedKey(address), JSON.stringify([...ids])) } catch {}
+}
+
 interface Notification {
     id: string
     type: 'expiring' | 'won' | 'lost' | 'resolved'
     message: string
     marketId?: string
     time: number
-    read: boolean
 }
 
 // ── Activity Feed types ──
@@ -159,8 +169,10 @@ export function Dashboard() {
         }
     }, [fetchMarkets, fetchUserBets, addMarket, syncBetStatuses])
 
-    // Generate notifications from market/bet state
+    // Generate notifications from market/bet state (filtered by dismissed)
     useEffect(() => {
+        if (!wallet.address) return
+        const dismissed = getDismissedNotifs(wallet.address)
         const notifs: Notification[] = []
 
         // Markets expiring within 1 hour
@@ -168,14 +180,16 @@ export function Dashboard() {
             if (m.status === 1 && m.deadlineTimestamp) {
                 const hoursLeft = (m.deadlineTimestamp - Date.now()) / 3_600_000
                 if (hoursLeft > 0 && hoursLeft <= 1) {
-                    notifs.push({
-                        id: `exp-${m.id}`,
-                        type: 'expiring',
-                        message: `"${m.question.slice(0, 40)}..." expires in < 1 hour`,
-                        marketId: m.id,
-                        time: Date.now(),
-                        read: false,
-                    })
+                    const id = `exp-${m.id}`
+                    if (!dismissed.has(id)) {
+                        notifs.push({
+                            id,
+                            type: 'expiring',
+                            message: `"${m.question.slice(0, 40)}..." expires in < 1 hour`,
+                            marketId: m.id,
+                            time: Date.now(),
+                        })
+                    }
                 }
             }
         }
@@ -183,28 +197,32 @@ export function Dashboard() {
         // Bet results
         for (const b of userBets) {
             if (b.status === 'won') {
-                notifs.push({
-                    id: `won-${b.id}`,
-                    type: 'won',
-                    message: `You won on "${(b.marketQuestion || 'a market').slice(0, 35)}..."`,
-                    marketId: b.marketId,
-                    time: b.placedAt,
-                    read: false,
-                })
+                const id = `won-${b.id}`
+                if (!dismissed.has(id)) {
+                    notifs.push({
+                        id,
+                        type: 'won',
+                        message: `You won on "${(b.marketQuestion || 'a market').slice(0, 35)}..."`,
+                        marketId: b.marketId,
+                        time: b.placedAt,
+                    })
+                }
             } else if (b.status === 'lost') {
-                notifs.push({
-                    id: `lost-${b.id}`,
-                    type: 'lost',
-                    message: `You lost on "${(b.marketQuestion || 'a market').slice(0, 35)}..."`,
-                    marketId: b.marketId,
-                    time: b.placedAt,
-                    read: false,
-                })
+                const id = `lost-${b.id}`
+                if (!dismissed.has(id)) {
+                    notifs.push({
+                        id,
+                        type: 'lost',
+                        message: `You lost on "${(b.marketQuestion || 'a market').slice(0, 35)}..."`,
+                        marketId: b.marketId,
+                        time: b.placedAt,
+                    })
+                }
             }
         }
 
         setNotifications(notifs.slice(0, 10))
-    }, [markets, userBets])
+    }, [markets, userBets, wallet.address])
 
     // Generate activity feed from recent market activity
     useEffect(() => {
@@ -328,7 +346,7 @@ export function Dashboard() {
 
             <DashboardHeader />
 
-            <main className="pt-20 relative z-10">
+            <main className="pt-20 pb-20 md:pb-0 relative z-10">
                 {/* Main Content */}
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -349,7 +367,8 @@ export function Dashboard() {
                                     {/* Notification Bell */}
                                     <button
                                         onClick={() => setShowNotifications(!showNotifications)}
-                                        className="relative p-2 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all"
+                                        aria-label="Notifications"
+                                        className="relative p-2 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
                                     >
                                         <Bell className="w-4 h-4" />
                                         {notifications.length > 0 && (
@@ -396,7 +415,7 @@ export function Dashboard() {
                                     icon={<Trophy className="w-4 h-4" />}
                                     label="WINNINGS"
                                     value={(() => {
-                                        const wonBets = userBets.filter(b => b.status === 'won' || b.status === 'claimed')
+                                        const wonBets = userBets.filter(b => b.status === 'won')
                                         const totalWon = wonBets.reduce((sum, b) => {
                                             const payout = b.payoutAmount ? Number(b.payoutAmount) : 0
                                             return sum + payout
@@ -746,6 +765,7 @@ export function Dashboard() {
                                                     : 'text-surface-500 hover:text-surface-300'
                                             )}
                                             title="List view"
+                                            aria-label="List view"
                                         >
                                             <List className="w-4 h-4" />
                                         </button>
@@ -758,6 +778,7 @@ export function Dashboard() {
                                                     : 'text-surface-500 hover:text-surface-300'
                                             )}
                                             title="Grid view"
+                                            aria-label="Grid view"
                                         >
                                             <LayoutGrid className="w-4 h-4" />
                                         </button>
@@ -918,9 +939,25 @@ export function Dashboard() {
                                                 <Bell className="w-4 h-4 text-brand-400" />
                                                 <h3 className="text-sm font-bold text-white font-mono">NOTIFICATIONS</h3>
                                             </div>
-                                            <button onClick={() => setShowNotifications(false)} className="text-surface-500 hover:text-white">
-                                                <X className="w-4 h-4" />
-                                            </button>
+                                            <div className="flex items-center gap-2">
+                                                {notifications.length > 0 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            if (!wallet.address) return
+                                                            const dismissed = getDismissedNotifs(wallet.address)
+                                                            notifications.forEach(n => dismissed.add(n.id))
+                                                            saveDismissedNotifs(wallet.address, dismissed)
+                                                            setNotifications([])
+                                                        }}
+                                                        className="text-xs text-surface-500 hover:text-white font-mono"
+                                                    >
+                                                        CLEAR_ALL
+                                                    </button>
+                                                )}
+                                                <button onClick={() => setShowNotifications(false)} className="text-surface-500 hover:text-white">
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
                                         {notifications.length === 0 ? (
                                             <p className="text-xs text-surface-500 font-mono text-center py-4">NO_NEW_NOTIFICATIONS</p>
@@ -929,30 +966,46 @@ export function Dashboard() {
                                                 {notifications.map(n => (
                                                     <div
                                                         key={n.id}
-                                                        onClick={() => {
-                                                            if (n.marketId) {
-                                                                const m = markets.find(mk => mk.id === n.marketId)
-                                                                if (m) handleMarketClick(m)
-                                                            }
-                                                            setShowNotifications(false)
-                                                        }}
                                                         className={cn(
-                                                            'p-2 rounded-lg cursor-pointer transition-colors text-xs font-mono',
+                                                            'p-2 rounded-lg flex items-start gap-2 transition-colors text-xs font-mono',
                                                             n.type === 'won' ? 'bg-yes-500/10 hover:bg-yes-500/20' :
                                                             n.type === 'lost' ? 'bg-no-500/10 hover:bg-no-500/20' :
                                                             n.type === 'expiring' ? 'bg-yellow-500/10 hover:bg-yellow-500/20' :
                                                             'bg-surface-800/30 hover:bg-surface-800/50'
                                                         )}
                                                     >
-                                                        <span className={cn(
-                                                            n.type === 'won' ? 'text-yes-400' :
-                                                            n.type === 'lost' ? 'text-no-400' :
-                                                            n.type === 'expiring' ? 'text-yellow-400' :
-                                                            'text-surface-300'
-                                                        )}>
+                                                        <span
+                                                            className={cn(
+                                                                'flex-1 cursor-pointer',
+                                                                n.type === 'won' ? 'text-yes-400' :
+                                                                n.type === 'lost' ? 'text-no-400' :
+                                                                n.type === 'expiring' ? 'text-yellow-400' :
+                                                                'text-surface-300'
+                                                            )}
+                                                            onClick={() => {
+                                                                if (n.marketId) {
+                                                                    const m = markets.find(mk => mk.id === n.marketId)
+                                                                    if (m) handleMarketClick(m)
+                                                                }
+                                                                setShowNotifications(false)
+                                                            }}
+                                                        >
                                                             {n.type === 'won' ? '🏆 ' : n.type === 'lost' ? '❌ ' : n.type === 'expiring' ? '⏰ ' : '📊 '}
                                                             {n.message}
                                                         </span>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation()
+                                                                if (!wallet.address) return
+                                                                const dismissed = getDismissedNotifs(wallet.address)
+                                                                dismissed.add(n.id)
+                                                                saveDismissedNotifs(wallet.address, dismissed)
+                                                                setNotifications(prev => prev.filter(x => x.id !== n.id))
+                                                            }}
+                                                            className="text-surface-600 hover:text-surface-300 mt-0.5 flex-shrink-0"
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </button>
                                                     </div>
                                                 ))}
                                             </div>

@@ -269,6 +269,21 @@ export async function removeUserBet(betId: string, address: string): Promise<voi
   }
 }
 
+export async function fetchBetCountByMarket(marketId: string): Promise<number> {
+  if (!supabase) return 0
+  try {
+    const { count, error } = await supabase
+      .from('user_bets')
+      .select('*', { count: 'exact', head: true })
+      .eq('market_id', marketId)
+    if (error) { devWarn('[Supabase] fetchBetCountByMarket error:', error.message); return 0 }
+    return count ?? 0
+  } catch (e) {
+    devWarn('[Supabase] fetchBetCountByMarket exception:', e)
+    return 0
+  }
+}
+
 export async function fetchCommitments(address: string, encryptionKey: CryptoKey | null = null): Promise<CommitmentRecord[]> {
   if (!supabase) return []
   try {

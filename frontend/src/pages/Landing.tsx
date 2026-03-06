@@ -289,8 +289,8 @@ export function Landing() {
                 transition={{ delay: 1.8 }}
                 className="mt-4 grid grid-cols-3 gap-3"
               >
-                <StatCard value="$2.4M+" label="Volume" icon={<Zap className="w-4 h-4" />} />
-                <StatCard value="1,234" label="Markets" icon={<Eye className="w-4 h-4" />} />
+                <StatCard value="ZK" label="Powered" icon={<Zap className="w-4 h-4" />} />
+                <StatCard value="Live" label="Testnet" icon={<Eye className="w-4 h-4" />} />
                 <StatCard value="100%" label="Private" icon={<Lock className="w-4 h-4" />} />
               </motion.div>
             </motion.div>

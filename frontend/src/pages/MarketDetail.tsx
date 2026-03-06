@@ -65,6 +65,8 @@ import { DisputePanel } from '@/components/DisputePanel'
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
 import { cn, formatCredits, getTokenSymbol, sanitizeUrl, safeHostname, isValidAleoAddress } from '@/lib/utils'
+import { useLiveCountdown } from '@/hooks/useGlobalTicker'
+import { fetchBetCountByMarket } from '@/lib/supabase'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { devWarn } from '../lib/logger'
@@ -179,6 +181,9 @@ export function MarketDetail() {
   const [fees, setFees] = useState<MarketFeesData | null>(null)
   const [, setDispute] = useState<DisputeDataResult | null>(null)
 
+  // Bet count from Supabase
+  const [betCount, setBetCount] = useState(0)
+
   // Active tab for extra panels
   const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees' | 'resolve'>('trade')
 
@@ -221,6 +226,12 @@ export function MarketDetail() {
       setMarket(found)
     }
   }, [marketId, markets])
+
+  // Fetch bet count from Supabase
+  useEffect(() => {
+    if (!market?.id) return
+    fetchBetCountByMarket(market.id).then(setBetCount)
+  }, [market?.id])
 
   // Fetch additional data (resolution, fees, dispute) when market loads
   useEffect(() => {
@@ -803,8 +814,8 @@ export function MarketDetail() {
                           setTimeout(() => setLinkCopied(false), 2000)
                         }
                       }}
-                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
-                      title={linkCopied ? 'Link copied!' : 'Share'}
+                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
+                      aria-label={linkCopied ? 'Link copied' : 'Share market'}
                     >
                       {linkCopied
                         ? <Check className="w-4 h-4 text-yes-400" />
@@ -818,8 +829,8 @@ export function MarketDetail() {
                         localStorage.setItem('veiled_bookmarks', JSON.stringify(updated))
                         setIsBookmarked(!isBookmarked)
                       }}
-                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
-                      title={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
+                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
+                      aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark market'}
                     >
                       {isBookmarked
                         ? <BookmarkCheck className="w-4 h-4 text-yellow-400" />
@@ -922,7 +933,7 @@ export function MarketDetail() {
                   reserves={[market.yesReserve, market.noReserve, market.reserve3 || 0n, market.reserve4 || 0n].slice(0, numOutcomes)}
                   prices={prices}
                   totalVolume={market.totalVolume}
-                  totalBets={market.totalBets}
+                  totalBets={betCount}
                   tokenSymbol={tokenSymbol}
                   className="glass-card p-6"
                 />
@@ -1811,34 +1822,4 @@ export function MarketDetail() {
       )}
     </div>
   )
-}
-
-/** Live countdown hook — updates every second when deadlineTimestamp is available */
-function useLiveCountdown(deadlineTimestamp?: number, fallbackTimeRemaining?: string): string {
-  const [now, setNow] = useState(Date.now())
-
-  useEffect(() => {
-    if (!deadlineTimestamp || deadlineTimestamp <= Date.now()) return
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [deadlineTimestamp])
-
-  if (!deadlineTimestamp || deadlineTimestamp <= 0) {
-    if (fallbackTimeRemaining) return fallbackTimeRemaining
-    return 'Ended'
-  }
-
-  const diffMs = deadlineTimestamp - now
-  if (diffMs <= 0) return 'Ended'
-
-  const totalSeconds = Math.floor(diffMs / 1000)
-  const days = Math.floor(totalSeconds / 86400)
-  const hours = Math.floor((totalSeconds % 86400) / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
-  if (minutes > 0) return `${minutes}m ${seconds}s`
-  return `${seconds}s`
 }

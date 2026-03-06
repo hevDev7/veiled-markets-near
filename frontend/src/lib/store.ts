@@ -1969,10 +1969,17 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
             }
           } catch { /* keep as pending */ }
         } else {
-          // Shield wallet or other non-at1 IDs — auto-promote
-          // Shield transactions land on-chain even if ID format is shield_xxx
-          devWarn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... (non-at1, ${Math.round((Date.now() - bet.placedAt) / 1000)}s old) → auto-promoting`)
-          promoted.push(bet.id)
+          // Shield wallet or other non-at1 IDs — do NOT auto-promote blindly.
+          // Shield can reject transactions silently. Only promote after 10 minutes
+          // to give the user time to notice and remove manually.
+          const SHIELD_PROMOTE_THRESHOLD = 10 * 60 * 1000 // 10 minutes
+          const age = Date.now() - bet.placedAt
+          if (age > SHIELD_PROMOTE_THRESHOLD) {
+            devWarn(`[Bets] Stale shield bet ${bet.id.slice(0, 20)}... (${Math.round(age / 1000)}s old) → auto-promoting (>10min)`)
+            promoted.push(bet.id)
+          } else {
+            devWarn(`[Bets] Shield bet ${bet.id.slice(0, 20)}... is ${Math.round(age / 1000)}s old — keeping as pending (wait 10min before auto-promote)`)
+          }
         }
       }
 

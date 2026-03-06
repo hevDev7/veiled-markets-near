@@ -3,7 +3,7 @@ import { ShieldAlert, Clock, AlertTriangle, Loader2, Check } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
-import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
+import { cn, formatCredits } from '@/lib/utils'
 import {
   buildDisputeResolutionInputs,
   type MarketResolutionData,
@@ -31,8 +31,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
   const [currentBlock, setCurrentBlock] = useState<bigint>(0n)
   const [timeRemaining, setTimeRemaining] = useState<string>('')
 
-  const tokenSymbol = getTokenSymbol(market.tokenType)
-  const numOutcomes = 2 // Default binary; extend as needed
+  const numOutcomes = market.numOutcomes || 2
 
   // Fetch current block height for countdown
   useEffect(() => {
@@ -96,11 +95,9 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
     return outcomes
   }, [numOutcomes, resolution.winning_outcome])
 
-  const outcomeLabels: Record<number, string> = {
-    1: 'Yes (Outcome 1)',
-    2: 'No (Outcome 2)',
-    3: 'Outcome 3',
-    4: 'Outcome 4',
+  const outcomeLabels: Record<number, string> = {}
+  for (let i = 1; i <= numOutcomes; i++) {
+    outcomeLabels[i] = market.outcomeLabels?.[i - 1] || `Outcome ${i}`
   }
 
   const handleDispute = async () => {
@@ -110,14 +107,12 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
     setError(null)
 
     try {
-      // Check minimum bond balance
-      const balance = market.tokenType === 'USDCX'
-        ? wallet.balance.usdcxPublic
-        : wallet.balance.public
+      // Dispute bond is always in ALEO regardless of market token type
+      const aleoBalance = wallet.balance.public
 
-      if (balance < MIN_DISPUTE_BOND + 700_000n) {
+      if (aleoBalance < MIN_DISPUTE_BOND + 700_000n) {
         throw new Error(
-          `Insufficient balance. You need at least ${formatCredits(MIN_DISPUTE_BOND)} ${tokenSymbol} ` +
+          `Insufficient ALEO balance. You need at least ${formatCredits(MIN_DISPUTE_BOND)} ALEO ` +
           'as a dispute bond plus gas fees.'
         )
       }
@@ -223,7 +218,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
             <h4 className="text-lg font-semibold text-white mb-2">Dispute Filed</h4>
             <p className="text-sm text-surface-400 mb-4">
               Your dispute has been submitted to the network. The bond of{' '}
-              {formatCredits(MIN_DISPUTE_BOND)} {tokenSymbol} has been locked.
+              {formatCredits(MIN_DISPUTE_BOND)} ALEO has been locked.
             </p>
             <TransactionLink
               transactionId={transactionId}
@@ -274,7 +269,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                   <div className="flex justify-between items-center">
                     <span className="text-surface-400 text-sm">Dispute Bond Required</span>
                     <span className="text-white font-semibold">
-                      {formatCredits(MIN_DISPUTE_BOND)} {tokenSymbol}
+                      {formatCredits(MIN_DISPUTE_BOND)} ALEO
                     </span>
                   </div>
                   <p className="text-xs text-surface-500 mt-2">
@@ -290,7 +285,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                     <p className="text-sm font-medium text-yellow-300">Important</p>
                     <p className="text-xs text-surface-400 mt-1">
                       Filing a dispute triggers a review process. Your{' '}
-                      {formatCredits(MIN_DISPUTE_BOND)} {tokenSymbol} bond will be locked.
+                      {formatCredits(MIN_DISPUTE_BOND)} ALEO bond will be locked.
                       Only file a dispute if you believe the resolution is incorrect.
                     </p>
                   </div>
@@ -321,7 +316,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                   ) : (
                     <>
                       <ShieldAlert className="w-5 h-5" />
-                      <span>File Dispute ({formatCredits(MIN_DISPUTE_BOND)} {tokenSymbol} bond)</span>
+                      <span>File Dispute ({formatCredits(MIN_DISPUTE_BOND)} ALEO bond)</span>
                     </>
                   )}
                 </button>

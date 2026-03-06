@@ -116,7 +116,7 @@ export function OddsChart({
         {numOutcomes <= 3 && (
           <div className="text-center p-3 rounded-lg bg-surface-800/30">
             <p className="text-xs text-surface-500 mb-1">Total Bets</p>
-            <p className="text-lg font-bold text-surface-300">{totalBets}</p>
+            <p className="text-lg font-bold text-surface-300">{totalBets > 0 ? totalBets : '—'}</p>
           </div>
         )}
       </div>

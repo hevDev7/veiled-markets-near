@@ -72,7 +72,7 @@ export function History() {
     <div className="min-h-screen bg-surface-950 flex flex-col">
       <DashboardHeader />
 
-      <main className="flex-1 pt-20">
+      <main className="flex-1 pt-20 pb-20 md:pb-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Page Header */}
           <motion.div

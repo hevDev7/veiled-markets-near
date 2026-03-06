@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { Clock, Users, TrendingUp, Shield, Zap, ExternalLink } from 'lucide-react'
-import { useState, useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
+import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji } from '@/lib/utils'
 import { config } from '@/lib/config'
@@ -248,33 +249,4 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
   )
 }
 
-/** Live countdown hook — updates every second when deadlineTimestamp is available */
-function useLiveCountdown(deadlineTimestamp?: number, fallbackTimeRemaining?: string): string {
-  const [now, setNow] = useState(Date.now())
-
-  useEffect(() => {
-    if (!deadlineTimestamp || deadlineTimestamp <= Date.now()) return
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [deadlineTimestamp])
-
-  if (!deadlineTimestamp || deadlineTimestamp <= 0) {
-    if (fallbackTimeRemaining) return fallbackTimeRemaining
-    return 'Ended'
-  }
-
-  const diffMs = deadlineTimestamp - now
-  if (diffMs <= 0) return 'Ended'
-
-  const totalSeconds = Math.floor(diffMs / 1000)
-  const days = Math.floor(totalSeconds / 86400)
-  const hours = Math.floor((totalSeconds % 86400) / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
-  if (minutes > 0) return `${minutes}m ${seconds}s`
-  return `${seconds}s`
-}
 
