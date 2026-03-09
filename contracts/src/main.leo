@@ -12,6 +12,10 @@
 // - FIX: execute_proposal/exec_proposal_usdcx validate token_type + cleanup approvals
 // - FIX: cancel_market excludes STATUS_PENDING_RESOLUTION from emergency cancel
 //
+// v19 fixes from v18:
+// - FIX: claim_dispute_bond now allows claim on CANCELLED markets (bond recovery)
+// - FIX: sell FPMM underflow guard: assert(r_k >= p) before subtraction for r1/r2
+//
 // 30 transitions
 // ============================================================================
 
@@ -581,25 +585,30 @@ program veiled_markets_v18.aleo {
                          (outcome == 3u8 ? r3 : r4));
 
         // Step division: r_i_new = r_i * prod(r_k / (r_k - p)) for active k != i
-        // Safe subtraction: sub=0 when not applied (avoids ternary underflow)
+        // v19 fix: Guard all reserves against underflow before subtraction.
+        // Previously only r3/r4 had safe guards; r1/r2 would panic on p > r_k.
         let sub1: u128 = outcome != 1u8 ? p : 0u128;
+        assert(r1 >= sub1);  // v19: prevent underflow
         let den1: u128 = r1 - sub1;
         let step0: u128 = r_i;
         let step1: u128 = outcome != 1u8 ? (step0 * r1) / den1 : step0;
 
         let sub2: u128 = outcome != 2u8 ? p : 0u128;
+        assert(r2 >= sub2);  // v19: prevent underflow
         let den2: u128 = r2 - sub2;
         let step2: u128 = outcome != 2u8 ? (step1 * r2) / den2 : step1;
 
         // For r3/r4: safe denominator when inactive (r=0, sub=0 -> den=0)
         let apply3: bool = outcome != 3u8 && n >= 3u8;
         let sub3: u128 = apply3 ? p : 0u128;
+        assert(r3 >= sub3);  // v19: prevent underflow
         let den3_raw: u128 = r3 - sub3;
         let safe_den3: u128 = den3_raw == 0u128 ? 1u128 : den3_raw;
         let step3: u128 = apply3 ? (step2 * r3) / safe_den3 : step2;
 
         let apply4: bool = outcome != 4u8 && n >= 4u8;
         let sub4: u128 = apply4 ? p : 0u128;
+        assert(r4 >= sub4);  // v19: prevent underflow
         let den4_raw: u128 = r4 - sub4;
         let safe_den4: u128 = den4_raw == 0u128 ? 1u128 : den4_raw;
         let step4: u128 = apply4 ? (step3 * r4) / safe_den4 : step3;
@@ -1053,23 +1062,28 @@ program veiled_markets_v18.aleo {
                          (outcome == 2u8 ? r2 :
                          (outcome == 3u8 ? r3 : r4));
 
+        // v19 fix: Guard all reserves against underflow before subtraction.
         let sub1: u128 = outcome != 1u8 ? p : 0u128;
+        assert(r1 >= sub1);  // v19: prevent underflow
         let den1: u128 = r1 - sub1;
         let step0: u128 = r_i;
         let step1: u128 = outcome != 1u8 ? (step0 * r1) / den1 : step0;
 
         let sub2: u128 = outcome != 2u8 ? p : 0u128;
+        assert(r2 >= sub2);  // v19: prevent underflow
         let den2: u128 = r2 - sub2;
         let step2: u128 = outcome != 2u8 ? (step1 * r2) / den2 : step1;
 
         let apply3: bool = outcome != 3u8 && n >= 3u8;
         let sub3: u128 = apply3 ? p : 0u128;
+        assert(r3 >= sub3);  // v19: prevent underflow
         let den3_raw: u128 = r3 - sub3;
         let safe_den3: u128 = den3_raw == 0u128 ? 1u128 : den3_raw;
         let step3: u128 = apply3 ? (step2 * r3) / safe_den3 : step2;
 
         let apply4: bool = outcome != 4u8 && n >= 4u8;
         let sub4: u128 = apply4 ? p : 0u128;
+        assert(r4 >= sub4);  // v19: prevent underflow
         let den4_raw: u128 = r4 - sub4;
         let safe_den4: u128 = den4_raw == 0u128 ? 1u128 : den4_raw;
         let step4: u128 = apply4 ? (step3 * r4) / safe_den4 : step3;
@@ -1391,23 +1405,28 @@ program veiled_markets_v18.aleo {
                          (outcome == 2u8 ? r2 :
                          (outcome == 3u8 ? r3 : r4));
 
+        // v19 fix: Guard all reserves against underflow before subtraction.
         let sub1: u128 = outcome != 1u8 ? p : 0u128;
+        assert(r1 >= sub1);  // v19: prevent underflow
         let den1: u128 = r1 - sub1;
         let step0: u128 = r_i;
         let step1: u128 = outcome != 1u8 ? (step0 * r1) / den1 : step0;
 
         let sub2: u128 = outcome != 2u8 ? p : 0u128;
+        assert(r2 >= sub2);  // v19: prevent underflow
         let den2: u128 = r2 - sub2;
         let step2: u128 = outcome != 2u8 ? (step1 * r2) / den2 : step1;
 
         let apply3: bool = outcome != 3u8 && n >= 3u8;
         let sub3: u128 = apply3 ? p : 0u128;
+        assert(r3 >= sub3);  // v19: prevent underflow
         let den3_raw: u128 = r3 - sub3;
         let safe_den3: u128 = den3_raw == 0u128 ? 1u128 : den3_raw;
         let step3: u128 = apply3 ? (step2 * r3) / safe_den3 : step2;
 
         let apply4: bool = outcome != 4u8 && n >= 4u8;
         let sub4: u128 = apply4 ? p : 0u128;
+        assert(r4 >= sub4);  // v19: prevent underflow
         let den4_raw: u128 = r4 - sub4;
         let safe_den4: u128 = den4_raw == 0u128 ? 1u128 : den4_raw;
         let step4: u128 = apply4 ? (step3 * r4) / safe_den4 : step3;
@@ -1688,9 +1707,14 @@ program veiled_markets_v18.aleo {
         let pool: AMMPool = amm_pools.get(market_id);
         assert(!is_creator_cancel || pool.total_volume == 0u128);
 
-        // Clean up stale resolution/dispute data (safe no-op if not present)
+        // Clean up stale resolution data (safe no-op if not present).
         market_resolutions.remove(market_id);
-        market_disputes.remove(market_id);
+        // v19 fix: Do NOT remove market_disputes on cancel.
+        // If a dispute was filed, the disputer's bond is held in program_credits.
+        // Removing dispute data here is fine (claim_dispute_bond uses the
+        // unforgeable DisputeBondReceipt record, not the mapping), but we keep
+        // it for transparency. The bond can be claimed via claim_dispute_bond
+        // which now accepts CANCELLED status.
 
         markets.set(market_id, Market {
             id: market.id,
@@ -1828,15 +1852,22 @@ program veiled_markets_v18.aleo {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
-        // v15 fix: Only allow bond claim after market is fully resolved (finalized).
-        // Previously also allowed STATUS_PENDING_RESOLUTION which was premature.
-        assert(market.status == MARKET_STATUS_RESOLVED);
+        // v19 fix: Allow bond claim on RESOLVED (disputer won) or CANCELLED (bond recovery).
+        // Previously only RESOLVED was allowed — if a market was cancelled after a dispute
+        // was filed, the disputer's bond was permanently stuck.
+        let is_resolved: bool = market.status == MARKET_STATUS_RESOLVED;
+        let is_cancelled: bool = market.status == MARKET_STATUS_CANCELLED;
+        assert(is_resolved || is_cancelled);
 
+        // If market is resolved: disputer only gets bond back if their proposed outcome won.
+        // If market is cancelled: disputer always gets bond back (unconditional recovery).
         // v15 fix: Use proposed_outcome from DisputeBondReceipt (unforgeable record)
         // instead of reading from market_disputes mapping, which may have been
         // cleared during re-resolution.
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(resolution.winning_outcome == proposed_outcome);
+        let resolution_exists: bool = market_resolutions.contains(market_id);
+        let outcome_matches: bool = resolution_exists ?
+            market_resolutions.get(market_id).winning_outcome == proposed_outcome : false;
+        assert(is_cancelled || outcome_matches);
 
         let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
         assert(!already_claimed);

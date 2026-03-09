@@ -108,7 +108,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const amountMicro = BigInt(Math.floor(parseFloat(amount) * 1_000_000))
       const minSharesOut = tradePreview?.minShares || 0n
 
-      // Pre-validate market status AND deadline
+      // Pre-validate market status, deadline, AND token type
       try {
         const [onChainMarket, currentBlock] = await Promise.all([
           getMarket(market.id),
@@ -129,9 +129,18 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
             `Betting deadline has passed (block ${onChainMarket.deadline.toString()} < current ${currentBlock.toString()}). Trading is no longer available.`
           )
         }
+        // Validate token type matches on-chain market (prevents transition/finalize mismatch)
+        if (onChainMarket) {
+          const onChainIsUsdcx = onChainMarket.token_type === 2
+          if (isUsdcx !== onChainIsUsdcx) {
+            throw new Error(
+              `Token type mismatch: UI shows ${isUsdcx ? 'USDCX' : 'ALEO'} but on-chain market uses ${onChainIsUsdcx ? 'USDCX' : 'ALEO'}. Please refresh the page.`
+            )
+          }
+        }
       } catch (validationErr) {
         if (validationErr instanceof Error &&
-            (validationErr.message.includes('Market is') || validationErr.message.includes('deadline has passed'))) {
+            (validationErr.message.includes('Market is') || validationErr.message.includes('deadline has passed') || validationErr.message.includes('Token type mismatch'))) {
           throw validationErr
         }
         devWarn('Pre-validation skipped (network error):', validationErr)

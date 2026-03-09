@@ -58,12 +58,14 @@ export function MyBets() {
   const userBetIds = new Set(userBets.map(b => b.id))
   const uniquePending = pendingBets.filter(b => !userBetIds.has(b.id))
   const allBets = [...uniquePending, ...userBets]
-  const acceptedBets = [...uniquePending, ...userBets.filter(b => b.status === 'active')]
+  // Sell bets with status 'active' are completed trades — show in settled, not accepted
+  const acceptedBets = [...uniquePending, ...userBets.filter(b => b.status === 'active' && b.type !== 'sell')]
   const unredeemedBets = userBets.filter(b =>
-    (b.status === 'won' || b.status === 'refunded') && !b.claimed
+    (b.status === 'won' || b.status === 'refunded') && !b.claimed && b.type !== 'sell'
   )
   const settledBets = userBets.filter(b =>
     b.status === 'won' || b.status === 'lost' || b.status === 'refunded'
+    || (b.type === 'sell' && b.status === 'active')
   )
 
   // Display bets based on active filter
@@ -597,14 +599,20 @@ function BetCard({
                 Pending
               </span>
             )}
-            {isWon && (
-              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-yes-500/15 text-yes-400">Won</span>
-            )}
-            {isLost && (
-              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-no-500/15 text-no-400">Lost</span>
-            )}
-            {isRefunded && (
-              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-500/15 text-orange-400">Refund</span>
+            {isSell && !isPending ? (
+              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-surface-600/30 text-surface-300">Completed</span>
+            ) : (
+              <>
+                {isWon && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-yes-500/15 text-yes-400">Won</span>
+                )}
+                {isLost && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-no-500/15 text-no-400">Lost</span>
+                )}
+                {isRefunded && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-orange-500/15 text-orange-400">Refund</span>
+                )}
+              </>
             )}
             {bet.claimed && (
               <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-surface-700 text-surface-400">Claimed</span>
@@ -645,7 +653,7 @@ function BetCard({
               {(isWon || isLost || isRefunded) && (
                 <div className="text-right">
                   <p className="text-xs text-surface-500">
-                    {isWon ? 'Payout' : isRefunded ? 'Refund' : 'P&L'}
+                    {isWon ? 'Payout' : isRefunded ? 'Refund' : 'Result'}
                   </p>
                   <p className={cn(
                     "text-sm font-bold",
@@ -659,6 +667,11 @@ function BetCard({
                         ? `${formatCredits(bet.amount)} ${tokenSymbol}`
                         : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
+                  {isWon && bet.sharesReceived != null && bet.sharesReceived > bet.amount ? (
+                    <p className="text-[10px] text-yes-400/60">
+                      profit +{formatCredits(bet.sharesReceived - bet.amount)} {tokenSymbol}
+                    </p>
+                  ) : null}
                 </div>
               )}
 

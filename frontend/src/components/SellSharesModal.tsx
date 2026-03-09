@@ -4,7 +4,8 @@ import { useState, useMemo } from 'react'
 import { type Market, CONTRACT_INFO } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildSellSharesInputs } from '@/lib/aleo-client'
+import { buildSellSharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
+import { devWarn } from '@/lib/logger'
 import {
   calculateSellSharesNeeded,
   calculateSellNetTokens,
@@ -102,7 +103,42 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
         )
       }
 
+      // Pre-validate market status and token type before submitting
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      try {
+        const [onChainMarket, currentBlock] = await Promise.all([
+          getMarket(market.id),
+          getCurrentBlockHeight(),
+        ])
+        if (onChainMarket) {
+          if (onChainMarket.status !== MARKET_STATUS.ACTIVE) {
+            const statusNames: Record<number, string> = {
+              2: 'CLOSED', 3: 'RESOLVED', 4: 'CANCELLED', 5: 'PENDING_RESOLUTION'
+            }
+            throw new Error(
+              `Market is ${statusNames[onChainMarket.status] || 'not active'}. Trading is no longer available.`
+            )
+          }
+          if (currentBlock > onChainMarket.deadline) {
+            throw new Error('Betting deadline has passed. Trading is no longer available.')
+          }
+          // Validate token type matches on-chain (prevents transition/finalize mismatch)
+          const onChainIsUsdcx = onChainMarket.token_type === 2
+          const uiIsUsdcx = tokenType === 'USDCX'
+          if (uiIsUsdcx !== onChainIsUsdcx) {
+            throw new Error(
+              `Token type mismatch: UI shows ${tokenType} but on-chain market uses ${onChainIsUsdcx ? 'USDCX' : 'ALEO'}. Please refresh the page.`
+            )
+          }
+        }
+      } catch (validationErr) {
+        if (validationErr instanceof Error &&
+            (validationErr.message.includes('Market is') || validationErr.message.includes('deadline has passed') || validationErr.message.includes('Token type mismatch'))) {
+          throw validationErr
+        }
+        devWarn('Pre-validation skipped (network error):', validationErr)
+      }
+
       const { functionName, inputs } = buildSellSharesInputs(
         shareRecord,
         tokensDesiredMicro,

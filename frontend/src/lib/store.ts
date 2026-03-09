@@ -2014,8 +2014,9 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     }
 
     // --- Sync active bet statuses with market state ---
+    // Sell bets are already settled (shares burned, tokens received) — skip them.
     const bets = get().userBets
-    const activeBets = bets.filter(b => b.status === 'active')
+    const activeBets = bets.filter(b => b.status === 'active' && b.type !== 'sell')
     if (activeBets.length === 0) return
 
     // Get unique market IDs (only real on-chain markets ending with 'field')
