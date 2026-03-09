@@ -319,72 +319,77 @@ function HistoryCard({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
+      transition={{ delay: index * 0.03 }}
       className={cn(
-        "glass-card p-6 transition-all duration-200",
+        "glass-card p-5 transition-all duration-200 hover:border-surface-600/50",
         isWon && "border-yes-500/20",
         isLost && "border-no-500/20",
         isRefunded && "border-accent-500/20"
       )}
     >
-      <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         {/* Status Badge */}
         <div className={cn(
-          "w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0",
+          "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
           `bg-${statusColor}-500/10`
         )}>
-          <StatusIcon className={cn("w-6 h-6", `text-${statusColor}-400`)} />
+          <StatusIcon className={cn("w-5 h-5", `text-${statusColor}-400`)} />
         </div>
 
         {/* Market Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-0.5">
             <span className={cn(
-              "px-2 py-0.5 text-xs font-medium rounded-full",
-              isWon && "bg-yes-500/20 text-yes-400",
-              isLost && "bg-no-500/20 text-no-400",
-              isRefunded && "bg-accent-500/20 text-accent-400"
+              "px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase",
+              isWon && "bg-yes-500/15 text-yes-400",
+              isLost && "bg-no-500/15 text-no-400",
+              isRefunded && "bg-accent-500/15 text-accent-400"
             )}>
               {bet.status.toUpperCase()}
             </span>
             <span className={cn(
-              "px-2 py-0.5 text-xs font-medium rounded-full",
+              "px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase",
               badgeColors.bg, badgeColors.text
             )}>
               {outcomeLabel}
             </span>
           </div>
-          <h3 className="font-medium text-white truncate">
+          <h3 className="text-sm font-medium text-white truncate">
             {market?.question || bet.marketQuestion || `Market ${bet.marketId}`}
           </h3>
-          <p className="text-sm text-surface-400 mt-1">
+          <p className="text-xs text-surface-500 mt-0.5">
             Placed {new Date(bet.placedAt).toLocaleDateString()}
           </p>
         </div>
 
         {/* Bet Details */}
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 sm:gap-4">
           <div className="text-right">
-            <p className="text-sm text-surface-400">Bet Amount</p>
-            <p className="text-lg font-bold text-white">
+            <p className="text-xs text-surface-500">Bet Amount</p>
+            <p className="text-sm font-bold text-white">
               {formatCredits(bet.amount)} ALEO
             </p>
           </div>
 
           <div className="text-right">
-            <p className="text-sm text-surface-400">
+            <p className="text-xs text-surface-500">
               {isWon ? 'Payout' : isRefunded ? 'Refunded' : 'Result'}
             </p>
             <p className={cn(
-              "text-lg font-bold",
+              "text-sm font-bold",
               isWon && "text-yes-400",
               isLost && "text-no-400",
               isRefunded && "text-accent-400"
             )}>
               {isWon ? `+${formatCredits(payout)}` : isLost ? `-${formatCredits(bet.amount)}` : formatCredits(payout)} ALEO
             </p>
+            {isWon && bet.sharesReceived != null && bet.sharesReceived > bet.amount ? (
+              <p className="text-[10px] text-yes-400/60">
+                profit +{formatCredits(bet.sharesReceived - bet.amount)} ALEO
+              </p>
+            ) : null}
           </div>
 
           {bet.id.startsWith('at1') && (

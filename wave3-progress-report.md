@@ -81,7 +81,7 @@
 
 ---
 
-## 3. UI/UX Audit — 14 Findings Fixed
+## 3. UI/UX Audit — 17 Findings Fixed
 
 ### Round 1 (8 findings)
 | # | Finding | Fix |
@@ -102,12 +102,15 @@
 | 10 | Dismissed notifications global (not per-wallet) | Scoped localStorage key with wallet address suffix |
 | 11 | localStorage unguarded in render path | Wrapped all localStorage access in try/catch for SSR/sandboxed environments |
 
-### Round 3 (3 findings)
+### Round 3 (6 findings)
 | # | Finding | Fix |
 |---|---------|-----|
 | 12 | `wallet.address` nullable but used as string | Added `if (!wallet.address) return` null guards in handlers |
 | 13 | `'claimed'` not in Bet status union type | Removed invalid status check from filter |
 | 14 | Unused imports causing TypeScript warnings | Removed `type Bet`, `getPriceHistory`, `PriceSnapshot` unused imports |
+| 15 | Sell bets showing "Won"/"Lost" in Settled tab | "Completed" badge for sell bets, excluded from `syncBetStatuses` |
+| 16 | History page outcome shows "OPTION D" not real label | Added `outcomeLabels` resolution matching Dashboard/MyBets pattern |
+| 17 | History page text oversized vs MyBets | Reduced all text/padding/icon sizes to match MyBets card styling |
 
 ---
 
@@ -128,9 +131,17 @@
 - **Problem:** Dashboard YOUR_POSITIONS panel included sell-type bets alongside buy positions
 - **Fix:** Added `b.type !== 'sell'` filter to both `pendingBets` and `userBets` in the positions list
 
-### 4.4 "OUTCOME_4" Displayed Instead of Real Label (Dashboard)
-- **Problem:** Dashboard displayed raw `bet.outcome.toUpperCase()` which for outcomes 3-4 produces `"OUTCOME_3"` / `"OUTCOME_4"` instead of the actual market label
-- **Fix:** Resolve label from `market.outcomeLabels[idx-1]` → fallback to default labels (`YES/NO/OPTION C/OPTION D`) → final fallback to raw outcome string
+### 4.4 "OUTCOME_4" Displayed Instead of Real Label (Dashboard, MyBets, History)
+- **Problem:** Multiple pages displayed raw `bet.outcome.toUpperCase()` which for outcomes 3-4 produces `"OUTCOME_3"` / `"OUTCOME_4"` instead of the actual market label
+- **Fix:** Consistent label resolution across all 3 pages: `market.outcomeLabels[idx-1]` → fallback to default labels (`YES/NO/OPTION C/OPTION D`) → final fallback to raw outcome string
+
+### 4.5 Sell Bets Incorrectly Showing "Won"/"Lost" in My Bets
+- **Problem:** Sell bets (completed share sales) appeared with "Won"/"Lost" badges in the Settled tab, and `syncBetStatuses` applied win/loss logic to sell bets
+- **Fix:** Added `b.type !== 'sell'` filter to `syncBetStatuses`. Sell bets in Settled tab now show "Completed" badge instead of Won/Lost. Sell bets excluded from Accepted tab (they belong in Settled only).
+
+### 4.6 History Page Text Sizing Mismatch
+- **Problem:** History page cards had significantly larger text than My Bets page cards
+- **Fix:** Reduced all sizing to match MyBets: `p-6→p-5`, `w-12→w-10`, icons `w-6→w-5`, title `text-lg→text-sm`, amounts `text-sm→text-xs`, labels `text-xs→text-[10px]`. Added profit line for winning bets for consistency.
 
 ---
 
@@ -183,7 +194,8 @@ CREATE INDEX idx_price_snapshots_time ON price_snapshots (market_id, timestamp D
 ### Major Modifications
 - `frontend/src/pages/Dashboard.tsx` — Complete redesign (+723 lines)
 - `frontend/src/pages/MarketDetail.tsx` — Buy/sell flow, charts (+206 lines)
-- `frontend/src/pages/MyBets.tsx` — Multi-outcome labels, sell display
+- `frontend/src/pages/MyBets.tsx` — Multi-outcome labels, sell bet "Completed" badge, profit line
+- `frontend/src/pages/History.tsx` — Outcome label resolution, text sizing to match MyBets, profit line
 - `frontend/src/components/MarketCard.tsx` — Multi-outcome, FPMM prices
 - `frontend/src/components/MarketRow.tsx` — Multi-outcome, global ticker
 - `frontend/src/lib/store.ts` — Supabase sync fix, sell bet filtering
