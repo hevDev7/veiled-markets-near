@@ -289,7 +289,7 @@ function HistoryCard({
   index
 }: {
   bet: Bet
-  market?: { question: string }
+  market?: { question: string; outcomeLabels?: string[] }
   index: number
 }) {
   const outcomeIdx = outcomeToIndex(bet.outcome)
@@ -304,7 +304,7 @@ function HistoryCard({
     { bg: 'bg-yellow-500/10', text: 'text-yellow-300' },
   ]
   const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
-  const outcomeLabel = defaultLabels[outcomeIdx - 1] || bet.outcome.toUpperCase()
+  const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || defaultLabels[outcomeIdx - 1] || bet.outcome.toUpperCase()
   const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
 
   const StatusIcon = isWon ? Trophy : isLost ? XCircle : RefreshCcw
