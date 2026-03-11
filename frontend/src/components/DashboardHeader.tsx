@@ -10,7 +10,6 @@ import {
   TrendingUp,
   History,
   Settings,
-  Bell,
   Gamepad2,
   RefreshCw,
   Menu,
@@ -163,12 +162,6 @@ export function DashboardHeader() {
               className="md:hidden p-2 rounded-lg hover:bg-surface-800/50 text-surface-400 hover:text-white transition-colors"
             >
               {showMobileMenu ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
-
-            {/* Notifications */}
-            <button className="hidden sm:block p-2 rounded-lg hover:bg-surface-800/50 text-surface-400 hover:text-white transition-colors relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-brand-500 rounded-full" />
             </button>
 
             {/* Wallet Dropdown */}

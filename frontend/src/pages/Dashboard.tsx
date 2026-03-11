@@ -444,6 +444,30 @@ export function Dashboard() {
                             animate={{ opacity: 1, x: 0 }}
                             className="space-y-4 self-start lg:sticky lg:top-24"
                         >
+                            {/* Token Type Filter */}
+                            <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <Coins className="w-4 h-4 text-yellow-400" />
+                                    <h3 className="text-sm font-bold text-white font-mono uppercase">Token</h3>
+                                </div>
+                                <div className="flex gap-1">
+                                    {(['all', 'ALEO', 'USDCX'] as const).map((t) => (
+                                        <button
+                                            key={t}
+                                            onClick={() => setTokenFilter(t)}
+                                            className={cn(
+                                                'flex-1 px-2 py-2 rounded-lg text-xs font-mono font-medium border transition-all',
+                                                tokenFilter === t
+                                                    ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                                                    : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
+                                            )}
+                                        >
+                                            {t === 'all' ? 'ALL' : t}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             {/* Categories */}
                             <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
                                 <div className="flex items-center gap-2 mb-4">
@@ -497,30 +521,6 @@ export function Dashboard() {
                                         >
                                             <option.icon className="w-4 h-4" />
                                             <span>{option.name.toUpperCase()}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Token Type Filter */}
-                            <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <Coins className="w-4 h-4 text-yellow-400" />
-                                    <h3 className="text-sm font-bold text-white font-mono uppercase">Token</h3>
-                                </div>
-                                <div className="flex gap-1">
-                                    {(['all', 'ALEO', 'USDCX'] as const).map((t) => (
-                                        <button
-                                            key={t}
-                                            onClick={() => setTokenFilter(t)}
-                                            className={cn(
-                                                'flex-1 px-2 py-2 rounded-lg text-xs font-mono font-medium border transition-all',
-                                                tokenFilter === t
-                                                    ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                                                    : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
-                                            )}
-                                        >
-                                            {t === 'all' ? 'ALL' : t}
                                         </button>
                                     ))}
                                 </div>

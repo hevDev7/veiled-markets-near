@@ -66,10 +66,11 @@ export function OutcomeSelector({
   onSelect,
   disabled = false,
 }: OutcomeSelectorProps) {
+  const isCompact = numOutcomes >= 3
   const gridCols = numOutcomes <= 2 ? 'grid-cols-2' : numOutcomes === 3 ? 'grid-cols-3' : 'grid-cols-2'
 
   return (
-    <div className={cn('grid gap-3', gridCols)}>
+    <div className={cn('grid gap-2', gridCols)}>
       {Array.from({ length: numOutcomes }, (_, i) => {
         const outcome = i + 1
         const isSelected = selectedOutcome === outcome
@@ -84,7 +85,8 @@ export function OutcomeSelector({
             onClick={() => !disabled && onSelect(outcome)}
             disabled={disabled}
             className={cn(
-              'relative p-5 rounded-xl border-2 transition-all duration-200',
+              'relative rounded-xl border-2 transition-all duration-200 text-center',
+              isCompact ? 'p-3' : 'p-5',
               disabled && 'opacity-60 cursor-not-allowed',
               isSelected
                 ? cn(colors.borderActive, colors.bgActive, colors.glow)
@@ -92,23 +94,26 @@ export function OutcomeSelector({
             )}
           >
             {isSelected && (
-              <div className="absolute top-2 right-2">
-                <Check className={cn('w-5 h-5', colors.check)} />
+              <div className="absolute top-1.5 right-1.5">
+                <Check className={cn(isCompact ? 'w-4 h-4' : 'w-5 h-5', colors.check)} />
               </div>
             )}
 
             {/* Price / Probability */}
-            <div className={cn('text-3xl font-bold mb-1', colors.text)}>
+            <div className={cn('font-bold mb-0.5', isCompact ? 'text-xl' : 'text-3xl', colors.text)}>
               {formatPercentage(percentage)}
             </div>
 
             {/* Label */}
-            <div className="text-lg font-semibold text-white mb-2">
+            <div className={cn(
+              'font-semibold text-white mb-1 leading-tight',
+              isCompact ? 'text-xs' : 'text-lg'
+            )}>
               {label}
             </div>
 
             {/* Implied odds */}
-            <div className="text-sm text-surface-400">
+            <div className={cn('text-surface-400', isCompact ? 'text-[10px]' : 'text-sm')}>
               Price:{' '}
               <span className={cn('font-medium', colors.text)}>
                 ${price.toFixed(3)}
