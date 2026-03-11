@@ -34,8 +34,8 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 |---|---|
 | **Program** | `veiled_markets_v18.aleo` |
 | **Network** | Aleo Testnet |
-| **Transitions** | 30 |
-| **Deploy TX** | `at1xkr8v408ct8dql2d7ngqxghzx6j4lfwf8x5dturth53mc6cycuzsqd7klu` |
+| **Transitions** | 30 (29 Leo + 1 injected) |
+| **Deploy TX** | [`at1xkr8v408ct8dql2d7ngqxghzx6j4lfwf8x5dturth53mc6cycuzsqd7klu`](https://testnet.explorer.provable.com/transaction/at1xkr8v408ct8dql2d7ngqxghzx6j4lfwf8x5dturth53mc6cycuzsqd7klu) |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
 
 ## Architecture
@@ -61,19 +61,21 @@ veiled-markets/
 │   ├── src/components/ # Trading UI, wallet bridge, modals, panels
 │   ├── src/hooks/      # useAleoTransaction, useSDKTransaction
 │   ├── src/lib/        # AMM math, blockchain client, Zustand stores
-│   └── src/pages/      # Dashboard, MarketDetail, MyBets, Settings
+│   └── src/pages/      # Dashboard, MarketDetail, MyBets, History, Settings
 ├── backend/            # Blockchain indexer
 ├── sdk/                # TypeScript SDK
 └── docs/               # Architecture documentation
 ```
 
-## Key Transitions (31 total)
+## Key Transitions (30 total)
 
 **Market Lifecycle:**
 `create_market` / `create_market_usdcx` · `close_market` · `resolve_market` · `finalize_resolution` · `cancel_market`
 
 **Trading:**
-`buy_shares_private` (ALEO, private) · `buy_shares_usdcx` · `sell_shares` / `sell_shares_usdcx` · `redeem_shares` / `redeem_shares_usdcx` · `claim_refund` / `claim_refund_usdcx`
+`buy_shares_private` (ALEO, private) · `buy_shares_private_usdcx`\* · `buy_shares_usdcx` · `sell_shares` / `sell_shares_usdcx` · `redeem_shares` / `redeem_shares_usdcx` · `claim_refund` / `claim_refund_usdcx`
+
+> \*`buy_shares_private_usdcx` is written in Aleo instructions and injected post-build via `scripts/inject_private_usdcx.sh` due to Leo 3.4.0 bug ETYC0372117.
 
 **Liquidity:**
 `add_liquidity` / `add_liquidity_usdcx` · `remove_liquidity` / `remove_liq_usdcx` · `withdraw_lp_resolved` / `withdraw_lp_resolved_usdcx` · `claim_lp_refund` / `claim_lp_refund_usdcx`
@@ -111,7 +113,7 @@ cd veiled-markets-near/frontend
 npm install --legacy-peer-deps
 cp .env.example .env
 npm run dev
-# Open http://localhost:5173
+# Open http://localhost:3000
 ```
 
 **Wallet:** Install [Shield Wallet](https://shieldwallet.io/), switch to Testnet, get credits from [Aleo Faucet](https://faucet.aleo.org).
@@ -122,6 +124,7 @@ npm run dev
 VITE_NETWORK=testnet
 VITE_PROGRAM_ID=veiled_markets_v18.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
+VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 ```
 
