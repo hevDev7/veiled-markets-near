@@ -27,6 +27,7 @@ interface ClaimWinningsModalProps {
   isOpen: boolean
   onClose: () => void
   bets: Bet[]
+  market?: { outcomeLabels?: string[] }
   onClaimSuccess?: () => void
 }
 
@@ -35,6 +36,7 @@ export function ClaimWinningsModal({
   isOpen,
   onClose,
   bets,
+  market,
   onClaimSuccess
 }: ClaimWinningsModalProps) {
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
@@ -187,6 +189,12 @@ export function ClaimWinningsModal({
     ? formatCredits(bet.amount)
     : formatCredits(recordQuantity || bet.sharesReceived || bet.amount)
 
+  // Resolve outcome label from market data
+  const resolveOutcomeLabel = (outcomeNum: number): string => {
+    const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
+    return market?.outcomeLabels?.[outcomeNum - 1]?.toUpperCase() || defaultLabels[outcomeNum - 1] || `Outcome ${outcomeNum}`
+  }
+
   const hasRecord = !!getRecordPlaintext()
 
   // CLI commands as fallback
@@ -316,7 +324,7 @@ export function ClaimWinningsModal({
                                 "text-xs font-medium px-2 py-0.5 rounded-full",
                                 colors[idx - 1] || colors[0]
                               )}>
-                                {bet.outcome.toUpperCase()}
+                                {resolveOutcomeLabel(outcomeToIndex(bet.outcome))}
                               </span>
                             )
                           })()}
@@ -376,11 +384,14 @@ export function ClaimWinningsModal({
                                 <div className="flex items-center justify-between">
                                   <span className={cn(
                                     "text-xs font-medium px-2 py-0.5 rounded-full",
-                                    rec.outcome === 1
-                                      ? "bg-yes-500/20 text-yes-400"
-                                      : "bg-no-500/20 text-no-400"
+                                    [
+                                      'bg-yes-500/20 text-yes-400',
+                                      'bg-no-500/20 text-no-400',
+                                      'bg-purple-500/20 text-purple-400',
+                                      'bg-yellow-500/20 text-yellow-400',
+                                    ][rec.outcome - 1] || 'bg-yes-500/20 text-yes-400'
                                   )}>
-                                    Outcome {rec.outcome}
+                                    {resolveOutcomeLabel(rec.outcome)}
                                   </span>
                                   <span className="text-surface-300 font-medium">
                                     {formatCredits(rec.quantity)} shares

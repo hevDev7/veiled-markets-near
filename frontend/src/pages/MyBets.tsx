@@ -496,6 +496,7 @@ export function MyBets() {
         isOpen={claimModalBet !== null}
         onClose={() => setClaimModalBet(null)}
         bets={claimModalBet ? [claimModalBet] : []}
+        market={claimModalBet ? getMarketInfo(claimModalBet.marketId) : undefined}
         onClaimSuccess={() => {
           fetchUserBets()
         }}
