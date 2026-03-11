@@ -1933,10 +1933,18 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
     if (entries.length === 0) return [];
 
     const ids: string[] = [];
+    const pendingToResolve: Array<{ txId: string; questionText: string; entry: typeof entries[0] }> = [];
+
     for (const entry of entries) {
-      // Skip pending entries — they have placeholder IDs like "pending_shield_xxx"
-      // that will fail when fetched from blockchain
-      if (entry.market_id.startsWith('pending_')) continue;
+      // Pending entries have placeholder IDs like "pending_shield_xxx" or "pending_at1..."
+      // If the entry has an on-chain tx ID (at1...), queue it for background resolution
+      if (entry.market_id.startsWith('pending_')) {
+        const txId = entry.transaction_id;
+        if (txId && txId.startsWith('at1') && entry.question_text) {
+          pendingToResolve.push({ txId, questionText: entry.question_text, entry });
+        }
+        continue;
+      }
       ids.push(entry.market_id);
       // Populate question text mappings
       if (entry.question_text) {
@@ -1975,6 +1983,54 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
           }
         } catch { /* invalid JSON, skip */ }
       }
+    }
+
+    // Background: resolve pending Supabase entries that have an on-chain tx ID
+    // Non-blocking — fires and forgets, updates Supabase + KNOWN_MARKET_IDS when found
+    if (pendingToResolve.length > 0) {
+      devLog(`[Supabase] ${pendingToResolve.length} pending market(s) to resolve via TX ID`);
+      (async () => {
+        for (const { txId, questionText, entry } of pendingToResolve) {
+          try {
+            const marketId = await resolveMarketFromTransaction(txId, questionText);
+            if (marketId && !KNOWN_MARKET_IDS.includes(marketId)) {
+              devLog('[Supabase] Resolved pending market:', marketId.slice(0, 20));
+              addKnownMarketId(marketId);
+              // Populate metadata from existing entry
+              if (questionText) QUESTION_TEXT_MAP[marketId] = questionText;
+              if (entry.question_hash) QUESTION_TEXT_MAP[entry.question_hash] = questionText;
+              if (entry.outcome_labels) {
+                try {
+                  const labels = JSON.parse(entry.outcome_labels);
+                  if (Array.isArray(labels)) OUTCOME_LABELS_MAP[marketId] = labels;
+                } catch { /* invalid JSON */ }
+              }
+              // Update Supabase entry: replace pending_ with real market ID
+              const supabaseMod = await import('./supabase');
+              if (supabaseMod.supabase) {
+                const { registerMarketInRegistry } = supabaseMod;
+                await registerMarketInRegistry({
+                  market_id: marketId,
+                  question_hash: entry.question_hash,
+                  question_text: questionText,
+                  category: entry.category,
+                  creator_address: entry.creator_address,
+                  transaction_id: txId,
+                  created_at: entry.created_at,
+                  ipfs_cid: entry.ipfs_cid,
+                  outcome_labels: entry.outcome_labels,
+                }).catch(() => {});
+                try {
+                  await supabaseMod.supabase.from('market_registry')
+                    .delete().eq('market_id', entry.market_id);
+                } catch { /* ignore */ }
+              }
+            }
+          } catch (e) {
+            devWarn('[Supabase] Failed to resolve pending market:', txId.slice(0, 20), e);
+          }
+        }
+      })();
     }
 
     devLog(`[Supabase] Loaded ${ids.length} markets from registry`);

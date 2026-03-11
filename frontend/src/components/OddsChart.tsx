@@ -98,7 +98,7 @@ export function OddsChart({
       <div className={cn('grid gap-4 mt-4',
         numOutcomes === 2 ? 'grid-cols-3' :
         numOutcomes === 3 ? 'grid-cols-4' :
-        'grid-cols-2 sm:grid-cols-4'
+        'grid-cols-3 sm:grid-cols-5'
       )}>
         {Array.from({ length: numOutcomes }, (_, i) => {
           const colors = POOL_COLORS[i] || POOL_COLORS[0]
@@ -113,12 +113,10 @@ export function OddsChart({
             </div>
           )
         })}
-        {numOutcomes <= 3 && (
-          <div className="text-center p-3 rounded-lg bg-surface-800/30">
-            <p className="text-xs text-surface-500 mb-1">Total Bets</p>
-            <p className="text-lg font-bold text-surface-300">{totalBets > 0 ? totalBets : '—'}</p>
-          </div>
-        )}
+        <div className="text-center p-3 rounded-lg bg-surface-800/30">
+          <p className="text-xs text-surface-500 mb-1">Total Bets</p>
+          <p className="text-lg font-bold text-surface-300">{totalBets > 0 ? totalBets : '—'}</p>
+        </div>
       </div>
 
       {/* Legend */}
