@@ -78,7 +78,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
 
-  // v18: Use total reserves (sum of AMM reserves) for LP calculations
+  // v20: Use total reserves (sum of AMM reserves) for LP calculations
   const totalReserves = (market.yesReserve ?? 0n) + (market.noReserve ?? 0n)
     + (market.reserve3 ?? 0n) + (market.reserve4 ?? 0n)
   const totalLiquidity = market.totalLiquidity ?? totalReserves

@@ -1,6 +1,6 @@
 {
-  "program": "veiled_markets_v18.aleo",
-  "version": "0.18.0",
+  "program": "veiled_markets_v21.aleo",
+  "version": "0.21.0",
   "description": "Privacy-preserving prediction market protocol with CFMM AMM, multi-outcome markets, LP provision, and multi-sig treasury",
   "license": "MIT",
   "dependencies": [

@@ -1,7 +1,7 @@
 // ============================================================================
-// AMM Utility Functions - v18 FPMM (Fixed Product Market Maker)
+// AMM Utility Functions - v20 FPMM (Fixed Product Market Maker)
 // ============================================================================
-// Correct complete-set minting/burning formulas matching contract v18.
+// Correct complete-set minting/burning formulas matching contract v20.
 // Supports 2-4 outcome markets.
 
 const SHARE_PRICE_SCALE = 1_000_000 // $1.00 in microcredits
@@ -463,7 +463,7 @@ export function isPriceValid(price: number): boolean {
 /**
  * Calculate LP shares for adding liquidity
  * lp_shares = (amount * total_lp_shares) / total_reserves
- * v18: Uses total_reserves (sum of AMM reserves) instead of total_liquidity
+ * v20: Uses total_reserves (sum of AMM reserves) instead of total_liquidity
  */
 export function calculateLPSharesOut(
     amount: bigint,
@@ -477,7 +477,7 @@ export function calculateLPSharesOut(
 /**
  * Calculate tokens returned when removing LP shares
  * tokens_out = (shares_to_remove * total_reserves) / total_lp_shares
- * v18: Uses total_reserves (sum of AMM reserves) instead of total_liquidity
+ * v20: Uses total_reserves (sum of AMM reserves) instead of total_liquidity
  */
 export function calculateLPTokensOut(
     sharesToRemove: bigint,
