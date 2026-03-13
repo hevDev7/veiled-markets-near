@@ -8,7 +8,7 @@ import { config } from './config';
 import { fetchMarketRegistry, isSupabaseAvailable, clearAllSupabaseData } from './supabase';
 import { devLog, devWarn } from './logger'
 
-// Contract constants (matching main.leo v21)
+// Contract constants (matching main.leo v22)
 export const MARKET_STATUS = {
   ACTIVE: 1,
   CLOSED: 2,
@@ -57,7 +57,7 @@ export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
 export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
 export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
 
-// Types matching the contract structures (v21)
+// Types matching the contract structures (v22)
 export interface MarketData {
   id: string;
   creator: string;
@@ -855,7 +855,7 @@ function generateRandomNonce(): string {
 }
 
 /**
- * Build inputs for create_market transaction (v21)
+ * Build inputs for create_market transaction (v22)
  * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
@@ -886,7 +886,7 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for buy_shares (v21AMM trading)
+ * Build inputs for buy_shares (v22AMM trading)
  * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
  * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
@@ -936,7 +936,7 @@ export function buildBuySharesInputs(
 }
 
 /**
- * Build inputs for buy_shares_private (v21privacy-preserving, ALEO only)
+ * Build inputs for buy_shares_private (v22privacy-preserving, ALEO only)
  * Alias for buildBuySharesInputs with tokenType='ALEO'.
  */
 export function buildBuySharesPrivateInputs(
@@ -1006,7 +1006,7 @@ export async function buildMerkleProofsForAddress(
 }
 
 /**
- * Build inputs for sell_shares (v21tokens_desired approach)
+ * Build inputs for sell_shares (v22tokens_desired approach)
  * sell_shares(shares: OutcomeShare, tokens_desired, max_shares_used)
  * User specifies how many tokens to withdraw. Contract computes shares needed.
  * Transition calls credits.aleo/transfer_public for the net payout.
@@ -1030,7 +1030,7 @@ export function buildSellSharesInputs(
 }
 
 /**
- * Build inputs for add_liquidity (v21LP provision)
+ * Build inputs for add_liquidity (v22LP provision)
  * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
  * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
  */
@@ -1055,11 +1055,11 @@ export function buildAddLiquidityInputs(
   };
 }
 
-// remove_liquidity removed in v21 — LP locked until finalize/cancel
+// remove_liquidity removed in v22 — LP locked until finalize/cancel
 // Use withdraw_lp_resolved (resolved markets) or claim_lp_refund (cancelled markets)
 
 /**
- * Build inputs for dispute_resolution (v21- bond always in ALEO)
+ * Build inputs for dispute_resolution (v22- bond always in ALEO)
  * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
  * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
  */
@@ -1104,7 +1104,7 @@ export function buildPlaceBetPrivateInputs(
 }
 
 /**
- * Calculate outcome price from AMM pool (v21FPMM)
+ * Calculate outcome price from AMM pool (v22FPMM)
  * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
  * Binary simplification: price_i = r_other / (r1 + r2)
  */
@@ -1219,7 +1219,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for withdraw_creator_fees (v21)
+ * Build inputs for withdraw_creator_fees (v22)
  * withdraw_creator_fees(market_id, expected_amount) — ALEO
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
@@ -1243,8 +1243,8 @@ export function buildCancelMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for emergency cancel via cancel_market (v21)
- * In v21, cancel_market handles both creator cancel (active, no volume)
+ * Build inputs for emergency cancel via cancel_market (v22)
+ * In v22, cancel_market handles both creator cancel (active, no volume)
  * and emergency cancel (anyone, past resolution_deadline).
  * Same inputs as buildCancelMarketInputs.
  */
@@ -2263,7 +2263,7 @@ export async function fetchMarketById(marketId: string) {
 }
 
 /**
- * Get the correct redeem/refund function name based on token type (v21)
+ * Get the correct redeem/refund function name based on token type (v22)
  */
 export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX'): string {
   return tokenType === 'USDCX' ? 'redeem_shares_usdcx' : 'redeem_shares';
@@ -2278,7 +2278,7 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
 }
 
 /**
- * Build inputs for claim_lp_refund (v21- LP refund on cancelled market)
+ * Build inputs for claim_lp_refund (v22- LP refund on cancelled market)
  * claim_lp_refund(lp_token: LPToken, min_tokens_out)
  */
 export function buildClaimLpRefundInputs(
@@ -2293,7 +2293,7 @@ export function buildClaimLpRefundInputs(
 }
 
 /**
- * Build inputs for withdraw_lp_resolved (v21- LP withdrawal from resolved/finalized market)
+ * Build inputs for withdraw_lp_resolved (v22- LP withdrawal from resolved/finalized market)
  * withdraw_lp_resolved(lp_token: LPToken, min_tokens_out: u128)
  */
 export function buildWithdrawLpResolvedInputs(
