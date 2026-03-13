@@ -1,14 +1,14 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v22.aleo program
+// Client for interacting with the deployed veiled_markets_v23.aleo program
 // ============================================================================
 
 import { config } from './config';
 import { fetchMarketRegistry, isSupabaseAvailable, clearAllSupabaseData } from './supabase';
 import { devLog, devWarn } from './logger'
 
-// Contract constants (matching main.leo v22)
+// Contract constants (matching main.leo v23)
 export const MARKET_STATUS = {
   ACTIVE: 1,
   CLOSED: 2,
@@ -57,7 +57,7 @@ export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
 export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
 export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
 
-// Types matching the contract structures (v22)
+// Types matching the contract structures (v23)
 export interface MarketData {
   id: string;
   creator: string;
@@ -855,7 +855,7 @@ function generateRandomNonce(): string {
 }
 
 /**
- * Build inputs for create_market transaction (v22)
+ * Build inputs for create_market transaction (v23)
  * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
@@ -886,11 +886,14 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for buy_shares (v22AMM trading)
+ * Build inputs for buy_shares (v23 AMM trading)
  * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
- * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
+ * USDCX public: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
  *   Uses transfer_public_as_signer (no record needed).
+ * USDCX private: buy_shares_private_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out,
+ *   share_nonce, token_record, siblings_0[16], leaf_index_0, siblings_1[16], leaf_index_1)
+ *   Uses transfer_private_to_public with flattened MerkleProof inputs (snarkVM parser workaround).
  * Frontend pre-computes expected_shares from AMM formula. Record gets this value.
  * Finalize validates shares_out >= expected_shares.
  */
@@ -902,6 +905,8 @@ export function buildBuySharesInputs(
   minSharesOut: bigint,
   tokenType: 'ALEO' | 'USDCX' = 'ALEO',
   creditsRecord?: string,
+  usdcxTokenRecord?: string,
+  merkleProofs?: { siblings: string[]; leafIndex: number }[],
 ): { functionName: string; inputs: string[] } {
   const shareNonce = generateRandomNonce();
 
@@ -915,9 +920,23 @@ export function buildBuySharesInputs(
   ];
 
   if (tokenType === 'USDCX') {
-    // USDCX: uses transfer_public_as_signer (public transfer)
-    // Note: buy_shares_private_usdcx removed in v22 due to snarkVM parser bug
-    // with imported struct types (MerkleProof). Will restore when snarkVM fixes this.
+    // USDCX private path: buy_shares_private_usdcx with flattened MerkleProof
+    if (usdcxTokenRecord && merkleProofs && merkleProofs.length === 2) {
+      inputs.push(usdcxTokenRecord);
+      // Flatten MerkleProof 0: [field; 16] siblings + u32 leaf_index
+      const siblings0 = `[${merkleProofs[0].siblings.join(', ')}]`;
+      inputs.push(siblings0);
+      inputs.push(`${merkleProofs[0].leafIndex}u32`);
+      // Flatten MerkleProof 1: [field; 16] siblings + u32 leaf_index
+      const siblings1 = `[${merkleProofs[1].siblings.join(', ')}]`;
+      inputs.push(siblings1);
+      inputs.push(`${merkleProofs[1].leafIndex}u32`);
+      return {
+        functionName: 'buy_shares_private_usdcx',
+        inputs,
+      };
+    }
+    // USDCX public fallback: buy_shares_usdcx (transfer_public_as_signer)
     return {
       functionName: 'buy_shares_usdcx',
       inputs,
@@ -936,7 +955,7 @@ export function buildBuySharesInputs(
 }
 
 /**
- * Build inputs for buy_shares_private (v22privacy-preserving, ALEO only)
+ * Build inputs for buy_shares_private (v23privacy-preserving, ALEO only)
  * Alias for buildBuySharesInputs with tokenType='ALEO'.
  */
 export function buildBuySharesPrivateInputs(
@@ -968,6 +987,19 @@ export function buildDefaultMerkleProofs(): string {
   const zeros = Array(16).fill('0field').join(', ');
   const proof = `{ siblings: [${zeros}], leaf_index: 1u32 }`;
   return `[${proof}, ${proof}]`;
+}
+
+/**
+ * Build default flattened Merkle proofs for buy_shares_private_usdcx (v23).
+ * Returns array of 2 proof objects with siblings and leafIndex separated,
+ * for the flattened input format that bypasses snarkVM parser bug.
+ */
+export function buildDefaultFlattenedMerkleProofs(): { siblings: string[]; leafIndex: number }[] {
+  const zeros = Array(16).fill('0field');
+  return [
+    { siblings: zeros, leafIndex: 1 },
+    { siblings: zeros, leafIndex: 1 },
+  ];
 }
 
 /**
@@ -1006,7 +1038,7 @@ export async function buildMerkleProofsForAddress(
 }
 
 /**
- * Build inputs for sell_shares (v22tokens_desired approach)
+ * Build inputs for sell_shares (v23tokens_desired approach)
  * sell_shares(shares: OutcomeShare, tokens_desired, max_shares_used)
  * User specifies how many tokens to withdraw. Contract computes shares needed.
  * Transition calls credits.aleo/transfer_public for the net payout.
@@ -1030,7 +1062,7 @@ export function buildSellSharesInputs(
 }
 
 /**
- * Build inputs for add_liquidity (v22LP provision)
+ * Build inputs for add_liquidity (v23LP provision)
  * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
  * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
  */
@@ -1055,11 +1087,11 @@ export function buildAddLiquidityInputs(
   };
 }
 
-// remove_liquidity removed in v22 — LP locked until finalize/cancel
+// remove_liquidity removed in v23 — LP locked until finalize/cancel
 // Use withdraw_lp_resolved (resolved markets) or claim_lp_refund (cancelled markets)
 
 /**
- * Build inputs for dispute_resolution (v22- bond always in ALEO)
+ * Build inputs for dispute_resolution (v23- bond always in ALEO)
  * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
  * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
  */
@@ -1104,7 +1136,7 @@ export function buildPlaceBetPrivateInputs(
 }
 
 /**
- * Calculate outcome price from AMM pool (v22FPMM)
+ * Calculate outcome price from AMM pool (v23FPMM)
  * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
  * Binary simplification: price_i = r_other / (r1 + r2)
  */
@@ -1219,7 +1251,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for withdraw_creator_fees (v22)
+ * Build inputs for withdraw_creator_fees (v23)
  * withdraw_creator_fees(market_id, expected_amount) — ALEO
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
@@ -1243,8 +1275,8 @@ export function buildCancelMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for emergency cancel via cancel_market (v22)
- * In v22, cancel_market handles both creator cancel (active, no volume)
+ * Build inputs for emergency cancel via cancel_market (v23)
+ * In v23, cancel_market handles both creator cancel (active, no volume)
  * and emergency cancel (anyone, past resolution_deadline).
  * Same inputs as buildCancelMarketInputs.
  */
@@ -2263,7 +2295,7 @@ export async function fetchMarketById(marketId: string) {
 }
 
 /**
- * Get the correct redeem/refund function name based on token type (v22)
+ * Get the correct redeem/refund function name based on token type (v23)
  */
 export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX'): string {
   return tokenType === 'USDCX' ? 'redeem_shares_usdcx' : 'redeem_shares';
@@ -2278,7 +2310,7 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
 }
 
 /**
- * Build inputs for claim_lp_refund (v22- LP refund on cancelled market)
+ * Build inputs for claim_lp_refund (v23- LP refund on cancelled market)
  * claim_lp_refund(lp_token: LPToken, min_tokens_out)
  */
 export function buildClaimLpRefundInputs(
@@ -2293,7 +2325,7 @@ export function buildClaimLpRefundInputs(
 }
 
 /**
- * Build inputs for withdraw_lp_resolved (v22- LP withdrawal from resolved/finalized market)
+ * Build inputs for withdraw_lp_resolved (v23- LP withdrawal from resolved/finalized market)
  * withdraw_lp_resolved(lp_token: LPToken, min_tokens_out: u128)
  */
 export function buildWithdrawLpResolvedInputs(

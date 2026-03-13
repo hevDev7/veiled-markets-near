@@ -9,7 +9,7 @@
 Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiledmarkets.xyz)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v22.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v23.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -32,10 +32,10 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 
 | Field | Value |
 |---|---|
-| **Program** | `veiled_markets_v22.aleo` |
+| **Program** | `veiled_markets_v23.aleo` |
 | **Network** | Aleo Testnet |
-| **Transitions** | 29 (all native Leo) |
-| **Deploy TX** | [`at1mke82n86z838m9dwsktvkzr63wkq2t4ham2heynhrutz5r90nvgs3mktmf`](https://testnet.explorer.provable.com/transaction/at1mke82n86z838m9dwsktvkzr63wkq2t4ham2heynhrutz5r90nvgs3mktmf) |
+| **Transitions** | 30 (29 Leo + 1 injected Aleo instructions) |
+| **Deploy TX** | [`at1ptm4dz9kz5775lchnfy5xk4c6ykprsalzfkg05xql42jxjf3vyqscceayl`](https://testnet.explorer.provable.com/transaction/at1ptm4dz9kz5775lchnfy5xk4c6ykprsalzfkg05xql42jxjf3vyqscceayl) |
 | **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
 
 ## Architecture
@@ -73,7 +73,7 @@ veiled-markets/
 `create_market` / `create_market_usdcx` · `close_market` · `resolve_market` · `finalize_resolution` · `cancel_market`
 
 **Trading:**
-`buy_shares_private` (ALEO, private) · `buy_shares_usdcx` · `sell_shares` / `sell_shares_usdcx` · `redeem_shares` / `redeem_shares_usdcx` · `claim_refund` / `claim_refund_usdcx`
+`buy_shares_private` (ALEO, private) · `buy_shares_private_usdcx` (USDCX, private) · `buy_shares_usdcx` · `sell_shares` / `sell_shares_usdcx` · `redeem_shares` / `redeem_shares_usdcx` · `claim_refund` / `claim_refund_usdcx`
 
 **Liquidity:**
 `add_liquidity` / `add_liquidity_usdcx` · `remove_liquidity` / `remove_liq_usdcx` · `withdraw_lp_resolved` / `withdraw_lp_resolved_usdcx` · `claim_lp_refund` / `claim_lp_refund_usdcx`
@@ -120,7 +120,7 @@ npm run dev
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets_v22.aleo
+VITE_PROGRAM_ID=veiled_markets_v23.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
@@ -130,7 +130,7 @@ VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 
 ```bash
 cd contracts && leo build              # Build (29 transitions, all native Leo)
-snarkos developer deploy veiled_markets_v22.aleo --path build --network 1 --broadcast  # Deploy (~60 ALEO)
+snarkos developer deploy veiled_markets_v23.aleo --path build --network 1 --broadcast  # Deploy (~60 ALEO)
 ```
 
 ## Tech Stack
@@ -160,6 +160,6 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v22.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
+[Live Demo](https://veiledmarkets.xyz) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v23.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
 
 </div>

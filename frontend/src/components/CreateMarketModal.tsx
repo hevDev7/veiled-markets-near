@@ -354,7 +354,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         program: createProgramId,
         function: createFunctionName,
         inputs,
-        fee: 3.0, // 3.0 ALEO for create_market (v22: 1982 stmts, complex finalize + nested transfer)
+        fee: 3.0, // 3.0 ALEO for create_market (v23: ~2100 stmts, complex finalize + nested transfer)
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(

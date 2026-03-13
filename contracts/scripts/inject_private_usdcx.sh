@@ -5,10 +5,9 @@
 # Injects the buy_shares_private_usdcx transition into the compiled .aleo
 # output. Run AFTER `leo build`.
 #
-# Why: Leo 3.4.0 has a type-checker bug (ETYC0372117) where arrays of imported
-# struct types ([MerkleProof; 2]) cannot be passed to imported function calls.
-# The transition works correctly in Aleo instructions but can't be compiled
-# from Leo source.
+# Why: snarkVM parser bug — cannot handle `input r as imported/Struct.private`
+# declarations. The workaround takes flattened inputs ([field; 16] + u32)
+# and reconstructs MerkleProof structs internally via cast instructions.
 #
 # Usage: cd contracts && ./scripts/inject_private_usdcx.sh
 # ============================================================================
@@ -18,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTRACT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_FILE="$CONTRACT_DIR/build/main.aleo"
-INJECT_FILE="$CONTRACT_DIR/aleo/buy_shares_private_usdcx.aleo"
+INJECT_FILE="$CONTRACT_DIR/aleo/buy_shares_private_usdcx_v2.aleo"
 
 # Validate files exist
 if [ ! -f "$BUILD_FILE" ]; then
@@ -42,8 +41,7 @@ fi
 # Strip comments from injection file (Aleo instructions don't support //)
 CLEAN_INJECT=$(grep -v '^//' "$INJECT_FILE" | grep -v '^\s*$' | sed '/^$/d')
 
-# Inject before the closing of the program (before the last empty line)
-# Find the last function in the file and append after it
+# Append to build file
 {
     cat "$BUILD_FILE"
     echo ""
@@ -52,5 +50,5 @@ CLEAN_INJECT=$(grep -v '^//' "$INJECT_FILE" | grep -v '^\s*$' | sed '/^$/d')
 
 mv "${BUILD_FILE}.tmp" "$BUILD_FILE"
 
-echo "✅ Injected buy_shares_private_usdcx into $BUILD_FILE"
+echo "✅ Injected buy_shares_private_usdcx (flattened MerkleProof) into $BUILD_FILE"
 echo "   Total transitions: $(grep -c '^function ' "$BUILD_FILE")"

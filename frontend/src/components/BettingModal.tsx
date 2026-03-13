@@ -5,8 +5,8 @@ import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildBuySharesInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
-import { fetchCreditsRecord } from '@/lib/credits-record'
+import { buildBuySharesInputs, buildDefaultFlattenedMerkleProofs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
+import { fetchCreditsRecord, fetchUsdcxTokenRecord } from '@/lib/credits-record'
 import { devWarn } from '../lib/logger'
 
 interface BettingModalProps {
@@ -69,19 +69,31 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       let inputs: string[]
 
       if (tokenType === 'USDCX') {
-        // USDCX: buy_shares_usdcx (public transfer)
-        // Note: private USDCX removed in v22 due to snarkVM parser bug
-        const availableBalance = wallet.balance.usdcxPublic
-        if (!wallet.isDemoMode && amountMicro > availableBalance) {
-          throw new Error(
-            `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX (public + private).`
-          )
+        // USDCX: try private path first, fallback to public
+        let usdcxRecord: string | null = null
+        try {
+          usdcxRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
+        } catch { /* fallback to public */ }
+
+        if (usdcxRecord) {
+          const merkleProofs = buildDefaultFlattenedMerkleProofs()
+          const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX', undefined, usdcxRecord, merkleProofs)
+          functionName = betResult.functionName
+          inputs = betResult.inputs
+          setPrivacyMode('private')
+        } else {
+          const availableBalance = wallet.balance.usdcxPublic
+          if (!wallet.isDemoMode && amountMicro > availableBalance) {
+            throw new Error(
+              `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
+              `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX (public + private).`
+            )
+          }
+          const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
+          functionName = betResult.functionName
+          inputs = betResult.inputs
+          setPrivacyMode('public')
         }
-        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
-        functionName = betResult.functionName
-        inputs = betResult.inputs
-        setPrivacyMode('public')
       } else {
         // ALEO: buy_shares_private with credits record
         const gasBuffer = 500_000

@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Aleo Client (v12)
 // ============================================================================
-// Main client for interacting with the veiled_markets_v22.aleo program
+// Main client for interacting with the veiled_markets_v23.aleo program
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -44,7 +44,7 @@ import {
  */
 const DEFAULT_CONFIG: VeiledMarketsConfig = {
   network: 'testnet',
-  programId: 'veiled_markets_v22.aleo',
+  programId: 'veiled_markets_v23.aleo',
 };
 
 /**
@@ -266,8 +266,37 @@ export class VeiledMarketsClient {
     };
   }
 
-  // buildBuySharesPrivateUsdcxInputs removed in v22 — snarkVM parser bug with
-  // imported struct types (MerkleProof). Use buildBuySharesInputs with USDCX instead.
+  /**
+   * Build inputs for buy_shares_private_usdcx (v23 — flattened MerkleProof inputs).
+   * Uses transfer_private_to_public with Token record for full privacy.
+   */
+  buildBuySharesPrivateUsdcxInputs(params: {
+    marketId: string;
+    outcome: number;
+    amountIn: bigint;
+    expectedShares: bigint;
+    minSharesOut: bigint;
+    tokenRecord: string;
+    merkleProofs: { siblings: string[]; leafIndex: number }[];
+  }): { functionName: string; inputs: string[] } {
+    const nonce = `${BigInt(Math.floor(Math.random() * 2 ** 64))}field`;
+    const inputs: string[] = [
+      params.marketId,
+      `${params.outcome}u8`,
+      `${params.amountIn}u128`,
+      `${params.expectedShares}u128`,
+      `${params.minSharesOut}u128`,
+      nonce,
+      params.tokenRecord,
+      // Flattened MerkleProof 0
+      `[${params.merkleProofs[0].siblings.join(', ')}]`,
+      `${params.merkleProofs[0].leafIndex}u32`,
+      // Flattened MerkleProof 1
+      `[${params.merkleProofs[1].siblings.join(', ')}]`,
+      `${params.merkleProofs[1].leafIndex}u32`,
+    ];
+    return { functionName: 'buy_shares_private_usdcx', inputs };
+  }
 
   buildSellSharesInputs(params: SellSharesParams, tokenType: TokenType = TokenType.ALEO): {
     functionName: string;

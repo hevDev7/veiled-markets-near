@@ -1,5 +1,5 @@
 // ============================================================================
-// VEILED MARKETS v22 - Privacy-Preserving Prediction Market Protocol
+// VEILED MARKETS v23 - Privacy-Preserving Prediction Market Protocol
 // ============================================================================
 // FPMM (Fixed Product Market Maker) with complete-set minting/burning.
 // Privacy-first: buy, sell, redeem, refund all use private credits records.
@@ -24,7 +24,7 @@ import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 // import test_usad_stablecoin.aleo;  // USAD disabled (snarkVM 31-transition limit)
 
-program veiled_markets_v22.aleo {
+program veiled_markets_v23.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -974,13 +974,14 @@ program veiled_markets_v22.aleo {
     }
 
     // ========================================================================
-    // 8b. BUY SHARES PRIVATE (USDCX) — REMOVED
+    // 8b. BUY SHARES PRIVATE (USDCX) — INJECTED POST-BUILD
     // ========================================================================
-    // Removed due to snarkVM parser bug: cannot handle imported struct types
-    // (test_usdcx_stablecoin.aleo/MerkleProof) in function input declarations.
-    // Qualified name → "Failed to parse string", unqualified → "Struct not defined".
-    // USDCX trading uses buy_shares_usdcx (public transfer) instead.
-    // Will be restored when snarkVM fixes this parser issue.
+    // Written in Aleo instructions and injected post-build via inject script.
+    // Workaround for snarkVM parser bug: input declarations can't use
+    // imported struct types (test_usdcx_stablecoin.aleo/MerkleProof.private).
+    // Solution: take flattened inputs ([field;16] + u32) and reconstruct
+    // MerkleProof internally via cast instructions.
+    // See contracts/aleo/buy_shares_private_usdcx_v2.aleo
 
     // ========================================================================
     // 9. SELL SHARES (USDCX)
