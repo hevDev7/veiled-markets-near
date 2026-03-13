@@ -29,7 +29,6 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
   buildBuySharesInputs,
-  buildDefaultFlattenedMerkleProofs,
   buildSellSharesInputs,
   getCurrentBlockHeight,
   getMarketResolution,
@@ -614,9 +613,6 @@ export function MarketDetail() {
         const expectedShares = tradePreview.minShares
         let creditsRecord: string | undefined
 
-        let usdcxTokenRecord: string | undefined
-        let merkleProofs: { siblings: string[]; leafIndex: number }[] | undefined
-
         if (tokenType === 'ALEO') {
           // ALEO: buy_shares_private needs credits record
           const { fetchCreditsRecord } = await import('@/lib/credits-record')
@@ -630,21 +626,6 @@ export function MarketDetail() {
             )
           }
           creditsRecord = record
-        } else if (tokenType === 'USDCX') {
-          // Try private USDCX for non-Shield wallets
-          const isShield = wallet.walletType === 'shield'
-          if (!isShield) {
-            try {
-              const { fetchUsdcxTokenRecord } = await import('@/lib/credits-record')
-              const record = await fetchUsdcxTokenRecord(Number(buyAmountMicro))
-              if (record) {
-                usdcxTokenRecord = record
-                merkleProofs = buildDefaultFlattenedMerkleProofs()
-              }
-            } catch {
-              // Fallback to public path silently
-            }
-          }
         }
 
         const result = buildBuySharesInputs(
@@ -655,8 +636,6 @@ export function MarketDetail() {
           tradePreview.minShares,
           tokenType as 'ALEO' | 'USDCX',
           creditsRecord,
-          usdcxTokenRecord,
-          merkleProofs,
         )
         functionName = result.functionName
         inputs = result.inputs

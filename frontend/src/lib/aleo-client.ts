@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v18.aleo program
+// Client for interacting with the deployed veiled_markets_v22.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -891,10 +891,7 @@ export function buildCreateMarketInputs(
  *   Uses transfer_private_to_public with credits record for privacy.
  * USDCX public: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
  *   Uses transfer_public_as_signer (no record needed).
- * USDCX private: buy_shares_private_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out,
- *   share_nonce, token_record, siblings_0, leaf_index_0, siblings_1, leaf_index_1)
- *   Uses flattened MerkleProof inputs to bypass snarkVM parser bug.
- *   Only works with Puzzle Wallet (server-side proving) — Shield Wallet parser fails on qualified struct names.
+ * USDCX: buy_shares_usdcx (public path via transfer_public_as_signer, no record needed).
  * Frontend pre-computes expected_shares from AMM formula. Record gets this value.
  * Finalize validates shares_out >= expected_shares.
  */
@@ -906,8 +903,6 @@ export function buildBuySharesInputs(
   minSharesOut: bigint,
   tokenType: 'ALEO' | 'USDCX' = 'ALEO',
   creditsRecord?: string,
-  usdcxTokenRecord?: string,
-  merkleProofs?: { siblings: string[]; leafIndex: number }[],
 ): { functionName: string; inputs: string[] } {
   const shareNonce = generateRandomNonce();
 
@@ -921,22 +916,7 @@ export function buildBuySharesInputs(
   ];
 
   if (tokenType === 'USDCX') {
-    // Private USDCX path: buy_shares_private_usdcx (needs Token record + MerkleProofs)
-    if (usdcxTokenRecord && merkleProofs && merkleProofs.length >= 2) {
-      const proofs = merkleProofs;
-      return {
-        functionName: 'buy_shares_private_usdcx',
-        inputs: [
-          ...baseInputs,
-          usdcxTokenRecord,
-          `[${proofs[0].siblings.join(', ')}]`,
-          `${proofs[0].leafIndex}u32`,
-          `[${proofs[1].siblings.join(', ')}]`,
-          `${proofs[1].leafIndex}u32`,
-        ],
-      };
-    }
-    // Fallback: buy_shares_usdcx (transfer_public_as_signer, public)
+    // v22: buy_shares_usdcx (public path via transfer_public_as_signer)
     return {
       functionName: 'buy_shares_usdcx',
       inputs: baseInputs,

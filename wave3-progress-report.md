@@ -211,8 +211,8 @@ CREATE INDEX idx_price_snapshots_time ON price_snapshots (market_id, timestamp D
 ## 8. On-Chain Activity
 
 ### Deployed Programs
-- `veiled_markets_v17.aleo` — Currently active on testnet
-- `veiled_markets_v18.aleo` — Built locally, deployment pending
+- `veiled_markets_v22.aleo` — Currently active on testnet (Deploy TX: at1mke82n86z838m9dwsktvkzr63wkq2t4ham2heynhrutz5r90nvgs3mktmf)
+- `veiled_markets_v17.aleo` — Previous version (deprecated)
 
 ### v13 Markets on Testnet (4 active)
 1. Test #1 (2 ALEO) — `175421318...530field`

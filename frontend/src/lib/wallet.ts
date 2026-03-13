@@ -545,7 +545,10 @@ export class LeoWalletAdapter {
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
         devLog('Leo Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [
+          config.programId, 'credits.aleo', config.usdcxProgramId,
+          'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
+        ]);
 
         if (this.adapter.account) {
           devLog('Leo Wallet: Connected successfully');
@@ -1201,7 +1204,10 @@ export class FoxWalletAdapter {
 
       try {
         devLog('Fox Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [
+          config.programId, 'credits.aleo', config.usdcxProgramId,
+          'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
+        ]);
 
         if (this.adapter.account) {
           devLog('Fox Wallet: Connected successfully');
@@ -1388,7 +1394,10 @@ export class SoterWalletAdapter {
 
       try {
         devLog('Soter Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [config.programId, 'credits.aleo', config.usdcxProgramId]);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [
+          config.programId, 'credits.aleo', config.usdcxProgramId,
+          'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
+        ]);
 
         if (this.adapter.account) {
           devLog('Soter Wallet: Connected successfully');
@@ -1585,11 +1594,17 @@ export class ShieldWalletAdapter {
       if (typeof shieldWallet.connect === 'function') {
         // Try standard Aleo wallet connect pattern
         try {
-          await shieldWallet.connect('AutoDecrypt', 'testnetbeta', [config.programId, 'credits.aleo', config.usdcxProgramId]);
+          await shieldWallet.connect('AutoDecrypt', 'testnetbeta', [
+            config.programId, 'credits.aleo', config.usdcxProgramId,
+            'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
+          ]);
         } catch {
           // Try alternative connect signature
           try {
-            await shieldWallet.connect({ network: 'testnet', programs: [config.programId, 'credits.aleo', config.usdcxProgramId] });
+            await shieldWallet.connect({ network: 'testnet', programs: [
+              config.programId, 'credits.aleo', config.usdcxProgramId,
+              'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
+            ] });
           } catch {
             await shieldWallet.connect();
           }
