@@ -106,7 +106,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs: inputs,
-        fee: 0.5,
+        fee: 3,
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(

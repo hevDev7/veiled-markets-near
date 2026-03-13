@@ -1532,7 +1532,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         programId: CONTRACT_INFO.programId,
         functionName: betFunctionName,
         inputs,
-        fee: 0.5, // 0.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
+        fee: 3, // 3 ALEO fee for v22 (5-level import chain needs higher fee)
       })
 
       devLog('Bet transaction submitted:', transactionId)

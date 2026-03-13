@@ -391,7 +391,7 @@ export function MarketDetail() {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 1.5,
+        fee: 3,
       })
 
       if (result?.transactionId) {
@@ -647,7 +647,7 @@ export function MarketDetail() {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 1.5,
+        fee: 3,
       })
 
       if (result?.transactionId) {
@@ -1330,7 +1330,7 @@ export function MarketDetail() {
                           </p>
                           <Tooltip content="Gas fee paid to Aleo network validators for processing your transaction" side="bottom">
                             <p className="text-xs text-surface-600 cursor-help w-fit">
-                              Transaction fee: 0.5 ALEO (from public balance)
+                              Transaction fee: 3 ALEO (from public balance)
                             </p>
                           </Tooltip>
                         </div>

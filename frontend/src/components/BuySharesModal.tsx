@@ -195,7 +195,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         program: CONTRACT_INFO.programId,
         function: functionName!,
         inputs: inputs!,
-        fee: 1.5,
+        fee: 3,
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(

@@ -1868,7 +1868,7 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
     const marketIds = data.marketIds || [];
     const markets = data.markets || [];
 
-    // Load question texts from indexed markets
+    // Load question texts and outcome labels from indexed markets
     for (const market of markets) {
       const questionText = market.questionText || market.question;
       const marketId = market.marketId || market.id;
@@ -1879,6 +1879,10 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
           QUESTION_TEXT_MAP[market.questionHash] = questionText;
         }
         devLog(`Loaded question text for ${marketId.slice(0, 16)}...`);
+      }
+      // Load outcome labels if present
+      if (marketId && market.outcomeLabels && Array.isArray(market.outcomeLabels)) {
+        OUTCOME_LABELS_MAP[marketId] = market.outcomeLabels;
       }
     }
 
