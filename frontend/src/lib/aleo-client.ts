@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v21.aleo program
+// Client for interacting with the deployed veiled_markets_v22.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -902,8 +902,6 @@ export function buildBuySharesInputs(
   minSharesOut: bigint,
   tokenType: 'ALEO' | 'USDCX' = 'ALEO',
   creditsRecord?: string,
-  usdcxTokenRecord?: string,
-  merkleProofs?: string,
 ): { functionName: string; inputs: string[] } {
   const shareNonce = generateRandomNonce();
 
@@ -917,16 +915,9 @@ export function buildBuySharesInputs(
   ];
 
   if (tokenType === 'USDCX') {
-    // Private USDCX: requires Token record + Merkle proofs
-    if (usdcxTokenRecord && merkleProofs) {
-      inputs.push(usdcxTokenRecord);
-      inputs.push(merkleProofs);
-      return {
-        functionName: 'buy_shares_private_usdcx',
-        inputs,
-      };
-    }
-    // Public USDCX: uses transfer_public_as_signer
+    // USDCX: uses transfer_public_as_signer (public transfer)
+    // Note: buy_shares_private_usdcx removed in v22 due to snarkVM parser bug
+    // with imported struct types (MerkleProof). Will restore when snarkVM fixes this.
     return {
       functionName: 'buy_shares_usdcx',
       inputs,

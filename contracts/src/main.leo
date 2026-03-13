@@ -1,5 +1,5 @@
 // ============================================================================
-// VEILED MARKETS v21 - Privacy-Preserving Prediction Market Protocol
+// VEILED MARKETS v22 - Privacy-Preserving Prediction Market Protocol
 // ============================================================================
 // FPMM (Fixed Product Market Maker) with complete-set minting/burning.
 // Privacy-first: buy, sell, redeem, refund all use private credits records.
@@ -24,7 +24,7 @@ import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 // import test_usad_stablecoin.aleo;  // USAD disabled (snarkVM 31-transition limit)
 
-program veiled_markets_v21.aleo {
+program veiled_markets_v22.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -974,131 +974,13 @@ program veiled_markets_v21.aleo {
     }
 
     // ========================================================================
-    // 8b. BUY SHARES PRIVATE (USDCX)
+    // 8b. BUY SHARES PRIVATE (USDCX) — REMOVED
     // ========================================================================
-    // Previously injected post-build due to Leo 3.4.0 bug ETYC0372117.
-    // Now native Leo — fixed in Leo 3.5.0.
-
-    async transition buy_shares_private_usdcx(
-        private market_id: field,
-        private outcome: u8,
-        private amount_in: u128,
-        private expected_shares: u128,
-        private min_shares_out: u128,
-        private share_nonce: field,
-        private token_record: test_usdcx_stablecoin.aleo/Token,
-        private merkle_proof_0: test_usdcx_stablecoin.aleo/MerkleProof,
-        private merkle_proof_1: test_usdcx_stablecoin.aleo/MerkleProof,
-    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(outcome >= OUTCOME_1 && outcome <= OUTCOME_4);
-        assert(amount_in >= MIN_TRADE_AMOUNT);
-
-        let share: OutcomeShare = OutcomeShare {
-            owner: self.caller,
-            market_id: market_id,
-            outcome: outcome,
-            quantity: expected_shares,
-            share_nonce: share_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        // Reconstruct array from individual proofs to avoid snarkVM parser bug
-        // with [ImportedProgram/Struct; N] array type in input declarations
-        let merkle_proofs: [test_usdcx_stablecoin.aleo/MerkleProof; 2] = [merkle_proof_0, merkle_proof_1];
-
-        let (compliance, change, transfer_future): (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) =
-            test_usdcx_stablecoin.aleo/transfer_private_to_public(
-                self.address,
-                amount_in,
-                token_record,
-                merkle_proofs
-            );
-
-        return (share, compliance, change, buy_shares_priv_usdcx_fin(
-            transfer_future, market_id, outcome, amount_in,
-            expected_shares, min_shares_out
-        ));
-    }
-
-    async function buy_shares_priv_usdcx_fin(
-        transfer_future: Future,
-        market_id: field,
-        outcome: u8,
-        amount_in: u128,
-        expected_shares: u128,
-        min_shares_out: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USDCX);
-        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
-
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= market.deadline);
-
-        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (amount_in * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let amount_to_pool: u128 = amount_in - protocol_fee - creator_fee;
-
-        let fees: MarketFees = market_fees.get(market_id);
-        market_fees.set(market_id, MarketFees {
-            market_id: market_id,
-            protocol_fees: fees.protocol_fees + protocol_fee,
-            creator_fees: fees.creator_fees + creator_fee,
-        });
-        let current_treasury: u128 = protocol_treasury.get_or_use(1u8, 0u128);
-        protocol_treasury.set(1u8, current_treasury + protocol_fee);
-
-        let pool: AMMPool = amm_pools.get(market_id);
-        let n: u8 = market.num_outcomes;
-        let r1: u128 = pool.reserve_1;
-        let r2: u128 = pool.reserve_2;
-        let r3: u128 = pool.reserve_3;
-        let r4: u128 = pool.reserve_4;
-        let a: u128 = amount_to_pool;
-
-        let r_i: u128 = outcome == 1u8 ? r1 :
-                         (outcome == 2u8 ? r2 :
-                         (outcome == 3u8 ? r3 : r4));
-
-        let step0: u128 = r_i;
-        let step1: u128 = outcome != 1u8 ? (step0 * r1) / (r1 + a) : step0;
-        let step2: u128 = outcome != 2u8 ? (step1 * r2) / (r2 + a) : step1;
-        let step3: u128 = (outcome != 3u8 && n >= 3u8) ? (step2 * r3) / (r3 + a) : step2;
-        let step4: u128 = (outcome != 4u8 && n >= 4u8) ? (step3 * r4) / (r4 + a) : step3;
-
-        let r_i_new: u128 = step4;
-        let shares_out: u128 = (r_i + a) - r_i_new;
-
-        assert(shares_out >= min_shares_out);
-        assert(shares_out >= expected_shares);
-        assert(shares_out > 0u128);
-
-        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 + a);
-        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 + a);
-        let nr3_active: u128 = outcome == 3u8 ? r_i_new : (r3 + a);
-        let new_r3: u128 = n >= 3u8 ? nr3_active : 0u128;
-        let nr4_active: u128 = outcome == 4u8 ? r_i_new : (r4 + a);
-        let new_r4: u128 = n >= 4u8 ? nr4_active : 0u128;
-
-        amm_pools.set(market_id, AMMPool {
-            market_id: market_id,
-            reserve_1: new_r1,
-            reserve_2: new_r2,
-            reserve_3: new_r3,
-            reserve_4: new_r4,
-            total_liquidity: pool.total_liquidity + amount_to_pool,
-            total_lp_shares: pool.total_lp_shares,
-            total_volume: pool.total_volume + amount_in,
-        });
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        program_credits.set(1u8, current_held + amount_in);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held + amount_in);
-    }
+    // Removed due to snarkVM parser bug: cannot handle imported struct types
+    // (test_usdcx_stablecoin.aleo/MerkleProof) in function input declarations.
+    // Qualified name → "Failed to parse string", unqualified → "Struct not defined".
+    // USDCX trading uses buy_shares_usdcx (public transfer) instead.
+    // Will be restored when snarkVM fixes this parser issue.
 
     // ========================================================================
     // 9. SELL SHARES (USDCX)

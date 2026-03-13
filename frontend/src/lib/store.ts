@@ -11,7 +11,6 @@ import {
 } from './wallet'
 import {
   buildBuySharesInputs,
-  buildDefaultMerkleProofs,
   CONTRACT_INFO,
   getMarket,
   getMarketResolution,
@@ -815,7 +814,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v21.aleo program.
+// in the veiled_markets_v22.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1477,15 +1476,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v21.aleo contract
+      // Build inputs for the veiled_markets_v22.aleo contract
       // ALEO: buy_shares_private (needs credits record)
-      // USDCX: buy_shares_private_usdcx (needs Token record + Merkle proofs), fallback to buy_shares_usdcx
+      // USDCX: buy_shares_usdcx (public transfer)
       const tokenType = market?.tokenType || 'ALEO'
       const outcomeNum = outcomeToIndex(outcome)
 
       let creditsRecord: string | undefined
-      let usdcxTokenRecord: string | undefined
-      let merkleProofs: string | undefined
 
       if (tokenType === 'ALEO') {
         const { fetchCreditsRecord } = await import('./credits-record')
@@ -1499,13 +1496,6 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           )
         }
         creditsRecord = record
-      } else if (tokenType === 'USDCX') {
-        const { fetchUsdcxTokenRecord } = await import('./credits-record')
-        const record = await fetchUsdcxTokenRecord(Number(amount))
-        if (record) {
-          usdcxTokenRecord = record
-          merkleProofs = buildDefaultMerkleProofs()
-        }
       }
 
       const { functionName: betFunctionName, inputs } = buildBuySharesInputs(
@@ -1516,8 +1506,6 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         0n, // minSharesOut
         tokenType as 'ALEO' | 'USDCX',
         creditsRecord,
-        usdcxTokenRecord,
-        merkleProofs,
       )
 
       devLog('=== PLACE BET DEBUG ===')
@@ -1539,7 +1527,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       // Request transaction through wallet
       // ALEO: buy_shares_private (privacy-preserving, transfer_private_to_public)
-      // USDCX: buy_shares_private_usdcx (private Token record) or buy_shares_usdcx (public fallback)
+      // USDCX: buy_shares_usdcx (public transfer)
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
         functionName: betFunctionName,

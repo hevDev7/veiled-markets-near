@@ -432,7 +432,7 @@ export async function fetchUsdcxTokenRecord(minAmountMicro: number): Promise<str
     }
   }
 
-  devLog('[USDCX] All strategies exhausted — no Token record found for buy_shares_private_usdcx')
+  devLog('[USDCX] All strategies exhausted — no Token record found')
   return null
 }
 

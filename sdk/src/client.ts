@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Aleo Client (v12)
 // ============================================================================
-// Main client for interacting with the veiled_markets_v21.aleo program
+// Main client for interacting with the veiled_markets_v22.aleo program
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -44,7 +44,7 @@ import {
  */
 const DEFAULT_CONFIG: VeiledMarketsConfig = {
   network: 'testnet',
-  programId: 'veiled_markets_v21.aleo',
+  programId: 'veiled_markets_v22.aleo',
 };
 
 /**
@@ -266,26 +266,8 @@ export class VeiledMarketsClient {
     };
   }
 
-  buildBuySharesPrivateUsdcxInputs(params: BuySharesPrivateUsdcxParams): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const nonce = `${BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))}field`;
-
-    return {
-      functionName: 'buy_shares_private_usdcx',
-      inputs: [
-        params.marketId,
-        `${params.outcome}u8`,
-        `${params.amountIn}u128`,
-        `${params.minSharesOut ?? 0n}u128`,
-        `${params.minSharesOut ?? 0n}u128`,
-        nonce,
-        params.tokenRecord,
-        params.merkleProofs,
-      ],
-    };
-  }
+  // buildBuySharesPrivateUsdcxInputs removed in v22 — snarkVM parser bug with
+  // imported struct types (MerkleProof). Use buildBuySharesInputs with USDCX instead.
 
   buildSellSharesInputs(params: SellSharesParams, tokenType: TokenType = TokenType.ALEO): {
     functionName: string;

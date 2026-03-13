@@ -29,7 +29,6 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
   buildBuySharesInputs,
-  buildDefaultMerkleProofs,
   buildSellSharesInputs,
   getCurrentBlockHeight,
   getMarketResolution,
@@ -613,18 +612,8 @@ export function MarketDetail() {
         // expectedShares = minShares (conservative) so record quantity <= actual shares_out
         const expectedShares = tradePreview.minShares
         let creditsRecord: string | undefined
-        let usdcxTokenRecord: string | undefined
-        let merkleProofs: string | undefined
 
-        if (tokenType === 'USDCX') {
-          // USDCX: try private first (Token record + Merkle proofs)
-          const { fetchUsdcxTokenRecord } = await import('@/lib/credits-record')
-          const record = await fetchUsdcxTokenRecord(Number(buyAmountMicro))
-          if (record) {
-            usdcxTokenRecord = record
-            merkleProofs = buildDefaultMerkleProofs()
-          }
-        } else {
+        if (tokenType === 'ALEO') {
           // ALEO: buy_shares_private needs credits record
           const { fetchCreditsRecord } = await import('@/lib/credits-record')
           const gasBuffer = 500_000
@@ -647,8 +636,6 @@ export function MarketDetail() {
           tradePreview.minShares,
           tokenType as 'ALEO' | 'USDCX',
           creditsRecord,
-          usdcxTokenRecord,
-          merkleProofs,
         )
         functionName = result.functionName
         inputs = result.inputs
