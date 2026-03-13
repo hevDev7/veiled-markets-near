@@ -5,9 +5,10 @@
 # Injects the buy_shares_private_usdcx transition into the compiled .aleo
 # output. Run AFTER `leo build`.
 #
-# Why: snarkVM parser bug — cannot handle `input r as imported/Struct.private`
-# declarations. The workaround takes flattened inputs ([field; 16] + u32)
-# and reconstructs MerkleProof structs internally via cast instructions.
+# Why: Leo 3.4.0 bug ETYC0372117 — [ImportedProgram/Struct; N] arrays can't
+# be passed to imported function calls. Workaround: write transition in Aleo
+# instructions using UNQUALIFIED struct names (MerkleProof, not
+# test_usdcx_stablecoin.aleo/MerkleProof) to avoid snarkVM parser issues.
 #
 # Usage: cd contracts && ./scripts/inject_private_usdcx.sh
 # ============================================================================
@@ -17,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTRACT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_FILE="$CONTRACT_DIR/build/main.aleo"
-INJECT_FILE="$CONTRACT_DIR/aleo/buy_shares_private_usdcx_v2.aleo"
+INJECT_FILE="$CONTRACT_DIR/aleo/buy_shares_private_usdcx.aleo"
 
 # Validate files exist
 if [ ! -f "$BUILD_FILE" ]; then
@@ -50,5 +51,5 @@ CLEAN_INJECT=$(grep -v '^//' "$INJECT_FILE" | grep -v '^\s*$' | sed '/^$/d')
 
 mv "${BUILD_FILE}.tmp" "$BUILD_FILE"
 
-echo "✅ Injected buy_shares_private_usdcx (flattened MerkleProof) into $BUILD_FILE"
+echo "✅ Injected buy_shares_private_usdcx (unqualified MerkleProof, v3) into $BUILD_FILE"
 echo "   Total transitions: $(grep -c '^function ' "$BUILD_FILE")"

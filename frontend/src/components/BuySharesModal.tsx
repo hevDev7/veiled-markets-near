@@ -5,8 +5,7 @@ import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO, outcomeToStri
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildBuySharesInputs, buildDefaultFlattenedMerkleProofs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
-import { fetchUsdcxTokenRecord } from '@/lib/credits-record'
+import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
 import { calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
 import { devWarn } from '../lib/logger'
@@ -156,21 +155,38 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const expectedShares = minSharesOut
 
       if (isUsdcx) {
-        // USDCX: try private path first (buy_shares_private_usdcx), fallback to public
-        let usdcxRecord: string | null = null
-        try {
-          usdcxRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
-        } catch { /* fallback to public */ }
+        // USDCX: Try private first (Puzzle Wallet), fallback to public (Shield Wallet)
+        // buy_shares_private_usdcx uses flattened MerkleProof inputs — works with
+        // server-side proving (Puzzle) but fails on Shield's client-side parser.
+        const isShieldWallet = wallet.walletType === 'shield'
+        let usePrivate = !isShieldWallet
 
-        if (usdcxRecord) {
-          // Private USDCX: buy_shares_private_usdcx with flattened MerkleProof
-          const merkleProofs = buildDefaultFlattenedMerkleProofs()
-          const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'USDCX', undefined, usdcxRecord, merkleProofs)
-          functionName = result.functionName
-          inputs = result.inputs
-          setPrivacyMode('private')
-        } else {
-          // Public USDCX fallback: buy_shares_usdcx (transfer_public_as_signer)
+        if (usePrivate) {
+          // Try to fetch a USDCX Token record for private transfer
+          try {
+            const tokenRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
+            if (tokenRecord) {
+              const proofs = buildDefaultFlattenedMerkleProofs()
+              const result = buildBuySharesInputs(
+                market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut,
+                'USDCX', undefined, tokenRecord, proofs,
+              )
+              functionName = result.functionName
+              inputs = result.inputs
+              setPrivacyMode('private')
+            } else {
+              // No private Token record available — fallback to public
+              usePrivate = false
+              devWarn('[BuyShares] No USDCX Token record found, falling back to public path')
+            }
+          } catch (err) {
+            usePrivate = false
+            devWarn('[BuyShares] Failed to fetch USDCX Token record, falling back to public:', err)
+          }
+        }
+
+        if (!usePrivate) {
+          // Public path: buy_shares_usdcx (transfer_public_as_signer)
           const availableBalance = wallet.balance.usdcxPublic
           if (!wallet.isDemoMode && amountMicro > availableBalance) {
             throw new Error(

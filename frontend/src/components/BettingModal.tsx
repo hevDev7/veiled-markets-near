@@ -65,23 +65,31 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       }
 
       const outcomeNum = selectedOutcome === 'yes' ? 1 : 2
-      let functionName: string
-      let inputs: string[]
+      let functionName = ''
+      let inputs: string[] = []
 
       if (tokenType === 'USDCX') {
-        // USDCX: try private path first, fallback to public
-        let usdcxRecord: string | null = null
-        try {
-          usdcxRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
-        } catch { /* fallback to public */ }
+        // USDCX: try private first (Puzzle), fallback to public (Shield)
+        const isShield = wallet.walletType === 'shield'
+        let usedPrivate = false
 
-        if (usdcxRecord) {
-          const merkleProofs = buildDefaultFlattenedMerkleProofs()
-          const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX', undefined, usdcxRecord, merkleProofs)
-          functionName = betResult.functionName
-          inputs = betResult.inputs
-          setPrivacyMode('private')
-        } else {
+        if (!isShield) {
+          try {
+            const tokenRecord = await fetchUsdcxTokenRecord(Number(amountMicro))
+            if (tokenRecord) {
+              const proofs = buildDefaultFlattenedMerkleProofs()
+              const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX', undefined, tokenRecord, proofs)
+              functionName = betResult.functionName
+              inputs = betResult.inputs
+              setPrivacyMode('private')
+              usedPrivate = true
+            }
+          } catch (err) {
+            devWarn('[Bet] Failed to fetch USDCX Token record, falling back to public:', err)
+          }
+        }
+
+        if (!usedPrivate) {
           const availableBalance = wallet.balance.usdcxPublic
           if (!wallet.isDemoMode && amountMicro > availableBalance) {
             throw new Error(

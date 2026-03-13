@@ -613,6 +613,7 @@ export function MarketDetail() {
         // expectedShares = minShares (conservative) so record quantity <= actual shares_out
         const expectedShares = tradePreview.minShares
         let creditsRecord: string | undefined
+
         let usdcxTokenRecord: string | undefined
         let merkleProofs: { siblings: string[]; leafIndex: number }[] | undefined
 
@@ -629,16 +630,21 @@ export function MarketDetail() {
             )
           }
           creditsRecord = record
-        } else {
-          // USDCX: try private Token record, fallback to public
-          try {
-            const { fetchUsdcxTokenRecord } = await import('@/lib/credits-record')
-            const record = await fetchUsdcxTokenRecord(Number(buyAmountMicro))
-            if (record) {
-              usdcxTokenRecord = record
-              merkleProofs = buildDefaultFlattenedMerkleProofs()
+        } else if (tokenType === 'USDCX') {
+          // Try private USDCX for non-Shield wallets
+          const isShield = wallet.walletType === 'shield'
+          if (!isShield) {
+            try {
+              const { fetchUsdcxTokenRecord } = await import('@/lib/credits-record')
+              const record = await fetchUsdcxTokenRecord(Number(buyAmountMicro))
+              if (record) {
+                usdcxTokenRecord = record
+                merkleProofs = buildDefaultFlattenedMerkleProofs()
+              }
+            } catch {
+              // Fallback to public path silently
             }
-          } catch { /* fallback to public buy_shares_usdcx */ }
+          }
         }
 
         const result = buildBuySharesInputs(

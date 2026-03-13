@@ -9,7 +9,7 @@
 Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiledmarkets.xyz)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v23.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v18.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -32,7 +32,7 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 
 | Field | Value |
 |---|---|
-| **Program** | `veiled_markets_v23.aleo` |
+| **Program** | `veiled_markets_v18.aleo` |
 | **Network** | Aleo Testnet |
 | **Transitions** | 30 (29 Leo + 1 injected Aleo instructions) |
 | **Deploy TX** | [`at1ptm4dz9kz5775lchnfy5xk4c6ykprsalzfkg05xql42jxjf3vyqscceayl`](https://testnet.explorer.provable.com/transaction/at1ptm4dz9kz5775lchnfy5xk4c6ykprsalzfkg05xql42jxjf3vyqscceayl) |
@@ -120,7 +120,7 @@ npm run dev
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_markets_v23.aleo
+VITE_PROGRAM_ID=veiled_markets_v18.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
@@ -130,7 +130,7 @@ VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 
 ```bash
 cd contracts && leo build              # Build (29 transitions, all native Leo)
-snarkos developer deploy veiled_markets_v23.aleo --path build --network 1 --broadcast  # Deploy (~60 ALEO)
+snarkos developer deploy veiled_markets_v18.aleo --path build --network 1 --broadcast  # Deploy (~60 ALEO)
 ```
 
 ## Tech Stack
@@ -160,6 +160,6 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v23.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
+[Live Demo](https://veiledmarkets.xyz) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v18.aleo) · [GitHub](https://github.com/hevDev7/veiled-markets-near)
 
 </div>

@@ -1,4 +1,4 @@
-# Audit Report: `buy_shares_private_usdcx` -- veiled_markets_v23.aleo
+# Audit Report: `buy_shares_private_usdcx` -- veiled_markets_v22.aleo
 
 ## Scope
 

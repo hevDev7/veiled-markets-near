@@ -11,6 +11,7 @@ import {
 } from './wallet'
 import {
   buildBuySharesInputs,
+  buildDefaultFlattenedMerkleProofs,
   CONTRACT_INFO,
   getMarket,
   getMarketResolution,
@@ -814,7 +815,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v23.aleo program.
+// in the veiled_markets_v18.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1476,9 +1477,9 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v23.aleo contract
+      // Build inputs for the veiled_markets_v18.aleo contract
       // ALEO: buy_shares_private (needs credits record)
-      // USDCX: buy_shares_private_usdcx (private Token record) or buy_shares_usdcx (public fallback)
+      // USDCX: buy_shares_private_usdcx (private, Puzzle) or buy_shares_usdcx (public, Shield)
       const tokenType = market?.tokenType || 'ALEO'
       const outcomeNum = outcomeToIndex(outcome)
 
@@ -1498,17 +1499,23 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
           )
         }
         creditsRecord = record
-      } else {
-        // USDCX: try private Token record, fallback to public
-        try {
-          const { fetchUsdcxTokenRecord } = await import('./credits-record')
-          const { buildDefaultFlattenedMerkleProofs } = await import('./aleo-client')
-          const record = await fetchUsdcxTokenRecord(Number(amount))
-          if (record) {
-            usdcxTokenRecord = record
-            merkleProofs = buildDefaultFlattenedMerkleProofs()
+      } else if (tokenType === 'USDCX') {
+        // Try private USDCX for non-Shield wallets
+        const walletState = useWalletStore.getState()
+        const isShield = walletState.wallet.walletType === 'shield'
+        if (!isShield) {
+          try {
+            const { fetchUsdcxTokenRecord } = await import('./credits-record')
+            const record = await fetchUsdcxTokenRecord(Number(amount))
+            if (record) {
+              usdcxTokenRecord = record
+              merkleProofs = buildDefaultFlattenedMerkleProofs()
+              devLog('[Store] Using private USDCX path (buy_shares_private_usdcx)')
+            }
+          } catch (err) {
+            devWarn('[Store] Failed to fetch USDCX Token record, using public path:', err)
           }
-        } catch { /* fallback to public buy_shares_usdcx */ }
+        }
       }
 
       const { functionName: betFunctionName, inputs } = buildBuySharesInputs(
@@ -1542,7 +1549,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       // Request transaction through wallet
       // ALEO: buy_shares_private (privacy-preserving, transfer_private_to_public)
-      // USDCX: buy_shares_usdcx (public transfer)
+      // USDCX: buy_shares_private_usdcx (private, Puzzle) or buy_shares_usdcx (public, Shield)
       const transactionId = await walletManager.requestTransaction({
         programId: CONTRACT_INFO.programId,
         functionName: betFunctionName,

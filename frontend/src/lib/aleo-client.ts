@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v23.aleo program
+// Client for interacting with the deployed veiled_markets_v18.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -892,8 +892,9 @@ export function buildCreateMarketInputs(
  * USDCX public: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
  *   Uses transfer_public_as_signer (no record needed).
  * USDCX private: buy_shares_private_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out,
- *   share_nonce, token_record, siblings_0[16], leaf_index_0, siblings_1[16], leaf_index_1)
- *   Uses transfer_private_to_public with flattened MerkleProof inputs (snarkVM parser workaround).
+ *   share_nonce, token_record, siblings_0, leaf_index_0, siblings_1, leaf_index_1)
+ *   Uses flattened MerkleProof inputs to bypass snarkVM parser bug.
+ *   Only works with Puzzle Wallet (server-side proving) — Shield Wallet parser fails on qualified struct names.
  * Frontend pre-computes expected_shares from AMM formula. Record gets this value.
  * Finalize validates shares_out >= expected_shares.
  */
@@ -910,7 +911,7 @@ export function buildBuySharesInputs(
 ): { functionName: string; inputs: string[] } {
   const shareNonce = generateRandomNonce();
 
-  const inputs = [
+  const baseInputs = [
     marketId,
     `${outcome}u8`,
     `${amountIn}u128`,
@@ -920,26 +921,25 @@ export function buildBuySharesInputs(
   ];
 
   if (tokenType === 'USDCX') {
-    // USDCX private path: buy_shares_private_usdcx with flattened MerkleProof
-    if (usdcxTokenRecord && merkleProofs && merkleProofs.length === 2) {
-      inputs.push(usdcxTokenRecord);
-      // Flatten MerkleProof 0: [field; 16] siblings + u32 leaf_index
-      const siblings0 = `[${merkleProofs[0].siblings.join(', ')}]`;
-      inputs.push(siblings0);
-      inputs.push(`${merkleProofs[0].leafIndex}u32`);
-      // Flatten MerkleProof 1: [field; 16] siblings + u32 leaf_index
-      const siblings1 = `[${merkleProofs[1].siblings.join(', ')}]`;
-      inputs.push(siblings1);
-      inputs.push(`${merkleProofs[1].leafIndex}u32`);
+    // Private USDCX path: buy_shares_private_usdcx (needs Token record + MerkleProofs)
+    if (usdcxTokenRecord && merkleProofs && merkleProofs.length >= 2) {
+      const proofs = merkleProofs;
       return {
         functionName: 'buy_shares_private_usdcx',
-        inputs,
+        inputs: [
+          ...baseInputs,
+          usdcxTokenRecord,
+          `[${proofs[0].siblings.join(', ')}]`,
+          `${proofs[0].leafIndex}u32`,
+          `[${proofs[1].siblings.join(', ')}]`,
+          `${proofs[1].leafIndex}u32`,
+        ],
       };
     }
-    // USDCX public fallback: buy_shares_usdcx (transfer_public_as_signer)
+    // Fallback: buy_shares_usdcx (transfer_public_as_signer, public)
     return {
       functionName: 'buy_shares_usdcx',
-      inputs,
+      inputs: baseInputs,
     };
   }
 
@@ -947,10 +947,10 @@ export function buildBuySharesInputs(
   if (!creditsRecord) {
     throw new Error('Credits record is required for ALEO buy_shares_private. Fetch a record via fetchCreditsRecord() first.');
   }
-  inputs.push(creditsRecord);
+  baseInputs.push(creditsRecord);
   return {
     functionName: 'buy_shares_private',
-    inputs,
+    inputs: baseInputs,
   };
 }
 

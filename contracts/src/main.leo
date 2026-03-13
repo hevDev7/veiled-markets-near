@@ -24,7 +24,7 @@ import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 // import test_usad_stablecoin.aleo;  // USAD disabled (snarkVM 31-transition limit)
 
-program veiled_markets_v23.aleo {
+program veiled_markets_v18.aleo {
 
     // ========================================================================
     // CONSTANTS
