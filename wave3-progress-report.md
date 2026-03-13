@@ -3,7 +3,7 @@
 **Period:** Feb 20, 2026 — Mar 6, 2026
 **Branch:** `main`
 **Live Demo:** https://veiledmarkets.xyz
-**Deployed Contract:** `veiled_markets_v17.aleo` (v18 built, deployment pending)
+**Deployed Contract:** `veiled_markets_v22.aleo` (v18 built, deployment pending)
 **Repository:** https://github.com/hevDev7/veiled-markets-near
 
 ---
@@ -212,7 +212,6 @@ CREATE INDEX idx_price_snapshots_time ON price_snapshots (market_id, timestamp D
 
 ### Deployed Programs
 - `veiled_markets_v22.aleo` — Currently active on testnet (Deploy TX: at1mke82n86z838m9dwsktvkzr63wkq2t4ham2heynhrutz5r90nvgs3mktmf)
-- `veiled_markets_v17.aleo` — Previous version (deprecated)
 
 ### v13 Markets on Testnet (4 active)
 1. Test #1 (2 ALEO) — `175421318...530field`
