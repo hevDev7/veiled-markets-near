@@ -96,7 +96,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         program: CONTRACT_INFO.programId,
         function: 'close_market',
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
       if (result?.transactionId) {
         setTransactionId(result.transactionId)
@@ -122,7 +122,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         program: CONTRACT_INFO.programId,
         function: 'resolve_market',
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
       if (result?.transactionId) {
         setTransactionId(result.transactionId)
@@ -147,7 +147,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         program: CONTRACT_INFO.programId,
         function: 'finalize_resolution',
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
       if (result?.transactionId) {
         setTransactionId(result.transactionId)

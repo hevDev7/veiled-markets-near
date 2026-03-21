@@ -34,7 +34,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
     setError(null)
 
     try {
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       const { functionName, inputs } = buildWithdrawCreatorFeesInputs(
         market.id,
         fees.creator_fees,
@@ -45,7 +45,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {

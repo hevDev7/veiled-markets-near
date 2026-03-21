@@ -6,6 +6,8 @@
     "scripts": {
         "index": "tsx src/index-markets.ts",
         "index:watch": "tsx watch src/index-markets.ts",
+        "governance": "tsx src/governance-indexer.ts",
+        "governance:watch": "tsx watch src/governance-indexer.ts",
         "build": "tsc",
         "dev": "tsx watch src/index-markets.ts"
     },

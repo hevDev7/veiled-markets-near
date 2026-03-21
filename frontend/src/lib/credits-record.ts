@@ -251,6 +251,19 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
     }
   }
 
+  // Strategy 5: Record Scanner SDK (fallback for all wallet types)
+  try {
+    devLog('[Bet] Strategy 5: Record Scanner SDK')
+    const { findCreditsRecord: scannerFindCredits } = await import('./record-scanner')
+    const scannedRecord = await scannerFindCredits(minAmountMicro)
+    if (scannedRecord) {
+      devLog('[Bet] Strategy 5 → Found credits record via scanner')
+      return scannedRecord
+    }
+  } catch (err) {
+    devLog('[Bet] Strategy 5 (scanner) failed:', err)
+  }
+
   devLog('[Bet] All strategies exhausted — no Credits record found for buy_shares_private')
   return null
 }
@@ -345,94 +358,16 @@ function findSuitableUsdcxRecord(records: any[], minAmountMicro: number): string
  * Uses the same multi-strategy approach as fetchCreditsRecord.
  */
 export async function fetchUsdcxTokenRecord(minAmountMicro: number): Promise<string | null> {
-  const USDCX_PROGRAM = 'test_usdcx_stablecoin.aleo'
   devLog('[USDCX] === Fetching Token record for private USDCX betting ===')
   devLog(`[USDCX] Need record with >= ${minAmountMicro} micro-USDCX (${minAmountMicro / 1_000_000} USDCX)`)
-
-  // Strategy 1: Adapter requestRecords with plaintext=true
-  const adapterRecords = (window as any).__aleoRequestRecords
-  if (typeof adapterRecords === 'function') {
-    try {
-      devLog('[USDCX] Strategy 1: adapter requestRecords(program, true)')
-      const records = await adapterRecords(USDCX_PROGRAM, true)
-      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      devLog(`[USDCX] Strategy 1 → Got ${recordsArr.length} record(s)`)
-      const found = findSuitableUsdcxRecord(recordsArr, minAmountMicro)
-      if (found) return found
-    } catch (err) {
-      devLog('[USDCX] Strategy 1 failed:', err)
-    }
-
-    // Strategy 2: without plaintext flag + decrypt
-    try {
-      devLog('[USDCX] Strategy 2: adapter requestRecords(program, false) + decrypt')
-      const records = await adapterRecords(USDCX_PROGRAM, false)
-      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      devLog(`[USDCX] Strategy 2 → Got ${recordsArr.length} record(s)`)
-
-      const found = findSuitableUsdcxRecord(recordsArr, minAmountMicro)
-      if (found) return found
-
-      const decryptFn = (window as any).__aleoDecrypt
-      if (typeof decryptFn === 'function' && recordsArr.length > 0) {
-        for (let idx = 0; idx < recordsArr.length; idx++) {
-          const record = recordsArr[idx]
-          if (!record) continue
-          if (record.spent === true || record.is_spent === true) continue
-          const ciphertext = record.ciphertext || record.recordCiphertext || record.record_ciphertext || record.data
-          if (!ciphertext || typeof ciphertext !== 'string') continue
-          try {
-            const decrypted = await decryptFn(ciphertext)
-            const textStr = String(decrypted)
-            const amtMatch = textStr.match(/amount\s*:\s*(\d+)u128/)
-            if (amtMatch && !textStr.includes('microcredits')) {
-              const amt = parseInt(amtMatch[1], 10)
-              if (amt >= minAmountMicro && textStr.includes('{') && textStr.includes('owner')) {
-                devLog(`[USDCX] Strategy 2b: FOUND via decrypt, ${amt} micro-USDCX`)
-                return textStr
-              }
-            }
-          } catch {
-            // Skip records that fail to decrypt
-          }
-        }
-      }
-    } catch (err) {
-      devLog('[USDCX] Strategy 2 failed:', err)
-    }
+  const { findTokenRecord } = await import('./private-stablecoin')
+  const record = await findTokenRecord('USDCX', BigInt(minAmountMicro))
+  if (record) {
+    devLog('[USDCX] Found Token record via shared stablecoin helper')
+    return record
   }
 
-  // Strategy 3: requestRecordPlaintexts
-  const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
-  if (typeof adapterPlaintexts === 'function') {
-    try {
-      devLog('[USDCX] Strategy 3: adapter requestRecordPlaintexts(program)')
-      const records = await adapterPlaintexts(USDCX_PROGRAM)
-      const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      devLog(`[USDCX] Strategy 3 → Got ${recordsArr.length} record(s)`)
-      const found = findSuitableUsdcxRecord(recordsArr, minAmountMicro)
-      if (found) return found
-    } catch (err) {
-      devLog('[USDCX] Strategy 3 failed:', err)
-    }
-  }
-
-  // Strategy 4: Native wallet API
-  const leoWallet = (window as any).leoWallet || (window as any).leo
-  if (leoWallet && typeof leoWallet.requestRecords === 'function') {
-    try {
-      devLog('[USDCX] Strategy 4: native wallet requestRecords(program)')
-      const result = await leoWallet.requestRecords(USDCX_PROGRAM)
-      const records = result?.records || (Array.isArray(result) ? result : [])
-      devLog(`[USDCX] Strategy 4 → Got ${records.length} record(s)`)
-      const found = findSuitableUsdcxRecord(records, minAmountMicro)
-      if (found) return found
-    } catch (err) {
-      devLog('[USDCX] Strategy 4 failed:', err)
-    }
-  }
-
-  devLog('[USDCX] All strategies exhausted — no Token record found')
+  devLog('[USDCX] Shared stablecoin helper returned no Token record')
   return null
 }
 

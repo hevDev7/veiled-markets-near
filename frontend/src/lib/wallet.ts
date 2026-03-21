@@ -36,6 +36,8 @@ export interface WalletBalance {
   private: bigint;
   usdcxPublic: bigint;
   usdcxPrivate: bigint;
+  usadPublic: bigint;
+  usadPrivate: bigint;
 }
 
 export interface TransactionRequest {
@@ -44,6 +46,7 @@ export interface TransactionRequest {
   inputs: string[];
   fee: number;
   network?: string;
+  recordIndices?: number[];
 }
 
 export interface WalletEvents {
@@ -164,9 +167,10 @@ export async function fetchPublicBalance(address: string): Promise<bigint> {
  * Fetch USDCX public balance from test_usdcx_stablecoin.aleo balances mapping.
  * Returns 0n for HTTP 404 (address has no USDCX balance).
  */
-export async function fetchUsdcxPublicBalance(address: string): Promise<bigint> {
+export async function fetchUsdcxPublicBalance(address: string, programId?: string): Promise<bigint> {
   const baseUrl = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-  const url = `${baseUrl}/program/${config.usdcxProgramId}/mapping/balances/${address}`;
+  const pid = programId || config.usdcxProgramId;
+  const url = `${baseUrl}/program/${pid}/mapping/balances/${address}`;
   try {
     const response = await fetch(url);
 
@@ -350,7 +354,7 @@ export class PuzzleWalletAdapter {
           devWarn('Puzzle Wallet: fetchPublicBalance also failed');
         }
       }
-      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
     }
   }
 
@@ -365,6 +369,7 @@ export class PuzzleWalletAdapter {
         functionName: request.functionName,
         fee: request.fee,
         inputs: request.inputs,
+        recordIndices: request.recordIndices,
       });
 
       // Validate inputs
@@ -591,7 +596,7 @@ export class LeoWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -807,6 +812,7 @@ export class LeoWalletAdapter {
         function: request.functionName,
         inputs: request.inputs,
         fee: request.fee,
+        recordIndices: request.recordIndices,
       });
 
       // Validate inputs
@@ -848,6 +854,7 @@ export class LeoWalletAdapter {
           }],
           fee: feeInMicrocredits,
           feePrivate: false,
+          recordIndices: request.recordIndices,
         };
 
         // Method 1: requestExecution with 'testnetbeta' chainId
@@ -901,6 +908,7 @@ export class LeoWalletAdapter {
           inputs: request.inputs,
           fee: adapterFee,
           privateFee: false,
+          recordIndices: request.recordIndices,
         });
       }
 
@@ -1250,7 +1258,7 @@ export class FoxWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -1294,6 +1302,7 @@ export class FoxWalletAdapter {
         inputs: request.inputs,
         fee: request.fee,
         privateFee: false,
+        recordIndices: request.recordIndices,
       });
 
       devLog('Fox Wallet: Transaction result:', result);
@@ -1440,7 +1449,7 @@ export class SoterWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.adapter.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -1484,6 +1493,7 @@ export class SoterWalletAdapter {
         inputs: request.inputs,
         fee: request.fee,
         privateFee: false,
+        recordIndices: request.recordIndices,
       });
 
       devLog('Soter Wallet: Transaction result:', result);
@@ -1576,6 +1586,53 @@ export class ShieldWalletAdapter {
     return (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo;
   }
 
+  private getAllowedPrograms(): string[] {
+    return [
+      config.programId,
+      config.usadProgramId,
+      config.governanceProgramId,
+      'credits.aleo',
+      config.usdcxProgramId,
+      'test_usad_stablecoin.aleo',
+      'merkle_tree.aleo',
+      'test_usdcx_multisig_core.aleo',
+      'test_usdcx_freezelist.aleo',
+      'test_usad_multisig_core.aleo',
+      'test_usad_freezelist.aleo',
+    ];
+  }
+
+  private async resolveAddress(shieldWallet: any): Promise<string | null> {
+    try {
+      if (shieldWallet?.publicKey && typeof shieldWallet.publicKey === 'string') {
+        return shieldWallet.publicKey;
+      }
+    } catch {
+      // Ignore read errors from wallet injection.
+    }
+
+    try {
+      if (typeof shieldWallet?.getAccount === 'function') {
+        const acc = await shieldWallet.getAccount();
+        const address = acc?.address || acc?.publicKey || acc;
+        if (typeof address === 'string') return address;
+      }
+    } catch {
+      // Ignore and continue to other methods.
+    }
+
+    try {
+      if (typeof shieldWallet?.getAddress === 'function') {
+        const address = await shieldWallet.getAddress();
+        if (typeof address === 'string') return address;
+      }
+    } catch {
+      // Ignore and continue to other methods.
+    }
+
+    return null;
+  }
+
   async connect(): Promise<WalletAccount> {
     try {
       devLog('Shield Wallet: Attempting to connect...');
@@ -1590,38 +1647,47 @@ export class ShieldWalletAdapter {
 
       devLog('Shield Wallet: Found wallet object, methods:', Object.keys(shieldWallet));
 
+      const existingAddress = await this.resolveAddress(shieldWallet);
+      if (existingAddress && existingAddress.startsWith('aleo1')) {
+        this.connected = true;
+        this.account = {
+          address: existingAddress,
+          network: 'testnet',
+        };
+        devLog('Shield Wallet: Reusing existing connection:', existingAddress);
+        return this.account;
+      }
+
       // Try to connect using standard Aleo wallet interface
       if (typeof shieldWallet.connect === 'function') {
-        // Try standard Aleo wallet connect pattern
-        try {
-          await shieldWallet.connect('AutoDecrypt', 'testnetbeta', [
-            config.programId, 'credits.aleo', config.usdcxProgramId,
-            'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
-          ]);
-        } catch {
-          // Try alternative connect signature
+        const programs = this.getAllowedPrograms();
+        const attempts: Array<() => Promise<unknown>> = [
+          () => shieldWallet.connect('testnet', 'AutoDecrypt', programs),
+          () => shieldWallet.connect({ network: 'testnet', decryptPermission: 'AutoDecrypt', programs }),
+          () => shieldWallet.connect({ network: 'testnet', programs }),
+          () => shieldWallet.connect('AutoDecrypt', 'testnet', programs),
+          () => shieldWallet.connect('AutoDecrypt', 'testnetbeta', programs),
+          () => shieldWallet.connect(),
+        ];
+
+        let connected = false;
+        for (const attempt of attempts) {
           try {
-            await shieldWallet.connect({ network: 'testnet', programs: [
-              config.programId, 'credits.aleo', config.usdcxProgramId,
-              'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
-            ] });
-          } catch {
-            await shieldWallet.connect();
+            await attempt();
+            connected = true;
+            break;
+          } catch (connectErr) {
+            devLog('Shield Wallet: connect attempt failed:', connectErr);
           }
+        }
+
+        if (!connected) {
+          throw new Error('Shield Wallet connection failed. Please reconnect the dApp in Shield and try again.');
         }
       }
 
       // Get public key / address
-      let address: string | null = null;
-
-      if (shieldWallet.publicKey) {
-        address = shieldWallet.publicKey;
-      } else if (typeof shieldWallet.getAccount === 'function') {
-        const acc = await shieldWallet.getAccount();
-        address = acc?.address || acc?.publicKey || acc;
-      } else if (typeof shieldWallet.getAddress === 'function') {
-        address = await shieldWallet.getAddress();
-      }
+      const address = await this.resolveAddress(shieldWallet);
 
       if (!address || typeof address !== 'string' || !address.startsWith('aleo1')) {
         throw new Error('Shield Wallet connected but no valid Aleo address returned');
@@ -1662,7 +1728,7 @@ export class ShieldWalletAdapter {
 
   async getBalance(): Promise<WalletBalance> {
     if (!this.connected || !this.account) {
-      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
+      return { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
     }
 
     let publicBalance = 0n;
@@ -1728,26 +1794,50 @@ export class ShieldWalletAdapter {
       function: request.functionName,
       inputs: request.inputs,
       fee: request.fee,
+      recordIndices: request.recordIndices,
     });
+
+    const feeInAleo = request.fee || 0.5;
+    const feeInMicrocredits = Math.round(feeInAleo * 1_000_000);
 
     const txData = {
       address: this.account.address,
-      chainId: 'testnetbeta',
+      chainId: 'testnet',
       transitions: [{
         program: request.programId,
         functionName: request.functionName,
         inputs: request.inputs,
       }],
-      fee: request.fee || 0.5,
+      fee: feeInMicrocredits,
       feePrivate: false,
+      recordIndices: request.recordIndices,
     };
 
     let result: any = null;
 
-    // Method 1: requestExecution (preferred for program execution)
-    if (typeof shieldWallet.requestExecution === 'function') {
+    // Method 1: executeTransaction (matches the current official Shield adapter)
+    if (typeof shieldWallet.executeTransaction === 'function') {
       try {
-        devLog('Shield Wallet: Trying requestExecution...');
+        devLog('Shield Wallet: Trying executeTransaction(network=testnet)...');
+        result = await shieldWallet.executeTransaction({
+          network: 'testnet',
+          program: request.programId,
+          function: request.functionName,
+          inputs: request.inputs,
+          fee: feeInMicrocredits,
+          privateFee: false,
+          recordIndices: request.recordIndices,
+        });
+        devLog('Shield Wallet: executeTransaction result:', result);
+      } catch (err: any) {
+        devLog('Shield Wallet: executeTransaction failed:', err?.message || err);
+      }
+    }
+
+    // Method 2: requestExecution using the current testnet chain ID
+    if (!result && typeof shieldWallet.requestExecution === 'function') {
+      try {
+        devLog('Shield Wallet: Trying requestExecution(chainId=testnet)...');
         result = await shieldWallet.requestExecution(txData);
         devLog('Shield Wallet: requestExecution result:', result);
       } catch (err: any) {
@@ -1755,10 +1845,21 @@ export class ShieldWalletAdapter {
       }
     }
 
-    // Method 2: requestTransaction
+    // Method 3: requestExecution fallback for old chain IDs
+    if (!result && typeof shieldWallet.requestExecution === 'function') {
+      try {
+        devLog('Shield Wallet: Trying requestExecution(chainId=testnetbeta)...');
+        result = await shieldWallet.requestExecution({ ...txData, chainId: 'testnetbeta' });
+        devLog('Shield Wallet: requestExecution(testnetbeta) result:', result);
+      } catch (err: any) {
+        devLog('Shield Wallet: requestExecution(testnetbeta) failed:', err?.message || err);
+      }
+    }
+
+    // Method 4: requestTransaction using the current testnet chain ID
     if (!result && typeof shieldWallet.requestTransaction === 'function') {
       try {
-        devLog('Shield Wallet: Trying requestTransaction...');
+        devLog('Shield Wallet: Trying requestTransaction(chainId=testnet)...');
         result = await shieldWallet.requestTransaction(txData);
         devLog('Shield Wallet: requestTransaction result:', result);
       } catch (err: any) {
@@ -1766,20 +1867,14 @@ export class ShieldWalletAdapter {
       }
     }
 
-    // Method 3: executeTransaction (alternative API)
-    if (!result && typeof shieldWallet.executeTransaction === 'function') {
+    // Method 5: requestTransaction fallback for old chain IDs
+    if (!result && typeof shieldWallet.requestTransaction === 'function') {
       try {
-        devLog('Shield Wallet: Trying executeTransaction...');
-        result = await shieldWallet.executeTransaction({
-          program: request.programId,
-          function: request.functionName,
-          inputs: request.inputs,
-          fee: request.fee,
-          privateFee: false,
-        });
-        devLog('Shield Wallet: executeTransaction result:', result);
+        devLog('Shield Wallet: Trying requestTransaction(chainId=testnetbeta)...');
+        result = await shieldWallet.requestTransaction({ ...txData, chainId: 'testnetbeta' });
+        devLog('Shield Wallet: requestTransaction(testnetbeta) result:', result);
       } catch (err: any) {
-        devLog('Shield Wallet: executeTransaction failed:', err?.message || err);
+        devLog('Shield Wallet: requestTransaction(testnetbeta) failed:', err?.message || err);
       }
     }
 
@@ -2125,7 +2220,7 @@ export class WalletManager {
       programId: 'credits.aleo',
       functionName: 'transfer_public',
       inputs: [account.address, '1000u64'],
-      fee: 0.1, // 0.1 ALEO fee
+      fee: 1.5, // 1.5 ALEO fee
     });
   }
 
@@ -2152,7 +2247,7 @@ export class WalletManager {
       programId: 'credits.aleo',
       functionName: 'transfer_public_to_private',
       inputs: [account.address, `${amount}u64`],
-      fee: 0.3, // 0.3 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
+      fee: 1.5, // 1.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
     });
   }
 

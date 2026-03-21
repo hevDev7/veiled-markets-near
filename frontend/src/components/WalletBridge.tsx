@@ -105,7 +105,7 @@ export function WalletBridge() {
           address,
           network: 'testnet',
           balance: isAccountSwitch
-            ? { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n }
+            ? { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n }
             : store.wallet.balance,
           walletType,
           isDemoMode: false,
@@ -141,7 +141,7 @@ export function WalletBridge() {
           connecting: false,
           address: null,
           network: 'testnet',
-          balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n },
+          balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n },
           walletType: null,
           isDemoMode: false,
           encryptionKey: null,
@@ -180,7 +180,7 @@ export function WalletBridge() {
             wallet: {
               ...useWalletStore.getState().wallet,
               address: currentAddress,
-              balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n },
+              balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n },
               encryptionKey: null,
             },
           })

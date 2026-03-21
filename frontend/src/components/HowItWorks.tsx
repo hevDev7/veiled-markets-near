@@ -117,9 +117,9 @@ export function HowItWorks() {
                 <motion.div
                   animate={{ 
                     boxShadow: [
-                      '0 0 40px rgba(139, 92, 246, 0.3)',
-                      '0 0 60px rgba(139, 92, 246, 0.5)',
-                      '0 0 40px rgba(139, 92, 246, 0.3)',
+                      '0 0 40px rgba(124, 58, 237, 0.3)',
+                      '0 0 60px rgba(124, 58, 237, 0.5)',
+                      '0 0 40px rgba(124, 58, 237, 0.3)',
                     ]
                   }}
                   transition={{ duration: 3, repeat: Infinity }}
@@ -166,7 +166,7 @@ export function HowItWorks() {
                   />
                   <defs>
                     <linearGradient id="gradient">
-                      <stop offset="0%" stopColor="#8b5cf6" />
+                      <stop offset="0%" stopColor="#9171f8" />
                       <stop offset="100%" stopColor="#06b6d4" />
                     </linearGradient>
                   </defs>

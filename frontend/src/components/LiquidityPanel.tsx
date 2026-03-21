@@ -106,7 +106,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     setError(null)
 
     try {
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       // CRITICAL: expected_lp_shares is stored in the LP Token record output.
       // If 0, the LP Token will have 0 shares — useless for LP withdrawal.
       // Apply 1% slippage buffer to the frontend estimate.
@@ -123,7 +123,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
@@ -146,7 +146,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     setError(null)
 
     try {
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       // CRITICAL: min_tokens_out is used as the ACTUAL transfer amount in the transition.
       // Estimate LP share value from on-chain pool data, apply 2% slippage buffer.
       // For cancelled markets, each LP share = proportional to total_liquidity / total_lp_shares.
@@ -168,7 +168,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {

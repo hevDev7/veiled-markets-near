@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Type Definitions (v12)
 // ============================================================================
-// Matches the Leo contract: veiled_markets_v22.aleo
+// Matches the Leo contract: veiled_markets_v29.aleo
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -36,6 +36,7 @@ export enum Outcome {
 export enum TokenType {
   ALEO = 1,
   USDCX = 2,
+  USAD = 3,
 }
 
 /**

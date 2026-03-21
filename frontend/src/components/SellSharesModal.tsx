@@ -104,7 +104,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
       }
 
       // Pre-validate market status and token type before submitting
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       try {
         const [onChainMarket, currentBlock] = await Promise.all([
           getMarket(market.id),
@@ -150,7 +150,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
         program: CONTRACT_INFO.programId,
         function: functionName,
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {

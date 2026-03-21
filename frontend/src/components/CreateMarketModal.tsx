@@ -55,7 +55,7 @@ interface MarketFormData {
   resolutionDeadlineDate: string
   resolutionDeadlineTime: string
   resolutionSource: string
-  tokenType: 'ALEO' | 'USDCX'
+  tokenType: 'ALEO' | 'USDCX' | 'USAD'
 }
 
 const categories = [
@@ -286,7 +286,10 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const liquidityMicro = BigInt(Math.floor(parseFloat(formData.initialLiquidity || '10') * 1_000_000));
       const input6 = `${liquidityMicro}u128`;
       const inputs = [input0, input1, input2, input3, input4, input5, input6]
-      const createProgramId = CREATE_MARKET_PROGRAM_ID
+      // Route to correct program based on token type
+      const createProgramId = formData.tokenType === 'USAD'
+        ? config.usadProgramId
+        : CREATE_MARKET_PROGRAM_ID
 
       if (CONTRACT_INFO.programId !== createProgramId) {
         devWarn(
@@ -349,12 +352,13 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
 
       const WALLET_TIMEOUT_MS = 120_000 // 2 minutes
-      const createFunctionName = formData.tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market';
+      const createFunctionName = formData.tokenType === 'USAD' ? 'create_market_usad'
+        : formData.tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market';
       const txPromise = executeTransaction({
         program: createProgramId,
         function: createFunctionName,
         inputs,
-        fee: 3.0, // 3.0 ALEO for create_market (v23: ~2100 stmts, complex finalize + nested transfer)
+        fee: 1.5, // 1.5 ALEO for create_market
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -400,7 +404,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           resolutionSource: formData.resolutionSource || '',
           questionHash,
           creator: wallet.address!,
-          tokenType: formData.tokenType as 'ALEO' | 'USDCX',
+          tokenType: formData.tokenType as 'ALEO' | 'USDCX' | 'USAD',
           createdAt: Date.now(),
         }
 
@@ -952,7 +956,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             <Coins className="w-4 h-4 text-surface-400" />
                             Betting Token
                           </label>
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-3 gap-3">
                             <button
                               onClick={() => updateForm({ tokenType: 'ALEO' })}
                               className={cn(
@@ -975,7 +979,19 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                               )}
                             >
                               <span className="text-lg font-semibold text-white block">USDCX</span>
-                              <span className="text-xs text-surface-400">Stablecoin (testnet)</span>
+                              <span className="text-xs text-surface-400">Stablecoin</span>
+                            </button>
+                            <button
+                              onClick={() => updateForm({ tokenType: 'USAD' })}
+                              className={cn(
+                                "p-3 rounded-xl border-2 transition-all text-center",
+                                formData.tokenType === 'USAD'
+                                  ? "border-brand-500 bg-brand-500/10"
+                                  : "border-surface-700 hover:border-surface-600"
+                              )}
+                            >
+                              <span className="text-lg font-semibold text-white block">USAD</span>
+                              <span className="text-xs text-surface-400">Stablecoin</span>
                             </button>
                           </div>
                         </div>

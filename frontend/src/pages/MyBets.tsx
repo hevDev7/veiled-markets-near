@@ -514,7 +514,7 @@ function BetCard({
   showClaimAction,
 }: {
   bet: Bet
-  market?: { question: string; tokenType?: 'ALEO' | 'USDCX'; numOutcomes?: number; outcomeLabels?: string[] }
+  market?: { question: string; tokenType?: 'ALEO' | 'USDCX' | 'USAD'; numOutcomes?: number; outcomeLabels?: string[] }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
   onRemove?: () => void

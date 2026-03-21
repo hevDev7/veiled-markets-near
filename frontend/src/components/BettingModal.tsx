@@ -69,18 +69,17 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       let inputs: string[] = []
 
       if (tokenType === 'USDCX') {
-        // USDCX: buy_shares_usdcx (public path via transfer_public_as_signer)
-        const availableBalance = wallet.balance.usdcxPublic
-        if (!wallet.isDemoMode && amountMicro > availableBalance) {
+        const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+        if (!wallet.isDemoMode && amountMicro > totalUsdcx) {
           throw new Error(
             `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX (public + private).`
+            `but only have ${(Number(totalUsdcx) / 1_000_000).toFixed(2)} USDCX.`
           )
         }
         const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
         functionName = betResult.functionName
         inputs = betResult.inputs
-        setPrivacyMode('public')
+        setPrivacyMode(wallet.balance.usdcxPrivate > 0n ? 'private' : 'public')
       } else {
         // ALEO: buy_shares_private with credits record
         const gasBuffer = 500_000
@@ -100,13 +99,33 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
       devWarn('[Bet] Using', functionName, '— public mode, inputs:', inputs)
 
-      // Add timeout — wallet can hang after confirmation (especially Shield)
+      // v8: Single TX — append Token record + MerkleProof for stablecoins
       const WALLET_TIMEOUT_MS = 120_000
+      if (tokenType === 'USDCX' || tokenType === 'USAD') {
+        const { findTokenRecord } = await import('@/lib/private-stablecoin')
+        const { buildMerkleProofsForAddress } = await import('@/lib/aleo-client')
+        const tokenRecord = await findTokenRecord(tokenType as 'USDCX' | 'USAD', amountMicro)
+        if (tokenRecord) {
+          if (!wallet.address) {
+            throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
+          }
+          inputs.push(tokenRecord)
+          inputs.push(await buildMerkleProofsForAddress(wallet.address))
+        } else {
+          throw new Error(
+            `No private ${tokenType} Token record found. Please unshield ${tokenType} in Shield Wallet first.`
+          )
+        }
+      }
+      const programId = tokenType === 'USAD'
+        ? (await import('@/lib/config')).config.usadProgramId
+        : CONTRACT_INFO.programId
       const txPromise = executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: programId,
         function: functionName,
         inputs: inputs,
-        fee: 3,
+        fee: 1.5,
+        recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -576,4 +595,3 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     </AnimatePresence>
   )
 }
-

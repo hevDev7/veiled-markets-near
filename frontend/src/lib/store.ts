@@ -81,7 +81,7 @@ export interface Market {
   resolutionSource?: string
   tags?: string[]
   transactionId?: string
-  tokenType?: 'ALEO' | 'USDCX'
+  tokenType?: 'ALEO' | 'USDCX' | 'USAD'
 }
 
 export interface SharePosition {
@@ -112,7 +112,7 @@ export interface Bet {
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
   winningOutcome?: string      // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
-  tokenType?: 'ALEO' | 'USDCX' // v12: token denomination
+  tokenType?: 'ALEO' | 'USDCX' | 'USAD' // v12: token denomination
 }
 
 /** Convert 1-indexed outcome number to string key */
@@ -180,7 +180,7 @@ const initialWalletState: WalletState = {
   connecting: false,
   address: null,
   network: 'testnet',
-  balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n },
+  balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n },
   walletType: null,
   isDemoMode: false,
   encryptionKey: null,
@@ -694,13 +694,125 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         devLog('[Balance] USDCX private: 0 (no Token records found or wallet does not support custom program records)')
       }
 
-      const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic, usdcxPrivate }
+      // Fetch USAD public balance (same pattern as USDCX)
+      let usadPublic = 0n
+      try {
+        usadPublic = await fetchUsdcxPublicBalance(wallet.address, 'test_usad_stablecoin.aleo')
+      } catch {
+        // USAD balance is non-critical
+      }
+
+      // Fetch USAD private balance from Token records (same 3-method pattern as USDCX)
+      let usadPrivate = 0n
+      const usadProgramId = 'test_usad_stablecoin.aleo'
+      // USAD Method 1: adapter requestRecords
+      if (usadPrivate === 0n && (window as any).__aleoRequestRecords) {
+        try {
+          devLog('[Balance] USAD M1: adapter requestRecords...')
+          const records = await (window as any).__aleoRequestRecords(usadProgramId, true)
+          usadPrivate = sumUsdcxRecords(records, 'USAD-M1')
+        } catch {
+          devLog('[Balance] USAD M1 failed')
+        }
+      }
+
+      // USAD Method 2: Direct wallet window object
+      if (usadPrivate === 0n) {
+        const usadWalletObjs: Array<{ name: string; obj: any }> = []
+        const shieldObjUsad = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
+        const leoObjUsad = (window as any).leoWallet || (window as any).leo
+        const foxObjUsad = (window as any).foxwallet?.aleo
+
+        if (connectedType === 'shield' && shieldObjUsad) usadWalletObjs.push({ name: 'Shield', obj: shieldObjUsad })
+        else if (connectedType === 'leo' && leoObjUsad) usadWalletObjs.push({ name: 'Leo', obj: leoObjUsad })
+        else if (connectedType === 'fox' && foxObjUsad) usadWalletObjs.push({ name: 'Fox', obj: foxObjUsad })
+
+        for (const { name: wName, obj: wObj } of usadWalletObjs) {
+          if (usadPrivate > 0n) break
+
+          // 2a: requestRecordPlaintexts
+          if (typeof wObj.requestRecordPlaintexts === 'function') {
+            try {
+              devLog(`[Balance] USAD M2a: ${wName} requestRecordPlaintexts(${usadProgramId})...`)
+              const result = await wObj.requestRecordPlaintexts(usadProgramId)
+              usadPrivate = sumUsdcxRecords(result, `USAD-M2a-${wName}`)
+            } catch (err) {
+              devLog(`[Balance] USAD M2a ${wName} failed:`, err)
+            }
+          }
+
+          // 2b: requestRecords
+          if (usadPrivate === 0n && typeof wObj.requestRecords === 'function') {
+            try {
+              devLog(`[Balance] USAD M2b: ${wName} requestRecords(${usadProgramId})...`)
+              const result = await wObj.requestRecords(usadProgramId)
+              usadPrivate = sumUsdcxRecords(result, `USAD-M2b-${wName}`)
+            } catch (err) {
+              devLog(`[Balance] USAD M2b ${wName} failed:`, err)
+            }
+          }
+
+          // 2c: getRecords (some wallets)
+          if (usadPrivate === 0n && typeof wObj.getRecords === 'function') {
+            try {
+              devLog(`[Balance] USAD M2c: ${wName} getRecords(${usadProgramId})...`)
+              const result = await wObj.getRecords(usadProgramId)
+              usadPrivate = sumUsdcxRecords(result, `USAD-M2c-${wName}`)
+            } catch (err) {
+              devLog(`[Balance] USAD M2c ${wName} failed:`, err)
+            }
+          }
+        }
+      }
+
+      // USAD Method 3: walletManager.getRecords fallback
+      if (usadPrivate === 0n) {
+        try {
+          devLog('[Balance] USAD M3: walletManager.getRecords...')
+          const records = await walletManager.getRecords(usadProgramId)
+          usadPrivate = sumUsdcxRecords(records, 'USAD-M3')
+        } catch {
+          // Non-critical
+        }
+      }
+
+      if (usadPrivate > 0n) {
+        devLog(`[Balance] USAD private total: ${Number(usadPrivate) / 1_000_000} USAD`)
+      } else {
+        devLog('[Balance] USAD private: 0 (no Token records found or wallet does not support custom program records)')
+      }
+
+      // Record Scanner fallback — if wallet methods missed any private balances
+      if (privateBalance === 0n || usdcxPrivate === 0n || usadPrivate === 0n) {
+        try {
+          const { getAllPrivateBalances } = await import('./record-scanner');
+          const scanned = await getAllPrivateBalances();
+          if (privateBalance === 0n && scanned.aleoPrivate > 0n) {
+            privateBalance = scanned.aleoPrivate;
+            devLog(`[Balance] Scanner found ALEO private: ${Number(scanned.aleoPrivate) / 1_000_000}`)
+          }
+          if (usdcxPrivate === 0n && scanned.usdcxPrivate > 0n) {
+            usdcxPrivate = scanned.usdcxPrivate;
+            devLog(`[Balance] Scanner found USDCX private: ${Number(scanned.usdcxPrivate) / 1_000_000}`)
+          }
+          if (usadPrivate === 0n && scanned.usadPrivate > 0n) {
+            usadPrivate = scanned.usadPrivate;
+            devLog(`[Balance] Scanner found USAD private: ${Number(scanned.usadPrivate) / 1_000_000}`)
+          }
+        } catch {
+          devLog('[Balance] Record scanner fallback unavailable')
+        }
+      }
+
+      const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic, usdcxPrivate, usadPublic, usadPrivate }
 
       devLog('[Balance] Final:', {
         public: `${Number(publicBalance) / 1_000_000} ALEO`,
         private: `${Number(privateBalance) / 1_000_000} ALEO`,
         usdcxPublic: `${Number(usdcxPublic) / 1_000_000} USDCX`,
         usdcxPrivate: `${Number(usdcxPrivate) / 1_000_000} USDCX`,
+        usadPublic: `${Number(usadPublic) / 1_000_000} USAD`,
+        usadPrivate: `${Number(usadPrivate) / 1_000_000} USAD`,
       })
 
       set({
@@ -814,7 +926,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v22.aleo program.
+// in the veiled_markets_v29.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1476,9 +1588,8 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const market = realMarkets.find(m => m.id === marketId)
       const marketQuestion = market?.question || `Market ${marketId}`
 
-      // Build inputs for the veiled_markets_v22.aleo contract
-      // ALEO: buy_shares_private (needs credits record)
-      // USDCX: buy_shares_usdcx (public path via transfer_public_as_signer)
+      // Build inputs for the active market contract.
+      // ALEO uses buy_shares_private, stablecoins use Token.record + MerkleProof.
       const tokenType = market?.tokenType || 'ALEO'
       const outcomeNum = outcomeToIndex(outcome)
 
@@ -1504,9 +1615,30 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         amount,
         0n, // expectedShares
         0n, // minSharesOut
-        tokenType as 'ALEO' | 'USDCX',
+        tokenType as 'ALEO' | 'USDCX' | 'USAD',
         creditsRecord,
       )
+
+      if (tokenType === 'USDCX' || tokenType === 'USAD') {
+        const [{ findTokenRecord }, { buildMerkleProofsForAddress }] = await Promise.all([
+          import('./private-stablecoin'),
+          import('./aleo-client'),
+        ])
+
+        const tokenRecord = await findTokenRecord(tokenType, amount)
+        if (!tokenRecord) {
+          throw new Error(
+            `No private ${tokenType} Token record found with at least ${(Number(amount) / 1_000_000).toFixed(2)} ${tokenType}.`
+          )
+        }
+
+        inputs.push(tokenRecord)
+        const walletAddress = get().wallet.address
+        if (!walletAddress) {
+          throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
+        }
+        inputs.push(await buildMerkleProofsForAddress(walletAddress))
+      }
 
       devLog('=== PLACE BET DEBUG ===')
       devLog('Market ID:', marketId)
@@ -1526,13 +1658,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }
 
       // Request transaction through wallet
-      // ALEO: buy_shares_private (privacy-preserving, transfer_private_to_public)
-      // USDCX: buy_shares_usdcx (public path via transfer_public_as_signer)
+      const programId = tokenType === 'USAD' ? config.usadProgramId : CONTRACT_INFO.programId
       const transactionId = await walletManager.requestTransaction({
-        programId: CONTRACT_INFO.programId,
+        programId,
         functionName: betFunctionName,
         inputs,
-        fee: 3, // 3 ALEO fee for v22 (5-level import chain needs higher fee)
+        fee: 1.5, // 1.5 ALEO fee for v22
+        recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
       })
 
       devLog('Bet transaction submitted:', transactionId)

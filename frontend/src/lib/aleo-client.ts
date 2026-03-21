@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v22.aleo program
+// Client for interacting with the deployed veiled_markets_v29.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -30,11 +30,13 @@ export const OUTCOME = {
 export const TOKEN_TYPE = {
   ALEO: 1,
   USDCX: 2,
+  USAD: 3,
 } as const;
 
 export const TOKEN_SYMBOLS: Record<number, string> = {
   1: 'ALEO',
   2: 'USDCX',
+  3: 'USAD',
 };
 
 export const FEES = {
@@ -47,7 +49,24 @@ export const FEES = {
 
 export const CHALLENGE_WINDOW_BLOCKS = 2880n; // ~12 hours
 
-const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx']);
+const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx', 'create_market_usad']);
+
+/**
+ * Get the correct program ID for a given token type.
+ * USAD markets live in a separate program (veiled_markets_usad_v7.aleo).
+ */
+export function getProgramIdForToken(tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO'): string {
+  if (tokenType === 'USAD') return config.usadProgramId;
+  return config.programId;
+}
+
+/**
+ * Get the stablecoin program ID for a given token type.
+ */
+export function getStablecoinProgramId(tokenType: 'USDCX' | 'USAD'): string {
+  if (tokenType === 'USAD') return 'test_usad_stablecoin.aleo';
+  return config.usdcxProgramId;
+}
 
 function isCreateMarketFunction(functionName: unknown): boolean {
   return typeof functionName === 'string' && CREATE_MARKET_FUNCTIONS.has(functionName);
@@ -668,14 +687,16 @@ export async function getCurrentBlockHeight(): Promise<bigint> {
  */
 export async function getMappingValue<T>(
   mappingName: string,
-  key: string
+  key: string,
+  programId?: string
 ): Promise<T | null> {
-  const cacheKey = `${mappingName}:${key}`;
+  const pid = programId || PROGRAM_ID;
+  const cacheKey = `${pid}:${mappingName}:${key}`;
   const cached = getCachedMapping<T>(cacheKey);
   if (cached !== undefined) return cached;
 
   try {
-    const url = `${API_BASE_URL}/program/${PROGRAM_ID}/mapping/${mappingName}/${key}`;
+    const url = `${API_BASE_URL}/program/${pid}/mapping/${mappingName}/${key}`;
     devLog('Fetching mapping:', url);
 
     const response = await fetchWithRetry(url);
@@ -718,8 +739,8 @@ export async function getMappingValue<T>(
 /**
  * Fetch market data by ID
  */
-export async function getMarket(marketId: string): Promise<MarketData | null> {
-  const data = await getMappingValue<Record<string, string>>('markets', marketId);
+export async function getMarket(marketId: string, programId?: string): Promise<MarketData | null> {
+  const data = await getMappingValue<Record<string, string>>('markets', marketId, programId);
   if (!data) return null;
 
   devLog('getMarket parsed data:', data);
@@ -754,8 +775,8 @@ export async function getMarket(marketId: string): Promise<MarketData | null> {
 /**
  * Fetch AMM pool data (v12 - replaces market_pools)
  */
-export async function getAMMPool(marketId: string): Promise<AMMPoolData | null> {
-  const data = await getMappingValue<Record<string, string>>('amm_pools', marketId);
+export async function getAMMPool(marketId: string, programId?: string): Promise<AMMPoolData | null> {
+  const data = await getMappingValue<Record<string, string>>('amm_pools', marketId, programId);
   if (!data) return null;
 
   return {
@@ -776,8 +797,8 @@ export const getMarketPool = getAMMPool;
 /**
  * Fetch market resolution data (v12 - with challenge window fields)
  */
-export async function getMarketResolution(marketId: string): Promise<MarketResolutionData | null> {
-  const data = await getMappingValue<Record<string, string>>('market_resolutions', marketId);
+export async function getMarketResolution(marketId: string, programId?: string): Promise<MarketResolutionData | null> {
+  const data = await getMappingValue<Record<string, string>>('market_resolutions', marketId, programId);
   if (!data) return null;
 
   return {
@@ -825,8 +846,8 @@ export async function getMarketDispute(marketId: string): Promise<DisputeDataRes
  * This reflects actual funds held after winner claims and LP withdrawals.
  * Different from amm_pools.total_liquidity which is frozen after resolution.
  */
-export async function getMarketCredits(marketId: string): Promise<bigint | null> {
-  const data = await getMappingValue<string>('market_credits', marketId);
+export async function getMarketCredits(marketId: string, programId?: string): Promise<bigint | null> {
+  const data = await getMappingValue<string>('market_credits', marketId, programId);
   if (data === null || data === undefined) return null;
   return BigInt(parseAleoValue(data) as bigint);
 }
@@ -866,9 +887,9 @@ export function buildCreateMarketInputs(
   deadline: bigint,
   resolutionDeadline: bigint,
   resolverAddress: string,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
   initialLiquidity: bigint,
-): { functionName: string; inputs: string[] } {
+): { functionName: string; inputs: string[]; programId: string } {
   const inputs = [
     questionHash,
     `${category}u8`,
@@ -879,9 +900,14 @@ export function buildCreateMarketInputs(
     `${initialLiquidity}u128`,
   ];
 
+  const functionName = tokenType === 'USAD' ? 'create_market_usad'
+    : tokenType === 'USDCX' ? 'create_market_usdcx'
+    : 'create_market';
+
   return {
-    functionName: tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market',
+    functionName,
     inputs,
+    programId: getProgramIdForToken(tokenType),
   };
 }
 
@@ -889,9 +915,8 @@ export function buildCreateMarketInputs(
  * Build inputs for buy_shares (v23 AMM trading)
  * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
- * USDCX public: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
- *   Uses transfer_public_as_signer (no record needed).
- * USDCX: buy_shares_usdcx (public path via transfer_public_as_signer, no record needed).
+ * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
+ *   Caller appends Token.record + [MerkleProof; 2].
  * Frontend pre-computes expected_shares from AMM formula. Record gets this value.
  * Finalize validates shares_out >= expected_shares.
  */
@@ -901,9 +926,9 @@ export function buildBuySharesInputs(
   amountIn: bigint,
   expectedShares: bigint,
   minSharesOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
   creditsRecord?: string,
-): { functionName: string; inputs: string[] } {
+): { functionName: string; inputs: string[]; programId: string } {
   const shareNonce = generateRandomNonce();
 
   const baseInputs = [
@@ -915,11 +940,22 @@ export function buildBuySharesInputs(
     shareNonce,
   ];
 
+  if (tokenType === 'USAD') {
+    // buy_shares_usad — caller appends Token record + MerkleProof
+    return {
+      functionName: 'buy_shares_usad',
+      inputs: baseInputs,
+      programId: getProgramIdForToken('USAD'),
+    };
+  }
+
   if (tokenType === 'USDCX') {
-    // v22: buy_shares_usdcx (public path via transfer_public_as_signer)
+    // v29: buy_shares_usdcx — PRIVATE with Token record + MerkleProof
+    // Token record and MerkleProof are appended by the caller (findTokenRecord + buildDefaultMerkleProofs)
     return {
       functionName: 'buy_shares_usdcx',
-      inputs: baseInputs,
+      inputs: baseInputs, // Token record + MerkleProof added by caller
+      programId: getProgramIdForToken('USDCX'),
     };
   }
 
@@ -931,6 +967,7 @@ export function buildBuySharesInputs(
   return {
     functionName: 'buy_shares_private',
     inputs: baseInputs,
+    programId: getProgramIdForToken('ALEO'),
   };
 }
 
@@ -970,7 +1007,7 @@ export function buildDefaultMerkleProofs(): string {
 }
 
 /**
- * Build default flattened Merkle proofs for buy_shares_private_usdcx (v23).
+ * Build default flattened Merkle proofs for buy_shares_usdcx (v23).
  * Returns array of 2 proof objects with siblings and leafIndex separated,
  * for the flattened input format that bypasses snarkVM parser bug.
  */
@@ -1027,17 +1064,22 @@ export function buildSellSharesInputs(
   sharesRecord: string,
   tokensDesired: bigint,
   maxSharesUsed: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
-): { functionName: string; inputs: string[] } {
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+): { functionName: string; inputs: string[]; programId: string } {
   const inputs = [
     sharesRecord,
     `${tokensDesired}u128`,
     `${maxSharesUsed}u128`,
   ];
 
+  const functionName = tokenType === 'USAD' ? 'sell_shares_usad'
+    : tokenType === 'USDCX' ? 'sell_shares_usdcx'
+    : 'sell_shares';
+
   return {
-    functionName: tokenType === 'USDCX' ? 'sell_shares_usdcx' : 'sell_shares',
+    functionName,
     inputs,
+    programId: getProgramIdForToken(tokenType),
   };
 }
 
@@ -1050,8 +1092,8 @@ export function buildAddLiquidityInputs(
   marketId: string,
   amount: bigint,
   expectedLpShares: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
-): { functionName: string; inputs: string[] } {
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+): { functionName: string; inputs: string[]; programId: string } {
   const lpNonce = generateRandomNonce();
 
   const inputs = [
@@ -1061,9 +1103,14 @@ export function buildAddLiquidityInputs(
     lpNonce,
   ];
 
+  const functionName = tokenType === 'USAD' ? 'add_liquidity_usad'
+    : tokenType === 'USDCX' ? 'add_liquidity_usdcx'
+    : 'add_liquidity';
+
   return {
-    functionName: tokenType === 'USDCX' ? 'add_liquidity_usdcx' : 'add_liquidity',
+    functionName,
     inputs,
+    programId: getProgramIdForToken(tokenType),
   };
 }
 
@@ -1099,7 +1146,7 @@ export function buildPlaceBetInputs(
   amount: bigint,
   outcome: 'yes' | 'no',
   expectedShares: bigint = 0n,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
   creditsRecord?: string,
 ): { functionName: string; inputs: string[] } {
   return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, tokenType, creditsRecord);
@@ -1239,7 +1286,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 export function buildWithdrawCreatorFeesInputs(
   marketId: string,
   expectedAmount: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
 ): { functionName: string; inputs: string[] } {
   return {
     functionName: tokenType === 'USDCX' ? 'withdraw_fees_usdcx' : 'withdraw_creator_fees',
@@ -2248,11 +2295,38 @@ export async function fetchAllMarkets(): Promise<Array<{
  */
 export async function fetchMarketById(marketId: string) {
   try {
-    const [market, pool, resolution] = await Promise.all([
+    let [market, pool, resolution] = await Promise.all([
       getMarket(marketId),
       getMarketPool(marketId),
       getMarketResolution(marketId),
     ]);
+
+    // Fallback: try USAD programs and legacy program versions
+    let usedProgramId: string | undefined;
+    if (!market || !pool) {
+      const fallbackPids = [
+        config.usadProgramId,
+        ...config.legacyUsadProgramIds,
+        ...config.legacyProgramIds,
+      ].filter(pid => pid && pid !== PROGRAM_ID);
+      // Deduplicate
+      const uniquePids = [...new Set(fallbackPids)];
+
+      for (const pid of uniquePids) {
+        const [fbMarket, fbPool, fbResolution] = await Promise.all([
+          getMarket(marketId, pid),
+          getMarketPool(marketId, pid),
+          getMarketResolution(marketId, pid),
+        ]);
+        if (fbMarket && fbPool) {
+          market = fbMarket;
+          pool = fbPool;
+          resolution = fbResolution;
+          usedProgramId = pid;
+          break;
+        }
+      }
+    }
 
     if (!market || !pool) {
       return null;
@@ -2262,7 +2336,7 @@ export async function fetchMarketById(marketId: string) {
     let marketCredits: bigint | undefined;
     const status = market.status;
     if (status === 3 || status === 4) { // RESOLVED or CANCELLED
-      const credits = await getMarketCredits(marketId);
+      const credits = await getMarketCredits(marketId, usedProgramId);
       if (credits !== null) marketCredits = credits;
     }
 
@@ -2281,16 +2355,22 @@ export async function fetchMarketById(marketId: string) {
 /**
  * Get the correct redeem/refund function name based on token type (v23)
  */
-export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX'): string {
-  return tokenType === 'USDCX' ? 'redeem_shares_usdcx' : 'redeem_shares';
+export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
+  if (tokenType === 'USAD') return 'redeem_shares_usad';
+  if (tokenType === 'USDCX') return 'redeem_shares_usdcx';
+  return 'redeem_shares';
 }
 
-export function getRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
-  return tokenType === 'USDCX' ? 'claim_refund_usdcx' : 'claim_refund';
+export function getRefundFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
+  if (tokenType === 'USAD') return 'claim_refund_usad';
+  if (tokenType === 'USDCX') return 'claim_refund_usdcx';
+  return 'claim_refund';
 }
 
-export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
-  return tokenType === 'USDCX' ? 'claim_lp_refund_usdcx' : 'claim_lp_refund';
+export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
+  if (tokenType === 'USAD') return 'claim_lp_refund_usad';
+  if (tokenType === 'USDCX') return 'claim_lp_refund_usdcx';
+  return 'claim_lp_refund';
 }
 
 /**
@@ -2300,27 +2380,31 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX'): string {
 export function buildClaimLpRefundInputs(
   lpTokenRecord: string,
   minTokensOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
-): { functionName: string; inputs: string[] } {
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+): { functionName: string; inputs: string[]; programId: string } {
   return {
     functionName: getLpRefundFunction(tokenType),
     inputs: [lpTokenRecord, `${minTokensOut}u128`],
+    programId: getProgramIdForToken(tokenType),
   };
 }
 
 /**
- * Build inputs for withdraw_lp_resolved (v23- LP withdrawal from resolved/finalized market)
+ * Build inputs for withdraw_lp_resolved (v24 - LP withdrawal from resolved/finalized market)
  * withdraw_lp_resolved(lp_token: LPToken, min_tokens_out: u128)
  */
 export function buildWithdrawLpResolvedInputs(
   lpTokenRecord: string,
   minTokensOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' = 'ALEO',
-): { functionName: string; inputs: string[] } {
-  const functionName = tokenType === 'USDCX' ? 'withdraw_lp_resolved_usdcx' : 'withdraw_lp_resolved';
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+): { functionName: string; inputs: string[]; programId: string } {
+  const functionName = tokenType === 'USAD' ? 'withdraw_lp_resolved_usad'
+    : tokenType === 'USDCX' ? 'withdraw_lp_resolved_usdcx'
+    : 'withdraw_lp_resolved';
   return {
     functionName,
     inputs: [lpTokenRecord, `${minTokensOut}u128`],
+    programId: getProgramIdForToken(tokenType),
   };
 }
 
@@ -2331,6 +2415,7 @@ export const getWithdrawFunction = getRedeemFunction;
 export const CONTRACT_INFO = {
   programId: config.programId,
   usdcxProgramId: config.usdcxProgramId,
+  usadProgramId: config.usadProgramId,
   network: 'testnet',
   explorerUrl: config.explorerUrl,
   useMockData: false,

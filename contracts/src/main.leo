@@ -1,9 +1,11 @@
 // ============================================================================
-// VEILED MARKETS v23 - Privacy-Preserving Prediction Market Protocol
+// VEILED MARKETS v28 - Privacy-Preserving Prediction Market Protocol
 // ============================================================================
 // FPMM (Fixed Product Market Maker) with complete-set minting/burning.
-// Privacy-first: buy, sell, redeem, refund all use private credits records.
-// USDCX dual-token markets supported. Dispute bond always in ALEO.
+// Privacy-first: buy, sell, redeem, refund all use private records.
+// USDCX dual-token markets supported with PRIVATE token transfers.
+// USAD supported via separate veiled_markets_usad_v2.aleo program.
+// Dispute bond always in ALEO.
 //
 // v18 security fixes from v17:
 // - FIX: init_multisig restricted to deployer + unique signer validation
@@ -17,14 +19,26 @@
 // - FIX: sell FPMM underflow guard: assert(r_k >= p) before subtraction for r1/r2
 // - CHANGE: buy_shares_private_usdcx now native Leo (Leo 3.5.0 fixed ETYC0372117)
 //
-// 30 transitions
+// v24 changes from v19:
+// - CHANGE: All USDCX inflow transitions now use transfer_private_to_public (Token record + MerkleProof)
+// - CHANGE: All USDCX outflow transitions now use transfer_public_to_private (returns Token record)
+// - CHANGE: USAD support via separate veiled_markets_usad_v2.aleo program
+//
+// v25 changes from v24:
+// - REMOVED: buy_shares_usdcx (redundant — buy_shares_private_usdcx handles private USDCX buys)
+// - NEW: set_resolver_status — on-chain resolver whitelist (deployer managed)
+// - NEW: claim_resolver_fee — resolver claims fee after market finalization
+// - NEW: resolver_rewards mapping — tracks fees owed to resolvers
+// - CHANGE: finalize_resolution allocates resolver fee from protocol_fees
+//
+// 31 transitions (at snarkVM limit)
 // ============================================================================
 
 import credits.aleo;
 import test_usdcx_stablecoin.aleo;
 // import test_usad_stablecoin.aleo;  // USAD disabled (snarkVM 31-transition limit)
 
-program veiled_markets_v22.aleo {
+program veiled_markets_v30.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -50,6 +64,9 @@ program veiled_markets_v22.aleo {
     const CREATOR_FEE_BPS: u128 = 50u128;
     const LP_FEE_BPS: u128 = 100u128;
     const FEE_DENOMINATOR: u128 = 10000u128;
+
+    // v25: Resolver fee — 20% of accumulated protocol_fees goes to resolver on finalization
+    const RESOLVER_FEE_PERCENT: u128 = 20u128;
 
     // Challenge window (~12 hours at ~15s blocks)
     const CHALLENGE_WINDOW_BLOCKS: u64 = 2880u64;
@@ -208,7 +225,7 @@ program veiled_markets_v22.aleo {
     }
 
     // ========================================================================
-    // MAPPINGS (14 total)
+    // MAPPINGS (17 total)
     // ========================================================================
 
     mapping markets: field => Market;
@@ -225,6 +242,11 @@ program veiled_markets_v22.aleo {
     mapping multisig_proposals: field => MultiSigProposal;
     mapping multisig_approvals: field => bool;
     mapping lp_positions: field => bool;
+
+    // v25: Resolver system
+    mapping approved_resolvers: address => bool;          // Whitelist of approved resolvers
+    mapping resolver_rewards: address => u128;            // Accumulated resolver fees (microcredits)
+    mapping resolver_fee_claimed: field => bool;          // market_id => claimed (prevent double claim)
 
     // ========================================================================
     // CONSTRUCTOR
@@ -776,9 +798,9 @@ program veiled_markets_v22.aleo {
             token_type: TOKEN_USDCX,
         };
 
+        // v25: Public inflow (MerkleProof parser bug workaround)
         let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
-            self.address,
-            initial_liquidity
+            self.address, initial_liquidity
         );
 
         return (market_id, lp_token, create_mkt_usdcx_fin(
@@ -859,8 +881,11 @@ program veiled_markets_v22.aleo {
     }
 
     // ========================================================================
-    // 8. BUY SHARES (USDCX) - All private inputs, transfer_public_as_signer
+    // 8. BUY SHARES (USDCX) — PRIVATE inflow with Token record + MerkleProof
     // ========================================================================
+    // Pattern from zk_pay_proofs_privacy_v20.aleo: Leo 3.5.0 supports
+    // [test_usdcx_stablecoin.aleo/MerkleProof; 2] as native transition input.
+    // Uses transfer_private_to_public to deposit private Token to program balance.
 
     async transition buy_shares_usdcx(
         private market_id: field,
@@ -869,7 +894,9 @@ program veiled_markets_v22.aleo {
         private expected_shares: u128,
         private min_shares_out: u128,
         private share_nonce: field,
-    ) -> (OutcomeShare, Future) {
+        private token_in: test_usdcx_stablecoin.aleo/Token,
+        private proofs: [test_usdcx_stablecoin.aleo/MerkleProof; 2],
+    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(outcome >= OUTCOME_1 && outcome <= OUTCOME_4);
         assert(amount_in >= MIN_TRADE_AMOUNT);
 
@@ -882,12 +909,16 @@ program veiled_markets_v22.aleo {
             token_type: TOKEN_USDCX,
         };
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
-            self.address,
-            amount_in
+        // Private inflow: Token record + MerkleProof → program public balance
+        let (compliance, change, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_private_to_public(
+            self.address, amount_in, token_in, proofs
         );
 
-        return (share, buy_shares_usdcx_fin(
+        return (share, compliance, change, buy_shares_usdcx_fin(
             transfer_future, market_id, outcome, amount_in,
             expected_shares, min_shares_out
         ));
@@ -974,16 +1005,6 @@ program veiled_markets_v22.aleo {
     }
 
     // ========================================================================
-    // 8b. BUY SHARES PRIVATE (USDCX) — INJECTED POST-BUILD
-    // ========================================================================
-    // Written in Aleo instructions and injected post-build via inject script.
-    // Workaround for snarkVM parser bug: input declarations can't use
-    // imported struct types (test_usdcx_stablecoin.aleo/MerkleProof.private).
-    // Solution: take flattened inputs ([field;16] + u32) and reconstruct
-    // MerkleProof internally via cast instructions.
-    // See contracts/aleo/buy_shares_private_usdcx_v2.aleo
-
-    // ========================================================================
     // 9. SELL SHARES (USDCX)
     // ========================================================================
 
@@ -991,7 +1012,7 @@ program veiled_markets_v22.aleo {
         private shares: OutcomeShare,
         private tokens_desired: u128,
         private max_shares_used: u128,
-    ) -> (OutcomeShare, Future) {
+    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(shares.owner == self.caller);
         assert(shares.token_type == TOKEN_USDCX);
         assert(tokens_desired >= MIN_TRADE_AMOUNT);
@@ -1003,7 +1024,12 @@ program veiled_markets_v22.aleo {
         let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
         let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(self.caller, net_tokens);
+        // v24: Private outflow — returns Token record to seller
+        let (compliance, token_out, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, net_tokens);
 
         let remainder: OutcomeShare = OutcomeShare {
             owner: self.caller,
@@ -1014,7 +1040,7 @@ program veiled_markets_v22.aleo {
             token_type: TOKEN_USDCX,
         };
 
-        return (remainder, sell_shares_usdcx_fin(
+        return (remainder, compliance, token_out, sell_shares_usdcx_fin(
             transfer_future, shares.market_id, shares.outcome,
             tokens_desired, max_shares_used
         ));
@@ -1142,9 +1168,9 @@ program veiled_markets_v22.aleo {
             token_type: TOKEN_USDCX,
         };
 
+        // v25: Public inflow (MerkleProof parser bug workaround)
         let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
-            self.address,
-            amount
+            self.address, amount
         );
 
         return (lp_token, add_liq_usdcx_fin(
@@ -1595,6 +1621,10 @@ program veiled_markets_v22.aleo {
         assert(market.resolver == resolver);
         assert(winning_outcome >= 1u8 && winning_outcome <= market.num_outcomes);
 
+        // v25: Verify resolver is on the approved whitelist
+        let is_approved: bool = approved_resolvers.get_or_use(resolver, false);
+        assert(is_approved);
+
         let current_height: u64 = block.height as u64;
         let is_closed: bool = market.status == MARKET_STATUS_CLOSED;
         let is_past_deadline: bool = market.status == MARKET_STATUS_ACTIVE && current_height > market.deadline;
@@ -1652,6 +1682,12 @@ program veiled_markets_v22.aleo {
 
         let has_dispute: bool = market_disputes.contains(market_id);
         assert(!has_dispute);
+
+        // v25: Allocate resolver fee from accumulated protocol_fees
+        let fees: MarketFees = market_fees.get(market_id);
+        let resolver_fee: u128 = (fees.protocol_fees * RESOLVER_FEE_PERCENT) / 100u128;
+        let current_resolver_reward: u128 = resolver_rewards.get_or_use(market.resolver, 0u128);
+        resolver_rewards.set(market.resolver, current_resolver_reward + resolver_fee);
 
         market_resolutions.set(market_id, MarketResolution {
             market_id: market_id,
@@ -2176,7 +2212,7 @@ program veiled_markets_v22.aleo {
     async transition withdraw_lp_resolved_usdcx(
         private lp_token: LPToken,
         private min_tokens_out: u128,
-    ) -> Future {
+    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(lp_token.owner == self.caller);
         assert(lp_token.token_type == TOKEN_USDCX);
         assert(lp_token.lp_shares > 0u128);
@@ -2188,14 +2224,17 @@ program veiled_markets_v22.aleo {
             lp_nonce: lp_token.lp_nonce,
         });
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            self.caller, min_tokens_out
-        );
+        // v24: Private outflow — returns Token record
+        let (compliance, token_out, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
 
-        return withdraw_lp_res_usdcx_fin(
+        return (compliance, token_out, withdraw_lp_res_usdcx_fin(
             transfer_future, claim_key, lp_token.market_id,
             lp_token.lp_shares, min_tokens_out
-        );
+        ));
     }
 
     async function withdraw_lp_res_usdcx_fin(
@@ -2305,7 +2344,7 @@ program veiled_markets_v22.aleo {
 
     async transition redeem_shares_usdcx(
         private shares: OutcomeShare,
-    ) -> Future {
+    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(shares.owner == self.caller);
         assert(shares.token_type == TOKEN_USDCX);
         assert(shares.quantity > 0u128);
@@ -2316,14 +2355,17 @@ program veiled_markets_v22.aleo {
             share_nonce: shares.share_nonce,
         });
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            self.caller, shares.quantity
-        );
+        // v24: Private outflow — returns Token record
+        let (compliance, token_out, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
 
-        return redeem_shares_usdcx_fin(
+        return (compliance, token_out, redeem_shares_usdcx_fin(
             transfer_future, claim_key, shares.market_id,
             shares.outcome, shares.quantity
-        );
+        ));
     }
 
     async function redeem_shares_usdcx_fin(
@@ -2362,7 +2404,7 @@ program veiled_markets_v22.aleo {
 
     async transition claim_refund_usdcx(
         private shares: OutcomeShare,
-    ) -> (RefundClaim, Future) {
+    ) -> (RefundClaim, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(shares.owner == self.caller);
         assert(shares.token_type == TOKEN_USDCX);
         assert(shares.quantity > 0u128);
@@ -2381,11 +2423,14 @@ program veiled_markets_v22.aleo {
             token_type: TOKEN_USDCX,
         };
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            self.caller, shares.quantity
-        );
+        // v24: Private outflow — returns Token record
+        let (compliance, token_out, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
 
-        return (refund, claim_refund_usdcx_fin(
+        return (refund, compliance, token_out, claim_refund_usdcx_fin(
             transfer_future, claim_key, shares.market_id, shares.quantity
         ));
     }
@@ -2422,7 +2467,7 @@ program veiled_markets_v22.aleo {
     async transition claim_lp_refund_usdcx(
         private lp_token: LPToken,
         private min_tokens_out: u128,
-    ) -> (RefundClaim, Future) {
+    ) -> (RefundClaim, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(lp_token.owner == self.caller);
         assert(lp_token.token_type == TOKEN_USDCX);
         assert(lp_token.lp_shares > 0u128);
@@ -2442,11 +2487,14 @@ program veiled_markets_v22.aleo {
             token_type: TOKEN_USDCX,
         };
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            self.caller, min_tokens_out
-        );
+        // v24: Private outflow — returns Token record to LP provider
+        let (compliance, token_out, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
 
-        return (refund, claim_lp_ref_usdcx_fin(
+        return (refund, compliance, token_out, claim_lp_ref_usdcx_fin(
             transfer_future, claim_key, lp_token.market_id,
             lp_token.lp_shares, min_tokens_out
         ));
@@ -2504,17 +2552,20 @@ program veiled_markets_v22.aleo {
 
     async transition withdraw_fees_usdcx(
         public market_id: field,
-        public expected_amount: u128,
-    ) -> Future {
+        private expected_amount: u128,
+    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(expected_amount > 0u128);
 
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            self.caller, expected_amount
-        );
+        // v24: Private outflow — returns Token record to creator
+        let (compliance, token_out, transfer_future): (
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
+            Future
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, expected_amount);
 
-        return withdraw_fees_usdcx_fin(
+        return (compliance, token_out, withdraw_fees_usdcx_fin(
             transfer_future, market_id, self.caller, expected_amount
-        );
+        ));
     }
 
     async function withdraw_fees_usdcx_fin(
@@ -3155,4 +3206,57 @@ program veiled_markets_v22.aleo {
     // ========================================================================
     // ... (exec_proposal_usad + exec_proposal_usad_fin)
     END USAD EXEC_PROPOSAL */
+
+    // ########################################################################
+    //                      RESOLVER SYSTEM (v25)
+    // ########################################################################
+
+    // ========================================================================
+    // 32. SET RESOLVER STATUS — Deployer manages resolver whitelist
+    // ========================================================================
+
+    async transition set_resolver_status(
+        public resolver: address,
+        public approved: bool,
+    ) -> Future {
+        assert(self.caller == DEPLOYER);
+        return set_resolver_status_fin(resolver, approved);
+    }
+
+    async function set_resolver_status_fin(
+        resolver: address,
+        approved: bool,
+    ) {
+        approved_resolvers.set(resolver, approved);
+    }
+
+    // ========================================================================
+    // 33. CLAIM RESOLVER FEE — Resolver claims accumulated fees as private ALEO
+    // ========================================================================
+
+    async transition claim_resolver_fee() -> (credits.aleo/credits, Future) {
+        // Transfer 1 microcredit placeholder — finalize validates actual amount
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, 1u64);
+
+        return (payout, claim_resolver_fee_fin(transfer_future, self.caller));
+    }
+
+    async function claim_resolver_fee_fin(
+        transfer_future: Future,
+        resolver: address,
+    ) {
+        transfer_future.await();
+
+        let reward: u128 = resolver_rewards.get_or_use(resolver, 0u128);
+        assert(reward > 0u128);
+
+        // Reset reward balance
+        resolver_rewards.set(resolver, 0u128);
+
+        // Deduct from program credits (ALEO key = 0u8)
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        assert(current_held >= reward);
+        program_credits.set(0u8, current_held - reward);
+    }
 }

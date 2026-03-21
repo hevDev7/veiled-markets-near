@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTRACT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_FILE="$CONTRACT_DIR/build/main.aleo"
-INJECT_FILE="$CONTRACT_DIR/aleo/buy_shares_private_usdcx.aleo"
+INJECT_FILE="$CONTRACT_DIR/aleo/buy_shares_private_usdcx_v3.aleo"
 
 # Validate files exist
 if [ ! -f "$BUILD_FILE" ]; then

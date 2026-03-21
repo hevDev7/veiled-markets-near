@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets_v22.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v29.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 
@@ -174,7 +174,7 @@ async function transformMarketData(
         resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,
-        tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX',
+        tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD',
         remainingCredits: marketCredits,
     }
 }

@@ -35,9 +35,10 @@ export function formatCredits(microcredits: bigint, decimals: number = 2): strin
 /**
  * Token type helpers
  */
-export type TokenType = 'ALEO' | 'USDCX'
+export type TokenType = 'ALEO' | 'USDCX' | 'USAD'
 
 export function getTokenSymbol(tokenType?: TokenType | number): string {
+  if (tokenType === 3 || tokenType === 'USAD') return 'USAD'
   if (tokenType === 2 || tokenType === 'USDCX') return 'USDCX'
   return 'ALEO'
 }
@@ -117,6 +118,39 @@ export function getCategoryEmoji(category: number): string {
     99: '🎯',
   }
   return emojis[category] || '🎯'
+}
+
+/**
+ * Get CSS class for category color strip on cards
+ */
+export function getCategoryStrip(category: number): string {
+  const strips: Record<number, string> = {
+    1: 'category-strip-politics',
+    2: 'category-strip-sports',
+    3: 'category-strip-crypto',
+    4: 'category-strip-entertainment',
+    5: 'category-strip-tech',
+    6: 'category-strip-economics',
+    7: 'category-strip-science',
+    99: 'category-strip-other',
+  }
+  return strips[category] || 'category-strip-other'
+}
+
+/**
+ * Get category accent color for dynamic styling
+ */
+export function getCategoryColor(category: number): { text: string; bg: string; border: string; glow: string } {
+  const colors: Record<number, { text: string; bg: string; border: string; glow: string }> = {
+    1: { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', glow: 'rgba(239, 68, 68, 0.08)' },
+    2: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', glow: 'rgba(16, 185, 129, 0.08)' },
+    3: { text: 'text-brand-400', bg: 'bg-brand-500/10', border: 'border-brand-500/20', glow: 'rgba(124, 58, 237, 0.08)' },
+    4: { text: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', glow: 'rgba(236, 72, 153, 0.08)' },
+    5: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', glow: 'rgba(59, 130, 246, 0.08)' },
+    6: { text: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', glow: 'rgba(245, 158, 11, 0.08)' },
+    7: { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', glow: 'rgba(168, 85, 247, 0.08)' },
+  }
+  return colors[category] || { text: 'text-surface-400', bg: 'bg-surface-500/10', border: 'border-surface-500/20', glow: 'rgba(107, 114, 128, 0.08)' }
 }
 
 /**

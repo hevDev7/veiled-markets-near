@@ -33,7 +33,7 @@ export interface MarketMetadataIPFS {
   resolutionSource: string
   questionHash: string
   creator: string
-  tokenType: 'ALEO' | 'USDCX'
+  tokenType: 'ALEO' | 'USDCX' | 'USAD'
   createdAt: number
 }
 

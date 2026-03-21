@@ -11,6 +11,7 @@ import { useCallback } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { devWarn } from '../lib/logger'
+import { ShieldWalletAdapter as DirectShieldWalletAdapter } from '../lib/wallet'
 
 interface TransactionOptions {
   program: string
@@ -55,6 +56,15 @@ function extractTransactionId(result: any): string | null {
   return null
 }
 
+function isShieldProgramFetchError(message: string): boolean {
+  const msg = message.toLowerCase()
+  return (
+    msg.includes('error finding')
+    || msg.includes('error fetching program')
+    || msg.includes('failed to fetch')
+  )
+}
+
 export function useAleoTransaction() {
   const {
     executeTransaction: adapterExecute,
@@ -93,13 +103,38 @@ export function useAleoTransaction() {
           inputs: options.inputs,
         })
 
-        // === ALL wallets: use ProvableHQ adapter ===
+        // Shield Wallet is still flaky through the shared adapter for some
+        // complex transitions. When we know the active wallet is Shield, use
+        // the direct Shield API first so we can avoid adapter-specific errors.
+        if (isShield) {
+          try {
+            devWarn('[TX] Shield detected — trying direct Shield API first')
+            const directShield = new DirectShieldWalletAdapter()
+            await directShield.connect()
+
+            const txId = await directShield.requestTransaction({
+              programId: options.program,
+              functionName: options.function,
+              inputs: options.inputs,
+              fee: feeAleo,
+              privateFee: privateFeeFlag,
+              recordIndices: options.recordIndices,
+            })
+
+            return { transactionId: txId }
+          } catch (directErr: any) {
+            const directMsg = directErr?.message || directErr?.data?.message || String(directErr)
+            devWarn('[TX] Direct Shield API failed, falling back to adapter:', directMsg)
+          }
+        }
+
+        // === Non-Shield wallets: use ProvableHQ adapter ===
         // Previously we had a Leo Wallet direct path (requestTransaction),
         // but this caused bugs when Shield was misdetected as Leo (both
         // extensions installed → walletType defaults to 'leo' → Shield
         // transactions routed to Leo Wallet which can't handle v12).
         // Leo Wallet can't handle v12 anyway (4-level import chain), so
-        // the direct path is removed. All wallets go through the adapter.
+        // the direct path is removed. All non-Shield wallets go through the adapter.
         const adapterPayload: Record<string, unknown> = {
           program: options.program,
           function: options.function,
@@ -111,7 +146,35 @@ export function useAleoTransaction() {
         if (options.recordIndices && options.recordIndices.length > 0) {
           adapterPayload.recordIndices = options.recordIndices
         }
-        const result = await (adapterExecute as any)(adapterPayload)
+        let result: unknown
+        try {
+          result = await (adapterExecute as any)(adapterPayload)
+        } catch (adapterErr: any) {
+          const adapterMsg = adapterErr?.message || adapterErr?.data?.message || String(adapterErr)
+
+          if (isShield && isShieldProgramFetchError(adapterMsg)) {
+            devWarn(
+              '[TX] Shield adapter failed to fetch program, retrying via direct Shield API:',
+              adapterMsg,
+            )
+
+            const directShield = new DirectShieldWalletAdapter()
+            await directShield.connect()
+
+            const txId = await directShield.requestTransaction({
+              programId: options.program,
+              functionName: options.function,
+              inputs: options.inputs,
+              fee: feeAleo,
+              privateFee: privateFeeFlag,
+              recordIndices: options.recordIndices,
+            })
+
+            return { transactionId: txId }
+          }
+
+          throw adapterErr
+        }
 
         const txId = extractTransactionId(result)
         if (txId) {
@@ -142,6 +205,15 @@ export function useAleoTransaction() {
           throw new Error(
             'Shield Wallet cannot process this transaction. ' +
             'Please try using Puzzle Wallet instead, which supports complex programs via server-side proving.'
+          )
+        }
+
+        if (isShield && isShieldProgramFetchError(msg)) {
+          throw new Error(
+            `Shield Wallet could not fetch "${options.program}" from Aleo testnet, ` +
+            'even though the program is deployed. ' +
+            'Please disconnect and reconnect Shield Wallet, then try again. ' +
+            'If it still fails, update Shield or use Puzzle Wallet for this transaction.'
           )
         }
 

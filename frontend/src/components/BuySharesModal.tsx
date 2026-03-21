@@ -155,18 +155,19 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const expectedShares = minSharesOut
 
       if (isUsdcx) {
-        // USDCX: buy_shares_usdcx (public path via transfer_public_as_signer)
-        const availableBalance = wallet.balance.usdcxPublic
-        if (!wallet.isDemoMode && amountMicro > availableBalance) {
+        // USDCX: check total balance (public + private)
+        const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+        if (!wallet.isDemoMode && amountMicro > totalUsdcx) {
           throw new Error(
             `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(availableBalance) / 1_000_000).toFixed(2)} USDCX (public + private).`
+            `but only have ${(Number(totalUsdcx) / 1_000_000).toFixed(2)} USDCX.`
           )
         }
         const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'USDCX')
         functionName = result.functionName
         inputs = result.inputs
-        setPrivacyMode('public')
+        // Use private flow if user has private USDCX balance
+        setPrivacyMode(wallet.balance.usdcxPrivate > 0n ? 'private' : 'public')
       } else {
         // ALEO: buy_shares_private uses transfer_private_to_public (needs credits record)
         // Need enough for bet amount + gas fee buffer (1.5 ALEO = 1,500,000 microcredits)
@@ -191,11 +192,33 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
       const WALLET_TIMEOUT_MS = 120_000 // 2 minutes
 
+      // v8: Single TX — append Token record + MerkleProof for stablecoins
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      if (tokenType === 'USDCX' || tokenType === 'USAD') {
+        const { findTokenRecord } = await import('@/lib/private-stablecoin')
+        const { buildMerkleProofsForAddress } = await import('@/lib/aleo-client')
+        const tokenRecord = await findTokenRecord(tokenType, amountMicro)
+        if (tokenRecord) {
+          if (!wallet.address) {
+            throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
+          }
+          inputs!.push(tokenRecord)
+          inputs!.push(await buildMerkleProofsForAddress(wallet.address))
+        } else {
+          throw new Error(
+            `No private ${tokenType} Token record found. Please unshield ${tokenType} in Shield Wallet first.`
+          )
+        }
+      }
+      const programId = tokenType === 'USAD'
+        ? (await import('@/lib/config')).config.usadProgramId
+        : CONTRACT_INFO.programId
       const txPromise = executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: programId,
         function: functionName!,
         inputs: inputs!,
-        fee: 3,
+        fee: 1.5,
+        recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -329,7 +352,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                                   : `border-surface-700 hover:border-${color}-500/50 hover:bg-${color}-500/5`
                               )}
                               style={isSelected ? {
-                                borderColor: color === 'yes' ? '#22c55e' : color === 'no' ? '#ef4444' : color === 'brand' ? '#8b5cf6' : '#eab308',
+                                borderColor: color === 'yes' ? '#22c55e' : color === 'no' ? '#ef4444' : color === 'brand' ? '#9171f8' : '#eab308',
                                 backgroundColor: color === 'yes' ? 'rgba(34,197,94,0.1)' : color === 'no' ? 'rgba(239,68,68,0.1)' : color === 'brand' ? 'rgba(139,92,246,0.1)' : 'rgba(234,179,8,0.1)',
                               } : {}}
                             >

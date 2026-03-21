@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
-import { Landing, Dashboard, MyBets, History, MarketDetail, Settings } from './pages'
+import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance } from './pages'
 import { useWalletStore } from './lib/store'
 import { initializeMarketIds } from './lib/aleo-client'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -100,6 +100,14 @@ function App() {
             <ProtectedRoute>
               <Settings />
             </ProtectedRoute>
+          }
+        />
+
+        {/* Governance Page — accessible without wallet for viewing */}
+        <Route
+          path="/governance"
+          element={
+            <Governance />
           }
         />
 

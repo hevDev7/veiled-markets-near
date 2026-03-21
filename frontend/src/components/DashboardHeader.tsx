@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Menu,
   X,
+  Vote,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -25,6 +26,7 @@ const navItems = [
   { name: 'Markets', href: '/dashboard', icon: LayoutDashboard },
   { name: 'My Bets', href: '/bets', icon: TrendingUp },
   { name: 'History', href: '/history', icon: History },
+  { name: 'Governance', href: '/governance', icon: Vote },
 ]
 
 export function DashboardHeader() {
@@ -37,10 +39,22 @@ export function DashboardHeader() {
   const [copied, setCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Close mobile menu on route change
   useEffect(() => {
     setShowMobileMenu(false)
   }, [location.pathname])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!showDropdown) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('[data-wallet-dropdown]')) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showDropdown])
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -65,38 +79,29 @@ export function DashboardHeader() {
     } catch (e) {
       console.error('Disconnect error:', e)
     }
-    // WalletBridge will sync disconnected state to useWalletStore
     setShowDropdown(false)
     navigate('/')
   }
 
-  // Get total balance (public + private)
   const totalBalance = wallet.balance.public + wallet.balance.private
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50">
-      {/* Backdrop blur */}
-      <div className="absolute inset-0 bg-surface-950/80 backdrop-blur-xl border-b border-surface-800/50" />
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-surface-950/70 backdrop-blur-2xl" style={{ borderBottom: '1px solid rgba(48, 40, 71, 0.3)' }} />
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 md:h-20">
-          {/* Logo */}
-          <motion.div
-            className="flex items-center gap-8"
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5 }}
-          >
+        <div className="flex items-center justify-between h-16 lg:h-18">
+          {/* Logo + Nav */}
+          <div className="flex items-center gap-8">
             <Link to="/dashboard" className="flex items-center gap-3 group">
-              <div className="relative">
-                <img
-                  src="/logo.png"
-                  alt="Veiled Markets"
-                  className="h-10 w-10 object-cover rounded-xl"
-                />
-              </div>
+              <img
+                src="/logo.png"
+                alt="Veiled Markets"
+                className="h-9 w-9 object-cover rounded-xl transition-transform group-hover:scale-105"
+              />
               <div className="hidden sm:block">
-                <h1 className="font-display text-xl font-bold" style={{ letterSpacing: '0.02em' }}>
+                <h1 className="font-display text-lg font-bold tracking-tight">
                   <span className="gradient-text">Veiled</span>
                   <span className="text-white"> Markets</span>
                 </h1>
@@ -112,11 +117,12 @@ export function DashboardHeader() {
                     key={item.name}
                     to={item.href}
                     className={cn(
-                      'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                      'flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200',
                       isActive
-                        ? 'text-white bg-surface-800/80'
-                        : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
+                        ? 'text-white bg-surface-800/70'
+                        : 'text-surface-400 hover:text-white hover:bg-surface-800/40'
                     )}
+                    style={isActive ? { boxShadow: 'inset 0 0 0 1px rgba(48, 40, 71, 0.5)' } : undefined}
                   >
                     <item.icon className="w-4 h-4" />
                     {item.name}
@@ -124,110 +130,117 @@ export function DashboardHeader() {
                 )
               })}
             </nav>
-          </motion.div>
+          </div>
 
           {/* Right Side */}
-          <motion.div
-            className="flex items-center gap-2 sm:gap-3"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-          >
-            {/* Demo Mode Badge */}
+          <div className="flex items-center gap-2.5">
+            {/* Demo Mode */}
             {wallet.isDemoMode && (
-              <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent-500/10 border border-accent-500/30 text-accent-400 text-xs font-medium">
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold"
+                style={{ background: 'rgba(20, 200, 191, 0.08)', border: '1px solid rgba(20, 200, 191, 0.15)', color: '#67e8f9' }}
+              >
                 <Gamepad2 className="w-3 h-3" />
-                <span>Demo Mode</span>
+                <span>Demo</span>
               </div>
             )}
 
             {/* Network Badge */}
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-800/50 border border-surface-700/50 text-surface-400 text-xs font-medium">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-surface-400"
+              style={{ background: 'rgba(14, 10, 31, 0.5)', border: '1px solid rgba(48, 40, 71, 0.3)' }}
+            >
               <div className={cn(
-                'w-2 h-2 rounded-full',
+                'w-1.5 h-1.5 rounded-full animate-pulse',
                 wallet.network === 'mainnet' ? 'bg-yes-400' : 'bg-accent-400'
               )} />
               <span className="capitalize">{wallet.network}</span>
             </div>
 
             {/* Privacy Badge */}
-            <div className="hidden sm:flex privacy-indicator">
+            <div className="hidden lg:flex privacy-indicator">
               <Shield className="w-3 h-3" />
-              <span>ZK Protected</span>
+              <span>ZK</span>
             </div>
 
-            {/* Mobile Menu Button */}
+            {/* Mobile Menu */}
             <button
               onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="md:hidden p-2 rounded-lg hover:bg-surface-800/50 text-surface-400 hover:text-white transition-colors"
+              className="md:hidden p-2 rounded-lg text-surface-400 hover:text-white hover:bg-surface-800/40 transition-colors"
             >
               {showMobileMenu ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
 
-            {/* Wallet Dropdown */}
-            <div className="relative">
+            {/* Wallet Button */}
+            <div className="relative" data-wallet-dropdown>
               <button
                 onClick={() => setShowDropdown(!showDropdown)}
                 className={cn(
-                  'flex items-center gap-3 px-4 py-2.5 rounded-xl',
-                  'bg-surface-800/80 border border-surface-700/50',
-                  'hover:border-brand-500/50 transition-all duration-200',
-                  showDropdown && 'border-brand-500/50'
+                  'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-all duration-200',
+                  showDropdown
+                    ? 'bg-surface-800/80'
+                    : 'bg-surface-800/50 hover:bg-surface-800/70'
                 )}
+                style={{ border: `1px solid ${showDropdown ? 'rgba(124, 58, 237, 0.3)' : 'rgba(48, 40, 71, 0.4)'}` }}
               >
                 <div className="flex items-center gap-2">
                   <div className={cn(
                     'w-2 h-2 rounded-full animate-pulse',
                     wallet.isDemoMode ? 'bg-accent-400' : 'bg-yes-400'
                   )} />
-                  <span className="text-sm font-medium text-white">
+                  <span className="text-sm font-semibold text-white">
                     {shortenAddress(wallet.address || '', 4)}
                   </span>
                 </div>
-                <div className="h-4 w-px bg-surface-700" />
-                <span className="text-sm text-surface-400">
-                  {formatCredits(totalBalance, 0)} <span className="text-xs">ALEO</span>
+                <div className="h-4 w-px bg-surface-700/50" />
+                <span className="text-sm text-surface-400 tabular-nums">
+                  {formatCredits(totalBalance, 1)} <span className="text-xs text-surface-500">ALEO</span>
                 </span>
                 <ChevronDown className={cn(
-                  'w-4 h-4 text-surface-400 transition-transform',
+                  'w-3.5 h-3.5 text-surface-500 transition-transform duration-200',
                   showDropdown && 'rotate-180'
                 )} />
               </button>
 
-              {/* Dropdown Menu */}
+              {/* Dropdown */}
               {showDropdown && (
                 <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute right-0 top-full mt-2 w-80 p-2 rounded-xl bg-surface-900 border border-surface-800 shadow-2xl"
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-full mt-2 w-80 rounded-xl p-1.5 shadow-elevated-lg z-50"
+                  style={{
+                    background: 'rgba(14, 10, 31, 0.95)',
+                    backdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(48, 40, 71, 0.6)',
+                  }}
                 >
-                  {/* Demo Mode Warning */}
+                  {/* Demo Warning */}
                   {wallet.isDemoMode && (
-                    <div className="mx-1 mb-2 p-3 rounded-lg bg-accent-500/10 border border-accent-500/20">
-                      <div className="flex items-center gap-2 text-accent-400 text-sm font-medium mb-1">
+                    <div className="mx-1 mb-1.5 p-3 rounded-lg"
+                      style={{ background: 'rgba(20, 200, 191, 0.06)', border: '1px solid rgba(20, 200, 191, 0.12)' }}
+                    >
+                      <div className="flex items-center gap-2 text-accent-400 text-sm font-semibold mb-1">
                         <Gamepad2 className="w-4 h-4" />
-                        Demo Mode Active
+                        Demo Mode
                       </div>
                       <p className="text-xs text-surface-400">
-                        Connect a real wallet to make actual transactions on Aleo.
+                        Connect a real wallet for actual transactions on Aleo.
                       </p>
                     </div>
                   )}
 
                   {/* Wallet Info */}
-                  <div className="p-3 border-b border-surface-800">
-                    <div className="flex items-center justify-between mb-1">
+                  <div className="p-3" style={{ borderBottom: '1px solid rgba(48, 40, 71, 0.5)' }}>
+                    <div className="flex items-center justify-between mb-1.5">
                       <p className="text-xs text-surface-500">
-                        {wallet.walletType === 'puzzle' && '🧩 Puzzle Wallet'}
-                        {wallet.walletType === 'leo' && '🦁 Leo Wallet'}
-                        {wallet.walletType === 'shield' && '🛡️ Shield Wallet'}
-                        {wallet.walletType === 'fox' && '🦊 Fox Wallet'}
-                        {wallet.walletType === 'soter' && '🛡️ Soter Wallet'}
-                        {wallet.walletType === 'demo' && '🎮 Demo Wallet'}
+                        {wallet.walletType === 'puzzle' && '🧩 Puzzle'}
+                        {wallet.walletType === 'leo' && '🦁 Leo'}
+                        {wallet.walletType === 'shield' && '🛡️ Shield'}
+                        {wallet.walletType === 'fox' && '🦊 Fox'}
+                        {wallet.walletType === 'soter' && '🛡️ Soter'}
+                        {wallet.walletType === 'demo' && '🎮 Demo'}
                       </p>
                       <span className={cn(
-                        'text-xs px-2 py-0.5 rounded-full',
+                        'text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-wider',
                         wallet.network === 'mainnet'
                           ? 'bg-yes-500/10 text-yes-400'
                           : 'bg-accent-500/10 text-accent-400'
@@ -236,88 +249,98 @@ export function DashboardHeader() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-mono text-white truncate flex-1">
+                      <span className="text-sm font-mono text-surface-300 truncate flex-1">
                         {wallet.address}
                       </span>
                       <button
                         onClick={handleCopy}
-                        className="p-1.5 rounded-lg hover:bg-surface-800 transition-colors"
+                        className="p-1.5 rounded-lg hover:bg-surface-800/60 transition-colors flex-shrink-0"
                       >
                         {copied ? (
-                          <Check className="w-4 h-4 text-yes-400" />
+                          <Check className="w-3.5 h-3.5 text-yes-400" />
                         ) : (
-                          <Copy className="w-4 h-4 text-surface-400" />
+                          <Copy className="w-3.5 h-3.5 text-surface-400" />
                         )}
                       </button>
                     </div>
                   </div>
 
                   {/* Balance Card */}
-                  <div className="p-3 m-1 rounded-lg bg-gradient-to-br from-brand-500/10 to-accent-500/10 border border-brand-500/20">
+                  <div className="p-3 m-1.5 rounded-xl" style={{
+                    background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(20, 200, 191, 0.04))',
+                    border: '1px solid rgba(124, 58, 237, 0.12)',
+                  }}>
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-surface-400">Total Balance</p>
+                      <p className="text-xs text-surface-400 font-medium">Total Balance</p>
                       <button
                         onClick={handleRefreshBalance}
                         disabled={refreshing}
-                        className="p-1 rounded hover:bg-surface-800/50 transition-colors"
+                        className="p-1 rounded-md hover:bg-surface-800/40 transition-colors"
                       >
                         <RefreshCw className={cn(
-                          'w-3.5 h-3.5 text-surface-400',
+                          'w-3.5 h-3.5 text-surface-500',
                           refreshing && 'animate-spin'
                         )} />
                       </button>
                     </div>
-                    <p className="text-2xl font-bold text-white mb-3">
-                      {formatCredits(totalBalance)} <span className="text-sm text-surface-400">ALEO</span>
+                    <p className="text-2xl font-display font-bold text-white mb-3 tabular-nums">
+                      {formatCredits(totalBalance)} <span className="text-sm text-surface-400 font-sans font-medium">ALEO</span>
                     </p>
 
-                    {/* Balance breakdown */}
-                    <div className="pt-3 border-t border-surface-700/50">
+                    <div className="pt-3 space-y-1.5" style={{ borderTop: '1px solid rgba(48, 40, 71, 0.3)' }}>
                       <div className="flex justify-between items-center">
-                        <p className="text-xs text-surface-500">Public (used for betting)</p>
-                        <p className="text-sm font-medium text-white">
+                        <p className="text-xs text-surface-500">Public</p>
+                        <p className="text-sm font-medium text-surface-200 tabular-nums">
                           {formatCredits(wallet.balance.public)} ALEO
                         </p>
                       </div>
                       {wallet.balance.private > 0n ? (
-                        <div className="flex justify-between items-center mt-1">
+                        <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">Private</p>
-                          <p className="text-sm font-medium text-white">
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">
                             {formatCredits(wallet.balance.private)} ALEO
                           </p>
                         </div>
                       ) : wallet.walletType === 'shield' ? (
-                        <p className="text-[10px] text-surface-500 mt-2">
-                          Private balance detection is not yet supported by Shield Wallet extension.
-                          Your private credits are safe — they just can't be read by dApps yet.
+                        <p className="text-[10px] text-surface-500 mt-1.5 leading-relaxed">
+                          Private balance detection not yet supported by Shield Wallet.
                         </p>
                       ) : null}
-                      {wallet.balance.usdcxPublic > 0n && (
-                        <div className="flex justify-between items-center mt-1">
-                          <p className="text-xs text-surface-500">USDCX (Public)</p>
-                          <p className="text-sm font-medium text-white">
-                            {formatCredits(wallet.balance.usdcxPublic)} USDCX
-                          </p>
-                        </div>
-                      )}
-                      {wallet.balance.usdcxPrivate > 0n && (
-                        <div className="flex justify-between items-center mt-1">
-                          <p className="text-xs text-surface-500">USDCX (Private)</p>
-                          <p className="text-sm font-medium text-white">
-                            {formatCredits(wallet.balance.usdcxPrivate)} USDCX
-                          </p>
-                        </div>
-                      )}
+                      {/* USDCX Balances */}
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-surface-500">USDCX (Public)</p>
+                        <p className="text-sm font-medium text-surface-200 tabular-nums">
+                          {formatCredits(wallet.balance.usdcxPublic)} USDCX
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-surface-500">USDCX (Private)</p>
+                        <p className="text-sm font-medium text-surface-200 tabular-nums">
+                          {formatCredits(wallet.balance.usdcxPrivate)} USDCX
+                        </p>
+                      </div>
+                      {/* USAD Balances */}
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-surface-500">USAD (Public)</p>
+                        <p className="text-sm font-medium text-surface-200 tabular-nums">
+                          {formatCredits(wallet.balance.usadPublic)} USAD
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-surface-500">USAD (Private)</p>
+                        <p className="text-sm font-medium text-surface-200 tabular-nums">
+                          {formatCredits(wallet.balance.usadPrivate)} USAD
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-
-                  {/* Menu Items */}
-                  <div className="p-1 mt-1 border-t border-surface-800">
+                  {/* Menu */}
+                  <div className="p-1 mt-0.5" style={{ borderTop: '1px solid rgba(48, 40, 71, 0.5)' }}>
                     <Link
                       to="/settings"
                       onClick={() => setShowDropdown(false)}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-surface-300 hover:text-white hover:bg-surface-800/50 transition-colors"
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-surface-300 hover:text-white hover:bg-surface-800/40 transition-colors"
                     >
                       <Settings className="w-4 h-4" />
                       Settings
@@ -327,7 +350,7 @@ export function DashboardHeader() {
                         href={`https://testnet.explorer.provable.com/address/${wallet.address}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-surface-300 hover:text-white hover:bg-surface-800/50 transition-colors"
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-surface-300 hover:text-white hover:bg-surface-800/40 transition-colors"
                       >
                         <ExternalLink className="w-4 h-4" />
                         View on Explorer
@@ -335,25 +358,30 @@ export function DashboardHeader() {
                     )}
                     <button
                       onClick={handleDisconnect}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-no-400 hover:text-no-300 hover:bg-no-500/10 transition-colors"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-no-400 hover:text-no-300 hover:bg-no-500/8 transition-colors"
                     >
                       <LogOut className="w-4 h-4" />
-                      {wallet.isDemoMode ? 'Exit Demo Mode' : 'Disconnect Wallet'}
+                      {wallet.isDemoMode ? 'Exit Demo' : 'Disconnect'}
                     </button>
                   </div>
                 </motion.div>
               )}
             </div>
-          </motion.div>
+          </div>
         </div>
       </div>
 
-      {/* Mobile Menu Dropdown */}
+      {/* Mobile Menu */}
       {showMobileMenu && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="md:hidden absolute top-full left-0 right-0 bg-surface-950/95 backdrop-blur-xl border-b border-surface-800/50 p-4"
+          className="md:hidden absolute top-full left-0 right-0 p-4"
+          style={{
+            background: 'rgba(2, 6, 23, 0.95)',
+            backdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(48, 40, 71, 0.4)',
+          }}
         >
           <nav className="space-y-1">
             {navItems.map((item) => {
@@ -366,8 +394,8 @@ export function DashboardHeader() {
                   className={cn(
                     'flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors',
                     isActive
-                      ? 'text-white bg-surface-800/80'
-                      : 'text-surface-400 hover:text-white hover:bg-surface-800/50'
+                      ? 'text-white bg-surface-800/60'
+                      : 'text-surface-400 hover:text-white hover:bg-surface-800/30'
                   )}
                 >
                   <item.icon className="w-5 h-5" />
@@ -376,9 +404,9 @@ export function DashboardHeader() {
               )
             })}
           </nav>
-          <div className="mt-3 pt-3 border-t border-surface-800/50 flex items-center gap-2">
+          <div className="mt-3 pt-3 flex items-center gap-3" style={{ borderTop: '1px solid rgba(48, 40, 71, 0.4)' }}>
             <div className={cn(
-              'w-2 h-2 rounded-full',
+              'w-1.5 h-1.5 rounded-full',
               wallet.network === 'mainnet' ? 'bg-yes-400' : 'bg-accent-400'
             )} />
             <span className="text-xs text-surface-400 capitalize">{wallet.network}</span>
@@ -390,4 +418,3 @@ export function DashboardHeader() {
     </header>
   )
 }
-

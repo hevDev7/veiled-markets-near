@@ -25,11 +25,13 @@ import {
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString } from '@/lib/store'
+import { config } from '@/lib/config'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
   buildBuySharesInputs,
   buildSellSharesInputs,
+  buildMerkleProofsForAddress,
   getCurrentBlockHeight,
   getMarketResolution,
   getMarketFees,
@@ -41,6 +43,7 @@ import {
   type DisputeDataResult,
 } from '@/lib/aleo-client'
 import { OddsChart } from '@/components/OddsChart'
+import { CryptoPriceChart } from '@/components/CryptoPriceChart'
 // fetchCreditsRecord dynamically imported where needed for buy_shares_private
 import type { ParsedOutcomeShare } from '@/lib/credits-record'
 import {
@@ -379,8 +382,8 @@ export function MarketDetail() {
         )
       }
 
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX'
-      const { functionName, inputs } = buildSellSharesInputs(
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const { functionName, inputs, programId: sellProgramId } = buildSellSharesInputs(
         sellShareRecord,
         sellTokensMicro,
         sellPreview.maxSharesUsed,
@@ -388,10 +391,10 @@ export function MarketDetail() {
       )
 
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: sellProgramId,
         function: functionName,
         inputs,
-        fee: 3,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
@@ -590,7 +593,7 @@ export function MarketDetail() {
       }
 
       // Pre-flight: Balance verification
-      const feeInMicro = 700_000n
+      const feeInMicro = 1_500_000n
       if (isUsdcx) {
         const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
         if (buyAmountMicro > totalUsdcx) {
@@ -634,21 +637,65 @@ export function MarketDetail() {
           buyAmountMicro,
           expectedShares,
           tradePreview.minShares,
-          tokenType as 'ALEO' | 'USDCX',
+          tokenType as 'ALEO' | 'USDCX' | 'USAD',
           creditsRecord,
         )
         functionName = result.functionName
         inputs = result.inputs
+
+        // v29: USDCX private buy — append Token record + MerkleProof to inputs
+        if (tokenType === 'USDCX') {
+          const { findTokenRecord } = await import('@/lib/private-stablecoin')
+          const tokenRecord = await findTokenRecord('USDCX', buyAmountMicro)
+          if (tokenRecord) {
+            if (!wallet.address) {
+              throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
+            }
+            inputs.push(tokenRecord)
+            inputs.push(await buildMerkleProofsForAddress(wallet.address))
+            devWarn('[Trade] USDCX PRIVATE buy — Token record + MerkleProof appended')
+          } else {
+            throw new Error(
+              `No private USDCX Token record found with at least ${Number(buyAmountMicro) / 1_000_000} USDCX. ` +
+              `Private betting requires USDCX Token records in your wallet.`
+            )
+          }
+        }
+
+        // USAD v8: private buy — append Token record + MerkleProof (same as USDCX)
+        if (tokenType === 'USAD') {
+          const { findTokenRecord } = await import('@/lib/private-stablecoin')
+          const tokenRecord = await findTokenRecord('USAD', buyAmountMicro)
+          if (tokenRecord) {
+            if (!wallet.address) {
+              throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
+            }
+            inputs.push(tokenRecord)
+            inputs.push(await buildMerkleProofsForAddress(wallet.address))
+            devWarn('[Trade] USAD PRIVATE buy — Token record + MerkleProof appended')
+          } else {
+            throw new Error(
+              `No private USAD Token record found with at least ${Number(buyAmountMicro) / 1_000_000} USAD. ` +
+              `Please unshield USAD in Shield Wallet first.`
+            )
+          }
+        }
       }
 
-      devWarn('[Trade] Submitting:', { function: functionName, mode: functionName.includes('private') ? 'PRIVATE' : 'PUBLIC', inputs })
+      devWarn('[Trade] Submitting:', { function: functionName, inputs: inputs.map((i, idx) => idx >= 6 ? `[${i.length} chars]` : i) })
 
-      const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
-        function: functionName,
-        inputs,
-        fee: 3,
-      })
+      let result: any
+      {
+        // v7: Single TX — all bet inputs private, USAD uses transfer_public_as_signer
+        const programId = tokenType === 'USAD' ? config.usadProgramId : CONTRACT_INFO.programId
+        result = await executeTransaction({
+          program: programId,
+          function: functionName,
+          inputs,
+          fee: 1.5,
+          recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
+        })
+      }
 
       if (result?.transactionId) {
         const submittedTxId = result.transactionId
@@ -834,6 +881,13 @@ export function MarketDetail() {
                 {market.description && (
                   <ExpandableDescription text={market.description} />
                 )}
+
+                {/* Crypto Live Price Chart */}
+                <CryptoPriceChart
+                  question={market.question}
+                  category={market.category}
+                  className="mb-6"
+                />
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1330,7 +1384,7 @@ export function MarketDetail() {
                           </p>
                           <Tooltip content="Gas fee paid to Aleo network validators for processing your transaction" side="bottom">
                             <p className="text-xs text-surface-600 cursor-help w-fit">
-                              Transaction fee: 3 ALEO (from public balance)
+                              Transaction fee: 1.5 ALEO (from public balance)
                             </p>
                           </Tooltip>
                         </div>

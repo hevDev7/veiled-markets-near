@@ -4,10 +4,6 @@ import {
     TrendingUp,
     Clock,
     Flame,
-    Plus,
-    Wallet,
-    Trophy,
-    Terminal,
     Activity,
     Zap,
     Lock,
@@ -27,18 +23,21 @@ import {
     Bell,
     X,
     Coins,
-    PieChart,
+    Trophy,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Market, outcomeToIndex } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
+import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
 import { MarketRow } from '@/components/MarketRow'
 import { MarketCard } from '@/components/MarketCard'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { CreateMarketModal } from '@/components/CreateMarketModal'
 import { EmptyState } from '@/components/EmptyState'
+import { CryptoTickerStrip } from '@/components/CryptoTickerStrip'
+import { DashboardHero } from '@/components/DashboardHero'
 import { cn, formatCredits, getCategoryEmoji } from '@/lib/utils'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
@@ -102,6 +101,10 @@ export function Dashboard() {
     const { wallet } = useWalletStore()
     const { markets, isLoading, isRefreshing, fetchMarkets, addMarket } = useRealMarketsStore()
     const { userBets, pendingBets, fetchUserBets, syncBetStatuses } = useBetsStore()
+    const { setVisible: setModalVisible } = useWalletModal()
+
+    // Close wallet modal if it's still open from Landing page
+    useEffect(() => { setModalVisible(false) }, [setModalVisible])
 
     const [selectedCategory, setSelectedCategory] = useState(0)
     const [searchQuery, setSearchQuery] = useState('')
@@ -110,7 +113,7 @@ export function Dashboard() {
     const [isCreateMarketOpen, setIsCreateMarketOpen] = useState(false)
     const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
-    const [tokenFilter, setTokenFilter] = useState<'all' | 'ALEO' | 'USDCX'>('all')
+    const [tokenFilter, setTokenFilter] = useState<'all' | 'ALEO' | 'USDCX' | 'USAD'>('all')
     const [visibleCount, setVisibleCount] = useState(10)
     const [expandPositions, setExpandPositions] = useState(false)
     const [notifications, setNotifications] = useState<Notification[]>([])
@@ -329,10 +332,10 @@ export function Dashboard() {
             <div className="fixed inset-0 z-0">
                 <div className="absolute inset-0" style={{
                     backgroundImage: `
-            linear-gradient(rgba(139, 92, 246, 0.02) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(139, 92, 246, 0.02) 1px, transparent 1px)
+            linear-gradient(rgba(124, 58, 237, 0.025) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(124, 58, 237, 0.025) 1px, transparent 1px)
           `,
-                    backgroundSize: '40px 40px',
+                    backgroundSize: '48px 48px',
                 }} />
                 <motion.div
                     animate={{
@@ -342,6 +345,14 @@ export function Dashboard() {
                     transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
                     className="absolute top-1/4 right-1/4 w-96 h-96 bg-brand-500/5 rounded-full blur-[120px]"
                 />
+                <motion.div
+                    animate={{
+                        x: [0, -30, 0],
+                        y: [0, 40, 0],
+                    }}
+                    transition={{ duration: 28, repeat: Infinity, ease: "linear" }}
+                    className="absolute bottom-1/4 left-1/4 w-80 h-80 bg-accent-500/4 rounded-full blur-[100px]"
+                />
             </div>
 
             <DashboardHeader />
@@ -350,89 +361,30 @@ export function Dashboard() {
                 {/* Main Content */}
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-                    {/* Command Center Header — full width */}
-                    <div className="rounded-xl border border-brand-500/10 bg-surface-900/30 backdrop-blur-xl p-6 mb-6">
-                            <div className="flex items-center justify-between mb-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-lg bg-brand-500/10 flex items-center justify-center">
-                                        <Terminal className="w-5 h-5 text-brand-400" />
-                                    </div>
-                                    <div>
-                                        <h1 className="text-xl font-bold text-white font-mono">COMMAND_CENTER</h1>
-                                        <p className="text-xs text-surface-500 font-mono">SYSTEM_ACTIVE • ZK_ENABLED</p>
-                                    </div>
-                                </div>
+                    {/* Hero Section: Market Slider + Dashboard Stats */}
+                    <DashboardHero
+                        markets={markets}
+                        walletBalance={wallet.balance.public + wallet.balance.private}
+                        activeBetsCount={userBets.filter(b => b.status === 'active').length + pendingBets.length}
+                        portfolioValue={portfolioValue}
+                        winningsValue={(() => {
+                            const wonBets = userBets.filter(b => b.status === 'won')
+                            const totalWon = wonBets.reduce((sum, b) => {
+                                const payout = b.payoutAmount ? Number(b.payoutAmount) : 0
+                                return sum + payout
+                            }, 0)
+                            return `${(totalWon / 1_000_000).toFixed(1)} ALEO`
+                        })()}
+                        totalVolume={`${(Number(markets.reduce((sum, m) => sum + m.totalVolume, 0n)) / 1_000_000).toFixed(1)} ALEO`}
+                        notificationCount={notifications.length}
+                        onCreateMarket={() => setIsCreateMarketOpen(true)}
+                        onToggleNotifications={() => setShowNotifications(!showNotifications)}
+                        onMarketClick={handleMarketClick}
+                    />
 
-                                <div className="flex items-center gap-2">
-                                    {/* Notification Bell */}
-                                    <button
-                                        onClick={() => setShowNotifications(!showNotifications)}
-                                        aria-label="Notifications"
-                                        className="relative p-2 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
-                                    >
-                                        <Bell className="w-4 h-4" />
-                                        {notifications.length > 0 && (
-                                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center">
-                                                {notifications.length}
-                                            </span>
-                                        )}
-                                    </button>
-
-                                    <button
-                                        onClick={() => setIsCreateMarketOpen(true)}
-                                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-400 hover:bg-brand-500/20 transition-all font-mono text-sm"
-                                    >
-                                        <Plus className="w-4 h-4" />
-                                        <span>NEW_MARKET</span>
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Stats */}
-                            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                                <StatTicker
-                                    icon={<Wallet className="w-4 h-4" />}
-                                    label="BALANCE"
-                                    value={`${formatCredits(wallet.balance.public + wallet.balance.private)} ALEO`}
-                                    color="text-brand-400"
-                                    delay={0}
-                                />
-                                <StatTicker
-                                    icon={<Activity className="w-4 h-4" />}
-                                    label="ACTIVE_BETS"
-                                    value={String(userBets.filter(b => b.status === 'active').length + pendingBets.length)}
-                                    color="text-yes-400"
-                                    delay={0.1}
-                                />
-                                <StatTicker
-                                    icon={<PieChart className="w-4 h-4" />}
-                                    label="PORTFOLIO"
-                                    value={`${portfolioValue.toFixed(1)} ALEO`}
-                                    color="text-brand-300"
-                                    delay={0.15}
-                                />
-                                <StatTicker
-                                    icon={<Trophy className="w-4 h-4" />}
-                                    label="WINNINGS"
-                                    value={(() => {
-                                        const wonBets = userBets.filter(b => b.status === 'won')
-                                        const totalWon = wonBets.reduce((sum, b) => {
-                                            const payout = b.payoutAmount ? Number(b.payoutAmount) : 0
-                                            return sum + payout
-                                        }, 0)
-                                        return `${(totalWon / 1_000_000).toFixed(1)} ALEO`
-                                    })()}
-                                    color="text-accent-400"
-                                    delay={0.2}
-                                />
-                                <StatTicker
-                                    icon={<Zap className="w-4 h-4" />}
-                                    label="TOTAL_VOLUME"
-                                    value={`${(Number(markets.reduce((sum, m) => sum + m.totalVolume, 0n)) / 1_000_000).toFixed(1)} ALEO`}
-                                    color="text-surface-400"
-                                    delay={0.3}
-                                />
-                            </div>
+                    {/* Live Crypto Prices */}
+                    <div className="mb-6 rounded-xl border border-surface-700/20 bg-surface-900/20 px-2 overflow-hidden">
+                        <CryptoTickerStrip />
                     </div>
 
                     {/* Sidebar + Content Layout */}
@@ -448,21 +400,21 @@ export function Dashboard() {
                             <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
                                 <div className="flex items-center gap-2 mb-4">
                                     <Coins className="w-4 h-4 text-yellow-400" />
-                                    <h3 className="text-sm font-bold text-white font-mono uppercase">Token</h3>
+                                    <h3 className="text-sm font-semibold text-white">Token</h3>
                                 </div>
                                 <div className="flex gap-1">
-                                    {(['all', 'ALEO', 'USDCX'] as const).map((t) => (
+                                    {(['all', 'ALEO', 'USDCX', 'USAD'] as const).map((t) => (
                                         <button
                                             key={t}
                                             onClick={() => setTokenFilter(t)}
                                             className={cn(
-                                                'flex-1 px-2 py-2 rounded-lg text-xs font-mono font-medium border transition-all',
+                                                'flex-1 px-2 py-2 rounded-lg text-xs font-medium border transition-all',
                                                 tokenFilter === t
                                                     ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                                                     : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
                                             )}
                                         >
-                                            {t === 'all' ? 'ALL' : t}
+                                            {t === 'all' ? 'All' : t}
                                         </button>
                                     ))}
                                 </div>
@@ -472,7 +424,7 @@ export function Dashboard() {
                             <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
                                 <div className="flex items-center gap-2 mb-4">
                                     <Grid3x3 className="w-4 h-4 text-brand-400" />
-                                    <h3 className="text-sm font-bold text-white font-mono uppercase">Categories</h3>
+                                    <h3 className="text-sm font-semibold text-white">Categories</h3>
                                 </div>
                                 <div className="space-y-1">
                                     {categories.map((category) => (
@@ -480,14 +432,14 @@ export function Dashboard() {
                                             key={category.id}
                                             onClick={() => setSelectedCategory(category.id)}
                                             className={cn(
-                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium font-mono border',
+                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium border',
                                                 selectedCategory === category.id
-                                                    ? 'bg-brand-500/20 text-brand-400 border-brand-500/30'
+                                                    ? 'bg-brand-500/15 text-brand-300 border-brand-500/25'
                                                     : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
                                             )}
                                         >
                                             <category.icon className="w-4 h-4" />
-                                            <span className="flex-1 text-left">{category.name.toUpperCase()}</span>
+                                            <span className="flex-1 text-left">{category.name}</span>
                                             <span className={cn(
                                                 'text-xs tabular-nums px-1.5 py-0.5 rounded-md',
                                                 selectedCategory === category.id
@@ -505,7 +457,7 @@ export function Dashboard() {
                             <div className="bg-surface-900/50 backdrop-blur-sm rounded-xl border border-surface-800/50 p-4">
                                 <div className="flex items-center gap-2 mb-4">
                                     <TrendingUp className="w-4 h-4 text-accent-400" />
-                                    <h3 className="text-sm font-bold text-white font-mono uppercase">Sort By</h3>
+                                    <h3 className="text-sm font-semibold text-white">Sort By</h3>
                                 </div>
                                 <div className="space-y-1">
                                     {sortOptions.map((option) => (
@@ -513,37 +465,37 @@ export function Dashboard() {
                                             key={option.id}
                                             onClick={() => setSortBy(option.id)}
                                             className={cn(
-                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium font-mono border',
+                                                'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium border',
                                                 sortBy === option.id
-                                                    ? 'bg-accent-500/20 text-accent-400 border-accent-500/30'
+                                                    ? 'bg-accent-500/15 text-accent-300 border-accent-500/25'
                                                     : 'border-transparent text-surface-400 hover:text-white hover:bg-surface-800/50'
                                             )}
                                         >
                                             <option.icon className="w-4 h-4" />
-                                            <span>{option.name.toUpperCase()}</span>
+                                            <span>{option.name}</span>
                                         </button>
                                     ))}
                                 </div>
                             </div>
 
                             {/* Privacy Status */}
-                            <div className="bg-gradient-to-br from-brand-500/10 to-accent-500/10 backdrop-blur-sm rounded-xl border border-brand-500/20 p-4">
+                            <div className="bg-gradient-to-br from-brand-500/8 to-accent-500/5 backdrop-blur-sm rounded-xl border border-brand-500/15 p-4">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Lock className="w-4 h-4 text-brand-400" />
-                                    <h3 className="text-sm font-bold text-white font-mono">PRIVACY_STATUS</h3>
+                                    <h3 className="text-sm font-semibold text-white">Privacy</h3>
                                 </div>
-                                <div className="space-y-2 text-xs font-mono">
+                                <div className="space-y-2.5 text-xs">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-surface-400">ZK_PROOFS</span>
-                                        <span className="text-yes-400">ACTIVE</span>
+                                        <span className="text-surface-400">ZK Proofs</span>
+                                        <span className="text-yes-400 font-medium">Active</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-surface-400">ENCRYPTION</span>
-                                        <span className="text-yes-400">ENABLED</span>
+                                        <span className="text-surface-400">Encryption</span>
+                                        <span className="text-yes-400 font-medium">Enabled</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-surface-400">MEV_PROTECTION</span>
-                                        <span className="text-yes-400">ON</span>
+                                        <span className="text-surface-400">MEV Protection</span>
+                                        <span className="text-yes-400 font-medium">On</span>
                                     </div>
                                 </div>
                             </div>
@@ -567,15 +519,15 @@ export function Dashboard() {
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-2">
                                             <Activity className="w-4 h-4 text-brand-400" />
-                                            <h3 className="text-sm font-bold text-white font-mono">
-                                                YOUR_POSITIONS ({allPositions.length})
+                                            <h3 className="text-sm font-semibold text-white">
+                                                Your Positions ({allPositions.length})
                                             </h3>
                                         </div>
                                         <button
                                             onClick={() => navigate('/bets')}
-                                            className="text-xs font-mono text-brand-400 hover:text-brand-300 flex items-center gap-1 transition-colors"
+                                            className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 transition-colors font-medium"
                                         >
-                                            VIEW_ALL <ChevronRight className="w-3 h-3" />
+                                            View All <ChevronRight className="w-3 h-3" />
                                         </button>
                                     </div>
                                     <div className="space-y-2">
@@ -628,17 +580,17 @@ export function Dashboard() {
                                     {hasMorePositions && !expandPositions && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setExpandPositions(true) }}
-                                            className="w-full mt-2 py-1.5 text-[10px] font-mono text-brand-400 hover:text-brand-300 transition-colors"
+                                            className="w-full mt-2 py-1.5 text-[10px] text-brand-400 hover:text-brand-300 transition-colors font-medium"
                                         >
-                                            SHOW_ALL ({allPositions.length - 3} more)
+                                            Show all ({allPositions.length - 3} more)
                                         </button>
                                     )}
                                     {hasMorePositions && expandPositions && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setExpandPositions(false) }}
-                                            className="w-full mt-2 py-1.5 text-[10px] font-mono text-surface-500 hover:text-surface-300 transition-colors"
+                                            className="w-full mt-2 py-1.5 text-[10px] text-surface-500 hover:text-surface-300 transition-colors font-medium"
                                         >
-                                            COLLAPSE
+                                            Collapse
                                         </button>
                                     )}
                                 </motion.div>
@@ -654,8 +606,8 @@ export function Dashboard() {
                                 >
                                     <div className="flex items-center gap-2 mb-3">
                                         <Bookmark className="w-4 h-4 text-yellow-400" />
-                                        <h3 className="text-sm font-bold text-white font-mono">
-                                            WATCHLIST ({bookmarkedMarkets.length})
+                                        <h3 className="text-sm font-semibold text-white">
+                                            Watchlist ({bookmarkedMarkets.length})
                                         </h3>
                                     </div>
                                     <div className="flex gap-2 overflow-x-auto pb-1">
@@ -703,10 +655,10 @@ export function Dashboard() {
                                             )}
                                         </div>
                                         <div className="flex-1">
-                                            <p className={`text-sm font-medium font-mono ${allFailed ? 'text-red-300' : 'text-yellow-300'}`}>
+                                            <p className={`text-sm font-medium ${allFailed ? 'text-red-300' : 'text-yellow-300'}`}>
                                                 {allFailed
-                                                    ? `${pendingInfo.count} MARKET${pendingInfo.count > 1 ? 'S' : ''} LIKELY FAILED`
-                                                    : `${pendingInfo.count} PENDING MARKET${pendingInfo.count > 1 ? 'S' : ''} AWAITING CONFIRMATION`}
+                                                    ? `${pendingInfo.count} market${pendingInfo.count > 1 ? 's' : ''} likely failed`
+                                                    : `${pendingInfo.count} pending market${pendingInfo.count > 1 ? 's' : ''} awaiting confirmation`}
                                             </p>
                                             <p className="text-xs text-surface-400 mt-1">
                                                 {allFailed
@@ -737,10 +689,10 @@ export function Dashboard() {
                                                 clearPendingMarkets()
                                                 setPendingInfo({ count: 0, questions: [], statuses: [], retryCounts: [] })
                                             }}
-                                            className={`${allFailed ? 'text-red-400/50 hover:text-red-400 border-red-500/20 hover:border-red-500/40' : 'text-yellow-400/50 hover:text-yellow-400 border-yellow-500/20 hover:border-yellow-500/40'} text-xs font-mono px-2 py-1 rounded border transition-all`}
+                                            className={`${allFailed ? 'text-red-400/50 hover:text-red-400 border-red-500/20 hover:border-red-500/40' : 'text-yellow-400/50 hover:text-yellow-400 border-yellow-500/20 hover:border-yellow-500/40'} text-xs px-2 py-1 rounded border transition-all font-medium`}
                                             title="Dismiss pending markets"
                                         >
-                                            DISMISS
+                                            Dismiss
                                         </button>
                                     </div>
                                 </motion.div>
@@ -759,10 +711,10 @@ export function Dashboard() {
                                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-surface-500" />
                                         <input
                                             type="text"
-                                            placeholder="SEARCH_MARKETS..."
+                                            placeholder="Search markets..."
                                             value={searchQuery}
                                             onChange={(e) => setSearchQuery(e.target.value)}
-                                            className="w-full pl-12 pr-4 py-3 bg-surface-800/50 border border-surface-700/50 rounded-lg focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20 transition-all outline-none placeholder-surface-500 text-white font-mono text-sm"
+                                            className="w-full pl-12 pr-4 py-3 bg-surface-800/50 border border-surface-700/50 rounded-xl focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/20 transition-all outline-none placeholder-surface-500 text-white text-sm"
                                         />
                                     </div>
                                     {/* View Mode Toggle */}
@@ -797,9 +749,9 @@ export function Dashboard() {
                                 </div>
 
                                 {/* Market Count */}
-                                <div className="mt-3 pt-3 border-t border-surface-800/50 flex items-center justify-between text-xs font-mono">
+                                <div className="mt-3 pt-3 border-t border-surface-800/50 flex items-center justify-between text-xs">
                                     <span className="text-surface-500">
-                                        SHOWING {Math.min(visibleCount, filteredMarkets.length)} OF {filteredMarkets.length} MARKETS
+                                        Showing {Math.min(visibleCount, filteredMarkets.length)} of {filteredMarkets.length} markets
                                         {tokenFilter !== 'all' && <span className="text-yellow-400 ml-1">({tokenFilter})</span>}
                                     </span>
                                     <div className="flex items-center gap-2">
@@ -808,7 +760,7 @@ export function Dashboard() {
                                             isRefreshing ? "bg-accent-400" : "bg-yes-400"
                                         )} />
                                         <span className={isRefreshing ? "text-accent-400" : "text-yes-400"}>
-                                            {isRefreshing ? "SYNCING" : "LIVE"}
+                                            {isRefreshing ? "Syncing" : "Live"}
                                         </span>
                                     </div>
                                 </div>
@@ -899,9 +851,9 @@ export function Dashboard() {
                                 <div className="text-center pt-4">
                                     <button
                                         onClick={() => setVisibleCount(prev => prev + 10)}
-                                        className="px-6 py-3 rounded-lg bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all font-mono text-sm"
+                                        className="px-6 py-3 rounded-xl bg-surface-800/50 border border-surface-700/50 text-surface-400 hover:text-white hover:border-brand-500/30 transition-all text-sm font-medium"
                                     >
-                                        LOAD_MORE ({filteredMarkets.length - visibleCount} remaining)
+                                        Load more ({filteredMarkets.length - visibleCount} remaining)
                                     </button>
                                 </div>
                             )}
@@ -915,7 +867,7 @@ export function Dashboard() {
                                 >
                                     <div className="flex items-center gap-2 mb-3">
                                         <Zap className="w-4 h-4 text-accent-400" />
-                                        <h3 className="text-sm font-bold text-white font-mono">MARKET_ACTIVITY</h3>
+                                        <h3 className="text-sm font-semibold text-white">Recent Activity</h3>
                                     </div>
                                     <div className="space-y-2">
                                         {activityFeed.map(item => (
@@ -928,7 +880,7 @@ export function Dashboard() {
                                                 className="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-800/30 cursor-pointer transition-colors"
                                             >
                                                 <div className="w-1.5 h-1.5 rounded-full bg-accent-400 flex-shrink-0" />
-                                                <p className="text-xs text-surface-300 font-mono flex-1 truncate">{item.message}</p>
+                                                <p className="text-xs text-surface-300 flex-1 truncate">{item.message}</p>
                                                 <ChevronRight className="w-3 h-3 text-surface-500 flex-shrink-0" />
                                             </div>
                                         ))}
@@ -948,7 +900,7 @@ export function Dashboard() {
                                         <div className="flex items-center justify-between mb-3">
                                             <div className="flex items-center gap-2">
                                                 <Bell className="w-4 h-4 text-brand-400" />
-                                                <h3 className="text-sm font-bold text-white font-mono">NOTIFICATIONS</h3>
+                                                <h3 className="text-sm font-semibold text-white">Notifications</h3>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 {notifications.length > 0 && (
@@ -960,9 +912,9 @@ export function Dashboard() {
                                                             saveDismissedNotifs(wallet.address, dismissed)
                                                             setNotifications([])
                                                         }}
-                                                        className="text-xs text-surface-500 hover:text-white font-mono"
+                                                        className="text-xs text-surface-500 hover:text-white font-medium"
                                                     >
-                                                        CLEAR_ALL
+                                                        Clear all
                                                     </button>
                                                 )}
                                                 <button onClick={() => setShowNotifications(false)} className="text-surface-500 hover:text-white">
@@ -971,14 +923,14 @@ export function Dashboard() {
                                             </div>
                                         </div>
                                         {notifications.length === 0 ? (
-                                            <p className="text-xs text-surface-500 font-mono text-center py-4">NO_NEW_NOTIFICATIONS</p>
+                                            <p className="text-xs text-surface-500 text-center py-4">No new notifications</p>
                                         ) : (
                                             <div className="space-y-2 max-h-64 overflow-y-auto">
                                                 {notifications.map(n => (
                                                     <div
                                                         key={n.id}
                                                         className={cn(
-                                                            'p-2 rounded-lg flex items-start gap-2 transition-colors text-xs font-mono',
+                                                            'p-2 rounded-lg flex items-start gap-2 transition-colors text-xs',
                                                             n.type === 'won' ? 'bg-yes-500/10 hover:bg-yes-500/20' :
                                                             n.type === 'lost' ? 'bg-no-500/10 hover:bg-no-500/20' :
                                                             n.type === 'expiring' ? 'bg-yellow-500/10 hover:bg-yellow-500/20' :
@@ -1043,37 +995,5 @@ export function Dashboard() {
                 }}
             />
         </div>
-    )
-}
-
-// StatTicker Component
-function StatTicker({
-    icon,
-    label,
-    value,
-    color,
-    delay = 0
-}: {
-    icon: React.ReactNode
-    label: string
-    value: string
-    color: string
-    delay?: number
-}) {
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay }}
-            className="bg-surface-800/30 backdrop-blur-sm rounded-lg p-3 border border-surface-700/30"
-        >
-            <div className="flex items-center gap-2 mb-1">
-                <div className={cn("text-xs font-mono", color)}>
-                    {icon}
-                </div>
-                <span className="text-xs font-mono text-surface-500">{label}</span>
-            </div>
-            <div className={cn("text-lg font-bold font-mono", color)}>{value}</div>
-        </motion.div>
     )
 }

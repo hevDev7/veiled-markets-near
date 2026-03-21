@@ -35,13 +35,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       decryptPermission={DecryptPermission.AutoDecrypt}
       programs={[
         config.programId,
+        config.usadProgramId,
+        config.governanceProgramId,
         'credits.aleo',
         config.usdcxProgramId,
-        // Transitive dependencies of test_usdcx_stablecoin.aleo
-        // Leo Wallet needs ALL imported programs registered to resolve them
+        'test_usad_stablecoin.aleo',
+        // Transitive dependencies of stablecoin programs
         'merkle_tree.aleo',
         'test_usdcx_multisig_core.aleo',
         'test_usdcx_freezelist.aleo',
+        'test_usad_multisig_core.aleo',
+        'test_usad_freezelist.aleo',
       ]}
       onError={(error) => console.error('[Wallet Error]', error.message)}
     >

@@ -1,0 +1,12 @@
+{
+  "program": "veiled_governance_v3.aleo",
+  "version": "3.0.0",
+  "description": "Pure ALEO governance system for Veiled Markets — staking, proposals, voting, delegation, resolver registry, and reward distribution using native ALEO credits",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network"
+    }
+  ]
+}

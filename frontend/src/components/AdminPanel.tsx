@@ -107,7 +107,7 @@ export function AdminPanel() {
         program: CONTRACT_INFO.programId,
         function: 'propose_treasury_withdrawal',
         inputs,
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
@@ -134,7 +134,7 @@ export function AdminPanel() {
         program: CONTRACT_INFO.programId,
         function: 'approve_proposal',
         inputs: [proposalId],
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
@@ -164,7 +164,7 @@ export function AdminPanel() {
         program: CONTRACT_INFO.programId,
         function: 'execute_proposal',
         inputs: [proposalId, `${amountMicro}u128`, executeRecipient],
-        fee: 0.5,
+        fee: 1.5,
       })
 
       if (result?.transactionId) {
