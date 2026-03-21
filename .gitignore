@@ -55,3 +55,7 @@ leo/
 
 # SnarkOS
 snarkOS/
+
+# MT4 files
+frontend/mt4setup.exe
+frontend/mt4ubuntu.sh
