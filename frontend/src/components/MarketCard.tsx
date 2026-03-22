@@ -6,7 +6,22 @@ import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji,
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
-import { getMarketThumbnail } from '@/lib/market-thumbnails'
+import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+
+function MarketThumb({ url, question, size = 'md' }: { url: string; question: string; size?: 'sm' | 'md' | 'lg' }) {
+  const useContain = isContainThumbnail(url)
+  const sizeClass = size === 'sm' ? 'w-8 h-8 rounded-lg' : size === 'lg' ? 'w-11 h-11 rounded-xl' : 'w-10 h-10 rounded-xl'
+  return (
+    <div className="flex gap-3 mb-4">
+      <div className={cn(sizeClass, 'overflow-hidden shrink-0 border border-white/[0.06] bg-surface-800', useContain && 'p-1.5 flex items-center justify-center')}>
+        <img src={url} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+      </div>
+      <h3 className="text-base font-semibold text-white line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">
+        {question}
+      </h3>
+    </div>
+  )
+}
 
 // Colors for up to 4 outcomes
 const OUTCOME_COLORS = [
@@ -85,20 +100,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         </div>
 
         {/* Question + Thumbnail */}
-        <div className="flex gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 bg-surface-800 border border-white/[0.06]">
-            <img
-              src={getMarketThumbnail(market.question, market.category, market.thumbnailUrl)}
-              alt=""
-              className="w-full h-full object-cover"
-              loading="lazy"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-            />
-          </div>
-          <h3 className="text-base font-semibold text-white line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">
-            {market.question}
-          </h3>
-        </div>
+        <MarketThumb url={getMarketThumbnail(market.question, market.category, market.thumbnailUrl)} question={market.question} />
 
         {/* Odds Display */}
         <div className="mb-4">

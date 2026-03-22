@@ -88,6 +88,9 @@ function MarketSlide({ market, onClick }: { market: Market; onClick: () => void 
       {/* Top: Category + Title in same row */}
       <div className="flex items-start gap-3 mb-3">
         <div className="flex items-center gap-2 flex-shrink-0 pt-1">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-yellow-300 bg-yellow-500/10 border border-yellow-500/20">
+            Trending
+          </span>
           <span className="text-xs">{getCategoryEmoji(market.category)}</span>
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider text-surface-300 bg-white/[0.04] border border-white/[0.06]">
             {getCategoryName(market.category)}
@@ -271,10 +274,32 @@ export function DashboardHero({
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
   const resumeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const activeMarkets = useMemo(
-    () => markets.filter(m => m.status === 1 && m.timeRemaining !== 'Ended').slice(0, 8),
-    [markets]
-  )
+  const activeMarkets = useMemo(() => {
+    const active = markets.filter(m => m.status === 1 && m.timeRemaining !== 'Ended')
+    if (active.length === 0) return []
+
+    // Score each market for "trending" ranking
+    // Factors: volume (40%), bets (30%), recency/deadline proximity (30%)
+    const maxVolume = Math.max(...active.map(m => Number(m.totalVolume)), 1)
+    const maxBets = Math.max(...active.map(m => m.totalBets), 1)
+    const now = Date.now()
+
+    const scored = active.map(m => {
+      const volumeScore = Number(m.totalVolume) / maxVolume
+      const betsScore = m.totalBets / maxBets
+      // Markets ending sooner get higher recency score (more urgent = more trending)
+      const msLeft = (m.deadlineTimestamp || now + 86400000) - now
+      const daysLeft = Math.max(msLeft / 86400000, 0.1)
+      const recencyScore = Math.min(1, 7 / daysLeft) // peaks when < 7 days left
+      const score = volumeScore * 0.4 + betsScore * 0.3 + recencyScore * 0.3
+      return { market: m, score }
+    })
+
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map(s => s.market)
+  }, [markets])
   const slideCount = activeMarkets.length
 
   useEffect(() => {
@@ -344,8 +369,8 @@ export function DashboardHero({
             <div className="w-14 h-14 rounded-2xl bg-brand-400/[0.06] border border-brand-400/[0.1] flex items-center justify-center mb-4">
               <TrendingUp className="w-7 h-7 text-brand-400" />
             </div>
-            <h3 className="text-lg font-display font-bold text-white mb-2">No Active Markets</h3>
-            <p className="text-sm text-surface-400 mb-4">Be the first to create a prediction market</p>
+            <h3 className="text-lg font-display font-bold text-white mb-2">No Trending Markets</h3>
+            <p className="text-sm text-surface-400 mb-4">Create a market and start trading to appear here</p>
             <button onClick={onCreateMarket} className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all"
               style={{ background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)', color: '#08090c', boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25)' }}>
               <Plus className="w-4 h-4" /> Create Market

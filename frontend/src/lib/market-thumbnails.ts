@@ -129,3 +129,12 @@ export function getMarketThumbnail(question: string, category: number, customUrl
   cache.set(cacheKey, fallback)
   return fallback
 }
+
+/**
+ * Determine if a thumbnail should use object-cover (fill area) or object-contain (fit inside).
+ * - Auto-detected keyword logos (CoinGecko icons): contain
+ * - Everything else (Unsplash photos, custom uploads, custom URLs): cover
+ */
+export function isContainThumbnail(url: string): boolean {
+  return url.includes('assets.coingecko.com')
+}

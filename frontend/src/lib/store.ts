@@ -1498,7 +1498,15 @@ async function syncFromSupabase(
   get: () => { userBets: Bet[]; pendingBets: Bet[]; commitmentRecords: CommitmentRecord[] }
 ) {
   try {
-    const { encryptionKey } = useWalletStore.getState().wallet
+    // Wait for encryption key if not yet available (WalletBridge may still be deriving it)
+    let encryptionKey = useWalletStore.getState().wallet.encryptionKey
+    if (!encryptionKey) {
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, 2000))
+        encryptionKey = useWalletStore.getState().wallet.encryptionKey
+        if (encryptionKey) break
+      }
+    }
     const [remoteBets, remotePending, remoteCommitments] = await Promise.all([
       sbFetchBets(address, encryptionKey),
       sbFetchPendingBets(address, encryptionKey),
