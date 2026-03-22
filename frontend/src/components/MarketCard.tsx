@@ -1,4 +1,4 @@
-import { Clock, Users, TrendingUp, Shield, Flame } from 'lucide-react'
+import { Clock, Users, TrendingUp, Shield } from 'lucide-react'
 import { useMemo, useRef } from 'react'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
@@ -76,24 +76,6 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
             <span className="text-lg" role="img">{getCategoryEmoji(market.category)}</span>
             <span className={cn("category-badge", categoryColor.text)}>{getCategoryName(market.category)}</span>
             {isExpired && <StatusBadge variant={statusVariant} />}
-            {market.tags?.slice(0, 2).map(tag => (
-              <span
-                key={tag}
-                className={cn(
-                  "px-2 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wide",
-                  tag === 'Hot' || tag === 'Trending'
-                    ? "badge-hot"
-                    : tag === 'Featured'
-                      ? "badge-featured"
-                      : tag === 'Ending Soon'
-                        ? "bg-no-500/15 text-no-400 border border-no-500/20"
-                        : "bg-surface-700/40 text-surface-400"
-                )}
-              >
-                {tag === 'Hot' && <Flame className="w-2.5 h-2.5 inline mr-0.5 -mt-px" />}
-                {tag}
-              </span>
-            ))}
           </div>
 
           <div className="flex items-center gap-1.5 flex-shrink-0 px-2 py-1 rounded-md bg-brand-500/8">

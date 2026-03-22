@@ -72,6 +72,7 @@ import { DisputePanel } from '@/components/DisputePanel'
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
 import { cn, formatCredits, getTokenSymbol, sanitizeUrl, safeHostname, isValidAleoAddress } from '@/lib/utils'
+import { getMarketThumbnail } from '@/lib/market-thumbnails'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { fetchBetCountByMarket } from '@/lib/supabase'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -987,9 +988,20 @@ export function MarketDetail() {
                   </div>
                 </div>
 
-                <h1 className="text-lg md:text-xl font-display font-bold tracking-tight text-white mb-2">
-                  {market.question}
-                </h1>
+                <div className="flex gap-3 mb-2">
+                  <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-surface-800 border border-white/[0.06]">
+                    <img
+                      src={getMarketThumbnail(market.question, market.category, market.thumbnailUrl)}
+                      alt=""
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    />
+                  </div>
+                  <h1 className="text-base md:text-lg font-semibold text-white leading-snug">
+                    {market.question}
+                  </h1>
+                </div>
 
                 {market.description && (
                   <HeroDescription text={market.description} />
