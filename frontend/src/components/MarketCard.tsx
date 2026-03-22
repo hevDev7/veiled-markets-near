@@ -3,7 +3,7 @@ import { useMemo, useRef } from 'react'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryStrip, getCategoryColor } from '@/lib/utils'
-import { Tooltip } from '@/components/ui/Tooltip'
+
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
@@ -160,33 +160,20 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           )}
         </div>
 
-        {/* Stats — Refined layout */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          <Tooltip content="Total value of all trades in this market" side="bottom">
-            <div className="text-center p-2.5 rounded-xl bg-surface-800/30 border border-surface-700/20">
-              <TrendingUp className="w-3.5 h-3.5 text-surface-500 mx-auto mb-1.5" />
-              <p className="text-sm font-bold text-white tabular-nums">
-                {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'ALEO'}</span>
-              </p>
-              <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-0.5">Volume</p>
-            </div>
-          </Tooltip>
-
-          <Tooltip content="Number of bets placed on this market" side="bottom">
-            <div className="text-center p-2.5 rounded-xl bg-surface-800/30 border border-surface-700/20">
-              <Users className="w-3.5 h-3.5 text-surface-500 mx-auto mb-1.5" />
-              <p className="text-sm font-bold text-white tabular-nums">{market.totalBets}</p>
-              <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-0.5">Bets</p>
-            </div>
-          </Tooltip>
-
-          <Tooltip content="Time remaining until trading closes" side="bottom">
-            <div className="text-center p-2.5 rounded-xl bg-surface-800/30 border border-surface-700/20">
-              <Clock className="w-3.5 h-3.5 text-surface-500 mx-auto mb-1.5" />
-              <p className="text-sm font-bold text-white tabular-nums">{timeRemaining}</p>
-              <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-0.5">Left</p>
-            </div>
-          </Tooltip>
+        {/* Stats — compact inline */}
+        <div className="flex items-center gap-4 pt-3 mt-auto border-t border-white/[0.04] text-xs text-surface-500">
+          <span className="flex items-center gap-1.5 tabular-nums">
+            <TrendingUp className="w-3 h-3" />
+            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}
+          </span>
+          <span className="flex items-center gap-1.5 tabular-nums">
+            <Users className="w-3 h-3" />
+            {market.totalBets}
+          </span>
+          <span className="flex items-center gap-1.5 tabular-nums ml-auto">
+            <Clock className="w-3 h-3" />
+            {timeRemaining}
+          </span>
         </div>
 
 
