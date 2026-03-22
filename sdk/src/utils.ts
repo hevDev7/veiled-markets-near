@@ -1,5 +1,5 @@
 // ============================================================================
-// VEILED MARKETS SDK - Utility Functions (v12)
+// VEILED MARKETS SDK - Utility Functions
 // ============================================================================
 // AMM-based multi-outcome prediction market calculations
 // ============================================================================
@@ -178,7 +178,7 @@ export function calculateNoProbability(yesPool: bigint, noPool: bigint): number 
 }
 
 /**
- * Calculate potential payout (v12: winning shares redeem 1:1, so payout = shares)
+ * Calculate potential payout (winning shares redeem 1:1)
  */
 export function calculatePotentialPayout(
   amountIn: bigint,

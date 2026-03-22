@@ -62,24 +62,24 @@ export function APIDocs() {
 
 // Initialize client
 const client = createClient({
-  networkUrl: 'https://api.explorer.provable.com/v1/testnet',
+  rpcUrl: 'https://api.explorer.provable.com/v1/testnet',
   programId: 'veiled_markets_v30.aleo',
 })
 
-// Fetch a market
-const market = await client.getMarket(1)
+// Fetch a market (marketId is a field string, e.g. "123field")
+const market = await client.getMarket('123field')
 console.log(market.status)    // MarketStatus.Active
 console.log(market.tokenType) // TokenType.ALEO
 
 // Get AMM pool reserves
-const pool = await client.getAMMPool(1)
-console.log(pool.reserves) // [bigint, bigint]
+const pool = await client.getAMMPool('123field')
+console.log(pool.reserve1, pool.reserve2) // bigint, bigint
 
 // Get current block height
 const height = await client.getCurrentBlockHeight()
 
 // Query any mapping value
-const value = await client.getMappingValue('markets', '1u64')`}</CodeBlock>
+const value = await client.getMappingValue('markets', '123field')`}</CodeBlock>
           </section>
 
           {/* Client Methods */}
@@ -92,48 +92,53 @@ const value = await client.getMappingValue('markets', '1u64')`}</CodeBlock>
             <div className="space-y-4">
               {[
                 {
-                  name: 'getMarket(marketId: number)',
-                  returns: 'Promise<Market>',
-                  desc: 'Fetch market data including status, deadline, token type, and creator.',
+                  name: 'getMarket(marketId: string)',
+                  returns: 'Promise<MarketWithStats | null>',
+                  desc: 'Fetch market data with pool, resolution, fees, prices, and volume in one call.',
                 },
                 {
-                  name: 'getAMMPool(marketId: number)',
-                  returns: 'Promise<AMMPool>',
-                  desc: 'Fetch AMM pool reserves, total LP shares, and liquidity depth.',
+                  name: 'getAMMPool(marketId: string)',
+                  returns: 'Promise<AMMPool | null>',
+                  desc: 'Fetch AMM pool reserves (up to 4 outcomes), total LP shares, liquidity, and volume.',
                 },
                 {
-                  name: 'getMarketResolution(marketId: number)',
-                  returns: 'Promise<MarketResolution | null>',
-                  desc: 'Get resolution data including winning outcome and finalization status.',
+                  name: 'getMarketFees(marketId: string)',
+                  returns: 'Promise<MarketFees | null>',
+                  desc: 'Fetch accumulated fee allocations (protocol and creator fees).',
                 },
                 {
-                  name: 'getMarketFees(marketId: number)',
-                  returns: 'Promise<MarketFees>',
-                  desc: 'Fetch accumulated fee allocations (protocol, creator, resolver).',
-                },
-                {
-                  name: 'getDisputeData(marketId: number)',
+                  name: 'getMarketDispute(marketId: string)',
                   returns: 'Promise<DisputeData | null>',
-                  desc: 'Get dispute information including proposer, bond, and proposed outcome.',
+                  desc: 'Get dispute information including disputer, bond amount, and proposed outcome.',
                 },
                 {
                   name: 'getActiveMarkets()',
-                  returns: 'Promise<Market[]>',
-                  desc: 'List all currently active markets.',
+                  returns: 'Promise<MarketWithStats[]>',
+                  desc: 'List all currently active markets with full stats.',
                 },
                 {
-                  name: 'getMarketsByCategory(category: MarketCategory)',
-                  returns: 'Promise<Market[]>',
-                  desc: 'Filter markets by category (Crypto, Politics, Sports, etc.).',
+                  name: 'getMarketsByCategory(category: number)',
+                  returns: 'Promise<MarketWithStats[]>',
+                  desc: 'Filter markets by category number (1=Politics, 2=Sports, 3=Crypto, etc.).',
+                },
+                {
+                  name: 'getTrendingMarkets(limit?: number)',
+                  returns: 'Promise<MarketWithStats[]>',
+                  desc: 'Get top markets sorted by volume. Default limit is 10.',
+                },
+                {
+                  name: 'searchMarkets(query: string)',
+                  returns: 'Promise<MarketWithStats[]>',
+                  desc: 'Search markets by question text (case-insensitive).',
                 },
                 {
                   name: 'getCurrentBlockHeight()',
-                  returns: 'Promise<number>',
+                  returns: 'Promise<bigint>',
                   desc: 'Get current Aleo blockchain block height.',
                 },
                 {
                   name: 'getMappingValue<T>(mapping: string, key: string)',
-                  returns: 'Promise<T>',
+                  returns: 'Promise<T | null>',
                   desc: 'Query any on-chain mapping value directly from the contract.',
                 },
               ].map((method) => (
@@ -165,12 +170,13 @@ const value = await client.getMappingValue('markets', '1u64')`}</CodeBlock>
   calculateBuySharesOut,
   calculateSellTokensOut,
   calculateLPSharesOut,
+  calculateLPTokensOut,
   calculateMinSharesOut,
 } from '@veiled-markets/sdk'
 
-// Get current prices
-const yesPrice = calculateOutcomePrice(pool.reserves, Outcome.Yes)  // 0.0 - 1.0
-const allPrices = calculateAllPrices(pool.reserves)                  // [yesPrice, noPrice]
+// Get current prices (supports 2-4 outcome markets)
+const prices = calculateAllPrices(pool.reserves)  // number[] (0.0 - 1.0 each)
+const yesPrice = calculateOutcomePrice(pool.reserves, Outcome.Yes)
 
 // Calculate trade fees (2% total)
 const fees = calculateTradeFees(1_000_000n)
@@ -183,7 +189,11 @@ const sharesOut = calculateBuySharesOut(pool.reserves, Outcome.Yes, 1_000_000n)
 const tokensOut = calculateSellTokensOut(pool.reserves, Outcome.Yes, sharesAmount)
 
 // Calculate LP shares for a deposit
-const lpShares = calculateLPSharesOut(pool, depositAmount)`}</CodeBlock>
+const lpShares = calculateLPSharesOut(pool, depositAmount)
+const lpTokens = calculateLPTokensOut(pool, depositAmount)
+
+// Calculate minimum shares with slippage tolerance
+const minShares = calculateMinSharesOut(expectedShares, slippageBps)`}</CodeBlock>
           </section>
 
           {/* Types */}
@@ -191,47 +201,79 @@ const lpShares = calculateLPSharesOut(pool, depositAmount)`}</CodeBlock>
             <h2 className="text-lg font-semibold text-white mb-4">Type Reference</h2>
 
             <CodeBlock title="typescript">{`// Enums
-enum MarketStatus { Pending, Active, Closed, Resolved, Cancelled }
-enum Outcome { Yes, No }
+enum MarketStatus {
+  Active = 1, Closed = 2, Resolved = 3, Cancelled = 4, PendingResolution = 5
+}
+enum Outcome {
+  One = 1, Two = 2, Three = 3, Four = 4,
+  Yes = 1, No = 2  // Legacy aliases
+}
 enum TokenType { ALEO = 1, USDCX = 2, USAD = 3 }
-enum MarketCategory { Crypto, Politics, Sports, Entertainment, Science, Other }
+enum MarketCategory {
+  Politics = 1, Sports = 2, Crypto = 3, Entertainment = 4,
+  Science = 5, Economics = 6, Other = 99
+}
 
 // Core Types
 interface Market {
-  id: number
-  question: string
-  status: MarketStatus
-  tokenType: TokenType
-  category: MarketCategory
-  creator: string
-  deadline: number        // Block height
-  createdAt: number       // Block height
+  id: string                     // field — Unique market identifier
+  creator: string                // address
+  resolver: string               // address — Designated resolver
+  questionHash: string           // field — Hash of the market question
+  question?: string              // Resolved from IPFS/off-chain
+  category: MarketCategory       // u8
+  numOutcomes: number            // u8 — 2, 3, or 4
+  deadline: bigint               // u64 — Trading deadline (block height)
+  resolutionDeadline: bigint     // u64
+  status: MarketStatus           // u8
+  createdAt: bigint              // u64
+  tokenType: TokenType           // u8 — ALEO, USDCX, or USAD
+}
+
+interface MarketWithStats extends Market {
+  pool: AMMPool
+  resolution?: MarketResolution
+  fees?: MarketFees
+  prices: number[]               // Outcome prices (0-1 range)
+  totalVolume: bigint
+  totalLiquidity: bigint
+  potentialPayouts: number[]     // 1/price for each outcome
+  yesPercentage: number          // Legacy binary fields
+  noPercentage: number
 }
 
 interface AMMPool {
-  reserves: [bigint, bigint]   // [YES reserves, NO reserves]
-  totalLPShares: bigint
+  marketId: string               // field
+  reserve1: bigint               // u128 — Outcome 1 shares in pool
+  reserve2: bigint               // u128 — Outcome 2 shares
+  reserve3: bigint               // u128 — Outcome 3 (0 if binary)
+  reserve4: bigint               // u128 — Outcome 4 (0 if binary)
+  totalLiquidity: bigint         // u128
+  totalLPShares: bigint          // u128
+  totalVolume: bigint            // u128
 }
 
 interface MarketResolution {
-  winningOutcome: Outcome
-  resolver: string
-  resolvedAt: number
+  marketId: string
+  winningOutcome: number         // u8 (1-4)
+  resolver: string               // address
+  resolvedAt: bigint             // u64
+  challengeDeadline: bigint      // u64
   finalized: boolean
-  challengeDeadline: number   // Block height
 }
 
 interface MarketFees {
-  protocolFees: bigint
-  creatorFees: bigint
-  resolverFees: bigint
+  marketId: string
+  protocolFees: bigint           // u128
+  creatorFees: bigint            // u128
 }
 
 interface DisputeData {
-  proposer: string
-  proposedOutcome: Outcome
-  bond: bigint
-  disputedAt: number
+  marketId: string
+  disputer: string               // address
+  proposedOutcome: number        // u8
+  bondAmount: bigint             // u128
+  disputedAt: bigint             // u64
 }`}</CodeBlock>
           </section>
 
@@ -290,14 +332,20 @@ const client = createClient({
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">Formatting Utilities</h2>
             <CodeBlock title="typescript">{`import {
-  formatCredits,      // 1000000n → "1.000000"
-  parseCredits,       // "1.5" → 1500000n
-  formatPercentage,   // 0.7523 → "75.23%"
-  formatTimeRemaining,// blocks → "2h 15m"
-  shortenAddress,     // "aleo1abc...xyz" → "aleo1ab...xyz"
-  isValidAleoAddress, // validate address format
-  hashToField,        // string → field element
-  blockHeightToTime,  // block number → estimated Date
+  formatCredits,        // 1000000n → "1.00"
+  parseCredits,         // "1.5" → 1500000n
+  formatPercentage,     // 0.7523 → "75.2%"
+  formatTimeRemaining,  // Date → "2h 15m"
+  shortenAddress,       // "aleo1abc...xyz" → "aleo1a...xyz"
+  isValidAleoAddress,   // validate aleo1... format
+  hashToField,          // string → field element
+  blockHeightToTime,    // block number → estimated Date
+  getStatusDisplay,     // MarketStatus → "Active"
+  getStatusColor,       // MarketStatus → "text-green-400"
+  validateTradeAmount,  // (amount, balance) → { valid, error? }
+  validateMarketDeadline,
+  validateMarketQuestion,
+  validateNumOutcomes,
 } from '@veiled-markets/sdk'`}</CodeBlock>
           </section>
         </div>

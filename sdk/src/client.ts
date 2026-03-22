@@ -1,7 +1,7 @@
 // ============================================================================
-// VEILED MARKETS SDK - Aleo Client (v12)
+// VEILED MARKETS SDK - Aleo Client
 // ============================================================================
-// Main client for interacting with the veiled_markets_v29.aleo program
+// Main client for interacting with the veiled_markets_v30.aleo program
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -44,7 +44,7 @@ import {
  */
 const DEFAULT_CONFIG: VeiledMarketsConfig = {
   network: 'testnet',
-  programId: 'veiled_markets_v29.aleo',
+  programId: 'veiled_markets_v30.aleo',
 };
 
 /**
@@ -164,7 +164,7 @@ export class VeiledMarketsClient {
       numOutcomes,
     );
 
-    // In v12 AMM, winning shares redeem 1:1, so payout = 1/price
+    // In FPMM AMM, winning shares redeem 1:1, so payout = 1/price
     const potentialPayouts = prices.map(p => p > 0 ? 1 / p : 0);
 
     const deadline = new Date(Number(market.deadline) * 15000 + Date.now());
@@ -267,7 +267,7 @@ export class VeiledMarketsClient {
   }
 
   /**
-   * Build inputs for buy_shares_private_usdcx (v23 — flattened MerkleProof inputs).
+   * Build inputs for buy_shares_private_usdcx (flattened MerkleProof inputs).
    * Uses transfer_private_to_public with Token record for full privacy.
    */
   buildBuySharesPrivateUsdcxInputs(params: {
@@ -431,11 +431,11 @@ export class VeiledMarketsClient {
   }
 
   /**
-   * Calculate payout for winning shares (v12: 1:1 redemption)
+   * Calculate payout for winning shares (1:1 redemption)
    */
   calculateWinnings(share: OutcomeShare, resolution: MarketResolution): bigint {
     if (share.outcome !== resolution.winningOutcome) return 0n;
-    return share.quantity; // 1:1 redemption in v12
+    return share.quantity; // 1:1 redemption
   }
 
   // ========================================================================

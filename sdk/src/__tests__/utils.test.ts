@@ -1,5 +1,5 @@
 // ============================================================================
-// VEILED MARKETS SDK - Utils Tests (v12)
+// VEILED MARKETS SDK - Utils Tests
 // ============================================================================
 
 import { describe, it, expect } from 'vitest';

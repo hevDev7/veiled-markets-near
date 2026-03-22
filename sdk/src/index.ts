@@ -1,7 +1,7 @@
 // ============================================================================
-// VEILED MARKETS SDK - Main Entry Point (v12)
+// VEILED MARKETS SDK - Main Entry Point
 // ============================================================================
-// TypeScript SDK for interacting with the veiled_markets_v13.aleo program
+// TypeScript SDK for interacting with the veiled_markets_v30.aleo program
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 

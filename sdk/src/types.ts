@@ -1,7 +1,7 @@
 // ============================================================================
-// VEILED MARKETS SDK - Type Definitions (v12)
+// VEILED MARKETS SDK - Type Definitions
 // ============================================================================
-// Matches the Leo contract: veiled_markets_v29.aleo
+// Matches the Leo contract: veiled_markets_v30.aleo
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -18,7 +18,7 @@ export enum MarketStatus {
 
 /**
  * Outcome enumeration (matches Leo constants)
- * v12 supports up to 4 outcomes
+ * Supports up to 4 outcomes
  */
 export enum Outcome {
   One = 1,
@@ -58,7 +58,7 @@ export enum MarketCategory {
 export type NetworkType = 'mainnet' | 'testnet';
 
 /**
- * Public market information (matches Leo Market struct v12)
+ * Public market information (matches Leo Market struct)
  */
 export interface Market {
   id: string;                    // field - Unique market identifier
@@ -76,7 +76,7 @@ export interface Market {
 }
 
 /**
- * AMM pool data (replaces MarketPool in v12)
+ * AMM pool data (AMM pool data)
  */
 export interface AMMPool {
   marketId: string;              // field
@@ -93,7 +93,7 @@ export interface AMMPool {
 export type MarketPool = AMMPool;
 
 /**
- * Market resolution data (v12 with challenge window)
+ * Market resolution data (with challenge window)
  */
 export interface MarketResolution {
   marketId: string;              // field
@@ -105,7 +105,7 @@ export interface MarketResolution {
 }
 
 /**
- * Market fee tracking (v12 per-trade fees)
+ * Market fee tracking (per-trade fees)
  */
 export interface MarketFees {
   marketId: string;              // field
@@ -125,7 +125,7 @@ export interface DisputeData {
 }
 
 /**
- * Outcome share record (replaces Bet record in v12)
+ * Outcome share record (private outcome share)
  * This data is encrypted on-chain and only visible to the owner
  */
 export interface OutcomeShare {
@@ -207,7 +207,7 @@ export interface MarketWithStats extends Market {
 }
 
 /**
- * Create market parameters (v12)
+ * Create market parameters
  */
 export interface CreateMarketParams {
   question: string;
@@ -333,7 +333,7 @@ export interface VeiledMarketsConfig {
 }
 
 /**
- * Fee configuration (matches Leo v12 constants - per-trade fees)
+ * Fee configuration (per-trade fee constants)
  */
 export const PROTOCOL_FEE_BPS = 50n;       // 0.5% protocol fee per trade
 export const CREATOR_FEE_BPS = 50n;        // 0.5% creator fee per trade
