@@ -168,6 +168,28 @@ function ExpandableDescription({ text }: { text: string }) {
   )
 }
 
+// ── Hero Description with Read More ──
+function HeroDescription({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const needsTruncation = text.length > 120
+
+  return (
+    <div className="mb-4">
+      <p className={cn('text-sm text-surface-400 leading-relaxed', !expanded && needsTruncation && 'line-clamp-2')}>
+        {text}
+      </p>
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs text-brand-400 hover:text-brand-300 mt-1 transition-colors"
+        >
+          {expanded ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── Vertical News Ticker ──
 function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; currentMarketId: string }) {
   const navigate = useNavigate()
@@ -965,9 +987,13 @@ export function MarketDetail() {
                   </div>
                 </div>
 
-                <h1 className="text-2xl md:text-3xl font-display font-bold tracking-tight text-white mb-4">
+                <h1 className="text-lg md:text-xl font-display font-bold tracking-tight text-white mb-2">
                   {market.question}
                 </h1>
+
+                {market.description && (
+                  <HeroDescription text={market.description} />
+                )}
 
                 {/* Crypto Live Price Chart */}
                 <CryptoPriceChart

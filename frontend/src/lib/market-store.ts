@@ -124,8 +124,8 @@ async function transformMarketData(
 
     const questionText = getQuestionText(market.question_hash)
     const transactionId = getMarketTransactionId(market.id)
-    const registryDescription = getMarketDescription(market.id)
-    const registryResolutionSource = getMarketResolutionSource(market.id)
+    const registryDescription = getMarketDescription(market.id) || getMarketDescription(market.question_hash)
+    const registryResolutionSource = getMarketResolutionSource(market.id) || getMarketResolutionSource(market.question_hash)
 
     return {
         id: market.id,

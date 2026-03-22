@@ -2013,10 +2013,14 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
       }
       // Populate metadata (description + resolution source)
       if (entry.description || entry.resolution_source) {
-        MARKET_METADATA_MAP[entry.market_id] = {
+        const meta = {
           description: entry.description || undefined,
           resolutionSource: entry.resolution_source || undefined,
         };
+        MARKET_METADATA_MAP[entry.market_id] = meta;
+        if (entry.question_hash) {
+          MARKET_METADATA_MAP[entry.question_hash] = meta;
+        }
       }
       // Populate IPFS CID mapping
       if (entry.ipfs_cid) {
