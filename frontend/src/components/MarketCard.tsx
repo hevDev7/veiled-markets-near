@@ -1,4 +1,4 @@
-import { Clock, Users, TrendingUp, Shield, Zap, Flame } from 'lucide-react'
+import { Clock, Users, TrendingUp, Shield, Flame } from 'lucide-react'
 import { useMemo, useRef } from 'react'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
@@ -109,26 +109,24 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         {/* Odds Display */}
         <div className="mb-4">
           {isBinary ? (
-            <>
-              <div className="flex justify-between text-sm mb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-yes-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]" />
-                  <span className="text-surface-300 font-medium">{outcomeLabels[0]}</span>
-                  <span className="text-yes-400 font-bold tabular-nums text-base">{formatPercentage(market.yesPercentage)}</span>
+            <div className="space-y-2">
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/40 border border-surface-700/30">
+                <div className="w-2.5 h-2.5 rounded-full bg-yes-500 shadow-[0_0_6px_rgba(16,185,129,0.4)] shrink-0" />
+                <span className="text-sm text-surface-300 font-medium">{outcomeLabels[0]}</span>
+                <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
+                  <div className="h-full rounded-full bg-yes-500" style={{ width: `${market.yesPercentage}%` }} />
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-no-400 font-bold tabular-nums text-base">{formatPercentage(market.noPercentage)}</span>
-                  <span className="text-surface-300 font-medium">{outcomeLabels[1]}</span>
-                  <div className="w-2.5 h-2.5 rounded-full bg-no-500 shadow-[0_0_6px_rgba(244,63,94,0.4)]" />
+                <span className="text-sm font-bold text-yes-400 tabular-nums shrink-0">{formatPercentage(market.yesPercentage)}</span>
+              </div>
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/40 border border-surface-700/30">
+                <div className="w-2.5 h-2.5 rounded-full bg-no-500 shadow-[0_0_6px_rgba(244,63,94,0.4)] shrink-0" />
+                <span className="text-sm text-surface-300 font-medium">{outcomeLabels[1]}</span>
+                <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
+                  <div className="h-full rounded-full bg-no-500" style={{ width: `${market.noPercentage}%` }} />
                 </div>
+                <span className="text-sm font-bold text-no-400 tabular-nums shrink-0">{formatPercentage(market.noPercentage)}</span>
               </div>
-              <div className="odds-bar h-2.5 rounded-full">
-                <div
-                  className="odds-bar-yes"
-                  style={{ width: `${market.yesPercentage}%` }}
-                />
-              </div>
-            </>
+            </div>
           ) : (
             <>
               {/* Multi-outcome chips */}
@@ -195,49 +193,6 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           </Tooltip>
         </div>
 
-        {/* Payout Buttons */}
-        {isBinary ? (
-          <div className="grid grid-cols-2 gap-2">
-            <button className={cn(
-              'flex-1 py-2.5 rounded-xl font-semibold text-sm',
-              'bg-yes-500/8 text-yes-400 border border-yes-500/15',
-              'hover:bg-yes-500/15 hover:border-yes-500/30 transition-all active:scale-[0.97]',
-              'flex items-center justify-center gap-2'
-            )}>
-              <Zap className="w-3.5 h-3.5" />
-              <span>{outcomeLabels[0]} <span className="font-bold tabular-nums">{market.potentialYesPayout.toFixed(2)}x</span></span>
-            </button>
-            <button className={cn(
-              'flex-1 py-2.5 rounded-xl font-semibold text-sm',
-              'bg-no-500/8 text-no-400 border border-no-500/15',
-              'hover:bg-no-500/15 hover:border-no-500/30 transition-all active:scale-[0.97]',
-              'flex items-center justify-center gap-2'
-            )}>
-              <Zap className="w-3.5 h-3.5" />
-              <span>{outcomeLabels[1]} <span className="font-bold tabular-nums">{market.potentialNoPayout.toFixed(2)}x</span></span>
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-1.5">
-            {outcomeLabels.map((label, i) => {
-              const price = prices[i] ?? (1 / numOutcomes)
-              const payout = price > 0 ? 1 / price : 2.0
-              const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
-              return (
-                <button key={i} className={cn(
-                  'py-2 px-2.5 rounded-xl font-semibold text-xs',
-                  colors.bg, colors.text, 'border', colors.border,
-                  colors.hoverBg, colors.hoverBorder, 'transition-all active:scale-[0.97]',
-                  'flex items-center justify-center gap-1.5 truncate'
-                )}>
-                  <Zap className="w-3 h-3 flex-shrink-0" />
-                  <span className="truncate">{label}</span>
-                  <span className="font-bold flex-shrink-0 tabular-nums">{payout.toFixed(1)}x</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
 
       </div>
     </div>
