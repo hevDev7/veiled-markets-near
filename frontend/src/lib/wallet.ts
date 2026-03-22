@@ -1633,10 +1633,43 @@ export class ShieldWalletAdapter {
     return null;
   }
 
-  async connect(): Promise<WalletAccount> {
+  private async attemptWalletConnect(shieldWallet: any, requireSuccess: boolean): Promise<boolean> {
+    if (typeof shieldWallet?.connect !== 'function') {
+      return true;
+    }
+
+    const programs = this.getAllowedPrograms();
+    const attempts: Array<() => Promise<unknown>> = [
+      () => shieldWallet.connect('testnet', 'AutoDecrypt', programs),
+      () => shieldWallet.connect({ network: 'testnet', decryptPermission: 'AutoDecrypt', programs }),
+      () => shieldWallet.connect({ network: 'testnet', programs }),
+      () => shieldWallet.connect('AutoDecrypt', 'testnet', programs),
+      () => shieldWallet.connect('AutoDecrypt', 'testnetbeta', programs),
+      () => shieldWallet.connect(),
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        await attempt();
+        return true;
+      } catch (connectErr) {
+        devLog('Shield Wallet: connect attempt failed:', connectErr);
+      }
+    }
+
+    if (requireSuccess) {
+      throw new Error('Shield Wallet connection failed. Please reconnect the dApp in Shield and try again.');
+    }
+
+    return false;
+  }
+
+  async connect(options?: { forceReconnect?: boolean; refreshPrograms?: boolean }): Promise<WalletAccount> {
     try {
       devLog('Shield Wallet: Attempting to connect...');
       const shieldWallet = this.getShieldWallet();
+      const forceReconnect = options?.forceReconnect ?? false;
+      const refreshPrograms = options?.refreshPrograms ?? false;
 
       if (!shieldWallet) {
         throw new Error(
@@ -1647,8 +1680,16 @@ export class ShieldWalletAdapter {
 
       devLog('Shield Wallet: Found wallet object, methods:', Object.keys(shieldWallet));
 
-      const existingAddress = await this.resolveAddress(shieldWallet);
-      if (existingAddress && existingAddress.startsWith('aleo1')) {
+      if (forceReconnect && typeof shieldWallet.disconnect === 'function') {
+        try {
+          await shieldWallet.disconnect();
+        } catch (disconnectErr) {
+          devLog('Shield Wallet: disconnect before reconnect failed:', disconnectErr);
+        }
+      }
+
+      const existingAddress = forceReconnect ? null : await this.resolveAddress(shieldWallet);
+      if (existingAddress && existingAddress.startsWith('aleo1') && !refreshPrograms) {
         this.connected = true;
         this.account = {
           address: existingAddress,
@@ -1658,32 +1699,15 @@ export class ShieldWalletAdapter {
         return this.account;
       }
 
-      // Try to connect using standard Aleo wallet interface
-      if (typeof shieldWallet.connect === 'function') {
-        const programs = this.getAllowedPrograms();
-        const attempts: Array<() => Promise<unknown>> = [
-          () => shieldWallet.connect('testnet', 'AutoDecrypt', programs),
-          () => shieldWallet.connect({ network: 'testnet', decryptPermission: 'AutoDecrypt', programs }),
-          () => shieldWallet.connect({ network: 'testnet', programs }),
-          () => shieldWallet.connect('AutoDecrypt', 'testnet', programs),
-          () => shieldWallet.connect('AutoDecrypt', 'testnetbeta', programs),
-          () => shieldWallet.connect(),
-        ];
-
-        let connected = false;
-        for (const attempt of attempts) {
-          try {
-            await attempt();
-            connected = true;
-            break;
-          } catch (connectErr) {
-            devLog('Shield Wallet: connect attempt failed:', connectErr);
-          }
-        }
-
-        if (!connected) {
-          throw new Error('Shield Wallet connection failed. Please reconnect the dApp in Shield and try again.');
-        }
+      const synced = await this.attemptWalletConnect(shieldWallet, !existingAddress);
+      if (!synced && existingAddress && existingAddress.startsWith('aleo1')) {
+        this.connected = true;
+        this.account = {
+          address: existingAddress,
+          network: 'testnet',
+        };
+        devLog('Shield Wallet: Using existing address after refresh failure:', existingAddress);
+        return this.account;
       }
 
       // Get public key / address

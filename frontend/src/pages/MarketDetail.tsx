@@ -1,8 +1,12 @@
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
+  Activity,
+  Zap,
   Clock,
   TrendingUp,
+  MessageSquare,
+  FileText,
   ExternalLink,
   Share2,
   Bookmark,
@@ -15,6 +19,7 @@ import {
   Check,
   Droplets,
   ShieldAlert,
+  Shield,
   Coins,
   ShoppingCart,
   TrendingDown,
@@ -77,20 +82,22 @@ const categoryNames: Record<number, string> = {
   1: 'Politics',
   2: 'Sports',
   3: 'Crypto',
-  4: 'Entertainment',
-  5: 'Tech',
-  6: 'Economics',
+  4: 'Culture',
+  5: 'AI & Tech',
+  6: 'Macro',
   7: 'Science',
+  8: 'Climate',
 }
 
 const categoryColors: Record<number, string> = {
-  1: 'bg-red-500/10 text-red-400 border-red-500/20',
+  1: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
   2: 'bg-green-500/10 text-green-400 border-green-500/20',
-  3: 'bg-brand-500/10 text-brand-400 border-brand-500/20',
+  3: 'bg-brand-400/10 text-brand-400 border-brand-400/20',
   4: 'bg-pink-500/10 text-pink-400 border-pink-500/20',
-  5: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  6: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  7: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  5: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  6: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  7: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+  8: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
 }
 
 type TradeStep = 'select' | 'processing' | 'pending' | 'success' | 'error'
@@ -118,7 +125,7 @@ function CopyableText({ text, displayText }: { text: string; displayText?: strin
       </span>
       <button
         onClick={handleCopy}
-        className="p-1.5 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors"
+        className="p-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] transition-colors"
         title="Copy to clipboard"
       >
         {copied ? (
@@ -161,6 +168,89 @@ function ExpandableDescription({ text }: { text: string }) {
   )
 }
 
+// ── Vertical News Ticker ──
+function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; currentMarketId: string }) {
+  const navigate = useNavigate()
+  const otherMarkets = useMemo(
+    () => markets.filter(m => m.id !== currentMarketId && m.status === 1),
+    [markets, currentMarketId]
+  )
+
+  if (otherMarkets.length === 0) return null
+
+  // Build ticker items — show leading outcome label + price
+  const items = useMemo(() => {
+    const list: Array<{ id: string; text: string; token: string; leadLabel: string; leadPrice: number; direction: 'yes' | 'no' }> = []
+    for (const m of otherMarkets) {
+      const yesPrice = (m.yesPercentage ?? 50) / 100
+      const noPrice = (m.noPercentage ?? 50) / 100
+      const isYesLeading = yesPrice >= noPrice
+      const labels = m.outcomeLabels ?? ['Yes', 'No']
+      const label = m.question.length > 50 ? m.question.slice(0, 50) + '...' : m.question
+      list.push({
+        id: m.id,
+        text: label,
+        token: m.tokenType ?? 'ALEO',
+        leadLabel: isYesLeading ? labels[0] : labels[1],
+        leadPrice: isYesLeading ? yesPrice : noPrice,
+        direction: isYesLeading ? 'yes' : 'no',
+      })
+    }
+    return list
+  }, [otherMarkets])
+
+  // Duplicate items for seamless loop
+  const doubled = useMemo(() => [...items, ...items], [items])
+  const itemHeight = 36 // px per item
+  const totalHeight = items.length * itemHeight
+
+  return (
+    <div className="mt-6 pt-5 border-t border-white/[0.04]">
+      <p className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider mb-3">Other Markets</p>
+      <div
+        className="relative overflow-hidden rounded-xl bg-white/[0.02] border border-white/[0.04]"
+        style={{ height: Math.min(itemHeight * 4, totalHeight) }}
+      >
+        <div
+          className="animate-ticker-up"
+          style={{
+            // @ts-ignore -- CSS custom property
+            '--ticker-distance': `-${totalHeight}px`,
+            animationDuration: `${items.length * 4}s`,
+          } as React.CSSProperties}
+        >
+          {doubled.map((item, i) => (
+            <button
+              key={`${item.id}-${i}`}
+              onClick={() => navigate(`/market/${item.id}`)}
+              className="flex items-center gap-3 w-full px-3 text-left hover:bg-white/[0.03] transition-colors"
+              style={{ height: itemHeight }}
+            >
+              <span className={cn(
+                'w-1.5 h-1.5 rounded-full shrink-0',
+                item.direction === 'yes' ? 'bg-yes-400' : 'bg-no-400'
+              )} />
+              <span className="flex-1 text-xs text-surface-300 truncate">{item.text}</span>
+              <span className={cn(
+                'text-[11px] font-semibold shrink-0',
+                item.direction === 'yes' ? 'text-yes-400' : 'text-no-400'
+              )}>
+                {item.leadLabel}
+              </span>
+              <span className={cn(
+                'text-xs font-bold tabular-nums shrink-0',
+                item.direction === 'yes' ? 'text-yes-400' : 'text-no-400'
+              )}>
+                ${item.leadPrice.toFixed(2)}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function MarketDetail() {
   const navigate = useNavigate()
   const { marketId } = useParams<{ marketId: string }>()
@@ -185,9 +275,13 @@ export function MarketDetail() {
 
   // Bet count from Supabase
   const [betCount, setBetCount] = useState(0)
+  const [createdTimestamp, setCreatedTimestamp] = useState<string | null>(null)
 
   // Active tab for extra panels
   const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees' | 'resolve'>('trade')
+
+  // Content tab for chart/activity/discussion/rules
+  const [contentTab, setContentTab] = useState<'chart' | 'activity' | 'discussion' | 'rules'>('chart')
 
   // Sell shares state
   const [tradeMode, setTradeMode] = useState<'buy' | 'sell'>('buy')
@@ -234,6 +328,36 @@ export function MarketDetail() {
     if (!market?.id) return
     fetchBetCountByMarket(market.id).then(setBetCount)
   }, [market?.id])
+
+  // Fetch created timestamp from explorer API
+  useEffect(() => {
+    if (!market?.transactionId) return
+    const txId = market.transactionId
+    if (!txId.startsWith('at1')) {
+      setCreatedTimestamp(null)
+      return
+    }
+    const fetchTimestamp = async () => {
+      try {
+        // Step 1: Find block hash from transaction ID
+        const hashResp = await fetch(`${config.rpcUrl}/find/blockHash/${txId}`)
+        if (!hashResp.ok) return
+        const blockHash = (await hashResp.json()) as string
+        if (!blockHash || typeof blockHash !== 'string') return
+
+        // Step 2: Get block by hash → read timestamp from metadata
+        const blockResp = await fetch(`${config.rpcUrl}/block/${blockHash.replace(/"/g, '')}`)
+        if (!blockResp.ok) return
+        const block = await blockResp.json()
+        const ts = block?.header?.metadata?.timestamp
+        if (ts && typeof ts === 'number') {
+          const date = new Date(ts * 1000)
+          setCreatedTimestamp(date.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))
+        }
+      } catch { /* silent */ }
+    }
+    fetchTimestamp()
+  }, [market?.transactionId])
 
   // Fetch additional data (resolution, fees, dispute) when market loads
   useEffect(() => {
@@ -480,7 +604,7 @@ export function MarketDetail() {
         <div className="min-h-screen bg-surface-950 flex flex-col">
           <DashboardHeader />
           <main className="flex-1 pt-20">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
               <div className="skeleton h-8 w-32 rounded-lg mb-6" />
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 space-y-6">
@@ -797,7 +921,7 @@ export function MarketDetail() {
       <DashboardHeader />
 
       <main className="flex-1 pt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Back Button */}
           <motion.button
             initial={{ opacity: 0, x: -20 }}
@@ -830,57 +954,20 @@ export function MarketDetail() {
                     {market.tags?.map(tag => (
                       <span
                         key={tag}
-                        className="px-2 py-0.5 text-xs font-medium rounded-full bg-surface-700/50 text-surface-300"
+                        className="px-2 py-0.5 text-xs font-medium rounded-full bg-white/[0.04] text-surface-300 border border-white/[0.04]"
                       >
                         {tag}
                       </span>
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        const url = window.location.href
-                        if (navigator.share) {
-                          try { await navigator.share({ title: market.question, url }) } catch {}
-                        } else {
-                          await navigator.clipboard.writeText(url)
-                          setLinkCopied(true)
-                          setTimeout(() => setLinkCopied(false), 2000)
-                        }
-                      }}
-                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
-                      aria-label={linkCopied ? 'Link copied' : 'Share market'}
-                    >
-                      {linkCopied
-                        ? <Check className="w-4 h-4 text-yes-400" />
-                        : <Share2 className="w-4 h-4 text-surface-400" />
-                      }
-                    </button>
-                    <button
-                      onClick={() => {
-                        const saved = JSON.parse(localStorage.getItem('veiled_bookmarks') || '[]') as string[]
-                        const updated = isBookmarked ? saved.filter(id => id !== market.id) : [...saved, market.id]
-                        localStorage.setItem('veiled_bookmarks', JSON.stringify(updated))
-                        setIsBookmarked(!isBookmarked)
-                      }}
-                      className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:outline-none"
-                      aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark market'}
-                    >
-                      {isBookmarked
-                        ? <BookmarkCheck className="w-4 h-4 text-yellow-400" />
-                        : <Bookmark className="w-4 h-4 text-surface-400" />
-                      }
-                    </button>
+                    <MarketStatusBadgeWrapper status={market.status} />
                   </div>
                 </div>
 
-                <h1 className="text-2xl md:text-3xl font-bold text-white mb-4">
+                <h1 className="text-2xl md:text-3xl font-display font-bold tracking-tight text-white mb-4">
                   {market.question}
                 </h1>
-
-                {market.description && (
-                  <ExpandableDescription text={market.description} />
-                )}
 
                 {/* Crypto Live Price Chart */}
                 <CryptoPriceChart
@@ -891,7 +978,7 @@ export function MarketDetail() {
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="p-4 rounded-xl bg-surface-800/30">
+                  <div className="p-4 rounded-xl bg-white/[0.02]">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
                       <TrendingUp className="w-4 h-4" />
                       <span>Volume</span>
@@ -900,7 +987,7 @@ export function MarketDetail() {
                       {formatCredits(market.totalVolume)} {tokenSymbol}
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-surface-800/30">
+                  <div className="p-4 rounded-xl bg-white/[0.02]">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
                       <Droplets className="w-4 h-4" />
                       <span>{(market.status === MARKET_STATUS.RESOLVED || market.status === MARKET_STATUS.CANCELLED) ? 'Remaining' : 'Liquidity'}</span>
@@ -914,7 +1001,7 @@ export function MarketDetail() {
                       )} {tokenSymbol}
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-surface-800/30">
+                  <div className="p-4 rounded-xl bg-white/[0.02]">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
                       <Clock className="w-4 h-4" />
                       <span>Ends In</span>
@@ -923,7 +1010,7 @@ export function MarketDetail() {
                       {liveTimeRemaining}
                     </p>
                   </div>
-                  <div className="p-4 rounded-xl bg-surface-800/30">
+                  <div className="p-4 rounded-xl bg-white/[0.02]">
                     <div className="flex items-center gap-2 text-surface-400 text-sm mb-1">
                       <Info className="w-4 h-4" />
                       <span>Outcomes</span>
@@ -933,15 +1020,80 @@ export function MarketDetail() {
                     </p>
                   </div>
                 </div>
+
+                {/* Market News Ticker */}
+                {markets.length > 1 && (
+                  <MarketNewsTicker markets={markets} currentMarketId={market.id} />
+                )}
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-3 mt-6 pt-6 border-t border-white/[0.04]">
+                  <button
+                    onClick={async () => {
+                      const url = window.location.href
+                      if (navigator.share) {
+                        try { await navigator.share({ title: market.question, url }) } catch {}
+                      } else {
+                        await navigator.clipboard.writeText(url)
+                        setLinkCopied(true)
+                        setTimeout(() => setLinkCopied(false), 2000)
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/[0.04] transition-all duration-200"
+                  >
+                    {linkCopied ? <Check className="w-3.5 h-3.5 text-yes-400" /> : <Share2 className="w-3.5 h-3.5" />}
+                    {linkCopied ? 'Copied!' : 'Share'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const saved = JSON.parse(localStorage.getItem('veiled_bookmarks') || '[]') as string[]
+                      const updated = isBookmarked ? saved.filter(id => id !== market.id) : [...saved, market.id]
+                      localStorage.setItem('veiled_bookmarks', JSON.stringify(updated))
+                      setIsBookmarked(!isBookmarked)
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/[0.04] transition-all duration-200"
+                  >
+                    {isBookmarked ? <BookmarkCheck className="w-3.5 h-3.5 text-yellow-400" /> : <Bookmark className="w-3.5 h-3.5" />}
+                    {isBookmarked ? 'Saved' : 'Watchlist'}
+                  </button>
+                </div>
               </motion.div>
 
-              {/* Multi-outcome Probability Display */}
+              {/* ═══ CONTENT TABS: Price Chart | Activity | Discussion | Rules ═══ */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="glass-card p-6"
+                className="glass-card overflow-hidden"
               >
+                {/* Tab bar */}
+                <div className="flex items-center gap-1 p-1.5 mx-4 mt-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                  {[
+                    { id: 'chart' as const, label: 'Price Chart', icon: Activity },
+                    { id: 'activity' as const, label: 'Activity', icon: Zap },
+                    { id: 'discussion' as const, label: 'Discussion', icon: MessageSquare },
+                    { id: 'rules' as const, label: 'Rules', icon: FileText },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setContentTab(tab.id)}
+                      className={cn(
+                        'flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200',
+                        contentTab === tab.id
+                          ? 'bg-white/[0.06] text-white'
+                          : 'text-surface-500 hover:text-surface-300'
+                      )}
+                    >
+                      <tab.icon className="w-3.5 h-3.5" />
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="p-4 lg:p-6">
+                  {/* Price Chart tab */}
+                  {contentTab === 'chart' && (
+                    <div className="space-y-6">
                 <h2 className="text-lg font-semibold text-white mb-4">Market Sentiment</h2>
 
                 {/* Donut chart + pool data visualization */}
@@ -960,14 +1112,8 @@ export function MarketDetail() {
                   totalVolume={market.totalVolume}
                   tokenSymbol={market.tokenType || 'ALEO'}
                 />
-              </motion.div>
 
               {/* Pool Breakdown Chart */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
-              >
                 <OddsChart
                   numOutcomes={numOutcomes}
                   outcomeLabels={outcomeLabels}
@@ -976,8 +1122,175 @@ export function MarketDetail() {
                   totalVolume={market.totalVolume}
                   totalBets={betCount}
                   tokenSymbol={tokenSymbol}
-                  className="glass-card p-6"
+                  className="rounded-xl border border-white/[0.04] p-5"
                 />
+                    </div>
+                  )}
+
+                  {/* Activity tab */}
+                  {contentTab === 'activity' && (
+                    <div className="space-y-4">
+                      {(() => {
+                        const { userBets, pendingBets } = useBetsStore.getState()
+                        const marketBets = [...pendingBets, ...userBets]
+                          .filter(b => b.marketId === market.id)
+                          .sort((a, b) => b.placedAt - a.placedAt)
+
+                        const getTimeAgo = (ts: number) => {
+                          const diff = Date.now() - ts
+                          if (diff < 60_000) return 'just now'
+                          if (diff < 3600_000) return `${Math.floor(diff / 60_000)} min ago`
+                          if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`
+                          return `${Math.floor(diff / 86400_000)}d ago`
+                        }
+
+                        const hasVolume = market.totalVolume > 0n
+                        const totalTraders = Math.max(betCount, market.totalBets || 0)
+                        const otherTraders = Math.max(0, totalTraders - marketBets.length)
+                        const volumeDisplay = (Number(market.totalVolume) / 1_000_000).toFixed(1)
+
+                        return (
+                          <>
+                            {/* Your Trades */}
+                            {marketBets.length > 0 && (
+                              <>
+                                <p className="text-2xs font-heading font-semibold text-surface-400 uppercase tracking-wider">Your Trades</p>
+                                {marketBets.map((bet, i) => {
+                                  const isYes = bet.outcome === 'yes' || bet.outcome === 'outcome_1'
+                                  const label = outcomeLabels[(bet.outcome === 'yes' ? 0 : bet.outcome === 'no' ? 1 : parseInt(bet.outcome.replace('outcome_', '')) - 1)] || bet.outcome.toUpperCase()
+                                  const isSell = bet.type === 'sell'
+                                  const amount = Number(bet.amount) / 1_000_000
+                                  const shares = bet.sharesReceived ? Number(bet.sharesReceived) / 1_000_000 : amount
+
+                                  return (
+                                    <motion.div key={bet.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
+                                      className="flex items-center gap-4 px-4 py-3 rounded-xl bg-white/[0.01] hover:bg-white/[0.02] transition-colors duration-200">
+                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
+                                        isSell ? 'bg-purple-500/10 text-purple-400' : isYes ? 'bg-yes-400/10 text-yes-400' : 'bg-no-400/10 text-no-400'
+                                      }`}>
+                                        {isSell ? 'S' : isYes ? 'Y' : 'N'}
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-white">
+                                          <span className="text-surface-400">You</span>
+                                          {isSell ? ' sold ' : ' bought '}
+                                          <span className={isYes ? 'text-yes-400 font-semibold' : 'text-no-400 font-semibold'}>
+                                            {shares.toFixed(1)} {label.toUpperCase()}
+                                          </span>
+                                        </p>
+                                        <p className="text-xs text-surface-500">{getTimeAgo(bet.placedAt)}</p>
+                                      </div>
+                                      <span className="text-sm font-heading font-medium text-white tabular-nums">
+                                        {amount.toFixed(2)} {tokenSymbol}
+                                      </span>
+                                    </motion.div>
+                                  )
+                                })}
+                              </>
+                            )}
+
+                            {/* Other traders info */}
+                            {(hasVolume || otherTraders > 0) && (
+                              <div className="rounded-xl p-4 mt-2" style={{ background: 'linear-gradient(135deg, rgba(201, 168, 76, 0.04), rgba(0, 220, 130, 0.02))', border: '1px solid rgba(201, 168, 76, 0.08)' }}>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl bg-brand-400/[0.08] flex items-center justify-center flex-shrink-0">
+                                    <Shield className="w-5 h-5 text-brand-400" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium text-white">
+                                      {otherTraders > 0
+                                        ? `${otherTraders} other trader${otherTraders > 1 ? 's' : ''} bought shares in this market`
+                                        : 'Other traders have bought shares in this market'}
+                                    </p>
+                                    <p className="text-xs text-surface-400 mt-0.5">
+                                      Total volume: {volumeDisplay} {tokenSymbol} · All positions encrypted with ZK proofs
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Empty state */}
+                            {marketBets.length === 0 && !hasVolume && otherTraders === 0 && (
+                              <div className="text-center py-12">
+                                <Zap className="w-8 h-8 text-surface-500 mx-auto mb-3" />
+                                <p className="text-sm text-surface-300 mb-1">No activity yet</p>
+                                <p className="text-xs text-surface-500">Be the first to trade on this market</p>
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Discussion tab */}
+                  {contentTab === 'discussion' && (
+                    <div className="text-center py-12">
+                      <MessageSquare className="w-8 h-8 text-surface-500 mx-auto mb-3" />
+                      <p className="text-sm text-surface-300 mb-1">Discussion coming soon</p>
+                      <p className="text-xs text-surface-500">Community comments and analysis will appear here</p>
+                    </div>
+                  )}
+
+                  {/* Rules tab */}
+                  {contentTab === 'rules' && (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-sm font-semibold text-white mb-2">Resolution Criteria</h3>
+                        <p className="text-sm text-surface-400 leading-relaxed">
+                          {market.description || 'No resolution criteria specified.'}
+                        </p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-white mb-2">Oracle Source</h3>
+                        <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                          <Info className="w-4 h-4 text-brand-400" />
+                          <span className="text-sm text-white">{market.resolutionSource || 'On-chain verification'}</span>
+                          {market.resolutionSource && (
+                            <ExternalLink className="w-3.5 h-3.5 text-surface-500 ml-auto" />
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-white mb-2">Market Details</h3>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-surface-400">Token</span>
+                            <span className="text-white font-medium">{tokenSymbol}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-surface-400">Outcomes</span>
+                            <span className="text-white font-medium">{numOutcomes}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-surface-400">Trading Fees</span>
+                            <span className="text-white font-medium">2%</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-surface-400">Contract</span>
+                            <a href={`https://testnet.explorer.provable.com/program/${CONTRACT_INFO.programId}`} target="_blank" rel="noopener noreferrer"
+                              className="text-brand-400 hover:text-brand-300 flex items-center gap-1 text-xs">
+                              {CONTRACT_INFO.programId} <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                      {market.tags && market.tags.length > 0 && (
+                        <div>
+                          <h3 className="text-sm font-semibold text-white mb-2">Tags</h3>
+                          <div className="flex flex-wrap gap-2">
+                            {market.tags.map(tag => (
+                              <span key={tag} className="px-2.5 py-1 rounded-lg text-2xs bg-white/[0.03] border border-white/[0.04] text-surface-300">
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </motion.div>
 
               {/* Tab panels: Liquidity, Dispute, Creator Fees */}
@@ -994,8 +1307,8 @@ export function MarketDetail() {
                       className={cn(
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'liquidity'
-                          ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                          ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]'
+                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
                       )}
                     >
                       <Droplets className="w-4 h-4" />
@@ -1009,7 +1322,7 @@ export function MarketDetail() {
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'dispute'
                           ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
                       )}
                     >
                       <ShieldAlert className="w-4 h-4" />
@@ -1023,7 +1336,7 @@ export function MarketDetail() {
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'fees'
                           ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
                       )}
                     >
                       <Coins className="w-4 h-4" />
@@ -1036,8 +1349,8 @@ export function MarketDetail() {
                       className={cn(
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'resolve'
-                          ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                          : 'bg-surface-800/50 text-surface-400 hover:text-white'
+                          ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]'
+                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
                       )}
                     >
                       <CheckCircle2 className="w-4 h-4" />
@@ -1065,96 +1378,16 @@ export function MarketDetail() {
                 )}
               </motion.div>
 
-              {/* Market Info */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.25 }}
-                className="glass-card p-6"
-              >
-                <h2 className="text-lg font-semibold text-white mb-4">Market Information</h2>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
-                    <span className="text-surface-400">Market ID</span>
-                    <CopyableText
-                      text={market.id}
-                      displayText={`${market.id.slice(0, 10)}...${market.id.slice(-8)}`}
-                    />
-                  </div>
-                  <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
-                    <span className="text-surface-400">Token</span>
-                    <span className="text-white font-medium">{tokenSymbol}</span>
-                  </div>
-                  <div className="flex justify-between items-center py-3 border-b border-surface-800/50">
-                    <span className="text-surface-400">Creator</span>
-                    <div className="flex items-center gap-2">
-                      {isValidAleoAddress(market.creator) ? (
-                        <a
-                          href={`https://testnet.explorer.provable.com/address/${market.creator}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
-                        >
-                          <span className="font-mono text-sm">
-                            {market.creator?.slice(0, 10)}...{market.creator?.slice(-6)}
-                          </span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      ) : (
-                        <span className="font-mono text-sm text-surface-400">
-                          {market.creator?.slice(0, 10)}...{market.creator?.slice(-6)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex justify-between py-3 border-b border-surface-800/50">
-                    <span className="text-surface-400">Resolution Source</span>
-                    {(() => {
-                      const safeUrl = sanitizeUrl(market.resolutionSource)
-                      if (safeUrl) {
-                        return (
-                          <a
-                            href={safeUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
-                          >
-                            <span>{safeHostname(safeUrl) || safeUrl}</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        )
-                      }
-                      return <span className="text-white">{market.resolutionSource || 'On-chain'}</span>
-                    })()}
-                  </div>
-                  <div className="flex justify-between py-3 border-b border-surface-800/50">
-                    <span className="text-surface-400">Trading Fees</span>
-                    <span className="text-white text-sm">2% (0.5% protocol + 0.5% creator + 1% LP)</span>
-                  </div>
-                  <div className="flex justify-between py-3">
-                    <span className="text-surface-400">Contract</span>
-                    <a
-                      href={`https://testnet.explorer.provable.com/program/${CONTRACT_INFO.programId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-brand-400 hover:text-brand-300 flex items-center gap-1"
-                    >
-                      <span>{CONTRACT_INFO.programId}</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                </div>
-              </motion.div>
-
             </div>
 
-            {/* Trading Panel (Right Sidebar) */}
+            {/* Trading Panel + Market Info (Right Sidebar) */}
             <div className="lg:col-span-1" ref={tradingPanelRef}>
+              <div className="sticky top-28 space-y-4">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="glass-card p-6 sticky top-24"
+                className="glass-card p-6"
               >
                 {/* Buy/Sell Tab Toggle */}
                 {!isExpired && canTrade && step === 'select' ? (
@@ -1165,7 +1398,7 @@ export function MarketDetail() {
                         'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all',
                         tradeMode === 'buy'
                           ? 'bg-yes-500/20 text-yes-400 border border-yes-500/30'
-                          : 'bg-surface-800/50 text-surface-400 hover:text-white border border-transparent'
+                          : 'bg-white/[0.03] text-surface-400 hover:text-white border border-transparent'
                       )}
                     >
                       <ShoppingCart className="w-4 h-4" />
@@ -1177,7 +1410,7 @@ export function MarketDetail() {
                         'flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all',
                         tradeMode === 'sell'
                           ? 'bg-no-500/20 text-no-400 border border-no-500/30'
-                          : 'bg-surface-800/50 text-surface-400 hover:text-white border border-transparent'
+                          : 'bg-white/[0.03] text-surface-400 hover:text-white border border-transparent'
                       )}
                     >
                       <TrendingDown className="w-4 h-4" />
@@ -1193,7 +1426,7 @@ export function MarketDetail() {
                 {/* Expired State */}
                 {isExpired && step === 'select' && (
                   <div className="text-center py-8">
-                    <div className="w-16 h-16 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-4">
+                    <div className="w-16 h-16 rounded-full bg-white/[0.03] flex items-center justify-center mx-auto mb-4">
                       <Clock className="w-8 h-8 text-surface-500" />
                     </div>
                     <h3 className="text-lg font-bold text-white mb-2">Trading Closed</h3>
@@ -1209,8 +1442,8 @@ export function MarketDetail() {
                 {/* Pending State */}
                 {step === 'pending' && (
                   <div className="text-center py-8">
-                    <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
-                    <h3 className="text-xl font-bold text-white mb-2">Transaction Pending</h3>
+                    <Loader2 className="w-12 h-12 text-brand-400 animate-spin mx-auto mb-4" />
+                    <h3 className="text-xl font-display font-bold text-white mb-2">Transaction Pending</h3>
                     <p className="text-surface-400 mb-2">
                       Your trade of {buyAmount} {tokenSymbol} has been submitted.
                     </p>
@@ -1229,7 +1462,7 @@ export function MarketDetail() {
                     <div className="w-16 h-16 rounded-full bg-yes-500/10 flex items-center justify-center mx-auto mb-4">
                       <CheckCircle2 className="w-8 h-8 text-yes-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Shares Purchased!</h3>
+                    <h3 className="text-xl font-display font-bold text-white mb-2">Shares Purchased!</h3>
                     <p className="text-surface-400 mb-4">
                       You bought {outcomeLabels[(selectedOutcome ?? 1) - 1]} shares with {buyAmount} {tokenSymbol}.
                     </p>
@@ -1267,7 +1500,7 @@ export function MarketDetail() {
                     <div className="w-16 h-16 rounded-full bg-no-500/10 flex items-center justify-center mx-auto mb-4">
                       <AlertCircle className="w-8 h-8 text-no-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Trade Failed</h3>
+                    <h3 className="text-xl font-display font-bold text-white mb-2">Trade Failed</h3>
                     <p className="text-surface-400 mb-6 whitespace-pre-line text-left text-sm">{error}</p>
                     <button onClick={resetTrade} className="btn-primary w-full">
                       Try Again
@@ -1278,8 +1511,8 @@ export function MarketDetail() {
                 {/* Processing State */}
                 {step === 'processing' && (
                   <div className="text-center py-8">
-                    <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
-                    <h3 className="text-xl font-bold text-white mb-2">Processing...</h3>
+                    <Loader2 className="w-12 h-12 text-brand-400 animate-spin mx-auto mb-4" />
+                    <h3 className="text-xl font-display font-bold text-white mb-2">Processing...</h3>
                     <p className="text-surface-400">
                       Please confirm the transaction in your wallet.
                     </p>
@@ -1333,8 +1566,8 @@ export function MarketDetail() {
                               className={cn(
                                 "px-3 py-1.5 rounded-lg text-sm font-medium transition-all active:scale-95",
                                 parseFloat(buyAmount) === amount
-                                  ? "bg-brand-500 text-white"
-                                  : "bg-surface-800/50 text-surface-400 hover:text-white hover:bg-surface-700/50"
+                                  ? "bg-brand-400 text-white"
+                                  : "bg-white/[0.03] text-surface-400 hover:text-white hover:bg-white/[0.06]"
                               )}
                             >
                               {amount}
@@ -1357,8 +1590,8 @@ export function MarketDetail() {
                                 className={cn(
                                   'px-3 py-1 rounded-lg text-xs font-medium transition-all active:scale-95',
                                   slippage === s
-                                    ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                                    : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                                    ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]'
+                                    : 'bg-white/[0.03] text-surface-500 hover:text-surface-300'
                                 )}
                               >
                                 {s}%
@@ -1396,7 +1629,7 @@ export function MarketDetail() {
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        className="p-4 rounded-xl bg-surface-800/30 mb-6"
+                        className="p-4 rounded-xl bg-white/[0.02] mb-6"
                       >
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400 text-sm">Shares Received</span>
@@ -1425,7 +1658,7 @@ export function MarketDetail() {
                             {formatCredits(tradePreview.fees.totalFees)} {tokenSymbol}
                           </span>
                         </div>
-                        <div className="flex justify-between pt-2 border-t border-surface-700/50">
+                        <div className="flex justify-between pt-2 border-t border-white/[0.06]">
                           <span className="text-surface-400 text-sm">Potential Payout (if wins)</span>
                           <span className="text-yes-400 font-bold text-sm">
                             {tradePreview.potentialPayout.toFixed(2)} {tokenSymbol}
@@ -1448,8 +1681,8 @@ export function MarketDetail() {
                       className={cn(
                         "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
                         selectedOutcome && buyAmountMicro > 0n
-                          ? "bg-brand-500 hover:bg-brand-400 text-white active:scale-[0.98]"
-                          : "bg-surface-800 text-surface-500 cursor-not-allowed"
+                          ? "bg-brand-400 hover:bg-brand-300 text-white active:scale-[0.98]"
+                          : "bg-white/[0.04] text-surface-500 cursor-not-allowed"
                       )}
                     >
                       <ShoppingCart className="w-5 h-5" />
@@ -1496,8 +1729,8 @@ export function MarketDetail() {
 
                           {/* Loading state */}
                           {isFetchingRecords && walletShareRecords.length === 0 && (
-                            <div className="flex items-center justify-center py-6 rounded-xl bg-surface-800/30">
-                              <Loader2 className="w-5 h-5 text-brand-500 animate-spin mr-2" />
+                            <div className="flex items-center justify-center py-6 rounded-xl bg-white/[0.02]">
+                              <Loader2 className="w-5 h-5 text-brand-400 animate-spin mr-2" />
                               <span className="text-sm text-surface-400">Fetching from wallet...</span>
                             </div>
                           )}
@@ -1522,8 +1755,8 @@ export function MarketDetail() {
                                     className={cn(
                                       'w-full p-3 rounded-xl border text-left transition-all',
                                       isSelected
-                                        ? 'bg-brand-500/10 border-brand-500/40 ring-1 ring-brand-500/20'
-                                        : 'bg-surface-800/30 border-surface-700/50 hover:border-surface-600/50'
+                                        ? 'bg-brand-500/10 border-brand-500/40 ring-1 ring-brand-400/20'
+                                        : 'bg-white/[0.02] border-white/[0.06] hover:border-surface-600/50'
                                     )}
                                   >
                                     <div className="flex items-center justify-between">
@@ -1548,7 +1781,7 @@ export function MarketDetail() {
 
                           {/* No records found */}
                           {!isFetchingRecords && walletShareRecords.length === 0 && fetchRecordError && (
-                            <div className="p-4 rounded-xl bg-surface-800/30 text-center">
+                            <div className="p-4 rounded-xl bg-white/[0.02] text-center">
                               <Wallet className="w-6 h-6 text-surface-500 mx-auto mb-2" />
                               <p className="text-xs text-surface-400">{fetchRecordError}</p>
                             </div>
@@ -1558,7 +1791,7 @@ export function MarketDetail() {
                           {!isFetchingRecords && walletShareRecords.length === 0 && !fetchRecordError && (
                             <button
                               onClick={handleFetchRecords}
-                              className="w-full py-6 rounded-xl bg-surface-800/30 border border-dashed border-surface-700/50 hover:border-brand-500/30 transition-all text-center group"
+                              className="w-full py-6 rounded-xl bg-white/[0.02] border border-dashed border-white/[0.06] hover:border-brand-400/[0.2] transition-all text-center group"
                             >
                               <Wallet className="w-8 h-8 text-surface-500 group-hover:text-brand-400 mx-auto mb-2 transition-colors" />
                               <p className="text-sm text-surface-400 group-hover:text-surface-300 transition-colors">
@@ -1597,7 +1830,7 @@ export function MarketDetail() {
                           <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className="p-3 rounded-xl bg-surface-800/50 space-y-2"
+                            className="p-3 rounded-xl bg-white/[0.03] space-y-2"
                           >
                             <div className="flex justify-between text-sm">
                               <span className="text-surface-400">Outcome</span>
@@ -1669,8 +1902,8 @@ export function MarketDetail() {
                                     className={cn(
                                       'px-3 py-1 rounded-lg text-xs font-medium transition-all',
                                       sellSlippage === s
-                                        ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                                        : 'bg-surface-800/50 text-surface-500 hover:text-surface-300'
+                                        ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]'
+                                        : 'bg-white/[0.03] text-surface-500 hover:text-surface-300'
                                     )}
                                   >
                                     {s}%
@@ -1686,7 +1919,7 @@ export function MarketDetail() {
                           <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className="p-4 rounded-xl bg-surface-800/30 space-y-2"
+                            className="p-4 rounded-xl bg-white/[0.02] space-y-2"
                           >
                             <div className="flex justify-between text-sm">
                               <span className="text-surface-400">Shares Used</span>
@@ -1715,7 +1948,7 @@ export function MarketDetail() {
                                 {sellPreview.priceImpact.toFixed(2)}%
                               </span>
                             </div>
-                            <div className="flex justify-between pt-2 border-t border-surface-700/50">
+                            <div className="flex justify-between pt-2 border-t border-white/[0.06]">
                               <span className="text-surface-400 text-sm">You Receive</span>
                               <span className="text-yes-400 font-bold">
                                 {formatCredits(sellPreview.netTokens)} {tokenSymbol}
@@ -1746,7 +1979,7 @@ export function MarketDetail() {
                             "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
                             parsedShareRecord && sellTokensMicro > 0n && !sellPreview?.exceedsBalance
                               ? "bg-no-500 hover:bg-no-400 text-white"
-                              : "bg-surface-800 text-surface-500 cursor-not-allowed"
+                              : "bg-white/[0.04] text-surface-500 cursor-not-allowed"
                           )}
                         >
                           <TrendingDown className="w-5 h-5" />
@@ -1764,8 +1997,8 @@ export function MarketDetail() {
                     {/* Sell: Processing */}
                     {sellStep === 'processing' && (
                       <div className="text-center py-8">
-                        <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
-                        <h3 className="text-xl font-bold text-white mb-2">Processing...</h3>
+                        <Loader2 className="w-12 h-12 text-brand-400 animate-spin mx-auto mb-4" />
+                        <h3 className="text-xl font-display font-bold text-white mb-2">Processing...</h3>
                         <p className="text-surface-400">Please confirm the transaction in your wallet.</p>
                       </div>
                     )}
@@ -1773,8 +2006,8 @@ export function MarketDetail() {
                     {/* Sell: Pending */}
                     {sellStep === 'pending' && (
                       <div className="text-center py-8">
-                        <Loader2 className="w-12 h-12 text-brand-500 animate-spin mx-auto mb-4" />
-                        <h3 className="text-xl font-bold text-white mb-2">Transaction Pending</h3>
+                        <Loader2 className="w-12 h-12 text-brand-400 animate-spin mx-auto mb-4" />
+                        <h3 className="text-xl font-display font-bold text-white mb-2">Transaction Pending</h3>
                         <p className="text-surface-400 mb-4">
                           Waiting for on-chain confirmation. This may take 1-3 minutes.
                         </p>
@@ -1790,7 +2023,7 @@ export function MarketDetail() {
                         <div className="w-16 h-16 rounded-full bg-yes-500/10 flex items-center justify-center mx-auto mb-4">
                           <CheckCircle2 className="w-8 h-8 text-yes-400" />
                         </div>
-                        <h3 className="text-xl font-bold text-white mb-2">Shares Sold!</h3>
+                        <h3 className="text-xl font-display font-bold text-white mb-2">Shares Sold!</h3>
                         <p className="text-surface-400 mb-4">
                           You withdrew {sellTokensDesired} {tokenSymbol} from the pool.
                         </p>
@@ -1817,7 +2050,7 @@ export function MarketDetail() {
                         <div className="w-16 h-16 rounded-full bg-no-500/10 flex items-center justify-center mx-auto mb-4">
                           <AlertCircle className="w-8 h-8 text-no-400" />
                         </div>
-                        <h3 className="text-xl font-bold text-white mb-2">Sell Failed</h3>
+                        <h3 className="text-xl font-display font-bold text-white mb-2">Sell Failed</h3>
                         <p className="text-surface-400 mb-6 whitespace-pre-line text-left text-sm">{sellError}</p>
                         <button onClick={resetSell} className="btn-primary w-full">
                           Try Again
@@ -1827,6 +2060,76 @@ export function MarketDetail() {
                   </>
                 )}
               </motion.div>
+
+              {/* Market Information — below trading panel */}
+              <div className="glass-card p-5">
+                <h4 className="text-xs font-heading font-semibold text-surface-400 uppercase tracking-wider mb-4">Market Info</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Market ID</span>
+                    <CopyableText text={market.id} displayText={`${market.id.slice(0, 8)}...${market.id.slice(-6)}`} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Created</span>
+                    <span className="text-xs font-medium text-white tabular-nums">
+                      {createdTimestamp || (market.transactionId?.startsWith('at1') ? 'Fetching...' : 'On-chain')}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Deadline</span>
+                    <span className="text-xs font-medium text-white tabular-nums">
+                      {market.deadlineTimestamp
+                        ? new Date(market.deadlineTimestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        : `Block ${market.deadline.toString()}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Token</span>
+                    <span className="text-xs font-medium text-white">{tokenSymbol}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Creator</span>
+                    {isValidAleoAddress(market.creator) ? (
+                      <a href={`https://testnet.explorer.provable.com/address/${market.creator}`} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                        {market.creator?.slice(0, 8)}...{market.creator?.slice(-4)} <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-xs text-surface-400">{market.creator?.slice(0, 8)}...{market.creator?.slice(-4)}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Oracle</span>
+                    <span className="text-xs text-white truncate max-w-[140px]">{market.resolutionSource || 'On-chain'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Fees</span>
+                    <span className="text-xs text-white">2%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-surface-500">Contract</span>
+                    <a href={`https://testnet.explorer.provable.com/program/${CONTRACT_INFO.programId}`} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                      {CONTRACT_INFO.programId.slice(0, 12)}... <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+
+                {/* Verify On-Chain */}
+                {market.transactionId && market.transactionId.startsWith('at1') && (
+                  <a
+                    href={`${config.explorerUrl}/transaction/${market.transactionId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-brand-500/8 border border-brand-500/15 text-brand-400 hover:bg-brand-500/15 hover:border-brand-500/30 transition-all text-xs font-semibold"
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>Verify On-Chain</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+              </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1836,7 +2139,7 @@ export function MarketDetail() {
 
       {/* Mobile sticky trade CTA — only when market is active and tradeable */}
       {canTrade && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden p-4 bg-surface-950/90 backdrop-blur-xl border-t border-surface-800/50">
+        <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden p-4 bg-surface-950/90 backdrop-blur-xl border-t border-white/[0.04]">
           <div className="flex gap-3">
             <button
               onClick={() => {

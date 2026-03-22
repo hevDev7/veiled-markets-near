@@ -67,7 +67,7 @@ export function TransactionLink({
 
             {/* Note */}
             {showNote && (
-                <div className="flex items-start gap-2 p-2 rounded-lg bg-surface-800/30">
+                <div className="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02]">
                     <span className="text-sm">⏱️</span>
                     <p className="text-xs text-surface-400 leading-relaxed">
                         Transaction may take 30-60 seconds to appear on the explorer.

@@ -196,7 +196,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
           >
             <div className="glass-card overflow-hidden">
               {/* Header */}
-              <div className="relative p-6 border-b border-surface-800">
+              <div className="relative p-6 border-b border-white/[0.04]">
                 <button
                   onClick={handleClose}
                   className="absolute right-4 top-4 p-2 rounded-lg hover:bg-surface-800 transition-colors"
@@ -229,7 +229,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                       className="space-y-6"
                     >
                       {/* Balance Display */}
-                      <div className="p-4 rounded-xl bg-surface-800/30">
+                      <div className="p-4 rounded-xl bg-white/[0.02]">
                         <div className="flex justify-between text-sm mb-1">
                           <span className="text-surface-400">Your Shares</span>
                           <span className="text-white font-medium">
@@ -285,7 +285,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                                 'flex-1 py-2 rounded-lg text-sm font-medium transition-all',
                                 slippage === val
                                   ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30'
-                                  : 'bg-surface-800/50 text-surface-400 border border-surface-700 hover:border-surface-600'
+                                  : 'bg-white/[0.03] text-surface-400 border border-surface-700 hover:border-surface-600'
                               )}
                             >
                               {val}%
@@ -296,7 +296,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
 
                       {/* Quote Preview */}
                       {sellPreview && tokensDesiredMicro > 0n && (
-                        <div className="p-4 rounded-xl bg-surface-800/50 space-y-3">
+                        <div className="p-4 rounded-xl bg-white/[0.03] space-y-3">
                           <div className="flex justify-between items-center">
                             <span className="text-surface-400 text-sm">Shares Used</span>
                             <span className="text-sm text-white font-medium">
@@ -415,7 +415,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                         Your sell order has been submitted to the network
                       </p>
 
-                      <div className="p-4 rounded-xl bg-surface-800/50 mb-6 text-left">
+                      <div className="p-4 rounded-xl bg-white/[0.03] mb-6 text-left">
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400">Withdrawal</span>
                           <span className="font-medium text-white">

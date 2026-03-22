@@ -206,7 +206,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           >
             <div className="glass-card overflow-hidden">
               {/* Header */}
-              <div className="relative p-6 border-b border-surface-800">
+              <div className="relative p-6 border-b border-white/[0.04]">
                 <button
                   onClick={handleClose}
                   className="absolute right-4 top-4 p-2 rounded-lg hover:bg-surface-800 transition-colors"
@@ -394,7 +394,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                       </div>
 
                       {betAmount && parseFloat(betAmount) > 0 && (
-                        <div className="p-4 rounded-xl bg-surface-800/50 mb-6">
+                        <div className="p-4 rounded-xl bg-white/[0.03] mb-6">
                           <div className="flex justify-between items-center">
                             <span className="text-surface-400">Potential Payout</span>
                             <span className="text-2xl font-bold text-white">
@@ -526,7 +526,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         Your private bet has been recorded on-chain
                       </p>
 
-                      <div className="p-4 rounded-xl bg-surface-800/50 mb-6">
+                      <div className="p-4 rounded-xl bg-white/[0.03] mb-6">
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400">Amount</span>
                           <span className="font-medium text-white">{betAmount} {tokenSymbol}</span>

@@ -222,7 +222,7 @@ export function CryptoPriceChart({ question, category, baselinePrice, baselineTi
 
   return (
     <div className={cn(
-      'rounded-2xl border border-surface-700/30 bg-surface-900/50 overflow-hidden',
+      'rounded-2xl border border-surface-700/30 bg-white/[0.01] overflow-hidden',
       className
     )}>
       {/* Header */}
@@ -263,7 +263,7 @@ export function CryptoPriceChart({ question, category, baselinePrice, baselineTi
           )}
           <button
             onClick={() => { setLoading(true); fetchPriceData() }}
-            className="p-1 rounded-md hover:bg-surface-800/50 transition-colors"
+            className="p-1 rounded-md hover:bg-white/[0.03] transition-colors"
             aria-label="Refresh price"
           >
             <RefreshCw className={cn('w-3.5 h-3.5 text-surface-400', loading && 'animate-spin')} />

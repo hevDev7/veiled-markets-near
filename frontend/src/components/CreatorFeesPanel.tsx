@@ -64,7 +64,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
   return (
     <div className="glass-card overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-surface-800">
+      <div className="p-6 border-b border-white/[0.04]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
             <Coins className="w-5 h-5 text-brand-400" />
@@ -81,13 +81,13 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
       <div className="p-6 space-y-4">
         {/* Fee Summary */}
         <div className="grid grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl bg-surface-800/30">
+          <div className="p-4 rounded-xl bg-white/[0.02]">
             <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Creator Fees</p>
             <p className="text-xl font-bold text-white">
               {formatCredits(fees.creator_fees)} {tokenSymbol}
             </p>
           </div>
-          <div className="p-4 rounded-xl bg-surface-800/30">
+          <div className="p-4 rounded-xl bg-white/[0.02]">
             <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Protocol Fees</p>
             <p className="text-xl font-bold text-surface-300">
               {formatCredits(fees.protocol_fees)} {tokenSymbol}
@@ -96,7 +96,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
         </div>
 
         {/* Status Info */}
-        <div className="p-4 rounded-xl bg-surface-800/30">
+        <div className="p-4 rounded-xl bg-white/[0.02]">
           <div className="flex justify-between items-center mb-2">
             <span className="text-surface-400 text-sm">Market Status</span>
             <span className={cn(
@@ -139,7 +139,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
         ) : (
           <>
             {!isCreator && (
-              <div className="p-4 rounded-xl bg-surface-800/30 text-center">
+              <div className="p-4 rounded-xl bg-white/[0.02] text-center">
                 <p className="text-surface-400 text-sm">
                   Only the market creator can withdraw accumulated fees.
                 </p>
@@ -160,7 +160,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
             )}
 
             {isCreator && isResolved && fees.creator_fees === 0n && (
-              <div className="p-4 rounded-xl bg-surface-800/30 text-center">
+              <div className="p-4 rounded-xl bg-white/[0.02] text-center">
                 <p className="text-surface-400 text-sm">
                   No creator fees have been accumulated for this market.
                 </p>

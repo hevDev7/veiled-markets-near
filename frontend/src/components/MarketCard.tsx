@@ -1,10 +1,8 @@
-import { motion } from 'framer-motion'
-import { Clock, Users, TrendingUp, Shield, Zap, ExternalLink, Flame } from 'lucide-react'
-import { useMemo } from 'react'
+import { Clock, Users, TrendingUp, Shield, Zap, Flame } from 'lucide-react'
+import { useMemo, useRef } from 'react'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryStrip, getCategoryColor } from '@/lib/utils'
-import { config } from '@/lib/config'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
@@ -47,14 +45,18 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
 
   const isHot = market.tags?.includes('Hot') || market.tags?.includes('Trending') || market.tags?.includes('Featured')
 
+  // Only animate on first mount, not on data refreshes
+  const hasAnimated = useRef(false)
+  const shouldAnimate = !hasAnimated.current
+  if (shouldAnimate) hasAnimated.current = true
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 24 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, delay: index * 0.06, ease: [0.22, 1, 0.36, 1] }}
+    <div
       onClick={onClick}
+      style={shouldAnimate ? { animationDelay: `${index * 60}ms` } : undefined}
       className={cn(
         "market-card group relative overflow-hidden",
+        shouldAnimate && "animate-fade-in-up",
         getCategoryStrip(market.category),
         isExpired && "opacity-60",
         isHot && "pulse-glow"
@@ -170,7 +172,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
             <div className="text-center p-2.5 rounded-xl bg-surface-800/30 border border-surface-700/20">
               <TrendingUp className="w-3.5 h-3.5 text-surface-500 mx-auto mb-1.5" />
               <p className="text-sm font-bold text-white tabular-nums">
-                {formatCredits(market.totalVolume, 0)}
+                {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'ALEO'}</span>
               </p>
               <p className="text-[10px] text-surface-500 uppercase tracking-wider mt-0.5">Volume</p>
             </div>
@@ -237,26 +239,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           </div>
         )}
 
-        {/* On-chain Verification */}
-        {market.transactionId && market.transactionId.startsWith('at1') && (
-          <a
-            href={`${config.explorerUrl}/transaction/${market.transactionId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              'mt-3 flex items-center justify-center gap-2 py-2 px-3 rounded-xl',
-              'bg-brand-500/8 border border-brand-500/15 text-brand-400',
-              'hover:bg-brand-500/15 hover:border-brand-500/30 transition-all',
-              'text-xs font-semibold'
-            )}
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>Verify On-Chain</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        )}
       </div>
-    </motion.div>
+    </div>
   )
 }

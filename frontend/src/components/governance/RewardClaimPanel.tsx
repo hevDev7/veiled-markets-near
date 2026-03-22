@@ -20,7 +20,7 @@ export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
   const totalTradingReward = tradingRewards.reduce((sum, r) => sum + r.amount, 0n);
 
   return (
-    <div className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-5">
+    <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5">
       <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4">
         <Gift className="w-5 h-5 text-emerald-400" />
         ALEO Rewards
@@ -40,7 +40,7 @@ export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
         <div className="space-y-4">
           {/* Summary */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-surface-800/30 rounded-xl p-3">
+            <div className="bg-white/[0.02] rounded-xl p-3">
               <div className="flex items-center gap-1.5 text-xs text-blue-400 mb-1">
                 <Droplets className="w-3.5 h-3.5" />
                 LP Rewards
@@ -48,7 +48,7 @@ export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
               <div className="text-lg font-bold text-white">{formatVeil(totalLpReward)}</div>
               <div className="text-[10px] text-surface-500">{lpRewards.length} epochs</div>
             </div>
-            <div className="bg-surface-800/30 rounded-xl p-3">
+            <div className="bg-white/[0.02] rounded-xl p-3">
               <div className="flex items-center gap-1.5 text-xs text-purple-400 mb-1">
                 <TrendingUp className="w-3.5 h-3.5" />
                 Trading Rewards

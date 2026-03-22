@@ -35,7 +35,7 @@ export function ProposalCard({ proposal, onClick, index = 0 }: ProposalCardProps
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
       onClick={onClick}
-      className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-5 hover:border-surface-600/50 transition-all cursor-pointer group"
+      className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5 hover:border-surface-600/50 transition-all cursor-pointer group"
     >
       {/* Header */}
       <div className="flex items-start justify-between mb-3">

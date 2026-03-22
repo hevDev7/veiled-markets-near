@@ -195,7 +195,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   return (
     <div className="glass-card overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-surface-800">
+      <div className="p-6 border-b border-white/[0.04]">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
             <Gavel className="w-5 h-5 text-brand-400" />
@@ -220,7 +220,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                   'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium flex-1',
                   isComplete ? 'bg-yes-500/10 text-yes-400' :
                   isCurrent ? 'bg-brand-500/10 text-brand-400 ring-1 ring-brand-500/30' :
-                  'bg-surface-800/30 text-surface-500'
+                  'bg-white/[0.02] text-surface-500'
                 )}>
                   <StepIcon className="w-4 h-4 flex-shrink-0" />
                   <span className="truncate">{s.label}</span>
@@ -296,7 +296,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             {/* Step 1: Close Market */}
             {currentStep === 'close' && (
               <div className="space-y-4">
-                <div className="flex items-start gap-3 p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02]">
                   <Lock className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-white">Close Trading</p>
@@ -340,7 +340,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             {/* Step 2: Resolve Market */}
             {currentStep === 'resolve' && (
               <div className="space-y-4">
-                <div className="flex items-start gap-3 p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02]">
                   <Gavel className="w-5 h-5 text-brand-400 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-white">Set Winning Outcome</p>
@@ -378,7 +378,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                               'w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between',
                               isSelected
                                 ? 'bg-brand-500/10 border-brand-500/40 ring-1 ring-brand-500/20'
-                                : 'bg-surface-800/30 border-surface-700/50 hover:border-surface-600/50'
+                                : 'bg-white/[0.02] border-white/[0.06] hover:border-surface-600/50'
                             )}
                           >
                             <div className="flex items-center gap-2">
@@ -431,7 +431,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             {/* Step 3: Finalize Resolution */}
             {currentStep === 'finalize' && (
               <div className="space-y-4">
-                <div className="flex items-start gap-3 p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02]">
                   <CheckCircle2 className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-white">Finalize Resolution</p>
@@ -444,7 +444,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
 
                 {/* Current resolution info */}
                 {resolution && (
-                  <div className="p-4 rounded-xl bg-surface-800/30 space-y-2">
+                  <div className="p-4 rounded-xl bg-white/[0.02] space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Proposed Winner</span>
                       <span className="text-white font-medium">

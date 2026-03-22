@@ -1,9 +1,9 @@
-import { Clock, TrendingUp, Shield, ChevronRight, ExternalLink, Flame } from 'lucide-react'
+import { Clock, TrendingUp, Shield, ChevronRight, Flame } from 'lucide-react'
 import { useMemo } from 'react'
 import { useLiveCountdown as useGlobalCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryStrip, getCategoryColor } from '@/lib/utils'
-import { config } from '@/lib/config'
+
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
@@ -60,7 +60,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
             style={{ animationDelay: `${index * 50}ms` }}
             className={cn(
                 "group relative overflow-hidden rounded-xl cursor-pointer",
-                "bg-surface-900/40 backdrop-blur-sm",
+                "bg-white/[0.01] backdrop-blur-sm",
                 "border border-surface-700/30",
                 "hover:border-brand-500/25 hover:bg-surface-900/60",
                 "transition-all duration-250 ease-out",
@@ -185,7 +185,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                             <span className="text-[10px] text-surface-500 uppercase tracking-wider font-semibold">Volume</span>
                         </div>
                         <p className="text-sm font-bold text-white tabular-nums">
-                            {formatCredits(market.totalVolume, 0)}
+                            {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'ALEO'}</span>
                         </p>
                       </div>
                     </Tooltip>
@@ -205,7 +205,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                             (market.status === 3 || market.status === 4) && market.remainingCredits !== undefined
                                 ? market.remainingCredits
                                 : (market.totalLiquidity ?? 0n), 0
-                        )}</p>
+                        )} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'ALEO'}</span></p>
                       </div>
                     </Tooltip>
 
@@ -250,27 +250,6 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                         })()}
                     </div>
 
-                    {/* On-chain Verification */}
-                    {market.transactionId && market.transactionId.startsWith('at1') && (
-                        <a
-                            href={`${config.explorerUrl}/transaction/${market.transactionId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className={cn(
-                                'hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-lg',
-                                'bg-brand-500/8 border border-brand-500/15 text-brand-400',
-                                'hover:bg-brand-500/15 hover:border-brand-500/30 transition-all',
-                                'text-xs font-semibold'
-                            )}
-                            title="Verify on blockchain"
-                        >
-                            <Shield className="w-3 h-3" />
-                            <span>VERIFY</span>
-                            <ExternalLink className="w-3 h-3" />
-                        </a>
-                    )}
-
                     <ChevronRight className="w-5 h-5 text-surface-600 group-hover:text-brand-400 group-hover:translate-x-1 transition-all duration-200" />
                 </div>
             </div>
@@ -281,14 +260,14 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                     <div className="flex items-center gap-4">
                         <span className="text-surface-400 tabular-nums">
                             <TrendingUp className="w-3 h-3 inline mr-1" />
-                            {formatCredits(market.totalVolume, 0)}
+                            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}
                         </span>
                         <span className="text-surface-400 tabular-nums">
                             LIQ {formatCredits(
                                 (market.status === 3 || market.status === 4) && market.remainingCredits !== undefined
                                     ? market.remainingCredits
                                     : (market.totalLiquidity ?? 0n), 0
-                            )}
+                            )} {market.tokenType ?? 'ALEO'}
                         </span>
                         <span className="text-surface-400 tabular-nums">
                             <Clock className="w-3 h-3 inline mr-1" />
@@ -297,24 +276,6 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                     </div>
                 </div>
 
-                {market.transactionId && market.transactionId.startsWith('at1') && (
-                    <a
-                        href={`${config.explorerUrl}/transaction/${market.transactionId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className={cn(
-                            'flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg mt-2',
-                            'bg-brand-500/8 border border-brand-500/15 text-brand-400',
-                            'hover:bg-brand-500/15 hover:border-brand-500/30 transition-all',
-                            'text-xs font-semibold'
-                        )}
-                    >
-                        <Shield className="w-3 h-3" />
-                        <span>VERIFY ON-CHAIN</span>
-                        <ExternalLink className="w-3 h-3" />
-                    </a>
-                )}
             </div>
         </div>
     )

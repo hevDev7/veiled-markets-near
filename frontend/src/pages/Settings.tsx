@@ -110,7 +110,7 @@ export function Settings() {
 
               <div className="space-y-4">
                 {/* Address */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
                   <div>
                     <p className="text-sm text-surface-400 mb-1">Address</p>
                     <p className="font-mono text-sm text-white">
@@ -130,7 +130,7 @@ export function Settings() {
                 </div>
 
                 {/* Balance */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
                   <div>
                     <p className="text-sm text-surface-400 mb-1">Balance</p>
                     <div className="flex items-center gap-4">
@@ -154,7 +154,7 @@ export function Settings() {
                 </div>
 
                 {/* Network */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
                   <div>
                     <p className="text-sm text-surface-400 mb-1">Network</p>
                     <p className="text-white capitalize">{wallet.network}</p>
@@ -165,7 +165,7 @@ export function Settings() {
                 </div>
 
                 {/* Wallet Type */}
-                <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
+                <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
                   <div>
                     <p className="text-sm text-surface-400 mb-1">Wallet Type</p>
                     <p className="text-white capitalize">
@@ -325,7 +325,7 @@ export function Settings() {
               </div>
 
               <div className="space-y-4">
-                <div className="p-4 rounded-xl bg-surface-800/30">
+                <div className="p-4 rounded-xl bg-white/[0.02]">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-white font-medium">Clear All Stale Data</p>
@@ -347,7 +347,7 @@ export function Settings() {
                     </button>
                   </div>
                   {clearResult && (
-                    <div className="mt-3 p-3 rounded-lg bg-surface-900/50 text-xs font-mono text-surface-400">
+                    <div className="mt-3 p-3 rounded-lg bg-white/[0.01] text-xs font-mono text-surface-400">
                       {clearResult}
                     </div>
                   )}
@@ -384,7 +384,7 @@ function SettingRow({
   action: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
+    <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
       <div className="flex items-center gap-3">
         <div className="text-surface-400">{icon}</div>
         <div>
@@ -427,7 +427,7 @@ function ToggleSetting({
   }
 
   return (
-    <div className="flex items-center justify-between p-4 rounded-xl bg-surface-800/30">
+    <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
       <div>
         <p className="text-white font-medium">{title}</p>
         <p className="text-sm text-surface-400">{description}</p>

@@ -32,7 +32,7 @@ export function GovernanceHeader() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-5"
+          className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5"
         >
           <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
             <Coins className="w-4 h-4 text-brand-400" />
@@ -74,7 +74,7 @@ export function GovernanceHeader() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-5"
+          className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5"
         >
           <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
             <Vote className="w-4 h-4 text-purple-400" />
@@ -97,7 +97,7 @@ export function GovernanceHeader() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.25 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-5"
+          className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5"
         >
           <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
             <Gift className="w-4 h-4 text-emerald-400" />

@@ -65,6 +65,16 @@ function isShieldProgramFetchError(message: string): boolean {
   )
 }
 
+function isShieldReconnectableError(message: string): boolean {
+  const msg = message.toLowerCase()
+  return (
+    isShieldProgramFetchError(msg)
+    || msg.includes('connection expired')
+    || msg.includes('dapp not connected')
+    || msg.includes('not connected')
+  )
+}
+
 export function useAleoTransaction() {
   const {
     executeTransaction: adapterExecute,
@@ -93,6 +103,30 @@ export function useAleoTransaction() {
         const feeMicrocredits = Math.round(feeAleo * 1_000_000)
 
         const privateFeeFlag = options.privateFee ?? false
+        const submitViaDirectShield = async (forceReconnect = false): Promise<string> => {
+          const directShield = new DirectShieldWalletAdapter()
+
+          if (forceReconnect) {
+            try {
+              await directShield.disconnect()
+            } catch {
+              // Ignore disconnect failures before forced reconnect.
+            }
+            await directShield.connect({ forceReconnect: true, refreshPrograms: true })
+          } else {
+            await directShield.connect()
+          }
+
+          return directShield.requestTransaction({
+            programId: options.program,
+            functionName: options.function,
+            inputs: options.inputs,
+            fee: feeAleo,
+            privateFee: privateFeeFlag,
+            recordIndices: options.recordIndices,
+          })
+        }
+
         devWarn('[TX] Calling adapter executeTransaction:', {
           program: options.program,
           function: options.function,
@@ -109,21 +143,21 @@ export function useAleoTransaction() {
         if (isShield) {
           try {
             devWarn('[TX] Shield detected — trying direct Shield API first')
-            const directShield = new DirectShieldWalletAdapter()
-            await directShield.connect()
-
-            const txId = await directShield.requestTransaction({
-              programId: options.program,
-              functionName: options.function,
-              inputs: options.inputs,
-              fee: feeAleo,
-              privateFee: privateFeeFlag,
-              recordIndices: options.recordIndices,
-            })
+            const txId = await submitViaDirectShield(false)
 
             return { transactionId: txId }
           } catch (directErr: any) {
             const directMsg = directErr?.message || directErr?.data?.message || String(directErr)
+            if (isShieldReconnectableError(directMsg)) {
+              try {
+                devWarn('[TX] Direct Shield API failed with reconnectable error, forcing reconnect and retrying once:', directMsg)
+                const retriedTxId = await submitViaDirectShield(true)
+                return { transactionId: retriedTxId }
+              } catch (retryErr: any) {
+                const retryMsg = retryErr?.message || retryErr?.data?.message || String(retryErr)
+                devWarn('[TX] Forced Shield reconnect retry failed:', retryMsg)
+              }
+            }
             devWarn('[TX] Direct Shield API failed, falling back to adapter:', directMsg)
           }
         }
@@ -157,18 +191,7 @@ export function useAleoTransaction() {
               '[TX] Shield adapter failed to fetch program, retrying via direct Shield API:',
               adapterMsg,
             )
-
-            const directShield = new DirectShieldWalletAdapter()
-            await directShield.connect()
-
-            const txId = await directShield.requestTransaction({
-              programId: options.program,
-              functionName: options.function,
-              inputs: options.inputs,
-              fee: feeAleo,
-              privateFee: privateFeeFlag,
-              recordIndices: options.recordIndices,
-            })
+            const txId = await submitViaDirectShield(true)
 
             return { transactionId: txId }
           }
@@ -210,7 +233,7 @@ export function useAleoTransaction() {
 
         if (isShield && isShieldProgramFetchError(msg)) {
           throw new Error(
-            `Shield Wallet could not fetch "${options.program}" from Aleo testnet, ` +
+            `Shield Wallet could not fetch "${options.program}" or one of its imported programs from Aleo testnet, ` +
             'even though the program is deployed. ' +
             'Please disconnect and reconnect Shield Wallet, then try again. ' +
             'If it still fails, update Shield or use Puzzle Wallet for this transaction.'

@@ -284,6 +284,26 @@ export async function fetchBetCountByMarket(marketId: string): Promise<number> {
   }
 }
 
+/** Fetch bet counts for multiple markets in a single query. */
+export async function fetchBetCountsForMarkets(marketIds: string[]): Promise<Record<string, number>> {
+  if (!supabase || marketIds.length === 0) return {}
+  try {
+    const { data, error } = await supabase
+      .from('user_bets')
+      .select('market_id')
+      .in('market_id', marketIds)
+    if (error) { devWarn('[Supabase] fetchBetCountsForMarkets error:', error.message); return {} }
+    const counts: Record<string, number> = {}
+    for (const row of data || []) {
+      counts[row.market_id] = (counts[row.market_id] || 0) + 1
+    }
+    return counts
+  } catch (e) {
+    devWarn('[Supabase] fetchBetCountsForMarkets exception:', e)
+    return {}
+  }
+}
+
 export async function fetchCommitments(address: string, encryptionKey: CryptoKey | null = null): Promise<CommitmentRecord[]> {
   if (!supabase) return []
   try {

@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react'
-import { cn, formatPercentage } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface OutcomeSelectorProps {
   numOutcomes: number // 2-4
@@ -99,25 +99,17 @@ export function OutcomeSelector({
               </div>
             )}
 
-            {/* Price / Probability */}
-            <div className={cn('font-bold mb-0.5', isCompact ? 'text-xl' : 'text-3xl', colors.text)}>
-              {formatPercentage(percentage)}
-            </div>
-
             {/* Label */}
             <div className={cn(
               'font-semibold text-white mb-1 leading-tight',
-              isCompact ? 'text-xs' : 'text-lg'
+              isCompact ? 'text-sm' : 'text-lg'
             )}>
               {label}
             </div>
 
-            {/* Implied odds */}
-            <div className={cn('text-surface-400', isCompact ? 'text-[10px]' : 'text-sm')}>
-              Price:{' '}
-              <span className={cn('font-medium', colors.text)}>
-                ${price.toFixed(3)}
-              </span>
+            {/* Price */}
+            <div className={cn('font-bold', isCompact ? 'text-lg' : 'text-2xl', colors.text)}>
+              ${price.toFixed(2)}
             </div>
           </button>
         )

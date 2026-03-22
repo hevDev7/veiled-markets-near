@@ -52,7 +52,7 @@ export function OddsChart({
       </div>
 
       {/* Pool Visualization */}
-      <div className="relative bg-surface-800/30 rounded-xl p-5">
+      <div className="relative bg-white/[0.02] rounded-xl p-5">
         {/* Pool Size Bars */}
         <div className="space-y-4">
           {Array.from({ length: numOutcomes }, (_, i) => {
@@ -88,7 +88,7 @@ export function OddsChart({
         </div>
 
         {/* Divider */}
-        <div className="border-t border-surface-700/50 my-4" />
+        <div className="border-t border-white/[0.06] my-4" />
 
         {/* Total Pool (sum of share reserves) */}
         <TotalPoolRow totalPool={totalPool} tokenSymbol={tokenSymbol} />
@@ -107,13 +107,13 @@ export function OddsChart({
           const payout = price > 0 ? 1 / price : numOutcomes
 
           return (
-            <div key={i} className="text-center p-3 rounded-lg bg-surface-800/30">
+            <div key={i} className="text-center p-3 rounded-lg bg-white/[0.02]">
               <p className="text-xs text-surface-500 mb-1">{label}</p>
               <p className={cn('text-lg font-bold', colors.text)}>{payout.toFixed(2)}x</p>
             </div>
           )
         })}
-        <div className="text-center p-3 rounded-lg bg-surface-800/30">
+        <div className="text-center p-3 rounded-lg bg-white/[0.02]">
           <p className="text-xs text-surface-500 mb-1">Total Bets</p>
           <p className="text-lg font-bold text-surface-300">{totalBets > 0 ? totalBets : '—'}</p>
         </div>

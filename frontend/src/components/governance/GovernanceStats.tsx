@@ -60,7 +60,7 @@ export function GovernanceStats() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
-              className="bg-surface-900/60 border border-surface-700/50 rounded-xl p-4 min-w-0 overflow-hidden"
+              className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4 min-w-0 overflow-hidden"
             >
               <div className={`flex items-center gap-1.5 text-xs ${item.color} mb-2`}>
                 <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -74,7 +74,7 @@ export function GovernanceStats() {
       </div>
 
       {/* Proposal Outcomes */}
-      <div className="bg-surface-900/60 border border-surface-700/50 rounded-xl p-4">
+      <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
         <h3 className="text-sm font-semibold text-surface-300 mb-3">Proposal Outcomes</h3>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
           <div className="flex items-center gap-1 text-emerald-400">
@@ -97,7 +97,7 @@ export function GovernanceStats() {
       </div>
 
       {/* Governance Info */}
-      <div className="bg-surface-900/60 border border-surface-700/50 rounded-xl p-4">
+      <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
         <h3 className="text-sm font-semibold text-surface-300 mb-3">Governance Model</h3>
         <div className="space-y-2 text-xs text-surface-400">
           <div className="flex justify-between">

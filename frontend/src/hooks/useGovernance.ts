@@ -94,11 +94,18 @@ export function useGovernance() {
         }
       }
 
-      // 7. Set VEIL balance (demo/placeholder — real balance comes from VEIL token records)
-      // In production: scan user's records for VeilToken records and sum amounts
+      // 7. Set VEIL balance from wallet's actual ALEO balance
+      // Governance uses ALEO credits for staking/voting
       if (wallet.isDemoMode) {
-        store.setVeilBalance(12450_000000n); // Demo: 12,450 VEIL
-        store.setVotingPower(15650_000000n); // Demo: 15,650 VEIL (incl. delegated)
+        store.setVeilBalance(12450_000000n);
+        store.setVotingPower(15650_000000n);
+      } else if (wallet.connected) {
+        // Use real wallet balance (public + private ALEO)
+        const { useWalletStore } = await import('../lib/store');
+        const walletState = useWalletStore.getState().wallet;
+        const totalBalance = walletState.balance.public + walletState.balance.private;
+        store.setVeilBalance(totalBalance);
+        store.setVotingPower(totalBalance); // Voting power = own balance (+ delegated in future)
       }
 
     } catch (error) {

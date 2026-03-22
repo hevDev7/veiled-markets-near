@@ -184,7 +184,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister }: ResolverP
       {/* Registration / Tier Upgrade */}
       {!isRegistered ? (
         <div className="space-y-4">
-          <div className="bg-surface-900/60 border border-surface-700/50 rounded-2xl p-5">
+          <div className="bg-surface-900/60 border border-white/[0.06] rounded-2xl p-5">
             <h3 className="text-sm font-semibold text-white mb-2">Become a Resolver</h3>
             <p className="text-xs text-surface-400 mb-4">
               Stake ALEO to register as a market resolver. Resolvers earn rewards for
@@ -207,7 +207,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister }: ResolverP
                     className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all ${
                       isSelected
                         ? `${cfg.bgColor} ${cfg.borderColor} border-2`
-                        : 'bg-surface-800/30 border border-surface-700/30 hover:border-surface-600/50'
+                        : 'bg-white/[0.02] border border-surface-700/30 hover:border-surface-600/50'
                     } ${!canAfford ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                   >
                     <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${cfg.gradient} flex items-center justify-center shrink-0`}>
@@ -231,7 +231,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister }: ResolverP
             </div>
 
             {/* Stake Summary */}
-            <div className="bg-surface-800/30 border border-surface-700/30 rounded-xl p-3 mb-4 space-y-1.5">
+            <div className="bg-white/[0.02] border border-surface-700/30 rounded-xl p-3 mb-4 space-y-1.5">
               <div className="flex justify-between text-xs">
                 <span className="text-surface-400">Stake Required</span>
                 <span className="text-white font-medium font-mono">
@@ -417,7 +417,7 @@ function TierUpgradeSection({
   if (upgradeTiers.length === 0) return null;
 
   return (
-    <div className="bg-surface-900/60 border border-surface-700/50 rounded-2xl p-5">
+    <div className="bg-surface-900/60 border border-white/[0.06] rounded-2xl p-5">
       <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
         <TrendingUp className="w-4 h-4 text-brand-400" />
         Upgrade Tier
@@ -433,7 +433,7 @@ function TierUpgradeSection({
           return (
             <div
               key={t.tier}
-              className={`flex items-center gap-3 p-3 rounded-xl bg-surface-800/30 border border-surface-700/30`}
+              className={`flex items-center gap-3 p-3 rounded-xl bg-white/[0.02] border border-surface-700/30`}
             >
               <div className={`w-9 h-9 rounded-lg bg-gradient-to-br ${cfg.gradient} flex items-center justify-center shrink-0`}>
                 <Icon className="w-4 h-4 text-white" />
@@ -476,13 +476,13 @@ function TierUpgradeSection({
 
 function TierComparisonTable({ currentTier }: { currentTier?: ResolverTier }) {
   return (
-    <div className="bg-surface-900/60 border border-surface-700/50 rounded-2xl p-5">
+    <div className="bg-surface-900/60 border border-white/[0.06] rounded-2xl p-5">
       <h3 className="text-sm font-semibold text-white mb-3">Resolver Tiers</h3>
 
       <div className="overflow-x-auto -mx-2">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-surface-500 border-b border-surface-700/50">
+            <tr className="text-surface-500 border-b border-white/[0.06]">
               <th className="text-left py-2 px-2 font-medium">Tier</th>
               <th className="text-right py-2 px-2 font-medium">Stake</th>
               <th className="text-right py-2 px-2 font-medium">Requirement</th>
@@ -499,7 +499,7 @@ function TierComparisonTable({ currentTier }: { currentTier?: ResolverTier }) {
               return (
                 <tr
                   key={t.tier}
-                  className={`border-b border-surface-800/50 ${isCurrent ? cfg.bgColor : ''}`}
+                  className={`border-b border-white/[0.04] ${isCurrent ? cfg.bgColor : ''}`}
                 >
                   <td className="py-2.5 px-2">
                     <div className="flex items-center gap-1.5">

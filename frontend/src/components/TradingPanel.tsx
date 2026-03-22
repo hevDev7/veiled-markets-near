@@ -188,7 +188,7 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                 <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-surface-800/50 rounded-lg p-4 space-y-2 text-sm"
+                    className="bg-white/[0.03] rounded-lg p-4 space-y-2 text-sm"
                 >
                     <div className="flex justify-between">
                         <span className="text-surface-400">

@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   TrendingUp,
+  TrendingDown,
   ArrowDownToLine,
   Clock,
   Loader2,
@@ -14,6 +15,12 @@ import {
   Plus,
   X,
   Download,
+  DollarSign,
+  BarChart2,
+  Shield,
+  ArrowUpRight,
+  ArrowDownRight,
+  Star,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -26,13 +33,14 @@ import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
 
-type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled'
+type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'watchlist'
 
 const TABS: { key: BetFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'accepted', label: 'Accepted' },
+  { key: 'accepted', label: 'Open Positions' },
   { key: 'unredeemed', label: 'Unredeemed' },
-  { key: 'settled', label: 'Settled' },
+  { key: 'settled', label: 'Resolved' },
+  { key: 'all', label: 'History' },
+  { key: 'watchlist', label: 'Watchlist' },
 ]
 
 export function MyBets() {
@@ -41,7 +49,7 @@ export function MyBets() {
   const { userBets, pendingBets, fetchUserBets, syncBetStatuses, addPendingBet, removePendingBet } = useBetsStore()
   const { markets } = useRealMarketsStore()
   const [isLoading, setIsLoading] = useState(true)
-  const [filter, setFilter] = useState<BetFilter>('all')
+  const [filter, setFilter] = useState<BetFilter>('accepted')
   const [claimModalBet, setClaimModalBet] = useState<Bet | null>(null)
   const [claimModalMode, setClaimModalMode] = useState<'winnings' | 'refund'>('winnings')
 
@@ -68,20 +76,22 @@ export function MyBets() {
     || (b.type === 'sell' && b.status === 'active')
   )
 
-  // Display bets based on active filter
-  const displayBets =
-    filter === 'all' ? allBets
-    : filter === 'accepted' ? acceptedBets
-    : filter === 'unredeemed' ? unredeemedBets
-    : settledBets
-
   // Tab counts
   const tabCounts: Record<BetFilter, number> = {
     all: allBets.length,
     accepted: acceptedBets.length,
     unredeemed: unredeemedBets.length,
     settled: settledBets.length,
+    watchlist: 0,
   }
+
+  // Display bets based on active filter
+  const displayBets =
+    filter === 'all' ? allBets
+    : filter === 'accepted' ? acceptedBets
+    : filter === 'unredeemed' ? unredeemedBets
+    : filter === 'settled' ? settledBets
+    : []
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -203,16 +213,20 @@ export function MyBets() {
       subtitle: "You haven't placed any bets. Browse active markets to make your first prediction.",
     },
     accepted: {
-      title: 'No active bets',
-      subtitle: "Accepted bets appear here after on-chain confirmation (usually 1-3 minutes).",
+      title: 'No open positions',
+      subtitle: "Active bets appear here after on-chain confirmation (usually 1-3 minutes).",
     },
     unredeemed: {
       title: 'No unredeemed bets',
       subtitle: "When you win a bet, you can claim your winnings here.",
     },
     settled: {
-      title: 'No settled bets',
-      subtitle: "Settled bets appear here after markets are resolved and winnings are claimed.",
+      title: 'No resolved bets',
+      subtitle: "Resolved bets appear here after markets are resolved.",
+    },
+    watchlist: {
+      title: 'No saved markets',
+      subtitle: "Bookmark markets to track them here.",
     },
   }
 
@@ -225,14 +239,17 @@ export function MyBets() {
       <DashboardHeader />
 
       <main className="flex-1 pt-20 pb-20 md:pb-0">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Page Header */}
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl font-bold text-white">My Bets</h1>
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="font-display text-[2rem] leading-[1.15] tracking-tight text-white mb-1">Portfolio</h1>
+              <p className="text-surface-400 text-sm">Track your positions and performance</p>
+            </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowImport(true)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors text-surface-400 hover:text-white text-sm"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04] hover:bg-white/[0.06] transition-colors text-surface-400 hover:text-white text-sm"
                 title="Import existing bet"
               >
                 <Download className="w-4 h-4" />
@@ -241,7 +258,7 @@ export function MyBets() {
               <button
                 onClick={handleRefresh}
                 disabled={isLoading}
-                className="p-2 rounded-lg bg-surface-800/50 hover:bg-surface-700/50 transition-colors text-surface-400 hover:text-white disabled:opacity-50"
+                className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.04] hover:bg-white/[0.06] transition-colors text-surface-400 hover:text-white disabled:opacity-50"
                 title="Refresh"
               >
                 <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
@@ -249,22 +266,56 @@ export function MyBets() {
             </div>
           </div>
 
-          {/* Filter Tabs — pill style */}
-          <div className="flex gap-2 mb-8">
+          {/* ═══ STATS CARDS (Premium Layout) ═══ */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {(() => {
+              const activeBets = userBets.filter(b => b.status === 'active' && b.type !== 'sell')
+              const portfolioVal = activeBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
+              const wonBets = userBets.filter(b => b.status === 'won')
+              const totalWon = wonBets.reduce((sum, b) => sum + Number(b.sharesReceived || b.amount), 0) / 1_000_000
+              const totalStaked = wonBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
+              const pnl = totalWon - totalStaked
+              const lostBets = userBets.filter(b => b.status === 'lost')
+              const totalLost = lostBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
+              const netPnl = pnl - totalLost
+              const claimable = userBets.filter(b => (b.status === 'won' || b.status === 'refunded') && !b.claimed)
+              const claimableVal = claimable.reduce((sum, b) => sum + Number(b.sharesReceived || b.amount), 0) / 1_000_000
+
+              return [
+                { label: 'Portfolio Value', value: `${portfolioVal.toFixed(2)} ALEO`, icon: DollarSign, color: 'text-white', sub: `${activeBets.length} active positions` },
+                { label: 'Total P&L', value: `${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} ALEO`, icon: netPnl >= 0 ? TrendingUp : TrendingDown, color: netPnl >= 0 ? 'text-yes-400' : 'text-no-400', sub: `${wonBets.length} won, ${lostBets.length} lost` },
+                { label: 'Open Positions', value: `${activeBets.length + uniquePending.length}`, icon: BarChart2, color: 'text-white', sub: `${uniquePending.length} pending` },
+                { label: 'Claimable', value: `${claimableVal.toFixed(2)} ALEO`, icon: Shield, color: claimableVal > 0 ? 'text-brand-400' : 'text-white', sub: `${claimable.length} unredeemed` },
+              ].map((stat, i) => (
+                <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + i * 0.04 }}
+                  className="glass-card rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <stat.icon className={cn('w-4 h-4', stat.color === 'text-white' ? 'text-surface-500' : stat.color)} />
+                    <span className="text-2xs font-heading font-semibold text-surface-500 uppercase tracking-wider">{stat.label}</span>
+                  </div>
+                  <p className={cn('text-base font-heading font-bold tabular-nums', stat.color)}>{stat.value}</p>
+                  <p className="text-2xs text-surface-600 mt-1 font-heading">{stat.sub}</p>
+                </motion.div>
+              ))
+            })()}
+          </div>
+
+          {/* Filter Tabs — premium style */}
+          <div className="flex items-center gap-1 p-1 mb-8 rounded-xl bg-white/[0.02] border border-white/[0.04] w-fit">
             {TABS.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setFilter(tab.key)}
                 className={cn(
-                  'px-4 py-2 rounded-full text-sm font-medium transition-all',
+                  'px-4 py-2 rounded-lg text-xs font-heading font-medium transition-all duration-200',
                   filter === tab.key
-                    ? 'bg-brand-500 text-white'
-                    : 'bg-surface-800/60 text-surface-400 hover:bg-surface-700/60 hover:text-surface-200'
+                    ? 'bg-white/[0.06] text-white'
+                    : 'text-surface-500 hover:text-surface-300'
                 )}
               >
                 {tab.label}
-                {tabCounts[tab.key] > 0 && filter !== tab.key && (
-                  <span className="ml-1.5 text-xs opacity-60">
+                {tabCounts[tab.key] > 0 && (
+                  <span className="ml-1.5 text-2xs tabular-nums opacity-60">
                     {tabCounts[tab.key]}
                   </span>
                 )}
@@ -273,7 +324,13 @@ export function MyBets() {
           </div>
 
           {/* Content */}
-          {isLoading ? (
+          {filter === 'watchlist' ? (
+            <div className="glass-card rounded-2xl p-12 text-center">
+              <Star className="w-10 h-10 text-surface-600 mx-auto mb-4" />
+              <h3 className="text-lg font-heading font-semibold text-white mb-2">No saved markets</h3>
+              <p className="text-sm text-surface-500">Bookmark markets to track them here</p>
+            </div>
+          ) : isLoading ? (
             <div className="space-y-3">
               {[...Array(4)].map((_, i) => (
                 <div
@@ -333,8 +390,8 @@ export function MyBets() {
 
       {/* Debug info (dev mode) */}
       {import.meta.env.DEV && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4">
-          <div className="text-[10px] text-surface-600 font-mono bg-surface-900/50 rounded-lg p-2">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pb-4">
+          <div className="text-[10px] text-surface-600 font-mono bg-white/[0.01] rounded-lg p-2">
             Store: {userBets.length} bets, {pendingBets.length} pending | Wallet: {wallet.address?.slice(0, 12)}... | Markets: {markets.length}
             {wallet.address && (() => {
               const raw = localStorage.getItem(`veiled_markets_pending_${wallet.address}`)
@@ -367,7 +424,7 @@ export function MyBets() {
                 <h2 className="text-lg font-bold text-white">Import Bet</h2>
                 <button
                   onClick={() => setShowImport(false)}
-                  className="p-1.5 rounded-lg hover:bg-surface-800/50 transition-colors text-surface-400"
+                  className="p-1.5 rounded-lg hover:bg-white/[0.03] transition-colors text-surface-400"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -388,7 +445,7 @@ export function MyBets() {
                     value={importTxId}
                     onChange={(e) => setImportTxId(e.target.value)}
                     placeholder="at1..."
-                    className="w-full px-3 py-2.5 rounded-lg bg-surface-800/50 border border-surface-700/50 text-white text-sm placeholder:text-surface-600 focus:outline-none focus:border-brand-500/50"
+                    className="w-full px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/[0.06] text-white text-sm placeholder:text-surface-600 focus:outline-none focus:border-brand-500/50"
                   />
                 </div>
 
@@ -400,7 +457,7 @@ export function MyBets() {
                   <select
                     value={importMarketId}
                     onChange={(e) => setImportMarketId(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-lg bg-surface-800/50 border border-surface-700/50 text-white text-sm focus:outline-none focus:border-brand-500/50 appearance-none"
+                    className="w-full px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/[0.06] text-white text-sm focus:outline-none focus:border-brand-500/50 appearance-none"
                   >
                     <option value="" className="bg-surface-900">Select market...</option>
                     {markets.map((m) => (
@@ -423,7 +480,7 @@ export function MyBets() {
                     placeholder="1.0"
                     step="0.1"
                     min="0"
-                    className="w-full px-3 py-2.5 rounded-lg bg-surface-800/50 border border-surface-700/50 text-white text-sm placeholder:text-surface-600 focus:outline-none focus:border-brand-500/50"
+                    className="w-full px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/[0.06] text-white text-sm placeholder:text-surface-600 focus:outline-none focus:border-brand-500/50"
                   />
                 </div>
 
@@ -437,10 +494,10 @@ export function MyBets() {
                     const numOutcomes = selectedMarket?.numOutcomes ?? 2
                     const labels = selectedMarket?.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
                     const btnColors = [
-                      { active: 'bg-yes-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
-                      { active: 'bg-no-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
-                      { active: 'bg-purple-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
-                      { active: 'bg-yellow-500 text-white', inactive: 'bg-surface-800/50 text-surface-400 hover:bg-surface-700/50' },
+                      { active: 'bg-yes-500 text-white', inactive: 'bg-white/[0.03] text-surface-400 hover:bg-white/[0.06]' },
+                      { active: 'bg-no-500 text-white', inactive: 'bg-white/[0.03] text-surface-400 hover:bg-white/[0.06]' },
+                      { active: 'bg-purple-500 text-white', inactive: 'bg-white/[0.03] text-surface-400 hover:bg-white/[0.06]' },
+                      { active: 'bg-yellow-500 text-white', inactive: 'bg-white/[0.03] text-surface-400 hover:bg-white/[0.06]' },
                     ]
                     return (
                       <div className={cn('grid gap-2', numOutcomes <= 2 ? 'grid-cols-2' : 'grid-cols-2')}>
@@ -619,10 +676,10 @@ function BetCard({
               <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-surface-700 text-surface-400">Claimed</span>
             )}
           </div>
-          <h3 className="text-sm font-medium text-white truncate">
+          <h3 className="text-sm font-heading font-medium text-white truncate">
             {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
           </h3>
-          <p className="text-xs text-surface-500 mt-0.5">
+          <p className="text-xs text-surface-500 mt-0.5 tabular-nums">
             {new Date(bet.placedAt).toLocaleDateString()}
           </p>
         </div>
@@ -632,14 +689,14 @@ function BetCard({
           {isSell ? (
             <>
               <div className="text-right">
-                <p className="text-xs text-surface-500">Shares Sold</p>
-                <p className="text-sm font-bold text-purple-400">
+                <p className="text-xs font-heading text-surface-500">Shares Sold</p>
+                <p className="text-sm font-heading font-bold text-purple-400 tabular-nums">
                   {bet.sharesSold ? formatCredits(bet.sharesSold) : '—'}
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-xs text-surface-500">Received</p>
-                <p className="text-sm font-bold text-yes-400">
+                <p className="text-xs font-heading text-surface-500">Received</p>
+                <p className="text-sm font-heading font-bold text-yes-400 tabular-nums">
                   +{formatCredits(bet.tokensReceived || bet.amount)} {tokenSymbol}
                 </p>
               </div>
@@ -647,8 +704,8 @@ function BetCard({
           ) : (
             <>
               <div className="text-right">
-                <p className="text-xs text-surface-500">Stake</p>
-                <p className="text-sm font-bold text-white">{formatCredits(bet.amount)} {tokenSymbol}</p>
+                <p className="text-xs font-heading text-surface-500">Stake</p>
+                <p className="text-sm font-heading font-bold text-white tabular-nums">{formatCredits(bet.amount)} {tokenSymbol}</p>
               </div>
 
               {(isWon || isLost || isRefunded) && (
@@ -669,7 +726,7 @@ function BetCard({
                         : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
                   {isWon && bet.sharesReceived != null && bet.sharesReceived > bet.amount ? (
-                    <p className="text-[10px] text-yes-400/60">
+                    <p className="text-2xs text-yes-400/60 tabular-nums">
                       profit +{formatCredits(bet.sharesReceived - bet.amount)} {tokenSymbol}
                     </p>
                   ) : null}
@@ -678,7 +735,7 @@ function BetCard({
 
               {isActive && (
                 <div className="text-right">
-                  <p className="text-xs text-surface-500">Shares</p>
+                  <p className="text-xs font-heading text-surface-500">Shares</p>
                   <p className={cn(
                     "text-sm font-bold",
                     badgeColors.text
@@ -720,7 +777,7 @@ function BetCard({
               href={`https://testnet.explorer.provable.com/transaction/${bet.id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-1.5 rounded-lg hover:bg-surface-800/50 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/[0.03] transition-colors"
               title="View on Explorer"
             >
               <ExternalLink className="w-3.5 h-3.5 text-surface-500" />

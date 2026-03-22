@@ -94,10 +94,11 @@ export function getCategoryName(category: number): string {
     1: 'Politics',
     2: 'Sports',
     3: 'Crypto',
-    4: 'Entertainment',
-    5: 'Tech',
-    6: 'Economics',
+    4: 'Culture',
+    5: 'AI & Tech',
+    6: 'Macro',
     7: 'Science',
+    8: 'Climate',
     99: 'Other',
   }
   return categories[category] || 'Other'
@@ -108,16 +109,17 @@ export function getCategoryName(category: number): string {
  */
 export function getCategoryEmoji(category: number): string {
   const emojis: Record<number, string> = {
-    1: '🗳️',
+    1: '🏛',
     2: '⚽',
     3: '₿',
-    4: '🎬',
-    5: '🔬',
+    4: '🎭',
+    5: '🤖',
     6: '📈',
-    7: '🧪',
-    99: '🎯',
+    7: '🔬',
+    8: '🌍',
+    99: '🔮',
   }
-  return emojis[category] || '🎯'
+  return emojis[category] || '🔮'
 }
 
 /**
@@ -132,6 +134,7 @@ export function getCategoryStrip(category: number): string {
     5: 'category-strip-tech',
     6: 'category-strip-economics',
     7: 'category-strip-science',
+    8: 'category-strip-science',
     99: 'category-strip-other',
   }
   return strips[category] || 'category-strip-other'
@@ -142,13 +145,14 @@ export function getCategoryStrip(category: number): string {
  */
 export function getCategoryColor(category: number): { text: string; bg: string; border: string; glow: string } {
   const colors: Record<number, { text: string; bg: string; border: string; glow: string }> = {
-    1: { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', glow: 'rgba(239, 68, 68, 0.08)' },
+    1: { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', glow: 'rgba(99, 102, 241, 0.08)' },
     2: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', glow: 'rgba(16, 185, 129, 0.08)' },
-    3: { text: 'text-brand-400', bg: 'bg-brand-500/10', border: 'border-brand-500/20', glow: 'rgba(124, 58, 237, 0.08)' },
+    3: { text: 'text-brand-400', bg: 'bg-brand-400/10', border: 'border-brand-400/20', glow: 'rgba(201, 168, 76, 0.08)' },
     4: { text: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', glow: 'rgba(236, 72, 153, 0.08)' },
-    5: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', glow: 'rgba(59, 130, 246, 0.08)' },
-    6: { text: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', glow: 'rgba(245, 158, 11, 0.08)' },
-    7: { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', glow: 'rgba(168, 85, 247, 0.08)' },
+    5: { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', glow: 'rgba(139, 92, 246, 0.08)' },
+    6: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', glow: 'rgba(59, 130, 246, 0.08)' },
+    7: { text: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', glow: 'rgba(6, 182, 212, 0.08)' },
+    8: { text: 'text-teal-400', bg: 'bg-teal-500/10', border: 'border-teal-500/20', glow: 'rgba(20, 184, 166, 0.08)' },
   }
   return colors[category] || { text: 'text-surface-400', bg: 'bg-surface-500/10', border: 'border-surface-500/20', glow: 'rgba(107, 114, 128, 0.08)' }
 }

@@ -71,7 +71,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
       </button>
 
       {/* Proposal Header */}
-      <div className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-6">
+      <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-2 mb-2">
@@ -139,7 +139,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
           </div>
 
           {/* Quorum */}
-          <div className="pt-2 border-t border-surface-700/50">
+          <div className="pt-2 border-t border-white/[0.06]">
             <div className="flex justify-between text-xs mb-1">
               <span className="text-surface-400">
                 Quorum: {proposal.quorumPercent.toFixed(1)}% met
@@ -164,7 +164,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
 
         {/* Timeline */}
         <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="bg-surface-800/30 rounded-xl p-3">
+          <div className="bg-white/[0.02] rounded-xl p-3">
             <div className="text-xs text-surface-500 mb-1 flex items-center gap-1">
               <Clock className="w-3 h-3" />
               Voting Ends
@@ -175,7 +175,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
                 : 'Ended'}
             </div>
           </div>
-          <div className="bg-surface-800/30 rounded-xl p-3">
+          <div className="bg-white/[0.02] rounded-xl p-3">
             <div className="text-xs text-surface-500 mb-1 flex items-center gap-1">
               <Timer className="w-3 h-3" />
               Timelock
@@ -191,7 +191,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
 
       {/* Vote Controls */}
       {isVotingOpen && (
-        <div className="bg-surface-900/60 backdrop-blur-sm border border-surface-700/50 rounded-2xl p-6">
+        <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6">
           <h3 className="text-base font-bold text-white mb-4">Cast Your Vote</h3>
 
           {/* Amount Input */}
@@ -203,7 +203,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
                 value={voteAmount}
                 onChange={(e) => setVoteAmount(e.target.value)}
                 placeholder="0.00"
-                className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-3 text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-lg font-mono"
+                className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-3 text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-lg font-mono"
               />
               <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-500 text-sm">ALEO</span>
             </div>
@@ -212,7 +212,7 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
                 <button
                   key={pct}
                   onClick={() => setPercentage(pct)}
-                  className="flex-1 text-xs py-1.5 bg-surface-800/50 hover:bg-surface-700/50 text-surface-400 hover:text-white rounded-lg transition-colors"
+                  className="flex-1 text-xs py-1.5 bg-white/[0.03] hover:bg-white/[0.06] text-surface-400 hover:text-white rounded-lg transition-colors"
                 >
                   {pct}%
                 </button>

@@ -97,7 +97,7 @@ export function CryptoTickerStrip() {
         return (
           <div
             key={coin.id}
-            className="flex items-center gap-3 flex-shrink-0 px-3 py-2 rounded-xl bg-surface-900/40 border border-surface-700/20 hover:border-surface-600/40 transition-all cursor-default"
+            className="flex items-center gap-3 flex-shrink-0 px-3 py-2 rounded-xl bg-white/[0.01] border border-surface-700/20 hover:border-surface-600/40 transition-all cursor-default"
           >
             <div className="relative flex-shrink-0">
               <img

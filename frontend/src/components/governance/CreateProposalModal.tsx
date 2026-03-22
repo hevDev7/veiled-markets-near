@@ -83,10 +83,10 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-surface-900 border border-surface-700/50 rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto"
+            className="bg-surface-900 border border-white/[0.06] rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto"
           >
             {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-surface-700/50">
+            <div className="flex items-center justify-between p-5 border-b border-white/[0.06]">
               <h2 className="text-lg font-bold text-white">Create Governance Proposal</h2>
               <button onClick={onClose} className="text-surface-400 hover:text-white transition-colors">
                 <X className="w-5 h-5" />
@@ -108,7 +108,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                         className={`flex items-center gap-2 p-3 rounded-xl text-left text-xs transition-all ${
                           proposalType === value
                             ? 'bg-brand-500/20 border border-brand-500/40 text-brand-300'
-                            : 'bg-surface-800/50 border border-surface-700/30 text-surface-400 hover:border-surface-600/50'
+                            : 'bg-white/[0.03] border border-surface-700/30 text-surface-400 hover:border-surface-600/50'
                         }`}
                       >
                         <Icon className="w-4 h-4 shrink-0" />
@@ -130,7 +130,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Short descriptive title..."
-                  className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50"
+                  className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50"
                 />
               </div>
 
@@ -142,7 +142,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Detailed explanation of the proposal..."
                   rows={3}
-                  className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 resize-none"
+                  className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 resize-none"
                 />
               </div>
 
@@ -156,7 +156,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                   value={target}
                   onChange={(e) => setTarget(e.target.value)}
                   placeholder="field value or 0field..."
-                  className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
+                  className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
                 />
               </div>
 
@@ -169,7 +169,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                     value={payload1}
                     onChange={(e) => setPayload1(e.target.value)}
                     placeholder="0"
-                    className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
+                    className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
                   />
                 </div>
                 <div>
@@ -179,13 +179,13 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                     value={payload2}
                     onChange={(e) => setPayload2(e.target.value)}
                     placeholder="0field"
-                    className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
+                    className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
                   />
                 </div>
               </div>
 
               {/* Stake Info Box */}
-              <div className="bg-surface-800/30 border border-surface-700/30 rounded-xl p-4 space-y-2">
+              <div className="bg-white/[0.02] border border-surface-700/30 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between text-xs">
                   <span className="text-surface-400">Stake Required</span>
                   <span className="text-white font-medium">{formatVeil(MIN_PROPOSAL_STAKE)} ALEO</span>
@@ -222,7 +222,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-end gap-3 p-5 border-t border-surface-700/50">
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-white/[0.06]">
               <button
                 onClick={onClose}
                 className="px-5 py-2 text-sm text-surface-400 hover:text-white transition-colors"

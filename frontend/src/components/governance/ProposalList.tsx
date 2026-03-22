@@ -48,7 +48,7 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-1 bg-surface-900/60 p-1 rounded-xl border border-surface-700/50">
+      <div className="flex gap-1 bg-surface-900/60 p-1 rounded-xl border border-white/[0.06]">
         {FILTER_OPTIONS.map((opt) => (
           <button
             key={opt.key}
@@ -56,7 +56,7 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
             className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
               proposalFilter === opt.key
                 ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
-                : 'text-surface-400 hover:text-surface-300 hover:bg-surface-800/50'
+                : 'text-surface-400 hover:text-surface-300 hover:bg-white/[0.03]'
             }`}
           >
             {opt.label}

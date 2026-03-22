@@ -57,9 +57,9 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-surface-900 border border-surface-700/50 rounded-2xl max-w-md w-full"
+            className="bg-surface-900 border border-white/[0.06] rounded-2xl max-w-md w-full"
           >
-            <div className="flex items-center justify-between p-5 border-b border-surface-700/50">
+            <div className="flex items-center justify-between p-5 border-b border-white/[0.06]">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Users className="w-5 h-5 text-purple-400" />
                 Delegate Voting Power
@@ -82,7 +82,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
                   value={delegateAddress}
                   onChange={(e) => setDelegateAddress(e.target.value)}
                   placeholder="aleo1..."
-                  className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
+                  className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
                 />
               </div>
 
@@ -93,7 +93,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
-                  className="w-full bg-surface-800/50 border border-surface-700/50 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
+                  className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
                 />
                 <div className="text-xs text-surface-500 mt-1">
                   Available: {formatVeil(veilBalance)} ALEO
@@ -108,7 +108,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-3 p-5 border-t border-surface-700/50">
+            <div className="flex items-center justify-end gap-3 p-5 border-t border-white/[0.06]">
               <button onClick={onClose} className="px-5 py-2 text-sm text-surface-400 hover:text-white transition-colors">
                 Cancel
               </button>

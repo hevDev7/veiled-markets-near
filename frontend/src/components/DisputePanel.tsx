@@ -169,7 +169,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
   return (
     <div className="glass-card overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-surface-800">
+      <div className="p-6 border-b border-white/[0.04]">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center">
             <ShieldAlert className="w-5 h-5 text-yellow-400" />
@@ -229,7 +229,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
         ) : (
           <>
             {!isChallengeWindowOpen ? (
-              <div className="p-4 rounded-xl bg-surface-800/30 text-center">
+              <div className="p-4 rounded-xl bg-white/[0.02] text-center">
                 <p className="text-surface-400">
                   The challenge window is closed. Disputes can no longer be filed.
                 </p>
@@ -265,7 +265,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                 </div>
 
                 {/* Bond Requirement */}
-                <div className="p-4 rounded-xl bg-surface-800/30">
+                <div className="p-4 rounded-xl bg-white/[0.02]">
                   <div className="flex justify-between items-center">
                     <span className="text-surface-400 text-sm">Dispute Bond Required</span>
                     <span className="text-white font-semibold">

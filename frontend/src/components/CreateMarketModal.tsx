@@ -59,13 +59,14 @@ interface MarketFormData {
 }
 
 const categories = [
-  { id: 1, name: 'Politics', emoji: '🏛️' },
-  { id: 2, name: 'Sports', emoji: '⚽' },
+  { id: 1, name: 'Politics', emoji: '🏛' },
   { id: 3, name: 'Crypto', emoji: '₿' },
-  { id: 4, name: 'Entertainment', emoji: '🎬' },
-  { id: 5, name: 'Tech', emoji: '🔬' },
-  { id: 6, name: 'Economics', emoji: '📈' },
-  { id: 7, name: 'Science', emoji: '🧪' },
+  { id: 2, name: 'Sports', emoji: '⚽' },
+  { id: 6, name: 'Macro', emoji: '📈' },
+  { id: 5, name: 'AI & Tech', emoji: '🤖' },
+  { id: 4, name: 'Culture', emoji: '🎭' },
+  { id: 8, name: 'Climate', emoji: '🌍' },
+  { id: 7, name: 'Science', emoji: '🔬' },
 ]
 
 const initialFormData: MarketFormData = {
@@ -738,7 +739,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
             >
               <div className="glass-card overflow-hidden">
                 {/* Header */}
-                <div className="relative p-6 border-b border-surface-800">
+                <div className="relative p-6 border-b border-white/[0.04]">
                   <button
                     onClick={handleClose}
                     className="absolute right-4 top-4 p-2 rounded-lg hover:bg-surface-800 transition-colors"
@@ -1072,7 +1073,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
                         {/* Timeline Preview */}
                         {deadline && resolutionDeadline && (
-                          <div className="p-4 rounded-xl bg-surface-800/30 space-y-3">
+                          <div className="p-4 rounded-xl bg-white/[0.02] space-y-3">
                             <h4 className="text-sm font-medium text-white">Timeline Preview</h4>
                             <div className="flex items-center gap-3">
                               <div className="w-3 h-3 rounded-full bg-yes-500" />
@@ -1125,7 +1126,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         exit={{ opacity: 0, x: -20 }}
                         className="space-y-6"
                       >
-                        <div className="p-4 rounded-xl bg-surface-800/30 space-y-4">
+                        <div className="p-4 rounded-xl bg-white/[0.02] space-y-4">
                           <div>
                             <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Question</p>
                             <p className="text-lg font-medium text-white">{formData.question}</p>
@@ -1191,7 +1192,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         </div>
 
                         {/* Creator Info */}
-                        <div className="p-4 rounded-xl bg-surface-800/30">
+                        <div className="p-4 rounded-xl bg-white/[0.02]">
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-surface-400">Creator</span>
                             <span className="text-sm text-white font-mono">
@@ -1269,7 +1270,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           Your market creation transaction has been sent to the network.
                         </p>
 
-                        <div className="p-4 rounded-xl bg-surface-800/50 mb-4 text-left">
+                        <div className="p-4 rounded-xl bg-white/[0.03] mb-4 text-left">
                           {marketId?.startsWith('at1') ? (
                             <>
                               <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Transaction ID</p>

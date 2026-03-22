@@ -233,7 +233,7 @@ export function ClaimWinningsModal({
           >
             <div className="glass-card overflow-hidden">
               {/* Header */}
-              <div className="relative p-6 border-b border-surface-800">
+              <div className="relative p-6 border-b border-white/[0.04]">
                 <button
                   onClick={handleClose}
                   className="absolute right-4 top-4 p-2 rounded-lg hover:bg-surface-800 transition-colors"
@@ -378,7 +378,7 @@ export function ClaimWinningsModal({
                                   "w-full p-3 rounded-lg border text-left transition-all text-sm",
                                   selectedRecord === rec
                                     ? "border-brand-500/50 bg-brand-500/10"
-                                    : "border-surface-700 bg-surface-800/30 hover:border-surface-600"
+                                    : "border-surface-700 bg-white/[0.02] hover:border-surface-600"
                                 )}
                               >
                                 <div className="flex items-center justify-between">
@@ -519,7 +519,7 @@ export function ClaimWinningsModal({
                     </div>
 
                     {/* CLI Fallback (collapsible) */}
-                    <div className="border border-surface-700/50 rounded-xl overflow-hidden">
+                    <div className="border border-white/[0.06] rounded-xl overflow-hidden">
                       <button
                         onClick={() => setShowCli(!showCli)}
                         className="w-full flex items-center justify-between p-3 text-sm text-surface-400 hover:text-surface-300 transition-colors"
@@ -557,7 +557,7 @@ export function ClaimWinningsModal({
                           </p>
 
                           {/* Record hint */}
-                          <div className="text-xs text-surface-500 p-3 rounded-lg bg-surface-800/50">
+                          <div className="text-xs text-surface-500 p-3 rounded-lg bg-white/[0.03]">
                             <p className="font-medium text-surface-400 mb-1">Finding your OutcomeShare record:</p>
                             <p>
                               Look up your buy transaction on the{' '}

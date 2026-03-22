@@ -2275,18 +2275,22 @@ export const CATEGORY_LABELS: Record<number, string> = {
   1: 'Politics',
   2: 'Sports',
   3: 'Crypto',
-  4: 'Entertainment',
-  5: 'Science & Tech',
-  6: 'Economics',
+  4: 'Culture',
+  5: 'AI & Tech',
+  6: 'Macro',
+  7: 'Science',
+  8: 'Climate',
   99: 'Other',
 }
 
 export const CATEGORY_ICONS: Record<number, string> = {
-  1: '🏛️',
+  1: '🏛',
   2: '⚽',
   3: '₿',
-  4: '🎬',
-  5: '🔬',
+  4: '🎭',
+  5: '🤖',
   6: '📈',
+  7: '🔬',
+  8: '🌍',
   99: '🔮',
 }

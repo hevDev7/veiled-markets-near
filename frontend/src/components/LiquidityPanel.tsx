@@ -199,7 +199,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   return (
     <div className="glass-card overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-surface-800">
+      <div className="p-6 border-b border-white/[0.04]">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-accent-500/10 flex items-center justify-center">
             <Droplets className="w-5 h-5 text-accent-400" />
@@ -213,7 +213,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
         </div>
 
         {/* Tabs */}
-        <div className="flex bg-surface-800/50 rounded-xl p-1">
+        <div className="flex bg-white/[0.03] rounded-xl p-1">
           {(isResolved || isCancelled) ? (
             <button
               onClick={() => handleTabChange('withdraw')}
@@ -370,7 +370,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
                 {/* LP Shares Preview */}
                 {amountMicro > 0n && (
-                  <div className="p-4 rounded-xl bg-surface-800/50">
+                  <div className="p-4 rounded-xl bg-white/[0.03]">
                     <div className="flex justify-between items-center">
                       <span className="text-surface-400 text-sm">LP Shares You Receive</span>
                       <span className="text-white font-semibold">
@@ -503,7 +503,7 @@ function LPTokenSelector({
         </div>
       ) : isFetchingLP ? (
         /* Loading state */
-        <div className="flex items-center justify-center gap-2 p-6 rounded-xl bg-surface-800/50 border border-surface-700/50">
+        <div className="flex items-center justify-center gap-2 p-6 rounded-xl bg-white/[0.03] border border-white/[0.06]">
           <Loader2 className="w-4 h-4 animate-spin text-brand-400" />
           <span className="text-sm text-surface-400">Fetching LP tokens from wallet...</span>
         </div>
@@ -525,7 +525,7 @@ function LPTokenSelector({
         </div>
       ) : lpTokens.length === 0 ? (
         /* No records found */
-        <div className="p-4 rounded-xl bg-surface-800/50 border border-surface-700/50 text-center">
+        <div className="p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] text-center">
           <p className="text-sm text-surface-400 mb-2">No LP tokens found for this market</p>
           <p className="text-xs text-surface-500 mb-3">
             LP tokens are created when you add liquidity or create a market.
@@ -548,7 +548,7 @@ function LPTokenSelector({
                 'w-full text-left p-3 rounded-xl border transition-all',
                 selectedLPIndex === idx
                   ? 'bg-brand-500/10 border-brand-500/30'
-                  : 'bg-surface-800/50 border-surface-700/50 hover:border-surface-600'
+                  : 'bg-white/[0.03] border-white/[0.06] hover:border-surface-600'
               )}
             >
               <div className="flex items-center justify-between">

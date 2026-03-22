@@ -118,7 +118,7 @@ export function ProbabilityDonut({
       <div className="mt-4 space-y-2">
         {/* Total liquidity + volume */}
         {hasPoolData && (
-          <div className="flex items-center justify-between pt-2 border-t border-surface-700/50">
+          <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
             <span className="text-sm text-surface-400">Total Liquidity</span>
             <span className="text-sm font-bold font-mono text-white">
               {formatCredits(totalLiquidity ?? 0n)} {tokenSymbol}

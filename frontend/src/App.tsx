@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
-import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance } from './pages'
+import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, APIDocs, BrandKit, BugBounty } from './pages'
 import { useWalletStore } from './lib/store'
 import { initializeMarketIds } from './lib/aleo-client'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -65,7 +65,7 @@ function App() {
 
         {/* My Bets Page */}
         <Route
-          path="/bets"
+          path="/portfolio"
           element={
             <ProtectedRoute>
               <MyBets />
@@ -110,6 +110,29 @@ function App() {
             <Governance />
           }
         />
+
+        {/* Create Market Page */}
+        <Route
+          path="/create"
+          element={
+            <ProtectedRoute>
+              <CreateMarketPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Resource Pages */}
+        <Route path="/how-it-works" element={<HowItWorks />} />
+        <Route path="/faq" element={<FAQ />} />
+        <Route path="/api-docs" element={<APIDocs />} />
+        <Route path="/brand-kit" element={<BrandKit />} />
+        <Route path="/bug-bounty" element={<BugBounty />} />
+
+        {/* Legal Pages */}
+        <Route path="/terms" element={<TermsOfService />} />
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/risk-disclosure" element={<RiskDisclosure />} />
+        <Route path="/cookies" element={<CookiesPolicy />} />
 
         {/* Catch all - redirect to landing */}
         <Route path="*" element={<Navigate to="/" replace />} />

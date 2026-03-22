@@ -299,7 +299,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           >
             <div className="glass-card overflow-hidden max-h-[80vh] overflow-y-auto">
               {/* Header */}
-              <div className="relative p-6 border-b border-surface-800">
+              <div className="relative p-6 border-b border-white/[0.04]">
                 <button onClick={handleClose} className="absolute right-4 top-4 p-2 rounded-lg hover:bg-surface-800 transition-colors">
                   <X className="w-5 h-5 text-surface-400" />
                 </button>
@@ -444,7 +444,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
                           {/* Trade preview */}
                           {tradePreview && tradePreview.sharesOut > 0n && (
-                            <div className="p-4 rounded-xl bg-surface-800/50 mb-4 space-y-2">
+                            <div className="p-4 rounded-xl bg-white/[0.03] mb-4 space-y-2">
                               <div className="flex justify-between text-sm">
                                 <span className="text-surface-400">Shares received</span>
                                 <span className="font-medium text-white">
@@ -566,7 +566,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                       <h3 className="text-2xl font-bold text-white mb-2">Shares Purchased!</h3>
                       <p className="text-surface-400 mb-6">Your trade has been submitted on-chain</p>
 
-                      <div className="p-4 rounded-xl bg-surface-800/50 mb-6 text-left">
+                      <div className="p-4 rounded-xl bg-white/[0.03] mb-6 text-left">
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400">Amount</span>
                           <span className="font-medium text-white">{amount} {tokenSymbol}</span>

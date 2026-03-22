@@ -193,7 +193,7 @@ export function AdminPanel() {
   return (
     <div className="glass-card overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b border-surface-800">
+      <div className="p-6 border-b border-white/[0.04]">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
             <Shield className="w-5 h-5 text-brand-400" />
@@ -206,7 +206,7 @@ export function AdminPanel() {
 
         {/* Treasury Balances */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="p-4 rounded-xl bg-surface-800/30">
+          <div className="p-4 rounded-xl bg-white/[0.02]">
             <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">ALEO Treasury</p>
             {isLoadingBalances ? (
               <div className="h-7 w-20 bg-surface-700/50 rounded animate-pulse" />
@@ -216,7 +216,7 @@ export function AdminPanel() {
               </p>
             )}
           </div>
-          <div className="p-4 rounded-xl bg-surface-800/30">
+          <div className="p-4 rounded-xl bg-white/[0.02]">
             <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">USDCX Treasury</p>
             {isLoadingBalances ? (
               <div className="h-7 w-20 bg-surface-700/50 rounded animate-pulse" />
@@ -230,7 +230,7 @@ export function AdminPanel() {
       </div>
 
       {/* Action Tabs */}
-      <div className="border-b border-surface-800">
+      <div className="border-b border-white/[0.04]">
         <div className="flex">
           {[
             { key: 'propose' as const, icon: Send, label: 'Propose' },
