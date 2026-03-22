@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -14,14 +14,30 @@ import { getPriceHistory, fetchPriceHistoryAsync, type PriceSnapshot } from '@/l
 
 const OUTCOME_COLORS = ['#22c55e', '#ef4444', '#a855f7', '#eab308']
 
-type TimeRange = '1h' | '6h' | '24h' | 'all'
+type TimeRange = '1h' | '6h' | '24h' | '7d' | 'all'
 
 const TIME_RANGES: { key: TimeRange; label: string; ms: number }[] = [
   { key: '1h', label: '1H', ms: 60 * 60 * 1000 },
   { key: '6h', label: '6H', ms: 6 * 60 * 60 * 1000 },
   { key: '24h', label: '24H', ms: 24 * 60 * 60 * 1000 },
+  { key: '7d', label: '7D', ms: 7 * 24 * 60 * 60 * 1000 },
   { key: 'all', label: 'All', ms: 0 },
 ]
+
+/** Generate evenly spaced tick values for X axis based on data range */
+function getTimeTicks(data: ChartRow[], maxTicks: number = 6): number[] {
+  if (data.length < 2) return data.map(d => d.t)
+  const min = data[0].t
+  const max = data[data.length - 1].t
+  const range = max - min
+  if (range <= 0) return [min]
+  const step = range / (maxTicks - 1)
+  const ticks: number[] = []
+  for (let i = 0; i < maxTicks; i++) {
+    ticks.push(Math.round(min + step * i))
+  }
+  return ticks
+}
 
 /** Pulsing dot rendered only on the last data point */
 function PulsingDot({ cx, cy, index, dataLength, color }: {
@@ -243,10 +259,23 @@ export function ProbabilityChart({
     return rawData
   }, [history, currentPrices, numOutcomes, timeRange])
 
-  const formatTime = (ts: number) => {
+  const timeTicks = useMemo(() => getTimeTicks(chartData, 6), [chartData])
+
+  const formatTime = useCallback((ts: number) => {
     const d = new Date(ts)
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
-  }
+    const rangeMs = TIME_RANGES.find(r => r.key === timeRange)?.ms || 0
+
+    if (rangeMs > 0 && rangeMs <= 24 * 60 * 60 * 1000) {
+      // 1H–24H: show HH:MM
+      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+    }
+    if (rangeMs > 0 && rangeMs <= 7 * 24 * 60 * 60 * 1000) {
+      // 7D: show Mon DD HH:MM
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    }
+    // All: show Mon DD
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }, [timeRange])
 
   const isLoading = remoteHistory === null
   const hasData = chartData.length >= 2
@@ -298,6 +327,9 @@ export function ProbabilityChart({
             {!compact && (
               <XAxis
                 dataKey="t"
+                type="number"
+                domain={['dataMin', 'dataMax']}
+                ticks={timeTicks}
                 tickFormatter={formatTime}
                 stroke="rgba(255,255,255,0.15)"
                 tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.35)' }}

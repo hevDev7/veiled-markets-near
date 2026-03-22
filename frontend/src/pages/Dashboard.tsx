@@ -89,6 +89,14 @@ export function Dashboard() {
         return () => document.removeEventListener('mousedown', handleClick)
     }, [showFilters])
 
+    // Re-fetch user bets when wallet address changes
+    useEffect(() => {
+        if (wallet.address) {
+            fetchUserBets()
+            syncBetStatuses()
+        }
+    }, [wallet.address, fetchUserBets, syncBetStatuses])
+
     // === ALL BUSINESS LOGIC PRESERVED EXACTLY ===
     useEffect(() => {
         fetchMarkets()
@@ -185,11 +193,35 @@ export function Dashboard() {
 
     return (
         <div className="min-h-screen bg-surface-950 relative overflow-hidden">
-            {/* Background */}
+            {/* Background — same as Landing */}
             <div className="fixed inset-0 z-0">
-                <div className="absolute inset-0 opacity-[0.02]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '64px 64px' }} />
-                <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-brand-400/[0.03] rounded-full blur-[120px]" />
-                <div className="absolute bottom-1/4 left-1/4 w-80 h-80 bg-yes-400/[0.02] rounded-full blur-[100px]" />
+                {/* Mesh gradient */}
+                <div className="absolute inset-0"
+                    style={{
+                        background: `
+                            radial-gradient(ellipse at 20% 0%, rgba(201, 168, 76, 0.06) 0%, transparent 50%),
+                            radial-gradient(ellipse at 80% 100%, rgba(0, 220, 130, 0.04) 0%, transparent 50%),
+                            radial-gradient(ellipse at 50% 50%, #0d0f14 0%, #08090c 100%)
+                        `
+                    }}
+                />
+                {/* Grid */}
+                <div className="absolute inset-0 opacity-[0.02]"
+                    style={{
+                        backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+                        backgroundSize: '64px 64px',
+                    }}
+                />
+                {/* Accent glow */}
+                <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] rounded-full bg-brand-400/[0.03] blur-[120px]" />
+                {/* Diagonal lines */}
+                <div className="absolute top-0 right-0 w-[600px] h-[600px] opacity-[0.015]"
+                    style={{ backgroundImage: 'repeating-linear-gradient(-45deg, rgba(201,168,76,1) 0, rgba(201,168,76,1) 1px, transparent 0, transparent 40px)' }}
+                />
+                {/* Noise */}
+                <div className="absolute inset-0 opacity-[0.015]"
+                    style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }}
+                />
             </div>
 
             <DashboardHeader />

@@ -19,6 +19,7 @@ export function WalletBridge() {
   const { connected, connecting, address, wallet, signMessage, requestRecords, requestRecordPlaintexts, decrypt } = useWallet() as any
   const prevConnected = useRef(false)
   const prevAddress = useRef<string | null>(null)
+  const signingLock = useRef(false) // Prevent concurrent signMessage calls
 
   // Store provider functions on window so refreshBalance can access them outside React
   useEffect(() => {
@@ -39,45 +40,51 @@ export function WalletBridge() {
   }, [connected, connecting, address, wallet])
 
   // Shared helper: initialize data for the current address (balance + bets + enc key)
-  const initForAddress = useCallback((addr: string) => {
-    setTimeout(() => {
-      useWalletStore.getState().refreshBalance()
-      useBetsStore.getState().loadBetsForAddress(addr)
-    }, 300)
+  const initForAddress = useCallback(async (addr: string) => {
+    // Immediate: refresh balance and load bets (no lock needed for these)
+    useWalletStore.getState().refreshBalance()
+    useBetsStore.getState().loadBetsForAddress(addr)
 
-    setTimeout(async () => {
-      try {
-        // Clear old key cache on account switch
-        let signature = sessionStorage.getItem(SIG_CACHE_KEY)
+    // Derive encryption key — locked to prevent duplicate sign popups
+    if (signingLock.current) {
+      devLog('[WalletBridge] Skipping signMessage — already in progress')
+      return
+    }
+    signingLock.current = true
 
-        if (!signature && signMessage) {
-          devLog('[WalletBridge] Requesting wallet signature for encryption key...')
-          const result = await Promise.race([
-            signMessage(ENCRYPTION_SIGN_MESSAGE),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
-          ])
-          if (result) {
-            signature = typeof result === 'string' ? result : new TextDecoder().decode(result)
-            if (signature) sessionStorage.setItem(SIG_CACHE_KEY, signature)
-          } else {
-            devWarn('[WalletBridge] signMessage timed out or returned null')
-          }
+    try {
+      await new Promise(r => setTimeout(r, 200))
+      let signature = sessionStorage.getItem(SIG_CACHE_KEY)
+
+      if (!signature && signMessage) {
+        devLog('[WalletBridge] Requesting wallet signature for encryption key...')
+        const result = await Promise.race([
+          signMessage(ENCRYPTION_SIGN_MESSAGE),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ])
+        if (result) {
+          signature = typeof result === 'string' ? result : new TextDecoder().decode(result)
+          if (signature) sessionStorage.setItem(SIG_CACHE_KEY, signature)
+        } else {
+          devWarn('[WalletBridge] signMessage timed out or returned null')
         }
-
-        if (signature) {
-          const encKey = await deriveEncryptionKey(signature)
-          if (encKey) {
-            useWalletStore.setState({ wallet: { ...useWalletStore.getState().wallet, encryptionKey: encKey } })
-            devLog('[WalletBridge] Encryption key derived successfully')
-            useBetsStore.getState().flushToSupabase()
-          } else {
-            devWarn('[WalletBridge] Key derivation returned null (non-deterministic wallet)')
-          }
-        }
-      } catch (err) {
-        devWarn('[WalletBridge] Encryption key derivation failed:', err)
       }
-    }, 500)
+
+      if (signature) {
+        const encKey = await deriveEncryptionKey(signature)
+        if (encKey) {
+          useWalletStore.setState({ wallet: { ...useWalletStore.getState().wallet, encryptionKey: encKey } })
+          devLog('[WalletBridge] Encryption key derived successfully')
+          useBetsStore.getState().flushToSupabase()
+        } else {
+          devWarn('[WalletBridge] Key derivation returned null (non-deterministic wallet)')
+        }
+      }
+    } catch (err) {
+      devWarn('[WalletBridge] Encryption key derivation failed:', err)
+    } finally {
+      signingLock.current = false
+    }
   }, [signMessage])
 
   useEffect(() => {
@@ -150,11 +157,21 @@ export function WalletBridge() {
       })
       prevConnected.current = false
       prevAddress.current = null
+      signingLock.current = false
     }
   }, [connected, connecting, address, wallet, signMessage, initForAddress])
 
+  // Auto-refresh balance periodically while connected
+  useEffect(() => {
+    if (!connected || !address) return
+    const interval = setInterval(() => {
+      useWalletStore.getState().refreshBalance()
+    }, 30_000) // Every 30 seconds
+    return () => clearInterval(interval)
+  }, [connected, address])
+
   // Shield wallet doesn't always emit adapter events when user switches accounts in the extension.
-  // Poll window.shield.getAccount() every 2s while connected to catch external account changes.
+  // Poll window.shield.getAccount() every 1s while connected to catch external account changes.
   useEffect(() => {
     if (!connected) return
 
@@ -172,8 +189,6 @@ export function WalletBridge() {
           currentAddress !== prevAddress.current
         ) {
           devWarn('[WalletBridge] Shield account change detected via poll:', currentAddress.slice(0, 12))
-          // Force adapter to re-read the new account by updating store directly.
-          // The adapter's address state will catch up on next render cycle.
           sessionStorage.removeItem(SIG_CACHE_KEY)
           prevAddress.current = currentAddress
           useWalletStore.setState({
@@ -189,10 +204,53 @@ export function WalletBridge() {
       } catch {
         // Shield API unavailable — ignore
       }
-    }, 2000)
+    }, 1000)
 
     return () => clearInterval(interval)
   }, [connected, initForAddress])
+
+  // Listen for Shield wallet events (connect/disconnect/accountChanged)
+  useEffect(() => {
+    const shieldApi = (window as any).shield
+    if (!shieldApi) return
+
+    const handleAccountChanged = (account: any) => {
+      const newAddr = account?.address || account
+      if (typeof newAddr === 'string' && newAddr.startsWith('aleo') && newAddr !== prevAddress.current) {
+        devWarn('[WalletBridge] Shield accountChanged event:', newAddr.slice(0, 12))
+        sessionStorage.removeItem(SIG_CACHE_KEY)
+        prevAddress.current = newAddr
+        useWalletStore.setState({
+          wallet: {
+            ...useWalletStore.getState().wallet,
+            address: newAddr,
+            balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n },
+            encryptionKey: null,
+          },
+        })
+        initForAddress(newAddr)
+      }
+    }
+
+    // Shield wallet may emit events via addEventListener or on()
+    if (shieldApi.on) {
+      shieldApi.on('accountChanged', handleAccountChanged)
+      shieldApi.on('accountsChanged', handleAccountChanged)
+    }
+    if (shieldApi.addEventListener) {
+      shieldApi.addEventListener('accountChanged', handleAccountChanged)
+    }
+
+    return () => {
+      if (shieldApi.off) {
+        shieldApi.off('accountChanged', handleAccountChanged)
+        shieldApi.off('accountsChanged', handleAccountChanged)
+      }
+      if (shieldApi.removeEventListener) {
+        shieldApi.removeEventListener('accountChanged', handleAccountChanged)
+      }
+    }
+  }, [initForAddress])
 
   return null // Bridge component renders nothing
 }

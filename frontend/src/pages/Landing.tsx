@@ -1,83 +1,18 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { Shield, Eye, Lock, ArrowRight, Wallet, Zap, ChevronRight, BarChart3, Users, Globe, Code, Sparkles, Target, Clock, ArrowUpRight, CheckCircle2 } from 'lucide-react'
+import { Shield, Eye, Lock, ArrowRight, Wallet, Zap, ChevronRight, BarChart3, Users, Globe, Code, Sparkles, Target, Clock, ArrowUpRight, TrendingUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect, useCallback } from 'react'
-import { useWalletStore } from '@/lib/store'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useWalletStore, type Market } from '@/lib/store'
+import { useRealMarketsStore } from '@/lib/market-store'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
 import { Network } from '@provablehq/aleo-types'
-import { cn } from '@/lib/utils'
+import { formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor } from '@/lib/utils'
+import { TrendingMarkets } from '@/components/TrendingMarkets'
+import { useLiveCountdown } from '@/hooks/useGlobalTicker'
+import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 
 // ── Sequential Terminal Typing (preserved) ──
-function SequentialTerminal({
-  lines
-}: {
-  lines: Array<{ prompt?: string; text: string; color?: string }>
-}) {
-  const [currentLineIndex, setCurrentLineIndex] = useState(0)
-  const [displayedLines, setDisplayedLines] = useState<string[]>([])
-  const [currentText, setCurrentText] = useState('')
-  const [showCursor, setShowCursor] = useState(true)
-  const [allComplete, setAllComplete] = useState(false)
-
-  useEffect(() => {
-    if (currentLineIndex >= lines.length) {
-      setAllComplete(true)
-      setShowCursor(false)
-      return
-    }
-    const currentLine = lines[currentLineIndex]
-    let charIndex = 0
-    setCurrentText('')
-    setShowCursor(true)
-    const typingTimer = setInterval(() => {
-      if (charIndex <= currentLine.text.length) {
-        setCurrentText(currentLine.text.slice(0, charIndex))
-        charIndex++
-      } else {
-        clearInterval(typingTimer)
-        setTimeout(() => {
-          setDisplayedLines(prev => [...prev, currentLine.text])
-          setCurrentText('')
-          setCurrentLineIndex(prev => prev + 1)
-        }, 250)
-      }
-    }, 25)
-    return () => clearInterval(typingTimer)
-  }, [currentLineIndex, lines])
-
-  return (
-    <>
-      {displayedLines.map((text, index) => (
-        <div key={index} className="flex items-start gap-2">
-          {lines[index].prompt && (
-            <span className="text-brand-400 select-none">{lines[index].prompt}</span>
-          )}
-          <span className={lines[index].color || 'text-surface-300'}>{text}</span>
-        </div>
-      ))}
-      {currentLineIndex < lines.length && (
-        <div className="flex items-start gap-2">
-          {lines[currentLineIndex].prompt && (
-            <span className="text-brand-400 select-none">{lines[currentLineIndex].prompt}</span>
-          )}
-          <span className={lines[currentLineIndex].color || 'text-surface-300'}>
-            {currentText}
-            {showCursor && <span className="animate-pulse text-brand-400">▊</span>}
-          </span>
-        </div>
-      )}
-      {allComplete && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}
-          className="flex items-center gap-2 text-brand-400 pt-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-          <span className="text-xs">Ready</span>
-        </motion.div>
-      )}
-    </>
-  )
-}
-
 // ── Rotating Words (preserved) ──
 function RotatingWords({ words, interval = 3000 }: { words: string[]; interval?: number }) {
   const [current, setCurrent] = useState(0)
@@ -104,6 +39,184 @@ function RotatingWords({ words, interval = 3000 }: { words: string[]; interval?:
   )
 }
 
+// ── Hero Featured Market Card ──
+function HeroFeaturedCard() {
+  const { markets, fetchMarkets } = useRealMarketsStore()
+
+  useEffect(() => {
+    if (markets.length === 0) fetchMarkets()
+  }, [markets.length, fetchMarkets])
+
+  // Pick the hottest market by volume
+  const featured = useMemo(() => {
+    const hot = markets.filter(m => m.status === 1 && (m.tags?.includes('Hot') || m.tags?.includes('Featured')))
+    const sorted = hot.length > 0 ? hot : markets.filter(m => m.status === 1)
+    return sorted.sort((a, b) => Number(b.totalVolume - a.totalVolume))[0] ?? null
+  }, [markets])
+
+  const timeRemaining = useLiveCountdown(featured?.deadlineTimestamp, featured?.timeRemaining)
+
+  if (!featured) {
+    return (
+      <div className="rounded-2xl p-6 lg:p-8 animate-pulse">
+        <div className="h-4 bg-surface-700 rounded w-1/4 mb-6" />
+        <div className="h-6 bg-surface-700 rounded w-3/4 mb-6" />
+        <div className="h-8 bg-surface-700 rounded w-1/3 mb-6" />
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="h-12 bg-surface-800 rounded-xl" />
+          <div className="h-12 bg-surface-800 rounded-xl" />
+        </div>
+        <div className="flex gap-4"><div className="h-3 bg-surface-800 rounded w-16" /><div className="h-3 bg-surface-800 rounded w-16" /></div>
+      </div>
+    )
+  }
+
+  const catColor = getCategoryColor(featured.category)
+  const thumbUrl = getMarketThumbnail(featured.question, featured.category, featured.thumbnailUrl)
+  const useContain = isContainThumbnail(thumbUrl)
+
+  return (
+    <div className="relative rounded-2xl overflow-hidden">
+      {/* Subtle accent glow */}
+      <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-brand-400/[0.03] to-transparent rounded-full blur-3xl" />
+
+      <div className="relative p-6 lg:p-8">
+        {/* Top row: category + LIVE badge */}
+        <div className="flex items-start justify-between mb-5">
+          <div className="flex items-center gap-2.5">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${catColor.text}`}
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              {getCategoryEmoji(featured.category)} {getCategoryName(featured.category)}
+            </span>
+            {(featured.tags?.includes('Hot') || featured.tags?.includes('Trending') || featured.tags?.includes('Featured')) && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-brand-400 bg-brand-500/8 border border-brand-400/10">
+                <Zap className="w-3 h-3" />
+                Hot
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yes-500/10 border border-yes-500/20">
+            <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
+            <span className="text-[10px] font-semibold text-yes-400 uppercase tracking-wider">Live</span>
+          </div>
+        </div>
+
+        {/* Question with thumbnail */}
+        <div className="flex gap-3 mb-6">
+          <div className={`w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/[0.06] bg-surface-800 ${useContain ? 'p-1.5 flex items-center justify-center' : ''}`}>
+            <img src={thumbUrl} alt="" className={`w-full h-full ${useContain ? 'object-contain' : 'object-cover'}`} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          </div>
+          <h3 className="font-display text-xl lg:text-2xl font-bold text-white leading-snug">
+            {featured.question}
+          </h3>
+        </div>
+
+        {/* Probability */}
+        <div className="flex items-baseline gap-2 mb-4">
+          <span className="text-3xl font-display font-bold tabular-nums" style={{ color: featured.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
+            {formatPercentage(featured.yesPercentage)}
+          </span>
+          <span className="text-sm text-surface-400">probability</span>
+        </div>
+
+        {/* Progress bar */}
+        <div className="w-full h-1.5 rounded-full bg-surface-700/40 overflow-hidden mb-6">
+          <div className="h-full rounded-full bg-yes-500 transition-all duration-700" style={{ width: `${featured.yesPercentage}%` }} />
+        </div>
+
+        {/* Yes / No prices */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-yes-500/[0.04]">
+            <span className="text-xs font-medium text-surface-300">Yes</span>
+            <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(featured.yesPercentage)}</span>
+          </div>
+          <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-no-500/[0.04]">
+            <span className="text-xs font-medium text-surface-300">No</span>
+            <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(featured.noPercentage)}</span>
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div className="flex items-center gap-4 pt-5 border-t border-white/[0.03]">
+          <div className="flex items-center gap-1.5 text-surface-500">
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span className="text-xs tabular-nums">{formatCredits(featured.totalVolume, 0)} {featured.tokenType ?? 'ALEO'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-surface-500">
+            <Users className="w-3.5 h-3.5" />
+            <span className="text-xs tabular-nums">{featured.totalBets}</span>
+          </div>
+          <div className="ml-auto flex items-center gap-1.5 text-surface-500">
+            <Clock className="w-3.5 h-3.5" />
+            <span className="text-xs">{timeRemaining}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Hero Compact Cards (two bottom cards) ──
+function HeroCompactCards() {
+  const { markets } = useRealMarketsStore()
+
+  const compactMarkets = useMemo(() => {
+    const active = markets.filter(m => m.status === 1)
+    const sorted = active.sort((a, b) => Number(b.totalVolume - a.totalVolume))
+    // Skip the first one (used by featured), take next 2
+    return sorted.slice(1, 3)
+  }, [markets])
+
+  if (compactMarkets.length === 0) {
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        {[0, 1].map(i => (
+          <div key={i} className="rounded-xl p-4 animate-pulse" style={{
+            background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)',
+            border: '1px solid rgba(255, 255, 255, 0.04)',
+          }}>
+            <div className="h-4 bg-surface-700 rounded w-3/4 mb-3" />
+            <div className="h-3 bg-surface-800 rounded w-1/2" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {compactMarkets.map((market) => (
+        <HeroCompactCard key={market.id} market={market} />
+      ))}
+    </div>
+  )
+}
+
+function HeroCompactCard({ market }: { market: Market }) {
+  const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
+
+  return (
+    <div className="rounded-xl p-4 transition-all duration-300 hover:bg-white/[0.02] border-t border-white/[0.03]">
+      <p className="text-sm font-semibold text-white line-clamp-1 mb-3">
+        {market.question}
+      </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-surface-500 flex items-center gap-1 tabular-nums">
+            <TrendingUp className="w-3 h-3" />
+            {formatCredits(market.totalVolume, 0)} vol
+          </span>
+          <span className="text-xs text-surface-600">·</span>
+          <span className="text-xs text-surface-500 tabular-nums">{timeRemaining}</span>
+        </div>
+        <span className="text-lg font-display font-bold tabular-nums" style={{ color: market.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
+          {formatPercentage(market.yesPercentage)}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 const stagger = {
   hidden: { opacity: 0 } as const,
   show: { opacity: 1, transition: { staggerChildren: 0.08 } } as const,
@@ -124,15 +237,6 @@ export function Landing() {
   const [connectError, setConnectError] = useState<string | null>(null)
 
   const isConnected = wallet.connected || providerConnected
-
-  const terminalLines = [
-    { prompt: '~', text: 'veiled connect --wallet shield', color: 'text-surface-300' },
-    { text: '✓ Connected: aleo1q8f...7x2m', color: 'text-yes-400' },
-    { prompt: '~', text: 'veiled bet --market 42 --amount 100 --outcome YES', color: 'text-surface-300' },
-    { text: '⟳ Generating zero-knowledge proof...', color: 'text-brand-400' },
-    { text: '✓ Bet placed — position encrypted on-chain', color: 'text-yes-400' },
-    { text: '⊘ Your bet: HIDDEN from all observers', color: 'text-brand-300' },
-  ]
 
   useEffect(() => {
     if (isConnected) {
@@ -230,13 +334,13 @@ export function Landing() {
       </header>
 
       {/* ═══════ HERO ═══════ */}
-      <section className="relative min-h-[90vh] flex items-center z-10">
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-20 w-full">
+      <section className="relative z-10">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-32 pb-12 w-full">
           <div className="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
             {/* Left — Copy */}
             <motion.div className="lg:col-span-5" variants={stagger} initial="hidden" animate="show">
               {/* Badge */}
-              <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-400/[0.06] border border-brand-400/[0.12] mb-8">
+              <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-400/[0.06] border border-brand-400/[0.12] mb-5">
                 <Sparkles className="w-3.5 h-3.5 text-brand-400" />
                 <span className="text-xs font-semibold text-brand-400">Live on Aleo Testnet</span>
               </motion.div>
@@ -247,13 +351,13 @@ export function Landing() {
                 <RotatingWords words={['Stay Anonymous.', 'Stay Hidden.', 'Stay Private.']} />
               </motion.h1>
 
-              <motion.p variants={fadeUp} className="text-lg text-surface-400 leading-relaxed mb-10 max-w-lg">
+              <motion.p variants={fadeUp} className="text-lg text-surface-400 leading-relaxed mb-8 max-w-lg">
                 The first prediction market where your positions are{' '}
                 <span className="text-brand-300 font-semibold">cryptographically invisible</span>.
                 Built on Aleo with zero-knowledge proofs.
               </motion.p>
 
-              <motion.div variants={fadeUp} className="flex items-center gap-4 mb-10">
+              <motion.div variants={fadeUp} className="flex items-center gap-4 mb-8">
                 <button onClick={handleConnectClick} disabled={connecting}
                   className="flex items-center gap-3 px-7 py-3.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200 group disabled:opacity-50"
                   style={{
@@ -289,60 +393,20 @@ export function Landing() {
               </motion.div>
             </motion.div>
 
-            {/* Right — Terminal + Stats */}
+            {/* Right — Hero Market Cards */}
             <motion.div className="lg:col-span-7"
               initial={{ opacity: 0, x: 40 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}>
               <div className="relative">
                 {/* Glow */}
-                <div className="absolute -inset-4 bg-brand-400/[0.03] rounded-3xl blur-3xl" />
+                <div className="absolute -inset-4 bg-gradient-to-br from-brand-400/[0.03] via-transparent to-transparent rounded-3xl blur-3xl" />
 
-                {/* Terminal */}
-                <div className="relative rounded-2xl overflow-hidden"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.9) 0%, rgba(13, 15, 20, 0.95) 100%)',
-                    border: '1px solid rgba(255, 255, 255, 0.06)',
-                    boxShadow: '0 0 0 1px rgba(0,0,0,0.3), 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 80px rgba(201, 168, 76, 0.04)',
-                    backdropFilter: 'blur(20px)',
-                  }}>
-                  {/* Header */}
-                  <div className="px-4 py-3 flex items-center gap-3 border-b border-white/[0.04]">
-                    <div className="flex gap-2">
-                      <div className="w-3 h-3 rounded-full bg-no-400/60" />
-                      <div className="w-3 h-3 rounded-full bg-brand-400/60" />
-                      <div className="w-3 h-3 rounded-full bg-yes-400/60" />
-                    </div>
-                    <span className="text-[11px] text-surface-500 font-mono ml-1">veiled_markets.aleo</span>
-                    <div className="ml-auto flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
-                      <span className="text-[10px] text-surface-500 font-mono">LIVE</span>
-                    </div>
-                  </div>
-                  {/* Content */}
-                  <div className="p-5 font-mono text-sm space-y-2.5 min-h-[240px]">
-                    <SequentialTerminal lines={terminalLines} />
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-3 mt-4">
-                  {[
-                    { value: 'ZK', label: 'Powered', icon: <Zap className="w-3.5 h-3.5" />, delay: 0.6 },
-                    { value: 'FPMM', label: 'AMM Model', icon: <BarChart3 className="w-3.5 h-3.5" />, delay: 0.7 },
-                    { value: '100%', label: 'Private', icon: <Lock className="w-3.5 h-3.5" />, delay: 0.8 },
-                  ].map((stat) => (
-                    <motion.div key={stat.label}
-                      initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: stat.delay, duration: 0.5 }}
-                      className="rounded-xl p-4 text-center bg-white/[0.02] border border-white/[0.04] backdrop-blur-sm">
-                      <div className="flex items-center justify-center gap-1.5 mb-2 text-brand-400">
-                        {stat.icon}
-                        <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-wider">{stat.label}</span>
-                      </div>
-                      <div className="text-xl font-display font-bold text-white">{stat.value}</div>
-                    </motion.div>
-                  ))}
+                <div className="relative space-y-4">
+                  {/* Featured Market Card */}
+                  <HeroFeaturedCard />
+                  {/* Compact cards grid */}
+                  <HeroCompactCards />
                 </div>
               </div>
             </motion.div>
@@ -350,7 +414,7 @@ export function Landing() {
         </div>
 
         {/* Scroll indicator */}
-        <motion.div className="absolute bottom-8 left-1/2 -translate-x-1/2" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
+        <motion.div className="flex justify-center mt-8 mb-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }}>
           <div className="w-5 h-8 rounded-full border border-white/[0.1] flex items-start justify-center p-1.5">
             <motion.div className="w-1 h-1.5 rounded-full bg-brand-400"
               animate={{ y: [0, 8, 0] }} transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }} />
@@ -413,6 +477,9 @@ export function Landing() {
           </div>
         </div>
       </section>
+
+      {/* ═══════ TRENDING MARKETS ═══════ */}
+      <TrendingMarkets />
 
       {/* ═══════ HOW IT WORKS ═══════ */}
       <section className="relative py-24 z-10">

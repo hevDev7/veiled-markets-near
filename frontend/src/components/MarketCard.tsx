@@ -13,7 +13,7 @@ function MarketThumb({ url, question, size = 'md' }: { url: string; question: st
   const sizeClass = size === 'sm' ? 'w-8 h-8 rounded-lg' : size === 'lg' ? 'w-11 h-11 rounded-xl' : 'w-10 h-10 rounded-xl'
   return (
     <div className="flex gap-3 mb-4">
-      <div className={cn(sizeClass, 'overflow-hidden shrink-0 border border-white/[0.06] bg-surface-800', useContain && 'p-1.5 flex items-center justify-center')}>
+      <div className={cn(sizeClass, 'overflow-hidden shrink-0 bg-surface-800', useContain && 'p-1.5 flex items-center justify-center')}>
         <img src={url} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
       </div>
       <h3 className="text-base font-semibold text-white line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">
@@ -106,7 +106,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         <div className="mb-4">
           {isBinary ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/40 border border-surface-700/30">
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/20">
                 <div className="w-2.5 h-2.5 rounded-full bg-yes-500 shadow-[0_0_6px_rgba(16,185,129,0.4)] shrink-0" />
                 <span className="text-sm text-surface-300 font-medium">{outcomeLabels[0]}</span>
                 <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
@@ -114,7 +114,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
                 </div>
                 <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.yesPercentage)}</span>
               </div>
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/40 border border-surface-700/30">
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/20">
                 <div className="w-2.5 h-2.5 rounded-full bg-no-500 shadow-[0_0_6px_rgba(244,63,94,0.4)] shrink-0" />
                 <span className="text-sm text-surface-300 font-medium">{outcomeLabels[1]}</span>
                 <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
@@ -133,7 +133,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
                   return (
                     <div key={i} className={cn(
                       'flex items-center gap-2 px-2.5 py-2 rounded-lg',
-                      'bg-surface-800/40 border border-surface-700/30'
+                      'bg-surface-800/20'
                     )}>
                       <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colors.bar)} />
                       <span className="text-xs text-surface-300 truncate">{label}</span>
@@ -161,7 +161,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         </div>
 
         {/* Stats — compact inline */}
-        <div className="flex items-center gap-4 pt-3 mt-auto border-t border-white/[0.04] text-xs text-surface-500">
+        <div className="flex items-center gap-4 pt-3 mt-auto border-t border-white/[0.03] text-xs text-surface-500">
           <span className="flex items-center gap-1.5 tabular-nums">
             <TrendingUp className="w-3 h-3" />
             {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}
