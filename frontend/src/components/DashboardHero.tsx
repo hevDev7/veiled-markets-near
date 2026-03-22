@@ -94,7 +94,7 @@ function MarketSlide({ market, onClick }: { market: Market; onClick: () => void 
           </span>
         </div>
         <h3 onClick={onClick}
-          className="font-display text-sm lg:text-base font-semibold text-white hover:text-brand-300 transition-colors leading-snug line-clamp-2 cursor-pointer tracking-tight flex-1">
+          className="text-sm lg:text-base font-semibold text-white hover:text-brand-300 transition-colors leading-snug line-clamp-2 cursor-pointer flex-1">
           {market.question}
         </h3>
         <div className="flex items-center gap-1.5 text-xs text-surface-400 flex-shrink-0 pt-1.5">

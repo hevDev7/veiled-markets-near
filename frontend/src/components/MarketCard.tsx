@@ -6,6 +6,7 @@ import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji,
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
+import { getMarketThumbnail } from '@/lib/market-thumbnails'
 
 // Colors for up to 4 outcomes
 const OUTCOME_COLORS = [
@@ -101,10 +102,21 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           </div>
         </div>
 
-        {/* Question */}
-        <h3 className="text-lg font-semibold text-white mb-4 line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">
-          {market.question}
-        </h3>
+        {/* Question + Thumbnail */}
+        <div className="flex gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 bg-surface-800 border border-white/[0.06]">
+            <img
+              src={getMarketThumbnail(market.question, market.category)}
+              alt=""
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+          </div>
+          <h3 className="text-base font-semibold text-white line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">
+            {market.question}
+          </h3>
+        </div>
 
         {/* Odds Display */}
         <div className="mb-4">
@@ -116,7 +128,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
                 <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
                   <div className="h-full rounded-full bg-yes-500" style={{ width: `${market.yesPercentage}%` }} />
                 </div>
-                <span className="text-sm font-bold text-yes-400 tabular-nums shrink-0">{formatPercentage(market.yesPercentage)}</span>
+                <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.yesPercentage)}</span>
               </div>
               <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/40 border border-surface-700/30">
                 <div className="w-2.5 h-2.5 rounded-full bg-no-500 shadow-[0_0_6px_rgba(244,63,94,0.4)] shrink-0" />
@@ -124,7 +136,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
                 <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
                   <div className="h-full rounded-full bg-no-500" style={{ width: `${market.noPercentage}%` }} />
                 </div>
-                <span className="text-sm font-bold text-no-400 tabular-nums shrink-0">{formatPercentage(market.noPercentage)}</span>
+                <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.noPercentage)}</span>
               </div>
             </div>
           ) : (
@@ -141,7 +153,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
                     )}>
                       <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colors.bar)} />
                       <span className="text-xs text-surface-300 truncate">{label}</span>
-                      <span className={cn('text-sm font-bold ml-auto tabular-nums', colors.text)}>{formatPercentage(pct)}</span>
+                      <span className="text-sm font-bold ml-auto tabular-nums text-white">{formatPercentage(pct)}</span>
                     </div>
                   )
                 })}
