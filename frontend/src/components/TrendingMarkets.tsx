@@ -104,46 +104,40 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
         <div className="mb-4">
           {isBinary ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/20">
-                <div className="w-2.5 h-2.5 rounded-full bg-yes-500 shadow-[0_0_6px_rgba(16,185,129,0.4)] shrink-0" />
-                <span className="text-sm text-surface-300 font-medium">{outcomeLabels[0]}</span>
-                <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
-                  <div className="h-full rounded-full bg-yes-500 transition-all duration-700" style={{ width: `${market.yesPercentage}%` }} />
-                </div>
-                <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.yesPercentage)}</span>
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-yes-500/5">
+                <span className="text-sm text-yes-400 font-medium">{outcomeLabels[0]}</span>
+                <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(market.yesPercentage)}</span>
               </div>
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/20">
-                <div className="w-2.5 h-2.5 rounded-full bg-no-500 shadow-[0_0_6px_rgba(244,63,94,0.4)] shrink-0" />
-                <span className="text-sm text-surface-300 font-medium">{outcomeLabels[1]}</span>
-                <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
-                  <div className="h-full rounded-full bg-no-500 transition-all duration-700" style={{ width: `${market.noPercentage}%` }} />
-                </div>
-                <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.noPercentage)}</span>
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-no-500/5">
+                <span className="text-sm text-no-400 font-medium">{outcomeLabels[1]}</span>
+                <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(market.noPercentage)}</span>
               </div>
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+              <div className="grid grid-cols-2 gap-1.5">
                 {outcomeLabels.map((label, i) => {
                   const pct = (prices[i] ?? 0) * 100
-                  const OUTCOME_COLORS = [
+                  const OUTCOME_DOT_COLORS = [
                     'bg-yes-500', 'bg-no-500', 'bg-purple-500', 'bg-yellow-500'
                   ]
+                  const OUTCOME_BORDER_COLORS = [
+                    'border-yes-500/20', 'border-no-500/20', 'border-purple-500/20', 'border-yellow-500/20'
+                  ]
+                  const OUTCOME_BG_COLORS = [
+                    'bg-yes-500/5', 'bg-no-500/5', 'bg-purple-500/5', 'bg-yellow-500/5'
+                  ]
+                  const OUTCOME_TEXT_COLORS = [
+                    'text-yes-400', 'text-no-400', 'text-purple-400', 'text-yellow-400'
+                  ]
                   return (
-                    <div key={i} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-surface-800/20">
-                      <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', OUTCOME_COLORS[i] || OUTCOME_COLORS[0])} />
-                      <span className="text-xs text-surface-300 truncate">{label}</span>
-                      <span className="text-sm font-bold ml-auto tabular-nums text-white">{formatPercentage(pct)}</span>
+                    <div key={i} className={cn(
+                      'flex items-center gap-2 px-2.5 py-2 rounded-lg',
+                      OUTCOME_BG_COLORS[i] || OUTCOME_BG_COLORS[0]
+                    )}>
+                      <span className={cn('text-xs truncate font-medium', OUTCOME_TEXT_COLORS[i] || OUTCOME_TEXT_COLORS[0])}>{label}</span>
+                      <span className={cn('text-sm font-bold ml-auto tabular-nums', OUTCOME_TEXT_COLORS[i] || OUTCOME_TEXT_COLORS[0])}>{formatPercentage(pct)}</span>
                     </div>
-                  )
-                })}
-              </div>
-              <div className="h-2 rounded-full overflow-hidden bg-surface-800 flex">
-                {outcomeLabels.map((_, i) => {
-                  const pct = (prices[i] ?? 0) * 100
-                  const OUTCOME_BAR_COLORS = ['bg-yes-500', 'bg-no-500', 'bg-purple-500', 'bg-yellow-500']
-                  return (
-                    <div key={i} className={cn('h-full transition-all duration-700 ease-out', OUTCOME_BAR_COLORS[i] || OUTCOME_BAR_COLORS[0])} style={{ width: `${pct}%` }} />
                   )
                 })}
               </div>

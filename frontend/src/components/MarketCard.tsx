@@ -25,10 +25,10 @@ function MarketThumb({ url, question, size = 'md' }: { url: string; question: st
 
 // Colors for up to 4 outcomes
 const OUTCOME_COLORS = [
-  { text: 'text-yes-400', bg: 'bg-yes-500/10', border: 'border-yes-500/20', bar: 'bg-yes-500', hoverBg: 'hover:bg-yes-500/20', hoverBorder: 'hover:border-yes-500/40' },
-  { text: 'text-no-400', bg: 'bg-no-500/10', border: 'border-no-500/20', bar: 'bg-no-500', hoverBg: 'hover:bg-no-500/20', hoverBorder: 'hover:border-no-500/40' },
-  { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', bar: 'bg-purple-500', hoverBg: 'hover:bg-purple-500/20', hoverBorder: 'hover:border-purple-500/40' },
-  { text: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', bar: 'bg-yellow-500', hoverBg: 'hover:bg-yellow-500/20', hoverBorder: 'hover:border-yellow-500/40' },
+  { text: 'text-yes-400', bg: 'bg-yes-500/5', border: 'border-yes-500/20', bar: 'bg-yes-500', hoverBg: 'hover:bg-yes-500/20', hoverBorder: 'hover:border-yes-500/40' },
+  { text: 'text-no-400', bg: 'bg-no-500/5', border: 'border-no-500/20', bar: 'bg-no-500', hoverBg: 'hover:bg-no-500/20', hoverBorder: 'hover:border-no-500/40' },
+  { text: 'text-purple-400', bg: 'bg-purple-500/5', border: 'border-purple-500/20', bar: 'bg-purple-500', hoverBg: 'hover:bg-purple-500/20', hoverBorder: 'hover:border-purple-500/40' },
+  { text: 'text-yellow-400', bg: 'bg-yellow-500/5', border: 'border-yellow-500/20', bar: 'bg-yellow-500', hoverBg: 'hover:bg-yellow-500/20', hoverBorder: 'hover:border-yellow-500/40' },
 ]
 
 interface MarketCardProps {
@@ -106,53 +106,30 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         <div className="mb-4">
           {isBinary ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/20">
-                <div className="w-2.5 h-2.5 rounded-full bg-yes-500 shadow-[0_0_6px_rgba(16,185,129,0.4)] shrink-0" />
-                <span className="text-sm text-surface-300 font-medium">{outcomeLabels[0]}</span>
-                <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
-                  <div className="h-full rounded-full bg-yes-500" style={{ width: `${market.yesPercentage}%` }} />
-                </div>
-                <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.yesPercentage)}</span>
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-yes-500/5">
+                <span className="text-sm text-yes-400 font-medium">{outcomeLabels[0]}</span>
+                <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(market.yesPercentage)}</span>
               </div>
-              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-surface-800/20">
-                <div className="w-2.5 h-2.5 rounded-full bg-no-500 shadow-[0_0_6px_rgba(244,63,94,0.4)] shrink-0" />
-                <span className="text-sm text-surface-300 font-medium">{outcomeLabels[1]}</span>
-                <div className="flex-1 h-1.5 rounded-full bg-surface-700/40 overflow-hidden mx-2">
-                  <div className="h-full rounded-full bg-no-500" style={{ width: `${market.noPercentage}%` }} />
-                </div>
-                <span className="text-sm font-bold text-white tabular-nums shrink-0">{formatPercentage(market.noPercentage)}</span>
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-no-500/5">
+                <span className="text-sm text-no-400 font-medium">{outcomeLabels[1]}</span>
+                <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(market.noPercentage)}</span>
               </div>
             </div>
           ) : (
             <>
-              {/* Multi-outcome chips */}
-              <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+              {/* Multi-outcome chips with colored borders + tinted background */}
+              <div className="grid grid-cols-2 gap-1.5">
                 {outcomeLabels.map((label, i) => {
                   const pct = (prices[i] ?? 0) * 100
                   const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
                   return (
                     <div key={i} className={cn(
                       'flex items-center gap-2 px-2.5 py-2 rounded-lg',
-                      'bg-surface-800/20'
+                      colors.bg
                     )}>
-                      <div className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colors.bar)} />
-                      <span className="text-xs text-surface-300 truncate">{label}</span>
-                      <span className="text-sm font-bold ml-auto tabular-nums text-white">{formatPercentage(pct)}</span>
+                      <span className={cn('text-xs truncate font-medium', colors.text)}>{label}</span>
+                      <span className={cn('text-sm font-bold ml-auto tabular-nums', colors.text)}>{formatPercentage(pct)}</span>
                     </div>
-                  )
-                })}
-              </div>
-              {/* Segmented bar */}
-              <div className="h-2 rounded-full overflow-hidden bg-surface-800 flex">
-                {outcomeLabels.map((_, i) => {
-                  const pct = (prices[i] ?? 0) * 100
-                  const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
-                  return (
-                    <div
-                      key={i}
-                      className={cn('h-full transition-all duration-700 ease-out', colors.bar)}
-                      style={{ width: `${pct}%` }}
-                    />
                   )
                 })}
               </div>
