@@ -85,17 +85,17 @@ function HeroFeaturedCard() {
         <div className="flex items-start justify-between mb-5">
           <div className="flex items-center gap-2.5">
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${catColor.text}`}
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              style={{ background: 'rgba(255,255,255,0.03)' }}>
               {getCategoryEmoji(featured.category)} {getCategoryName(featured.category)}
             </span>
             {(featured.tags?.includes('Hot') || featured.tags?.includes('Trending') || featured.tags?.includes('Featured')) && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-brand-400 bg-brand-500/8 border border-brand-400/10">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-brand-400 bg-brand-500/8">
                 <Zap className="w-3 h-3" />
                 Hot
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yes-500/10 border border-yes-500/20">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-yes-500/10">
             <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
             <span className="text-[10px] font-semibold text-yes-400 uppercase tracking-wider">Live</span>
           </div>
@@ -103,7 +103,7 @@ function HeroFeaturedCard() {
 
         {/* Question with thumbnail */}
         <div className="flex gap-3 mb-6">
-          <div className={`w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/[0.06] bg-surface-800 ${useContain ? 'p-1.5 flex items-center justify-center' : ''}`}>
+          <div className={`w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-surface-800 ${useContain ? 'p-1.5 flex items-center justify-center' : ''}`}>
             <img src={thumbUrl} alt="" className={`w-full h-full ${useContain ? 'object-contain' : 'object-cover'}`} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
           </div>
           <h3 className="font-display text-xl lg:text-2xl font-bold text-white leading-snug">
@@ -137,7 +137,7 @@ function HeroFeaturedCard() {
         </div>
 
         {/* Stats row */}
-        <div className="flex items-center gap-4 pt-5 border-t border-white/[0.03]">
+        <div className="flex items-center gap-4 pt-5 text-surface-500">
           <div className="flex items-center gap-1.5 text-surface-500">
             <BarChart3 className="w-3.5 h-3.5" />
             <span className="text-xs tabular-nums">{formatCredits(featured.totalVolume, 0)} {featured.tokenType ?? 'ALEO'}</span>
@@ -171,10 +171,7 @@ function HeroCompactCards() {
     return (
       <div className="grid grid-cols-2 gap-3">
         {[0, 1].map(i => (
-          <div key={i} className="rounded-xl p-4 animate-pulse" style={{
-            background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)',
-            border: '1px solid rgba(255, 255, 255, 0.04)',
-          }}>
+          <div key={i} className="rounded-xl p-4 animate-pulse">
             <div className="h-4 bg-surface-700 rounded w-3/4 mb-3" />
             <div className="h-3 bg-surface-800 rounded w-1/2" />
           </div>
@@ -196,7 +193,7 @@ function HeroCompactCard({ market }: { market: Market }) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
 
   return (
-    <div className="rounded-xl p-4 transition-all duration-300 hover:bg-white/[0.02] border-t border-white/[0.03]">
+    <div className="rounded-xl p-4 transition-all duration-300 hover:bg-white/[0.02]">
       <p className="text-sm font-semibold text-white line-clamp-1 mb-3">
         {market.question}
       </p>
@@ -340,7 +337,7 @@ export function Landing() {
             {/* Left — Copy */}
             <motion.div className="lg:col-span-5" variants={stagger} initial="hidden" animate="show">
               {/* Badge */}
-              <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-400/[0.06] border border-brand-400/[0.12] mb-5">
+              <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-400/[0.06] mb-5">
                 <Sparkles className="w-3.5 h-3.5 text-brand-400" />
                 <span className="text-xs font-semibold text-brand-400">Live on Aleo Testnet</span>
               </motion.div>
@@ -385,7 +382,7 @@ export function Landing() {
                   { icon: <Eye className="w-3.5 h-3.5" />, text: 'Hidden Bets' },
                   { icon: <Lock className="w-3.5 h-3.5" />, text: 'ZK Proofs' },
                 ].map((pill) => (
-                  <div key={pill.text} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold text-surface-300 bg-white/[0.02] border border-white/[0.04]">
+                  <div key={pill.text} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold text-surface-300 bg-white/[0.02]">
                     <span className="text-brand-400">{pill.icon}</span>
                     <span>{pill.text}</span>
                   </div>

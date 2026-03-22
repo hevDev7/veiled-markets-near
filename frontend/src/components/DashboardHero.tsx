@@ -357,13 +357,7 @@ export function DashboardHero({
   return (
     <div className="grid lg:grid-cols-[1fr_320px] gap-4 mb-6">
       {/* Left: Market Slider */}
-      <div className="relative rounded-2xl overflow-hidden min-h-[480px]"
-        style={{
-          background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)',
-          border: '1px solid rgba(255, 255, 255, 0.04)',
-          boxShadow: '0 1px 0 0 rgba(255, 255, 255, 0.02) inset, 0 4px 20px -4px rgba(0, 0, 0, 0.4)',
-          backdropFilter: 'blur(12px)',
-        }}>
+      <div className="relative rounded-2xl overflow-hidden min-h-[480px] border border-white/[0.04]">
         {activeMarkets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <div className="w-14 h-14 rounded-2xl bg-brand-400/[0.06] border border-brand-400/[0.1] flex items-center justify-center mb-4">
@@ -443,13 +437,7 @@ export function DashboardHero({
       </div>
 
       {/* Right: Platform Stats Panel */}
-      <div className="rounded-2xl p-5 flex flex-col"
-        style={{
-          background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)',
-          border: '1px solid rgba(255, 255, 255, 0.04)',
-          boxShadow: '0 1px 0 0 rgba(255, 255, 255, 0.02) inset, 0 4px 20px -4px rgba(0, 0, 0, 0.4)',
-          backdropFilter: 'blur(12px)',
-        }}>
+      <div className="rounded-2xl p-5 flex flex-col border border-white/[0.04]">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-white">Platform Stats</h2>
           <div className="flex items-center gap-1.5">
@@ -469,26 +457,46 @@ export function DashboardHero({
           <StatRow icon={<Trophy className="w-4 h-4" />} label="Total Bets" value={String(markets.reduce((sum, m) => sum + m.totalBets, 0))} color="text-brand-300" />
         </div>
 
-        {/* Recent Activity */}
-        {activityFeed.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-white/[0.04]">
-            <div className="flex items-center gap-2 mb-2.5">
-              <Zap className="w-3.5 h-3.5 text-brand-400" />
-              <span className="text-xs font-semibold text-white">Recent Activity</span>
-            </div>
-            <div className="space-y-1">
-              {activityFeed.slice(0, 4).map(item => (
-                <div key={item.id}
-                  onClick={() => { const m = markets.find(mk => mk.id === item.marketId); if (m) onMarketClick(m) }}
-                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-white/[0.03] cursor-pointer transition-colors">
-                  <div className="w-1.5 h-1.5 rounded-full bg-brand-400 flex-shrink-0" />
-                  <p className="text-[11px] text-surface-400 flex-1 truncate">{item.message}</p>
-                  <ChevronRight className="w-3 h-3 text-surface-600 flex-shrink-0" />
+        {/* Recent Activity — auto-scrolling ticker */}
+        {activityFeed.length > 0 && (() => {
+          const itemHeight = 36
+          const doubled = [...activityFeed, ...activityFeed]
+          const totalHeight = activityFeed.length * itemHeight
+          const visibleHeight = Math.min(itemHeight * 4, totalHeight)
+          return (
+            <div className="mt-3 pt-3 border-t border-white/[0.04]">
+              <div className="flex items-center gap-2 mb-2.5">
+                <Zap className="w-3.5 h-3.5 text-brand-400" />
+                <span className="text-xs font-semibold text-white">Recent Activity</span>
+              </div>
+              <div
+                className="relative overflow-hidden rounded-xl"
+                style={{ height: visibleHeight }}
+              >
+                <div
+                  className="animate-ticker-up"
+                  style={{
+                    '--ticker-distance': `-${totalHeight}px`,
+                    animationDuration: `${activityFeed.length * 4}s`,
+                  } as React.CSSProperties}
+                >
+                  {doubled.map((item, i) => (
+                    <div
+                      key={`${item.id}-${i}`}
+                      onClick={() => { const m = markets.find(mk => mk.id === item.marketId); if (m) onMarketClick(m) }}
+                      className="flex items-center gap-2.5 px-2.5 w-full hover:bg-white/[0.03] cursor-pointer transition-colors"
+                      style={{ height: itemHeight }}
+                    >
+                      <div className="w-1.5 h-1.5 rounded-full bg-brand-400 flex-shrink-0" />
+                      <p className="text-[11px] text-surface-400 flex-1 truncate">{item.message}</p>
+                      <ChevronRight className="w-3 h-3 text-surface-600 flex-shrink-0" />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div className="mt-3 pt-3 border-t border-white/[0.04] flex items-center justify-center gap-2 text-xs text-surface-500">
           <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
