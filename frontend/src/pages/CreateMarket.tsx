@@ -3,8 +3,9 @@ import {
   ArrowRight, ArrowLeft, AlertCircle, CheckCircle2, Lightbulb,
   Plus, Calendar, Hash, FileText, Shield, Coins, Clock, ExternalLink,
   Check, Loader2, Info, AlertTriangle, X, DollarSign, Globe, Layers, Tag,
+  Upload, Link, Image,
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore } from '@/lib/store'
 import { config } from '@/lib/config'
@@ -12,11 +13,11 @@ import { cn, sanitizeUrl } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
   hashToField, getCurrentBlockHeight, CONTRACT_INFO, getTransactionUrl,
-  registerQuestionText, registerOutcomeLabels, registerMarketTransaction,
+  registerQuestionText, registerOutcomeLabels, registerMarketTransaction, setMarketThumbnailUrl,
   waitForMarketCreation, savePendingMarket, updatePendingMarketTxId,
 } from '@/lib/aleo-client'
 import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
-import { uploadMarketMetadata, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
+import { uploadMarketMetadata, uploadImageToIPFS, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
 import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
 import { devLog, devWarn } from '@/lib/logger'
 import { DashboardHeader } from '@/components/DashboardHeader'
@@ -37,6 +38,7 @@ interface MarketFormData {
   resolutionDeadlineTime: string
   resolutionSource: string
   tokenType: 'ALEO' | 'USDCX' | 'USAD'
+  thumbnailUrl: string
 }
 
 const categories = [
@@ -56,6 +58,7 @@ const initialFormData: MarketFormData = {
   deadlineDate: '', deadlineTime: '23:59',
   resolutionDeadlineDate: '', resolutionDeadlineTime: '23:59',
   resolutionSource: '', tokenType: 'ALEO',
+  thumbnailUrl: '',
 }
 
 const CREATE_MARKET_PROGRAM_ID = CONTRACT_INFO.programId
@@ -64,6 +67,123 @@ function saveDraft(data: MarketFormData) { try { localStorage.setItem(DRAFT_KEY,
 function loadDraft(): MarketFormData | null { try { const raw = localStorage.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null } catch { return null } }
 function clearDraft() { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
 function hasFormContent(data: MarketFormData) { return data.question.trim() !== '' || data.description.trim() !== '' }
+
+// ── Thumbnail Input (URL or file upload) ──
+function ThumbnailInput({ value, onChange }: { value: string; onChange: (url: string) => void }) {
+  const [mode, setMode] = useState<'url' | 'upload'>(value && !value.startsWith('blob:') ? 'url' : 'url')
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please select an image file')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Image must be under 5MB')
+      return
+    }
+
+    setUploadError(null)
+    setUploading(true)
+
+    // Show local preview immediately
+    const localPreview = URL.createObjectURL(file)
+    onChange(localPreview)
+
+    // Upload to IPFS
+    try {
+      const ipfsUrl = await uploadImageToIPFS(file)
+      if (ipfsUrl) {
+        onChange(ipfsUrl)
+        URL.revokeObjectURL(localPreview)
+      } else {
+        setUploadError('Upload failed. Using local preview — image may not persist.')
+      }
+    } catch {
+      setUploadError('Upload failed. Using local preview.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div>
+      <label className="text-sm font-medium text-white mb-2 block">Thumbnail Image</label>
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 p-0.5 rounded-lg bg-white/[0.02] border border-white/[0.04] w-fit mb-3">
+        <button onClick={() => setMode('url')}
+          className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+            mode === 'url' ? 'bg-white/[0.06] text-white' : 'text-surface-500 hover:text-surface-300')}>
+          <Link className="w-3 h-3" /> URL
+        </button>
+        <button onClick={() => setMode('upload')}
+          className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+            mode === 'upload' ? 'bg-white/[0.06] text-white' : 'text-surface-500 hover:text-surface-300')}>
+          <Upload className="w-3 h-3" /> Upload
+        </button>
+      </div>
+
+      <div className="flex gap-3 items-start">
+        <div className="flex-1">
+          {mode === 'url' ? (
+            <>
+              <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
+                placeholder="https://... image URL (optional)" className="input-field w-full" />
+              <p className="text-2xs text-surface-500 mt-1.5">Paste an image URL. Leave empty for auto-detection.</p>
+            </>
+          ) : (
+            <>
+              <input ref={fileRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
+              <button onClick={() => fileRef.current?.click()} disabled={uploading}
+                className={cn(
+                  'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-dashed transition-all',
+                  value && !uploading
+                    ? 'border-yes-500/30 bg-yes-500/[0.04] text-yes-400'
+                    : 'border-white/[0.08] bg-white/[0.02] text-surface-400 hover:border-white/[0.15] hover:bg-white/[0.04]'
+                )}>
+                {uploading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Uploading to IPFS...</>
+                ) : value ? (
+                  <><Check className="w-4 h-4" /> Image selected — click to change</>
+                ) : (
+                  <><Image className="w-4 h-4" /> Choose image file</>
+                )}
+              </button>
+              <p className="text-2xs text-surface-500 mt-1.5">
+                {isPinataAvailable() ? 'JPG, PNG, WebP — max 5MB. Uploaded to IPFS.' : 'IPFS not configured. Image will be stored as local preview only.'}
+              </p>
+              {uploadError && <p className="text-2xs text-no-400 mt-1">{uploadError}</p>}
+            </>
+          )}
+        </div>
+
+        {/* Preview */}
+        <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-surface-800 border border-white/[0.06] flex items-center justify-center">
+          {value ? (
+            <img src={value} alt="Preview" className="w-full h-full object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <Image className="w-4 h-4 text-surface-600" />
+          )}
+        </div>
+      </div>
+
+      {/* Clear button */}
+      {value && (
+        <button onClick={() => { onChange(''); if (fileRef.current) fileRef.current.value = '' }}
+          className="text-2xs text-surface-500 hover:text-no-400 mt-2 transition-colors">
+          Remove thumbnail
+        </button>
+      )}
+    </div>
+  )
+}
 
 export function CreateMarketPage() {
   const navigate = useNavigate()
@@ -173,6 +293,9 @@ export function CreateMarketPage() {
       registerMarketTransaction(questionHash, transactionId)
       const activeLabels = formData.outcomeLabels.slice(0, formData.numOutcomes)
       registerOutcomeLabels(questionHash, activeLabels)
+      if (formData.thumbnailUrl) {
+        setMarketThumbnailUrl(questionHash, formData.thumbnailUrl)
+      }
 
       let ipfsCid: string | null = null
       if (isPinataAvailable()) {
@@ -194,6 +317,7 @@ export function CreateMarketPage() {
         registerMarketInRegistry({
           market_id: `pending_${transactionId}`, question_hash: questionHash, question_text: formData.question,
           description: formData.description || undefined, resolution_source: formData.resolutionSource || undefined,
+          thumbnail_url: formData.thumbnailUrl || undefined,
           category: formData.category, creator_address: wallet.address!, transaction_id: transactionId,
           created_at: Date.now(), ipfs_cid: ipfsCid || undefined, outcome_labels: JSON.stringify(activeLabels),
         }).catch(err => devWarn('[CreateMarket] Early Supabase register failed:', err))
@@ -206,10 +330,11 @@ export function CreateMarketPage() {
           if (resolved) return; resolved = true
           registerOutcomeLabels(actualMarketId, activeLabels)
           if (ipfsCid) saveIPFSCid(actualMarketId, ipfsCid)
+          if (formData.thumbnailUrl) setMarketThumbnailUrl(actualMarketId, formData.thumbnailUrl)
           let creatorAddress = wallet.address!
           try { const m = await getMarket(actualMarketId); if (m?.creator) creatorAddress = m.creator } catch {}
           if (isSupabaseAvailable()) {
-            registerMarketInRegistry({ market_id: actualMarketId, question_hash: questionHash, question_text: formData.question, description: formData.description || undefined, resolution_source: formData.resolutionSource || undefined, category: formData.category, creator_address: creatorAddress, transaction_id: onChainTxId || transactionId, created_at: Date.now(), ipfs_cid: ipfsCid || undefined, outcome_labels: JSON.stringify(activeLabels) }).catch(() => {})
+            registerMarketInRegistry({ market_id: actualMarketId, question_hash: questionHash, question_text: formData.question, description: formData.description || undefined, resolution_source: formData.resolutionSource || undefined, thumbnail_url: formData.thumbnailUrl || undefined, category: formData.category, creator_address: creatorAddress, transaction_id: onChainTxId || transactionId, created_at: Date.now(), ipfs_cid: ipfsCid || undefined, outcome_labels: JSON.stringify(activeLabels) }).catch(() => {})
             import('@/lib/supabase').then(({ supabase: sb }) => { if (sb) Promise.resolve(sb.from('market_registry').delete().eq('market_id', `pending_${transactionId}`)).catch(() => {}) }).catch(() => {})
           }
         }
@@ -326,6 +451,10 @@ export function CreateMarketPage() {
                         <label className="text-sm font-medium text-white mb-2 block">Resolution Source</label>
                         <input type="text" value={formData.resolutionSource} onChange={(e) => updateForm({ resolutionSource: e.target.value })} placeholder="e.g., CoinGecko API, Official announcement..." className="input-field w-full" />
                       </div>
+                      <ThumbnailInput
+                        value={formData.thumbnailUrl}
+                        onChange={(url) => updateForm({ thumbnailUrl: url })}
+                      />
                       <div>
                         <label className="text-sm font-medium text-white mb-3 block">Outcomes</label>
                         <div className="grid grid-cols-3 gap-3 mb-4">

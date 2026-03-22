@@ -82,6 +82,7 @@ export interface Market {
   tags?: string[]
   transactionId?: string
   tokenType?: 'ALEO' | 'USDCX' | 'USAD'
+  thumbnailUrl?: string
 }
 
 export interface SharePosition {

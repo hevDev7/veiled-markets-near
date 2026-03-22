@@ -1957,10 +1957,10 @@ async function loadMarketIdsFromIndexer(): Promise<string[]> {
 }
 
 /**
- * Market metadata (description + resolution source) from Supabase registry.
- * Maps market_id to { description, resolutionSource }
+ * Market metadata (description + resolution source + thumbnail) from Supabase registry.
+ * Maps market_id to { description, resolutionSource, thumbnailUrl }
  */
-let MARKET_METADATA_MAP: Record<string, { description?: string; resolutionSource?: string }> = {};
+let MARKET_METADATA_MAP: Record<string, { description?: string; resolutionSource?: string; thumbnailUrl?: string }> = {};
 
 /**
  * Get market description from registry
@@ -1974,6 +1974,23 @@ export function getMarketDescription(marketId: string): string | null {
  */
 export function getMarketResolutionSource(marketId: string): string | null {
   return MARKET_METADATA_MAP[marketId]?.resolutionSource || null;
+}
+
+/**
+ * Get market custom thumbnail URL from registry
+ */
+export function getMarketThumbnailUrl(marketId: string): string | null {
+  return MARKET_METADATA_MAP[marketId]?.thumbnailUrl || null;
+}
+
+/**
+ * Set market thumbnail URL in memory (immediate, before Supabase roundtrip)
+ */
+export function setMarketThumbnailUrl(marketId: string, url: string): void {
+  if (!MARKET_METADATA_MAP[marketId]) {
+    MARKET_METADATA_MAP[marketId] = {};
+  }
+  MARKET_METADATA_MAP[marketId].thumbnailUrl = url;
 }
 
 /**
@@ -2011,11 +2028,12 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
       if (entry.transaction_id) {
         MARKET_TX_MAP[entry.market_id] = entry.transaction_id;
       }
-      // Populate metadata (description + resolution source)
-      if (entry.description || entry.resolution_source) {
+      // Populate metadata (description + resolution source + thumbnail)
+      if (entry.description || entry.resolution_source || entry.thumbnail_url) {
         const meta = {
           description: entry.description || undefined,
           resolutionSource: entry.resolution_source || undefined,
+          thumbnailUrl: entry.thumbnail_url || undefined,
         };
         MARKET_METADATA_MAP[entry.market_id] = meta;
         if (entry.question_hash) {

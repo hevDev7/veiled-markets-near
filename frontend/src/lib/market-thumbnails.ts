@@ -105,10 +105,13 @@ const CATEGORY_THUMBS: Record<number, string> = {
 const cache = new Map<string, string>()
 
 /**
- * Resolve the best thumbnail image URL for a market question.
- * Matches keywords in the question, falls back to category image.
+ * Resolve the best thumbnail image URL for a market.
+ * Priority: custom URL > keyword match > category fallback.
  */
-export function getMarketThumbnail(question: string, category: number): string {
+export function getMarketThumbnail(question: string, category: number, customUrl?: string): string {
+  // Custom thumbnail from creator takes highest priority
+  if (customUrl) return customUrl
+
   const cacheKey = `${category}:${question}`
   const cached = cache.get(cacheKey)
   if (cached) return cached

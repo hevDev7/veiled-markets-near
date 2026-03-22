@@ -18,6 +18,7 @@ import {
     getMarketTransactionId,
     getMarketDescription,
     getMarketResolutionSource,
+    getMarketThumbnailUrl,
     TOKEN_SYMBOLS,
     type MarketData,
     type AMMPoolData,
@@ -126,6 +127,7 @@ async function transformMarketData(
     const transactionId = getMarketTransactionId(market.id)
     const registryDescription = getMarketDescription(market.id) || getMarketDescription(market.question_hash)
     const registryResolutionSource = getMarketResolutionSource(market.id) || getMarketResolutionSource(market.question_hash)
+    const registryThumbnail = getMarketThumbnailUrl(market.id) || getMarketThumbnailUrl(market.question_hash)
 
     return {
         id: market.id,
@@ -177,6 +179,7 @@ async function transformMarketData(
         transactionId: transactionId || undefined,
         tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD',
         remainingCredits: marketCredits,
+        thumbnailUrl: registryThumbnail || undefined,
     }
 }
 

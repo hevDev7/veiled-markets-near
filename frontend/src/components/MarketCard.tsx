@@ -106,7 +106,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         <div className="flex gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 bg-surface-800 border border-white/[0.06]">
             <img
-              src={getMarketThumbnail(market.question, market.category)}
+              src={getMarketThumbnail(market.question, market.category, market.thumbnailUrl)}
               alt=""
               className="w-full h-full object-cover"
               loading="lazy"

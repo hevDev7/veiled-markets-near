@@ -38,6 +38,46 @@ export interface MarketMetadataIPFS {
 }
 
 /**
+ * Upload an image file to Pinata IPFS.
+ * Returns the public gateway URL on success, or null on failure.
+ */
+export async function uploadImageToIPFS(file: File): Promise<string | null> {
+  if (!isPinataAvailable()) {
+    devWarn('[IPFS] Pinata JWT not configured, cannot upload image')
+    return null
+  }
+
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('pinataMetadata', JSON.stringify({
+      name: `veiled-thumb-${Date.now()}`,
+      keyvalues: { app: 'veiled-markets', type: 'thumbnail' },
+    }))
+    formData.append('pinataOptions', JSON.stringify({ cidVersion: 1 }))
+
+    const response = await fetch(`${PINATA_API_URL}/pinning/pinFileToIPFS`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${PINATA_JWT}` },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      devWarn('[IPFS] Image upload failed:', response.status)
+      return null
+    }
+
+    const result = await response.json()
+    const cid: string = result.IpfsHash
+    devLog('[IPFS] Image uploaded, CID:', cid)
+    return `${PINATA_GATEWAY}/ipfs/${cid}`
+  } catch (err) {
+    devWarn('[IPFS] Image upload error:', err)
+    return null
+  }
+}
+
+/**
  * Upload market metadata JSON to Pinata IPFS.
  * Returns the IPFS CID on success, or null on failure.
  */

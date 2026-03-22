@@ -83,7 +83,7 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2.5 mb-2">
                         <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 bg-surface-800 border border-white/[0.06]">
-                            <img src={getMarketThumbnail(market.question, market.category)} alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                            <img src={getMarketThumbnail(market.question, market.category, market.thumbnailUrl)} alt="" className="w-full h-full object-cover" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                             <span className={cn("text-xs font-semibold uppercase tracking-wider", categoryColor.text)}>
