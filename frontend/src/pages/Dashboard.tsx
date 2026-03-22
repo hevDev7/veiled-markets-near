@@ -78,6 +78,17 @@ export function Dashboard() {
     const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
     const [showFilters, setShowFilters] = useState(false)
 
+    useEffect(() => {
+        if (!showFilters) return
+        const handleClick = (e: MouseEvent) => {
+            if (!(e.target as HTMLElement).closest('[data-filters]')) {
+                setShowFilters(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClick)
+        return () => document.removeEventListener('mousedown', handleClick)
+    }, [showFilters])
+
     // === ALL BUSINESS LOGIC PRESERVED EXACTLY ===
     useEffect(() => {
         fetchMarkets()
@@ -325,7 +336,7 @@ export function Dashboard() {
                                     onBlur={(e) => e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.06)'}
                                 />
                             </div>
-                            <button onClick={() => setShowFilters(!showFilters)}
+                            <button data-filters onClick={() => setShowFilters(!showFilters)}
                                 className={cn('btn-secondary gap-2 px-5 py-2.5 text-sm whitespace-nowrap flex items-center', showFilters && 'border-brand-400/30 text-brand-400')}>
                                 <SlidersHorizontal className="w-4 h-4 flex-shrink-0" /> Filters
                             </button>
@@ -344,11 +355,11 @@ export function Dashboard() {
                         {/* Expanded filters */}
                         <AnimatePresence>
                             {showFilters && (
-                                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}>
+                                <motion.div data-filters initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}>
                                     <div className="rounded-2xl p-5 space-y-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
                                         {/* Token filter */}
                                         <div>
-                                            <label className="text-2xs font-semibold text-surface-400 mb-3 block uppercase tracking-wider">Token Type</label>
+                                            <label className="text-[9px] font-semibold text-surface-500 mb-2 block uppercase tracking-wider">Token Type</label>
                                             <div className="flex gap-2">
                                                 {(['all', 'ALEO', 'USDCX', 'USAD'] as const).map((t) => (
                                                     <button key={t} onClick={() => setTokenFilter(t)}
@@ -360,7 +371,7 @@ export function Dashboard() {
                                         </div>
                                         {/* Market Type */}
                                         <div>
-                                            <label className="text-2xs font-semibold text-surface-400 mb-3 block uppercase tracking-wider">Market Type</label>
+                                            <label className="text-[9px] font-semibold text-surface-500 mb-2 block uppercase tracking-wider">Market Type</label>
                                             <div className="flex flex-wrap gap-2">
                                                 {[
                                                     { id: 'all' as const, label: 'All Types' },
@@ -384,7 +395,7 @@ export function Dashboard() {
                                         </div>
                                         {/* Sort */}
                                         <div>
-                                            <label className="text-2xs font-semibold text-surface-400 mb-3 block uppercase tracking-wider">Sort By</label>
+                                            <label className="text-[9px] font-semibold text-surface-500 mb-2 block uppercase tracking-wider">Sort By</label>
                                             <div className="flex flex-wrap gap-2">
                                                 {sortOptions.map((opt) => (
                                                     <button key={opt.id} onClick={() => setSortBy(opt.id)}
