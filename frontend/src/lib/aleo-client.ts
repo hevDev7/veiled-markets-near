@@ -1,14 +1,14 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v29.aleo program
+// Client for interacting with the deployed veiled_markets_v34.aleo program
 // ============================================================================
 
 import { config } from './config';
 import { fetchMarketRegistry, isSupabaseAvailable, clearAllSupabaseData } from './supabase';
 import { devLog, devWarn } from './logger'
 
-// Contract constants (matching main.leo v23)
+// Contract constants (matching main.leo v31)
 export const MARKET_STATUS = {
   ACTIVE: 1,
   CLOSED: 2,
@@ -57,6 +57,7 @@ const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx',
  */
 export function getProgramIdForToken(tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO'): string {
   if (tokenType === 'USAD') return config.usadProgramId;
+  if (tokenType === 'USDCX') return config.usdcxMarketProgramId;
   return config.programId;
 }
 
@@ -76,7 +77,7 @@ export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
 export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
 export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
 
-// Types matching the contract structures (v23)
+// Types matching the contract structures (v30)
 export interface MarketData {
   id: string;
   creator: string;
@@ -104,11 +105,17 @@ export interface AMMPoolData {
 
 export interface MarketResolutionData {
   market_id: string;
-  winning_outcome: number;
-  resolver: string;
-  resolved_at: bigint;
-  challenge_deadline: bigint;  // v12: challenge window
-  finalized: boolean;          // v12: finalization flag
+  winning_outcome: number;  // v33: proposed_outcome from ResolutionRound
+  resolver: string;         // v33: proposer from ResolutionRound
+  resolved_at: bigint;      // v33: submitted_at
+  challenge_deadline: bigint;
+  finalized: boolean;
+  // v33: Open Voting + Bond fields
+  round: number;
+  proposer: string;
+  proposed_outcome: number;
+  bond_amount: bigint;
+  total_bonded: bigint;
 }
 
 export interface MarketFeesData {
@@ -798,16 +805,26 @@ export const getMarketPool = getAMMPool;
  * Fetch market resolution data (v12 - with challenge window fields)
  */
 export async function getMarketResolution(marketId: string, programId?: string): Promise<MarketResolutionData | null> {
-  const data = await getMappingValue<Record<string, string>>('market_resolutions', marketId, programId);
+  // v33: Query resolution_rounds mapping (renamed from market_resolutions)
+  const data = await getMappingValue<Record<string, string>>('resolution_rounds', marketId, programId);
   if (!data) return null;
+
+  const proposedOutcome = Number(parseAleoValue(data.proposed_outcome || data.winning_outcome || '0u8'));
+  const proposer = String(data.proposer || data.resolver || '');
 
   return {
     market_id: String(data.market_id || marketId),
-    winning_outcome: Number(parseAleoValue(data.winning_outcome || '0u8')),
-    resolver: String(data.resolver || ''),
-    resolved_at: BigInt(parseAleoValue(data.resolved_at || '0u64') as bigint),
+    winning_outcome: proposedOutcome,  // backward compat
+    resolver: proposer,                 // backward compat
+    resolved_at: BigInt(parseAleoValue(data.submitted_at || data.resolved_at || '0u64') as bigint),
     challenge_deadline: BigInt(parseAleoValue(data.challenge_deadline || '0u64') as bigint),
     finalized: String(parseAleoValue(data.finalized || 'false')) === 'true',
+    // v33: Open Voting + Bond fields
+    round: Number(parseAleoValue(data.round || '1u8')),
+    proposer: proposer,
+    proposed_outcome: proposedOutcome,
+    bond_amount: BigInt(parseAleoValue(data.bond_amount || '1000000u128') as bigint),
+    total_bonded: BigInt(parseAleoValue(data.total_bonded || '1000000u128') as bigint),
   };
 }
 
@@ -876,7 +893,7 @@ function generateRandomNonce(): string {
 }
 
 /**
- * Build inputs for create_market transaction (v23)
+ * Build inputs for create_market transaction (v30)
  * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
@@ -912,7 +929,7 @@ export function buildCreateMarketInputs(
 }
 
 /**
- * Build inputs for buy_shares (v23 AMM trading)
+ * Build inputs for buy_shares (v30 AMM trading)
  * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
  * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
@@ -950,7 +967,7 @@ export function buildBuySharesInputs(
   }
 
   if (tokenType === 'USDCX') {
-    // v29: buy_shares_usdcx — PRIVATE with Token record + MerkleProof
+    // v31: buy_shares_usdcx — PRIVATE with Token record + MerkleProof
     // Token record and MerkleProof are appended by the caller (findTokenRecord + buildDefaultMerkleProofs)
     return {
       functionName: 'buy_shares_usdcx',
@@ -972,7 +989,7 @@ export function buildBuySharesInputs(
 }
 
 /**
- * Build inputs for buy_shares_private (v23privacy-preserving, ALEO only)
+ * Build inputs for buy_shares_private (v30 privacy-preserving, ALEO only)
  * Alias for buildBuySharesInputs with tokenType='ALEO'.
  */
 export function buildBuySharesPrivateInputs(
@@ -1007,7 +1024,7 @@ export function buildDefaultMerkleProofs(): string {
 }
 
 /**
- * Build default flattened Merkle proofs for buy_shares_usdcx (v23).
+ * Build default flattened Merkle proofs for buy_shares_usdcx (v30).
  * Returns array of 2 proof objects with siblings and leafIndex separated,
  * for the flattened input format that bypasses snarkVM parser bug.
  */
@@ -1055,7 +1072,7 @@ export async function buildMerkleProofsForAddress(
 }
 
 /**
- * Build inputs for sell_shares (v23tokens_desired approach)
+ * Build inputs for sell_shares (v30 tokens_desired approach)
  * sell_shares(shares: OutcomeShare, tokens_desired, max_shares_used)
  * User specifies how many tokens to withdraw. Contract computes shares needed.
  * Transition calls credits.aleo/transfer_public for the net payout.
@@ -1084,7 +1101,7 @@ export function buildSellSharesInputs(
 }
 
 /**
- * Build inputs for add_liquidity (v23LP provision)
+ * Build inputs for add_liquidity (v30 LP provision)
  * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
  * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
  */
@@ -1114,11 +1131,11 @@ export function buildAddLiquidityInputs(
   };
 }
 
-// remove_liquidity removed in v23 — LP locked until finalize/cancel
+// remove_liquidity removed in v31 — LP locked until finalize/cancel
 // Use withdraw_lp_resolved (resolved markets) or claim_lp_refund (cancelled markets)
 
 /**
- * Build inputs for dispute_resolution (v23- bond always in ALEO)
+ * Build inputs for dispute_resolution (v30 - bond always in ALEO)
  * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
  * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
  */
@@ -1163,7 +1180,7 @@ export function buildPlaceBetPrivateInputs(
 }
 
 /**
- * Calculate outcome price from AMM pool (v23FPMM)
+ * Calculate outcome price from AMM pool (v30 FPMM)
  * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
  * Binary simplification: price_i = r_other / (r1 + r2)
  */
@@ -1254,7 +1271,39 @@ export function buildCloseMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for resolve_market transaction (v12 - multi-outcome)
+ * v33: Build inputs for submit_outcome (Open Voting + Bond)
+ * Anyone can submit outcome with MIN_RESOLUTION_BOND (1 ALEO)
+ */
+export function buildSubmitOutcomeInputs(
+  marketId: string,
+  proposedOutcome: number,
+  bondNonce: string,
+): string[] {
+  return [marketId, `${proposedOutcome}u8`, bondNonce];
+}
+
+/**
+ * v33: Build inputs for challenge_outcome (Open Voting + Bond)
+ * Challenge with 2x previous bond
+ */
+export function buildChallengeOutcomeInputs(
+  marketId: string,
+  proposedOutcome: number,
+  bondAmount: bigint,
+  bondNonce: string,
+): string[] {
+  return [marketId, `${proposedOutcome}u8`, `${bondAmount}u128`, bondNonce];
+}
+
+/**
+ * v33: Build inputs for finalize_outcome
+ */
+export function buildFinalizeOutcomeInputs(marketId: string): string[] {
+  return [marketId];
+}
+
+/**
+ * Legacy: Build inputs for resolve_market (kept for old contract versions)
  */
 export function buildResolveMarketInputs(
   marketId: string,
@@ -1278,7 +1327,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for withdraw_creator_fees (v23)
+ * Build inputs for withdraw_creator_fees (v30)
  * withdraw_creator_fees(market_id, expected_amount) — ALEO
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
@@ -1302,8 +1351,8 @@ export function buildCancelMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for emergency cancel via cancel_market (v23)
- * In v23, cancel_market handles both creator cancel (active, no volume)
+ * Build inputs for emergency cancel via cancel_market (v30)
+ * In v31, cancel_market handles both creator cancel (active, no volume)
  * and emergency cancel (anyone, past resolution_deadline).
  * Same inputs as buildCancelMarketInputs.
  */
@@ -2327,6 +2376,7 @@ export async function fetchMarketById(marketId: string) {
     let usedProgramId: string | undefined;
     if (!market || !pool) {
       const fallbackPids = [
+        config.usdcxMarketProgramId,
         config.usadProgramId,
         ...config.legacyUsadProgramIds,
         ...config.legacyProgramIds,
@@ -2375,7 +2425,7 @@ export async function fetchMarketById(marketId: string) {
 }
 
 /**
- * Get the correct redeem/refund function name based on token type (v23)
+ * Get the correct redeem/refund function name based on token type (v30)
  */
 export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
   if (tokenType === 'USAD') return 'redeem_shares_usad';
@@ -2396,7 +2446,7 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): stri
 }
 
 /**
- * Build inputs for claim_lp_refund (v23- LP refund on cancelled market)
+ * Build inputs for claim_lp_refund (v30 - LP refund on cancelled market)
  * claim_lp_refund(lp_token: LPToken, min_tokens_out)
  */
 export function buildClaimLpRefundInputs(

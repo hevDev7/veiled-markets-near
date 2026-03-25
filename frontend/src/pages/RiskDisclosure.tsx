@@ -93,10 +93,10 @@ export function RiskDisclosure() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">6. Stablecoin Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens: native ALEO, USDCX (test_usdcx_stablecoin.aleo), and USAD (veiled_markets_usad_v8.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
+              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens: native ALEO, USDCX (test_usdcx_stablecoin.aleo), and USAD (veiled_markets_usad_v11.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
               <li><strong className="text-surface-300">De-peg Risk:</strong> Stablecoins can lose their peg due to market conditions, smart contract issues, or governance failures.</li>
               <li><strong className="text-surface-300">Two-Transaction Flow:</strong> Buying shares with USDCX or USAD requires two sequential blockchain transactions (deposit to public, then buy). If the first transaction succeeds but the second fails, your funds may be temporarily locked in the contract's public balance until you retry.</li>
-              <li><strong className="text-surface-300">Separate Contract Risk:</strong> USAD operates through a separate smart contract (veiled_markets_usad_v8.aleo) due to snarkVM transition limits. This adds additional composability risk compared to ALEO or USDCX markets.</li>
+              <li><strong className="text-surface-300">Separate Contract Risk:</strong> USAD operates through a separate smart contract (veiled_markets_usad_v11.aleo) due to snarkVM transition limits. This adds additional composability risk compared to ALEO or USDCX markets.</li>
             </ul>
           </section>
 

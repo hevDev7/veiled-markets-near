@@ -16,12 +16,13 @@ import {
 import { useState, useEffect } from 'react'
 import { useWalletStore } from '@/lib/store'
 import { config } from '@/lib/config'
-import { cn, sanitizeUrl } from '@/lib/utils'
+import { cn, formatCredits, sanitizeUrl } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
   hashToField,
   getCurrentBlockHeight,
   CONTRACT_INFO,
+  getMappingValue,
   getTransactionUrl,
   registerQuestionText,
   registerOutcomeLabels,
@@ -102,6 +103,51 @@ function loadDraft(): MarketFormData | null {
 
 function clearDraft() {
   try { localStorage.removeItem(DRAFT_KEY) } catch {}
+}
+
+function getCreateMarketBalanceError(
+  tokenType: 'ALEO' | 'USDCX' | 'USAD',
+  liquidityMicro: bigint,
+  balances: {
+    public: bigint
+    private: bigint
+    usdcxPublic: bigint
+    usadPublic: bigint
+  },
+): string | null {
+  const feeMicro = 1_500_000n
+
+  if (tokenType === 'ALEO') {
+    const totalNeeded = liquidityMicro + feeMicro
+    if (balances.public < totalNeeded) {
+      return (
+        `Insufficient public ALEO. Market creation uses public ALEO, not private credits. ` +
+        `Need ${formatCredits(totalNeeded)} ALEO total ` +
+        `(${formatCredits(liquidityMicro)} ALEO liquidity + ${formatCredits(feeMicro)} ALEO fee), ` +
+        `but only have ${formatCredits(balances.public)} public ALEO. ` +
+        `Private ALEO available: ${formatCredits(balances.private)}.`
+      )
+    }
+    return null
+  }
+
+  const publicStableBalance = tokenType === 'USDCX' ? balances.usdcxPublic : balances.usadPublic
+  if (publicStableBalance < liquidityMicro) {
+    return (
+      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity. ` +
+      `Need ${formatCredits(liquidityMicro)} ${tokenType}, ` +
+      `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.`
+    )
+  }
+
+  if (balances.public < feeMicro) {
+    return (
+      `Insufficient public ALEO for network fee. Market creation also needs ${formatCredits(feeMicro)} public ALEO ` +
+      `for the transaction fee, but only have ${formatCredits(balances.public)} public ALEO.`
+    )
+  }
+
+  return null
 }
 
 function hasFormContent(data: MarketFormData): boolean {
@@ -290,7 +336,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       // Route to correct program based on token type
       const createProgramId = formData.tokenType === 'USAD'
         ? config.usadProgramId
-        : CREATE_MARKET_PROGRAM_ID
+        : formData.tokenType === 'USDCX'
+        ? config.usdcxMarketProgramId
+        : config.programId
+
+      // v33: No resolver whitelist — Open Voting + Bond system allows anyone to resolve
+      // resolver field is advisory only (suggested resolver, not enforced)
 
       if (CONTRACT_INFO.programId !== createProgramId) {
         devWarn(
@@ -345,6 +396,13 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
       if (resolutionBlockHeight <= deadlineBlockHeight) {
         throw new Error('Resolution deadline must be after betting deadline')
+      }
+
+      if (!wallet.isDemoMode) {
+        const balanceError = getCreateMarketBalanceError(formData.tokenType, liquidityMicro, wallet.balance)
+        if (balanceError) {
+          throw new Error(balanceError)
+        }
       }
 
       // Request transaction through useAleoTransaction hook (bypasses adapter, calls wallet directly)
@@ -694,7 +752,15 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         errorMsg = 'Network request timed out. Please check your connection and try again.'
       } else if (msg.includes('Wallet did not respond')) {
         errorMsg = msg
-      } else if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancel')) {
+      } else if (msg.includes('Resolver') && msg.includes('not approved')) {
+        errorMsg = msg
+      } else if (
+        msg.toLowerCase().includes('rejected by user')
+        || msg.toLowerCase().includes('user rejected')
+        || msg.toLowerCase().includes('denied by user')
+        || msg.toLowerCase().includes('cancelled by user')
+        || msg.toLowerCase().includes('canceled by user')
+      ) {
         errorMsg = 'Transaction was rejected in your wallet.'
       }
       setError(errorMsg)
@@ -948,7 +1014,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             />
                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 text-sm">{formData.tokenType}</span>
                           </div>
-                          <p className="text-xs text-surface-500 mt-1">Seeds the AMM pool. Split equally across outcomes. Min: 0.01 {formData.tokenType}</p>
+                          <p className="text-xs text-surface-500 mt-1">
+                            Seeds the AMM pool. Split equally across outcomes. Min: 0.01 {formData.tokenType}.
+                            {formData.tokenType === 'ALEO'
+                              ? ' Uses public ALEO balance; private credits cannot be used here.'
+                              : ` Uses public ${formData.tokenType} balance, plus 1.5 public ALEO for the network fee.`}
+                          </p>
                         </div>
 
                         {/* Token Type */}

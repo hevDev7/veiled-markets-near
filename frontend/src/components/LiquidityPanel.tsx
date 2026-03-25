@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion'
 import { Droplets, Plus, Minus, Loader2, AlertCircle, Check, RefreshCw, Edit3, Info } from 'lucide-react'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
-import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
+import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildAddLiquidityInputs, buildWithdrawLpResolvedInputs, buildClaimLpRefundInputs, MARKET_STATUS } from '@/lib/aleo-client'
+import { buildAddLiquidityInputs, buildWithdrawLpResolvedInputs, buildClaimLpRefundInputs, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { calculateLPSharesOut } from '@/lib/amm'
 import { fetchLPTokenRecords, type ParsedLPToken } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
@@ -48,7 +48,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     try {
       // Timeout after 8s — requestRecords can hang if wallet has no records for this program
       const records = await Promise.race([
-        fetchLPTokenRecords(CONTRACT_INFO.programId, market.id),
+        fetchLPTokenRecords(getProgramIdForToken((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'), market.id),
         new Promise<ParsedLPToken[]>((resolve) => setTimeout(() => resolve([]), 8_000)),
       ])
       lpFetchedRef.current = true
@@ -120,7 +120,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
       )
 
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs,
         fee: 1.5,
@@ -165,7 +165,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
       )
 
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs,
         fee: 1.5,

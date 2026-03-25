@@ -87,9 +87,22 @@ async function initScanner(): Promise<{ scanner: any; uuid: string } | null> {
       // Create scanner
       const scanner = new RecordScanner({ url: SCANNER_URL });
 
-      // Register view key (start from block 0 to scan all history)
-      const result = await scanner.register(viewKey, 0);
-      const uuid = result?.uuid || result?.data?.uuid;
+      // Use encrypted registration (recommended, avoids CORS issues)
+      let uuid: string | undefined;
+      try {
+        const regResult = await scanner.registerEncrypted(viewKey, 0);
+        uuid = regResult?.uuid || regResult?.data?.uuid;
+        devLog('[RecordScanner] Encrypted registration successful');
+      } catch (encErr) {
+        devWarn('[RecordScanner] Encrypted registration failed, trying plain:', encErr);
+        // Fallback to plain registration
+        try {
+          const result = await scanner.register(viewKey, 0);
+          uuid = result?.uuid || result?.data?.uuid;
+        } catch (plainErr) {
+          devWarn('[RecordScanner] Plain registration also failed:', plainErr);
+        }
+      }
 
       if (!uuid) {
         devWarn('[RecordScanner] Registration failed — no UUID returned');

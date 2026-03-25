@@ -135,6 +135,23 @@ export function getAvailableWallets(): string[] {
   return wallets;
 }
 
+function getAllowedProgramIds(): string[] {
+  return Array.from(new Set([
+    config.programId,
+    config.usdcxMarketProgramId,
+    config.usadProgramId,
+    config.governanceProgramId,
+    'credits.aleo',
+    config.usdcxProgramId,
+    'test_usad_stablecoin.aleo',
+    'merkle_tree.aleo',
+    'test_usdcx_multisig_core.aleo',
+    'test_usdcx_freezelist.aleo',
+    'test_usad_multisig_core.aleo',
+    'test_usad_freezelist.aleo',
+  ]));
+}
+
 
 /**
  * Fetch public balance from API.
@@ -225,8 +242,8 @@ export class PuzzleWalletAdapter {
         },
         permissions: {
           programIds: {
-            'AleoTestnet': [config.programId, 'credits.aleo', config.usdcxProgramId],
-            'AleoMainnet': [config.programId, 'credits.aleo', config.usdcxProgramId],
+            'AleoTestnet': getAllowedProgramIds(),
+            'AleoMainnet': getAllowedProgramIds(),
           }
         }
       });
@@ -550,10 +567,7 @@ export class LeoWalletAdapter {
       // Try testnet first (the ProvableHQ adapter uses Network.TESTNET)
       try {
         devLog('Leo Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [
-          config.programId, 'credits.aleo', config.usdcxProgramId,
-          'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
-        ]);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, getAllowedProgramIds());
 
         if (this.adapter.account) {
           devLog('Leo Wallet: Connected successfully');
@@ -1212,10 +1226,7 @@ export class FoxWalletAdapter {
 
       try {
         devLog('Fox Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [
-          config.programId, 'credits.aleo', config.usdcxProgramId,
-          'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
-        ]);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, getAllowedProgramIds());
 
         if (this.adapter.account) {
           devLog('Fox Wallet: Connected successfully');
@@ -1403,10 +1414,7 @@ export class SoterWalletAdapter {
 
       try {
         devLog('Soter Wallet: Trying network testnet...');
-        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, [
-          config.programId, 'credits.aleo', config.usdcxProgramId,
-          'merkle_tree.aleo', 'test_usdcx_multisig_core.aleo', 'test_usdcx_freezelist.aleo',
-        ]);
+        await this.adapter.connect(Network.TESTNET, DecryptPermission.AutoDecrypt, getAllowedProgramIds());
 
         if (this.adapter.account) {
           devLog('Soter Wallet: Connected successfully');
@@ -1587,19 +1595,7 @@ export class ShieldWalletAdapter {
   }
 
   private getAllowedPrograms(): string[] {
-    return [
-      config.programId,
-      config.usadProgramId,
-      config.governanceProgramId,
-      'credits.aleo',
-      config.usdcxProgramId,
-      'test_usad_stablecoin.aleo',
-      'merkle_tree.aleo',
-      'test_usdcx_multisig_core.aleo',
-      'test_usdcx_freezelist.aleo',
-      'test_usad_multisig_core.aleo',
-      'test_usad_freezelist.aleo',
-    ];
+    return getAllowedProgramIds();
   }
 
   private async resolveAddress(shieldWallet: any): Promise<string | null> {

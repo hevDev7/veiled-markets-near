@@ -41,7 +41,7 @@ export function BugBounty() {
               {[
                 {
                   title: 'Smart Contract Scope',
-                  desc: 'veiled_markets_v30.aleo, veiled_markets_usad_v8.aleo, and veiled_governance_v3.aleo',
+                  desc: 'veiled_markets_v34.aleo, veiled_markets_usad_v11.aleo, and veiled_governance_v4.aleo',
                 },
                 {
                   title: 'Frontend Scope',

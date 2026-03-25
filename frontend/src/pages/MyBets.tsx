@@ -21,8 +21,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Star,
+  ChevronRight,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Bet, outcomeToIndex, outcomeToString } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
@@ -32,6 +33,7 @@ import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'watchlist'
 
@@ -42,6 +44,15 @@ const TABS: { key: BetFilter; label: string }[] = [
   { key: 'all', label: 'History' },
   { key: 'watchlist', label: 'Watchlist' },
 ]
+
+/* ─── Outcome badge colors (shared between table & card) ─── */
+const OUTCOME_BADGE_COLORS = [
+  { bg: 'bg-yes-500/15', text: 'text-yes-400' },
+  { bg: 'bg-no-500/15', text: 'text-no-400' },
+  { bg: 'bg-purple-500/15', text: 'text-purple-400' },
+  { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
+]
+const DEFAULT_LABELS = ['YES', 'NO', 'OPTION C', 'OPTION D']
 
 export function MyBets() {
   const navigate = useNavigate()
@@ -92,6 +103,28 @@ export function MyBets() {
     : filter === 'unredeemed' ? unredeemedBets
     : filter === 'settled' ? settledBets
     : []
+
+  // ─── Performance chart data ───
+  const performanceData = useMemo(() => {
+    if (allBets.length < 2) return null
+    // Build cumulative portfolio value over time from chronological bets
+    const sorted = [...allBets].sort((a, b) => a.placedAt - b.placedAt)
+    let cumValue = 0
+    return sorted.map((bet) => {
+      const amount = Number(bet.amount) / 1_000_000
+      if (bet.status === 'won') {
+        cumValue += Number(bet.sharesReceived || bet.amount) / 1_000_000 - amount
+      } else if (bet.status === 'lost') {
+        cumValue -= amount
+      } else if (bet.status === 'active') {
+        cumValue += amount * 0.1 // open positions: approximate unrealised
+      }
+      return {
+        date: new Date(bet.placedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        value: parseFloat(cumValue.toFixed(2)),
+      }
+    })
+  }, [allBets])
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -291,14 +324,69 @@ export function MyBets() {
                   className="glass-card rounded-2xl p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <stat.icon className={cn('w-4 h-4', stat.color === 'text-white' ? 'text-surface-500' : stat.color)} />
-                    <span className="text-2xs font-heading font-semibold text-surface-500 uppercase tracking-wider">{stat.label}</span>
+                    <span className="text-[10px] font-heading font-semibold text-surface-500 uppercase tracking-wider">{stat.label}</span>
                   </div>
                   <p className={cn('text-base font-heading font-bold tabular-nums', stat.color)}>{stat.value}</p>
-                  <p className="text-2xs text-surface-600 mt-1 font-heading">{stat.sub}</p>
+                  <p className="text-[10px] text-surface-600 mt-1 font-heading">{stat.sub}</p>
                 </motion.div>
               ))
             })()}
           </div>
+
+          {/* ═══ PERFORMANCE CHART ═══ */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="glass-card rounded-2xl p-6 mb-8"
+          >
+            <div className="mb-4">
+              <h2 className="text-base font-heading font-semibold text-white">Performance</h2>
+              <p className="text-xs text-surface-500 mt-0.5">Portfolio value over time</p>
+            </div>
+            {performanceData ? (
+              <div className="h-[200px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={performanceData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fill: '#6b7280', fontSize: 10 }}
+                      axisLine={{ stroke: 'rgba(255,255,255,0.04)' }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: '#6b7280', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => `${v >= 0 ? '+' : ''}${v}`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'rgba(15,15,20,0.95)',
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        color: '#fff',
+                      }}
+                      formatter={(value: number) => [`${value >= 0 ? '+' : ''}${value.toFixed(2)} ALEO`, 'P&L']}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4, fill: '#8b5cf6', strokeWidth: 0 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-[160px] flex items-center justify-center text-surface-600 text-sm">
+                Not enough data &mdash; place at least 2 bets to see your performance chart.
+              </div>
+            )}
+          </motion.div>
 
           {/* Filter Tabs — premium style */}
           <div className="flex items-center gap-1 p-1 mb-8 rounded-xl bg-white/[0.02] border border-white/[0.04] w-fit">
@@ -315,7 +403,7 @@ export function MyBets() {
               >
                 {tab.label}
                 {tabCounts[tab.key] > 0 && (
-                  <span className="ml-1.5 text-2xs tabular-nums opacity-60">
+                  <span className="ml-1.5 text-[10px] tabular-nums opacity-60">
                     {tabCounts[tab.key]}
                   </span>
                 )}
@@ -361,7 +449,197 @@ export function MyBets() {
               subtitle={emptyConfig[filter].subtitle}
               action={{ label: 'Place a Bet', onClick: () => navigate('/dashboard') }}
             />
+          ) : filter === 'accepted' ? (
+            /* ═══ TABLE LAYOUT for Open Positions ═══ */
+            <AnimatePresence mode="wait">
+              <motion.div
+                key="accepted-table"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.15 }}
+              >
+                {/* Desktop table */}
+                <div className="hidden md:block glass-card rounded-2xl overflow-hidden">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/[0.04]">
+                        <th className="text-left px-5 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Market</th>
+                        <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Side</th>
+                        <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Shares</th>
+                        <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Value</th>
+                        <th className="text-right px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">P&L</th>
+                        <th className="w-10 px-3 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayBets.map((bet, index) => {
+                        const market = getMarketInfo(bet.marketId)
+                        const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
+                        const outcomeIdx = outcomeToIndex(bet.outcome)
+                        const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
+                        const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
+                        const isPending = bet.status === 'pending'
+
+                        // Shares
+                        const shares = bet.sharesReceived || bet.amount
+                        // Value (current value = shares for active bets since payout is 1:1 if winning)
+                        const valueRaw = Number(shares) / 1_000_000
+                        // Avg price = amount / shares
+                        const amountRaw = Number(bet.amount) / 1_000_000
+                        const sharesRaw = Number(shares) / 1_000_000
+                        const avgPrice = sharesRaw > 0 ? amountRaw / sharesRaw : 0
+                        // P&L = (current value - cost) — for active, approximate current value = shares * current implied price
+                        // Since we don't have live prices, use a simple heuristic: value - cost
+                        const pnlAmount = valueRaw - amountRaw
+                        const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
+
+                        return (
+                          <motion.tr
+                            key={bet.id}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.03 }}
+                            onClick={() => navigate(`/market/${bet.marketId}`)}
+                            className="border-b border-white/[0.03] last:border-0 cursor-pointer hover:bg-white/[0.02] transition-colors group"
+                          >
+                            {/* MARKET */}
+                            <td className="px-5 py-4 max-w-[320px]">
+                              <p className="text-sm font-heading font-medium text-white truncate">
+                                {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
+                              </p>
+                              <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
+                                Avg. ${avgPrice.toFixed(2)} &rarr; ${(avgPrice * (1 + pnlPct / 100)).toFixed(2)}
+                              </p>
+                            </td>
+                            {/* SIDE */}
+                            <td className="px-4 py-4 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                {isPending && (
+                                  <Loader2 className="w-3 h-3 animate-spin text-accent-400" />
+                                )}
+                                <span className={cn(
+                                  "px-2 py-0.5 text-[10px] font-bold rounded uppercase",
+                                  badgeColors.bg, badgeColors.text
+                                )}>
+                                  {outcomeLabel}
+                                </span>
+                              </div>
+                            </td>
+                            {/* SHARES */}
+                            <td className="px-4 py-4 text-center">
+                              <span className="text-sm font-heading font-semibold text-white tabular-nums">
+                                {Math.floor(sharesRaw).toLocaleString()}
+                              </span>
+                            </td>
+                            {/* VALUE */}
+                            <td className="px-4 py-4 text-center">
+                              <span className="text-sm font-heading font-semibold text-white tabular-nums">
+                                {formatCredits(shares)} {tokenSymbol}
+                              </span>
+                            </td>
+                            {/* P&L */}
+                            <td className="px-4 py-4 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {pnlAmount >= 0 ? (
+                                  <ArrowUpRight className="w-3.5 h-3.5 text-yes-400" />
+                                ) : (
+                                  <ArrowDownRight className="w-3.5 h-3.5 text-no-400" />
+                                )}
+                                <span className={cn(
+                                  "text-sm font-heading font-semibold tabular-nums",
+                                  pnlAmount >= 0 ? "text-yes-400" : "text-no-400"
+                                )}>
+                                  {pnlAmount >= 0 ? '+' : ''}{pnlAmount.toFixed(2)}
+                                </span>
+                                <span className={cn(
+                                  "text-[10px] tabular-nums ml-0.5",
+                                  pnlAmount >= 0 ? "text-yes-400/60" : "text-no-400/60"
+                                )}>
+                                  ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
+                                </span>
+                              </div>
+                            </td>
+                            {/* Chevron */}
+                            <td className="px-3 py-4">
+                              <ChevronRight className="w-4 h-4 text-surface-600 group-hover:text-surface-400 transition-colors" />
+                            </td>
+                          </motion.tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile cards for Open Positions */}
+                <div className="md:hidden space-y-3">
+                  {displayBets.map((bet, index) => {
+                    const market = getMarketInfo(bet.marketId)
+                    const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
+                    const outcomeIdx = outcomeToIndex(bet.outcome)
+                    const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
+                    const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
+                    const isPending = bet.status === 'pending'
+                    const shares = bet.sharesReceived || bet.amount
+                    const valueRaw = Number(shares) / 1_000_000
+                    const amountRaw = Number(bet.amount) / 1_000_000
+                    const pnlAmount = valueRaw - amountRaw
+                    const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
+
+                    return (
+                      <motion.div
+                        key={bet.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.03 }}
+                        onClick={() => navigate(`/market/${bet.marketId}`)}
+                        className="glass-card p-4 cursor-pointer hover:border-surface-600/50 transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              {isPending && <Loader2 className="w-3 h-3 animate-spin text-accent-400" />}
+                              <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded uppercase", badgeColors.bg, badgeColors.text)}>
+                                {outcomeLabel}
+                              </span>
+                            </div>
+                            <p className="text-sm font-heading font-medium text-white truncate">
+                              {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
+                            </p>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-surface-600 flex-shrink-0 mt-1" />
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Shares</p>
+                            <p className="text-sm font-heading font-semibold text-white tabular-nums">{Math.floor(Number(shares) / 1_000_000).toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Value</p>
+                            <p className="text-sm font-heading font-semibold text-white tabular-nums">{formatCredits(shares)} {tokenSymbol}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">P&L</p>
+                            <div className="flex items-center justify-end gap-0.5">
+                              {pnlAmount >= 0 ? (
+                                <ArrowUpRight className="w-3 h-3 text-yes-400" />
+                              ) : (
+                                <ArrowDownRight className="w-3 h-3 text-no-400" />
+                              )}
+                              <span className={cn("text-sm font-heading font-semibold tabular-nums", pnlAmount >= 0 ? "text-yes-400" : "text-no-400")}>
+                                {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              </motion.div>
+            </AnimatePresence>
           ) : (
+            /* ═══ CARD LAYOUT for all other tabs ═══ */
             <AnimatePresence mode="wait">
               <motion.div
                 key={filter}
@@ -587,14 +865,7 @@ function BetCard({
   const isActive = bet.status === 'active'
 
   // Resolve outcome label from market data
-  const OUTCOME_BADGE_COLORS = [
-    { bg: 'bg-yes-500/15', text: 'text-yes-400' },
-    { bg: 'bg-no-500/15', text: 'text-no-400' },
-    { bg: 'bg-purple-500/15', text: 'text-purple-400' },
-    { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
-  ]
-  const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
-  const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || defaultLabels[outcomeIdx - 1] || bet.outcome.toUpperCase()
+  const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
   const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
 
   return (
@@ -691,7 +962,7 @@ function BetCard({
               <div className="text-right">
                 <p className="text-xs font-heading text-surface-500">Shares Sold</p>
                 <p className="text-sm font-heading font-bold text-purple-400 tabular-nums">
-                  {bet.sharesSold ? formatCredits(bet.sharesSold) : '—'}
+                  {bet.sharesSold ? formatCredits(bet.sharesSold) : '\u2014'}
                 </p>
               </div>
               <div className="text-right">
@@ -726,7 +997,7 @@ function BetCard({
                         : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
                   {isWon && bet.sharesReceived != null && bet.sharesReceived > bet.amount ? (
-                    <p className="text-2xs text-yes-400/60 tabular-nums">
+                    <p className="text-[10px] text-yes-400/60 tabular-nums">
                       profit +{formatCredits(bet.sharesReceived - bet.amount)} {tokenSymbol}
                     </p>
                   ) : null}
@@ -744,7 +1015,7 @@ function BetCard({
                       ? formatCredits(bet.sharesReceived)
                       : bet.lockedMultiplier
                         ? formatCredits(BigInt(Math.floor(Number(bet.amount) * bet.lockedMultiplier)))
-                        : '—'}
+                        : '\u2014'}
                   </p>
                 </div>
               )}

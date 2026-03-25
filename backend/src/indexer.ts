@@ -24,8 +24,8 @@ export interface IndexedMarket {
  * In production, this would be fetched from an indexer service or custom node
  * Question hashes are generated from actual market questions using SHA-256
  * 
- * NOTE: veiled_markets_v9.aleo is the version 4 deployment with privacy fix
- * Includes delayed pool updates, noise addition, and commit-reveal betting for better privacy
+ * Current deployed contract: veiled_markets_v34.aleo
+ * Markets below are hardcoded legacy entries; dynamic blockchain scanning planned
  */
 const KNOWN_MARKETS: IndexedMarket[] = [
     // v9 Market - BTC $150k (1-day market on veiled_markets_v9.aleo)

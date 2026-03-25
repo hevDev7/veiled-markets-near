@@ -260,8 +260,8 @@ export function Dashboard() {
                                         return (
                                             <div key={i} className="flex items-center gap-2 mt-1">
                                                 <p className={cn('text-xs font-mono truncate flex-1', status === 'likely_failed' ? 'text-no-400/70' : 'text-brand-400/70')}>&gt; {q}</p>
-                                                {status === 'likely_failed' ? <span className="text-2xs font-mono text-no-400 bg-no-400/10 px-1.5 py-0.5 rounded">FAILED</span>
-                                                    : retries > 0 ? <span className="text-2xs font-mono text-surface-500">#{retries}</span> : null}
+                                                {status === 'likely_failed' ? <span className="text-[10px] font-mono text-no-400 bg-no-400/10 px-1.5 py-0.5 rounded">FAILED</span>
+                                                    : retries > 0 ? <span className="text-[10px] font-mono text-surface-500">#{retries}</span> : null}
                                             </div>
                                         )
                                     })}
@@ -307,10 +307,10 @@ export function Dashboard() {
                                                         const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
                                                         const label = market?.outcomeLabels?.[idx - 1]?.toUpperCase() || defaultLabels[idx - 1] || bet.outcome.toUpperCase()
                                                         const colorMap = ['bg-yes-400/15 text-yes-400', 'bg-no-400/15 text-no-400', 'bg-purple-400/15 text-purple-400', 'bg-yellow-400/15 text-yellow-400']
-                                                        return <span className={cn('text-2xs font-mono font-bold px-1.5 py-0.5 rounded', colorMap[idx - 1] || colorMap[0])}>{label}</span>
+                                                        return <span className={cn('text-[10px] font-mono font-bold px-1.5 py-0.5 rounded', colorMap[idx - 1] || colorMap[0])}>{label}</span>
                                                     })()}
-                                                    <span className="text-2xs font-mono text-surface-500">{formatCredits(bet.amount)} {bet.tokenType || 'ALEO'}</span>
-                                                    {bet.status === 'pending' && <span className="text-2xs font-mono text-brand-400">PENDING</span>}
+                                                    <span className="text-[10px] font-mono text-surface-500">{formatCredits(bet.amount)} {bet.tokenType || 'ALEO'}</span>
+                                                    {bet.status === 'pending' && <span className="text-[10px] font-mono text-brand-400">PENDING</span>}
                                                 </div>
                                             </div>
                                             <ChevronRight className="w-3.5 h-3.5 text-surface-500" />
@@ -320,13 +320,13 @@ export function Dashboard() {
                             </div>
                             {hasMorePositions && !expandPositions && (
                                 <button onClick={(e) => { e.stopPropagation(); setExpandPositions(true) }}
-                                    className="w-full mt-2 py-1.5 text-2xs text-brand-400 hover:text-brand-300 transition-colors font-medium">
+                                    className="w-full mt-2 py-1.5 text-[10px] text-brand-400 hover:text-brand-300 transition-colors font-medium">
                                     Show all ({allPositions.length - 3} more)
                                 </button>
                             )}
                             {hasMorePositions && expandPositions && (
                                 <button onClick={(e) => { e.stopPropagation(); setExpandPositions(false) }}
-                                    className="w-full mt-2 py-1.5 text-2xs text-surface-500 hover:text-surface-300 transition-colors font-medium">Collapse</button>
+                                    className="w-full mt-2 py-1.5 text-[10px] text-surface-500 hover:text-surface-300 transition-colors font-medium">Collapse</button>
                             )}
                         </motion.div>
                         )
@@ -346,8 +346,8 @@ export function Dashboard() {
                                         className="flex-shrink-0 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:border-brand-400/20 transition-colors text-left max-w-[200px]">
                                         <p className="text-xs text-white font-medium truncate">{market.question}</p>
                                         <div className="flex items-center gap-2 mt-1">
-                                            <span className="text-2xs font-mono text-yes-400">{market.yesPercentage.toFixed(0)}%</span>
-                                            <span className="text-2xs text-surface-500">{formatCredits(market.totalVolume, 0)} vol</span>
+                                            <span className="text-[10px] font-mono text-yes-400">{market.yesPercentage.toFixed(0)}%</span>
+                                            <span className="text-[10px] text-surface-500">{formatCredits(market.totalVolume, 0)} vol</span>
                                         </div>
                                     </button>
                                 ))}
@@ -420,7 +420,7 @@ export function Dashboard() {
                                                         disabled={type.id === 'scalar' || type.id === 'conditional'}
                                                         title={type.id === 'scalar' ? 'Coming soon — Range-based predictions' : type.id === 'conditional' ? 'Coming soon — Dependent market outcomes' : ''}>
                                                         {type.label}
-                                                        {(type.id === 'scalar' || type.id === 'conditional') && <span className="ml-1 text-2xs opacity-60">Soon</span>}
+                                                        {(type.id === 'scalar' || type.id === 'conditional') && <span className="ml-1 text-[10px] opacity-60">Soon</span>}
                                                     </button>
                                                 ))}
                                             </div>
@@ -454,7 +454,7 @@ export function Dashboard() {
                                         )}>
                                         <span>{cat.emoji}</span>
                                         {cat.name}
-                                        <span className="text-2xs tabular-nums opacity-60">{categoryCounts[cat.id] || 0}</span>
+                                        <span className="text-[10px] tabular-nums opacity-60">{categoryCounts[cat.id] || 0}</span>
                                     </button>
                                 ))}
                             </div>

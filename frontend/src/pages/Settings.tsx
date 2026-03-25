@@ -220,17 +220,6 @@ export function Settings() {
                   }
                 />
 
-                <SettingRow
-                  icon={<Palette className="w-5 h-5" />}
-                  title="Theme"
-                  description="Select your preferred theme"
-                  action={
-                    <select className="bg-surface-800 border border-surface-700 rounded-lg px-3 py-2 text-white text-sm">
-                      <option value="dark">Dark</option>
-                      <option value="light" disabled>Light (Coming Soon)</option>
-                    </select>
-                  }
-                />
               </div>
             </motion.div>
 

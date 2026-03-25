@@ -124,7 +124,7 @@ export function BrandKit() {
               </div>
               <div className="p-5 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                 <p className="text-xs text-surface-500 mb-2">Code / Technical</p>
-                <p className="font-mono text-base text-surface-300">veiled_markets_v30.aleo</p>
+                <p className="font-mono text-base text-surface-300">veiled_markets_v34.aleo</p>
                 <p className="text-xs text-surface-500 mt-2">Font: Monospace stack (configured as <code className="bg-white/[0.04] px-1 rounded">font-mono</code>)</p>
               </div>
             </div>

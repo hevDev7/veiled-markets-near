@@ -1,11 +1,11 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Shield, ShieldAlert, TrendingUp, Check, Loader2, AlertCircle, Settings2 } from 'lucide-react'
 import { useState, useMemo } from 'react'
-import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO, outcomeToString } from '@/lib/store'
+import { type Market, useWalletStore, useBetsStore, outcomeToString } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
+import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
 import { calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
 import { devWarn } from '../lib/logger'
@@ -44,7 +44,15 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
   const numOutcomes = market?.numOutcomes || 2
   const outcomeLabels = market?.outcomeLabels || OUTCOME_LABELS_DEFAULT.slice(0, numOutcomes)
   const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'ALEO'
-  const isUsdcx = market?.tokenType === 'USDCX'
+  const marketTokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const isUsdcx = marketTokenType === 'USDCX'
+  const isStablecoin = marketTokenType === 'USDCX' || marketTokenType === 'USAD'
+  const stablecoinTotalBalance = marketTokenType === 'USDCX'
+    ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+    : wallet.balance.usadPublic + wallet.balance.usadPrivate
+  const stablecoinPrivateBalance = marketTokenType === 'USDCX'
+    ? wallet.balance.usdcxPrivate
+    : wallet.balance.usadPrivate
   const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
 
   // AMM reserves from market data
@@ -131,10 +139,12 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         }
         // Validate token type matches on-chain market (prevents transition/finalize mismatch)
         if (onChainMarket) {
-          const onChainIsUsdcx = onChainMarket.token_type === 2
-          if (isUsdcx !== onChainIsUsdcx) {
+          const onChainTokenType = onChainMarket.token_type === 3 ? 'USAD'
+            : onChainMarket.token_type === 2 ? 'USDCX'
+            : 'ALEO'
+          if (marketTokenType !== onChainTokenType) {
             throw new Error(
-              `Token type mismatch: UI shows ${isUsdcx ? 'USDCX' : 'ALEO'} but on-chain market uses ${onChainIsUsdcx ? 'USDCX' : 'ALEO'}. Please refresh the page.`
+              `Token type mismatch: UI shows ${marketTokenType} but on-chain market uses ${onChainTokenType}. Please refresh the page.`
             )
           }
         }
@@ -154,20 +164,19 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       // Contract finalize asserts shares_out >= expected_shares.
       const expectedShares = minSharesOut
 
-      if (isUsdcx) {
-        // USDCX: check total balance (public + private)
-        const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
-        if (!wallet.isDemoMode && amountMicro > totalUsdcx) {
+      const tokenType = marketTokenType
+
+      if (isStablecoin) {
+        if (!wallet.isDemoMode && amountMicro > stablecoinTotalBalance) {
           throw new Error(
-            `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(totalUsdcx) / 1_000_000).toFixed(2)} USDCX.`
+            `Insufficient ${tokenType} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
+            `but only have ${(Number(stablecoinTotalBalance) / 1_000_000).toFixed(2)} ${tokenType}.`
           )
         }
-        const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'USDCX')
+        const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, tokenType)
         functionName = result.functionName
         inputs = result.inputs
-        // Use private flow if user has private USDCX balance
-        setPrivacyMode(wallet.balance.usdcxPrivate > 0n ? 'private' : 'public')
+        setPrivacyMode(stablecoinPrivateBalance > 0n ? 'private' : 'public')
       } else {
         // ALEO: buy_shares_private uses transfer_private_to_public (needs credits record)
         // Need enough for bet amount + gas fee buffer (1.5 ALEO = 1,500,000 microcredits)
@@ -193,7 +202,6 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const WALLET_TIMEOUT_MS = 120_000 // 2 minutes
 
       // v8: Single TX — append Token record + MerkleProof for stablecoins
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
         const { findTokenRecord } = await import('@/lib/private-stablecoin')
         const { buildMerkleProofsForAddress } = await import('@/lib/aleo-client')
@@ -210,11 +218,8 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           )
         }
       }
-      const programId = tokenType === 'USAD'
-        ? (await import('@/lib/config')).config.usadProgramId
-        : CONTRACT_INFO.programId
       const txPromise = executeTransaction({
-        program: programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName!,
         inputs: inputs!,
         fee: 1.5,
@@ -423,15 +428,15 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                             </div>
                             <div className="flex justify-between text-xs mt-2">
                               <span className="text-surface-500">
-                                {isUsdcx
-                                  ? `Balance: ${formatCredits(wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate)} USDCX (private: ${formatCredits(wallet.balance.usdcxPrivate)})`
+                                {isStablecoin
+                                  ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${marketTokenType} (private: ${formatCredits(stablecoinPrivateBalance)})`
                                   : `Balance: ${formatCredits(wallet.balance.public + wallet.balance.private)} ALEO (private: ${formatCredits(wallet.balance.private)})`
                                 }
                               </span>
                               <button
                                 onClick={() => {
                                   // Use total balance (public + private) minus gas buffer
-                                  const bal = isUsdcx ? (wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate) : (wallet.balance.public + wallet.balance.private)
+                                  const bal = isStablecoin ? stablecoinTotalBalance : (wallet.balance.public + wallet.balance.private)
                                   const usable = bal > 700_000n ? bal - 700_000n : 0n
                                   setAmount((Number(usable) / 1_000_000).toString())
                                 }}

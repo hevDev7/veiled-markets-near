@@ -8,7 +8,7 @@ import { formatVeil } from '../../lib/governance-client';
 import { useGovernanceStore } from '../../lib/governance-store';
 
 interface RewardClaimPanelProps {
-  onClaimReward: (epochId: number, rewardType: 'lp' | 'trading') => Promise<void>;
+  onClaimReward: (epochId: number, rewardType: 'lp' | 'trading', amount: bigint) => Promise<void>;
 }
 
 export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
@@ -74,7 +74,7 @@ export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
                   <div className="text-sm font-medium text-white">{formatVeil(reward.amount)} ALEO</div>
                 </div>
                 <button
-                  onClick={() => onClaimReward(reward.epochId, reward.rewardType)}
+                  onClick={() => onClaimReward(reward.epochId, reward.rewardType, reward.amount)}
                   className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors text-xs font-medium"
                 >
                   Claim

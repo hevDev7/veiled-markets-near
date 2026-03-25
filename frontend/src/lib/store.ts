@@ -14,6 +14,7 @@ import {
   CONTRACT_INFO,
   getMarket,
   getMarketResolution,
+  getProgramIdForToken,
 } from './aleo-client'
 import { config } from './config'
 import { devLog, devWarn } from './logger'
@@ -360,211 +361,68 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         return sum
       }
 
-      // Method 1: Provider adapter's requestRecords (from WalletBridge)
-      if ((window as any).__aleoRequestRecords) {
-        try {
-          devLog('[Balance] Method 1: adapter requestRecords(credits.aleo, true)...')
-          const records = await (window as any).__aleoRequestRecords('credits.aleo', true)
-          privateBalance = sumRecordsBalance(records, 'M1-plaintext')
-        } catch (err) {
-          devLog('[Balance] Method 1 plaintext failed:', err)
+      // Fetch ALEO private balance with retry (same pattern as USDCX/USAD)
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        if (privateBalance > 0n) break
+        if (attempt > 0) {
+          devLog(`[Balance] ALEO private retry ${attempt}/2...`)
+          await new Promise(r => setTimeout(r, 1000))
         }
 
-        // Try without plaintext flag
-        if (privateBalance === 0n) {
-          try {
-            devLog('[Balance] Method 1b: adapter requestRecords(credits.aleo, false)...')
-            const records = await (window as any).__aleoRequestRecords('credits.aleo', false)
-            const recordsArr = Array.isArray(records) ? records : ((records as any)?.records || [])
-            if (recordsArr.length > 0) {
-              devLog('[Balance] Method 1b: Got', recordsArr.length, 'encrypted records, trying decrypt...')
-              const decryptFn = (window as any).__aleoDecrypt
-              for (let i = 0; i < recordsArr.length; i++) {
-                const record = recordsArr[i]
-                if (isRecordSpent(record)) continue
-                let recordMc = 0n
-                const ciphertext = (record as any)?.ciphertext || (record as any)?.record_ciphertext || (record as any)?.data
-                if (ciphertext && decryptFn) {
-                  try {
-                    const decrypted = await decryptFn(String(ciphertext))
-                    recordMc = parseMicrocredits(String(decrypted))
-                  } catch { /* decrypt failed */ }
-                }
-                if (recordMc === 0n) {
-                  const text = typeof record === 'string' ? record : JSON.stringify(record)
-                  recordMc = parseMicrocredits(text)
-                }
-                if (recordMc > 0n) {
-                  devLog(`[Balance] M1b record ${i} decrypted: ${Number(recordMc) / 1_000_000} ALEO`)
-                }
-                privateBalance += recordMc
-              }
-            }
-          } catch (err) {
-            devLog('[Balance] Method 1b failed:', err)
-          }
-        }
-      }
-
-      // Method 2: Direct wallet window object - prioritize connected wallet
-      if (privateBalance === 0n) {
-        // Build ordered list of wallet objects to try, connected wallet first
-        const walletCandidates: Array<{ name: string; obj: any }> = []
-
-        const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
-        const leoObj = (window as any).leoWallet || (window as any).leo
-        const foxObj = (window as any).foxwallet?.aleo
-
-        // Add connected wallet first
-        if (connectedType === 'shield' && shieldObj) {
-          walletCandidates.push({ name: 'Shield', obj: shieldObj })
-        } else if ((connectedType === 'leo') && leoObj) {
-          walletCandidates.push({ name: 'Leo', obj: leoObj })
-        } else if (connectedType === 'fox' && foxObj) {
-          walletCandidates.push({ name: 'Fox', obj: foxObj })
-        }
-
-        // Add other wallets as fallback
-        if (shieldObj && connectedType !== 'shield') walletCandidates.push({ name: 'Shield', obj: shieldObj })
-        if (leoObj && connectedType !== 'leo') walletCandidates.push({ name: 'Leo', obj: leoObj })
-        if (foxObj && connectedType !== 'fox') walletCandidates.push({ name: 'Fox', obj: foxObj })
-
-        for (const { name: wName, obj: wObj } of walletCandidates) {
-          if (privateBalance > 0n) break
-          devLog(`[Balance] Method 2: Trying ${wName} wallet window object...`)
-
-          // 2a: requestRecordPlaintexts (decrypted records)
-          if (typeof wObj.requestRecordPlaintexts === 'function') {
-            try {
-              const result = await wObj.requestRecordPlaintexts('credits.aleo')
-              privateBalance = sumRecordsBalance(result, `M2a-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] M2a ${wName} requestRecordPlaintexts:`, err)
-            }
-          }
-
-          // 2b: requestRecords + decrypt
-          if (privateBalance === 0n && typeof wObj.requestRecords === 'function') {
-            try {
-              const result = await wObj.requestRecords('credits.aleo')
-              const recordsArr = Array.isArray(result) ? result : ((result as any)?.records || [])
-              if (recordsArr.length > 0) {
-                devLog(`[Balance] M2b ${wName}: ${recordsArr.length} records, decrypting...`)
-                const decryptFn = (window as any).__aleoDecrypt
-                  || (typeof wObj.decrypt === 'function' ? wObj.decrypt.bind(wObj) : null)
-                for (let i = 0; i < recordsArr.length; i++) {
-                  const record = recordsArr[i]
-                  if (isRecordSpent(record)) continue
-                  let recordMc = 0n
-                  const ciphertext = (record as any)?.ciphertext || (record as any)?.record_ciphertext || (record as any)?.data
-                  if (ciphertext && decryptFn) {
-                    try {
-                      const decrypted = await decryptFn(String(ciphertext))
-                      recordMc = parseMicrocredits(String(decrypted))
-                    } catch { /* decrypt failed */ }
-                  }
-                  if (recordMc === 0n) {
-                    const text = typeof record === 'string' ? record : JSON.stringify(record)
-                    recordMc = parseMicrocredits(text)
-                  }
-                  if (recordMc > 0n) devLog(`[Balance] M2b ${wName} record ${i}: ${Number(recordMc) / 1_000_000} ALEO`)
-                  privateBalance += recordMc
-                }
-              }
-            } catch (err) {
-              devLog(`[Balance] M2b ${wName} requestRecords:`, err)
-            }
-          }
-
-          // 2c: getBalance (Shield Wallet native API)
-          if (privateBalance === 0n && typeof wObj.getBalance === 'function') {
-            try {
-              devLog(`[Balance] M2c ${wName} getBalance...`)
-              const bal = await wObj.getBalance()
-              devLog(`[Balance] M2c ${wName} getBalance response:`, JSON.stringify(bal).substring(0, 200))
-              if (bal?.private !== undefined) {
-                const privVal = String(bal.private).replace(/[ui]\d+\.?\w*$/i, '').trim()
-                const parsed = BigInt(privVal.replace(/[^\d]/g, '') || '0')
-                if (parsed > 0n) {
-                  privateBalance = parsed
-                  devLog(`[Balance] M2c ${wName}: ${Number(parsed) / 1_000_000} ALEO`)
-                }
-              }
-            } catch (err) {
-              devLog(`[Balance] M2c ${wName} getBalance:`, err)
-            }
-          }
-        }
-
-        if (privateBalance === 0n) {
-          devLog('[Balance] Method 2: No private balance found from any wallet object')
-        }
-      }
-
-      // Method 3: Shield Wallet specific - log available methods and try alternatives
-      if (privateBalance === 0n && connectedType === 'shield') {
-        const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
-        if (shieldObj) {
-          // Log available methods for debugging
-          try {
-            const methods = Object.keys(shieldObj).filter(k => typeof shieldObj[k] === 'function')
-            devLog('[Balance] Shield Wallet methods:', methods.join(', '))
-            const allKeys = Object.keys(shieldObj)
-            devLog('[Balance] Shield Wallet all keys:', allKeys.join(', '))
-          } catch { /* ignore */ }
-
-          // Try alternative method names that Shield might use
-          const altMethods = [
-            'getRecords', 'records', 'fetchRecords',
-            'getCredits', 'credits', 'getPrivateBalance',
-            'balance', 'getUnspentRecords',
-          ]
-          for (const method of altMethods) {
-            if (privateBalance > 0n) break
-            if (typeof shieldObj[method] === 'function') {
+        // Try Shield wallet direct first (most reliable)
+        if (privateBalance === 0n && connectedType === 'shield') {
+          const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
+          if (shieldObj) {
+            if (typeof shieldObj.requestRecordPlaintexts === 'function') {
               try {
-                devLog(`[Balance] M3 Shield trying ${method}()...`)
-                const result = await shieldObj[method]('credits.aleo')
-                devLog(`[Balance] M3 Shield ${method}() returned:`, typeof result, JSON.stringify(result).substring(0, 300))
-                if (result) {
-                  const records = Array.isArray(result) ? result : (result?.records || [])
-                  for (const r of records) {
-                    if (isRecordSpent(r)) continue
-                    const text = typeof r === 'string' ? r : ((r as any)?.plaintext || (r as any)?.data || JSON.stringify(r))
-                    const mc = parseMicrocredits(String(text))
-                    if (mc > 0n) privateBalance += mc
-                  }
-                  // Also try if result is a balance object directly
-                  if (privateBalance === 0n && typeof result === 'object' && !Array.isArray(result)) {
-                    const privVal = result?.private ?? result?.privateBalance ?? result?.unspent
-                    if (privVal !== undefined) {
-                      const cleaned = String(privVal).replace(/[ui]\d+\.?\w*$/i, '').replace(/[^\d]/g, '')
-                      if (cleaned) privateBalance = BigInt(cleaned)
-                    }
-                  }
-                }
-              } catch (err) {
-                devLog(`[Balance] M3 Shield ${method}() failed:`, err)
+                devLog('[Balance] ALEO: Shield requestRecordPlaintexts(credits.aleo)...')
+                const result = await shieldObj.requestRecordPlaintexts('credits.aleo')
+                privateBalance = sumRecordsBalance(result, 'ALEO-Shield-plaintexts')
+                if (privateBalance > 0n) break
+              } catch (err: any) {
+                devLog('[Balance] ALEO Shield plaintexts failed:', err?.message || err)
+              }
+            }
+            if (privateBalance === 0n && typeof shieldObj.requestRecords === 'function') {
+              try {
+                devLog('[Balance] ALEO: Shield requestRecords(credits.aleo)...')
+                const result = await shieldObj.requestRecords('credits.aleo')
+                privateBalance = sumRecordsBalance(result, 'ALEO-Shield-records')
+                if (privateBalance > 0n) break
+              } catch (err: any) {
+                devLog('[Balance] ALEO Shield records failed:', err?.message || err)
               }
             }
           }
+        }
 
-          // Try property access (some wallets expose balance as a property)
-          if (privateBalance === 0n) {
-            try {
-              const balProp = shieldObj.balance || shieldObj.privateBalance
-              if (balProp !== undefined) {
-                devLog('[Balance] M3 Shield balance property:', balProp)
-                const cleaned = String(balProp).replace(/[ui]\d+\.?\w*$/i, '').replace(/[^\d]/g, '')
-                if (cleaned) privateBalance = BigInt(cleaned)
-              }
-            } catch { /* ignore */ }
-          }
+        // Adapter API fallback
+        if (privateBalance === 0n && (window as any).__aleoRequestRecords) {
+          try {
+            devLog('[Balance] ALEO: adapter requestRecords(credits.aleo)...')
+            const records = await (window as any).__aleoRequestRecords('credits.aleo', true)
+            privateBalance = sumRecordsBalance(records, 'ALEO-adapter')
+        } catch (err: any) {
+          devLog('[Balance] ALEO adapter failed:', err?.message || err)
+        }
+        }
 
-          if (privateBalance === 0n) {
-            devLog('[Balance] Shield Wallet: Private balance detection not supported by this wallet extension')
+        // walletManager fallback
+        if (privateBalance === 0n) {
+          try {
+            devLog('[Balance] ALEO: walletManager.getRecords(credits.aleo)...')
+            const records = await walletManager.getRecords('credits.aleo')
+            privateBalance = sumRecordsBalance(records, 'ALEO-walletManager')
+          } catch {
+            // Non-critical
           }
         }
+      }
+
+      if (privateBalance > 0n) {
+        devLog(`[Balance] ALEO private total: ${Number(privateBalance) / 1_000_000} ALEO`)
+      } else {
+        devLog('[Balance] ALEO private: 0 (records not found after 3 attempts)')
       }
 
       // Fetch USDCX public balance in parallel (non-blocking)
@@ -618,82 +476,90 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         return sum
       }
 
-      // USDCX Method 1: adapter requestRecords
-      if (usdcxPrivate === 0n && (window as any).__aleoRequestRecords) {
-        try {
-          devLog('[Balance] USDCX M1: adapter requestRecords...')
-          const records = await (window as any).__aleoRequestRecords(usdcxProgramId, true)
-          usdcxPrivate = sumUsdcxRecords(records, 'USDCX-M1')
-        } catch {
-          devLog('[Balance] USDCX M1 failed')
-        }
-      }
+      // Helper: fetch private token balance with retry for Shield wallet
+      const fetchPrivateTokenBalance = async (
+        programId: string,
+        label: string,
+        maxRetries: number = 2,
+      ): Promise<bigint> => {
+        let result = 0n
 
-      // USDCX Method 2: Direct wallet window object
-      if (usdcxPrivate === 0n) {
-        const walletObjs: Array<{ name: string; obj: any }> = []
-        const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
-        const leoObj = (window as any).leoWallet || (window as any).leo
-        const foxObj = (window as any).foxwallet?.aleo
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          if (attempt > 0) {
+            devLog(`[Balance] ${label} retry ${attempt}/${maxRetries}...`)
+            await new Promise(r => setTimeout(r, 1000)) // Wait 1s between retries
+          }
 
-        if (connectedType === 'shield' && shieldObj) walletObjs.push({ name: 'Shield', obj: shieldObj })
-        else if (connectedType === 'leo' && leoObj) walletObjs.push({ name: 'Leo', obj: leoObj })
-        else if (connectedType === 'fox' && foxObj) walletObjs.push({ name: 'Fox', obj: foxObj })
-
-        for (const { name: wName, obj: wObj } of walletObjs) {
-          if (usdcxPrivate > 0n) break
-
-          // 2a: requestRecordPlaintexts
-          if (typeof wObj.requestRecordPlaintexts === 'function') {
-            try {
-              devLog(`[Balance] USDCX M2a: ${wName} requestRecordPlaintexts(${usdcxProgramId})...`)
-              const result = await wObj.requestRecordPlaintexts(usdcxProgramId)
-              usdcxPrivate = sumUsdcxRecords(result, `USDCX-M2a-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] USDCX M2a ${wName} failed:`, err)
+          // Method 1: Shield wallet direct (most reliable for Shield)
+          if (result === 0n && connectedType === 'shield') {
+            const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
+            if (shieldObj) {
+              // Try requestRecordPlaintexts first (returns plaintext directly)
+              if (typeof shieldObj.requestRecordPlaintexts === 'function') {
+                try {
+                  devLog(`[Balance] ${label}: Shield requestRecordPlaintexts(${programId})...`)
+                  const records = await shieldObj.requestRecordPlaintexts(programId)
+                  result = sumUsdcxRecords(records, `${label}-Shield-plaintexts`)
+                  if (result > 0n) break
+                } catch (err: any) {
+                  devLog(`[Balance] ${label} Shield plaintexts failed:`, err?.message || err)
+                }
+              }
+              // Fallback: requestRecords
+              if (result === 0n && typeof shieldObj.requestRecords === 'function') {
+                try {
+                  devLog(`[Balance] ${label}: Shield requestRecords(${programId})...`)
+                  const records = await shieldObj.requestRecords(programId)
+                  result = sumUsdcxRecords(records, `${label}-Shield-records`)
+                  if (result > 0n) break
+                } catch (err: any) {
+                  devLog(`[Balance] ${label} Shield records failed:`, err?.message || err)
+                }
+              }
             }
           }
 
-          // 2b: requestRecords
-          if (usdcxPrivate === 0n && typeof wObj.requestRecords === 'function') {
-            try {
-              devLog(`[Balance] USDCX M2b: ${wName} requestRecords(${usdcxProgramId})...`)
-              const result = await wObj.requestRecords(usdcxProgramId)
-              usdcxPrivate = sumUsdcxRecords(result, `USDCX-M2b-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] USDCX M2b ${wName} failed:`, err)
+          // Method 2: Adapter API (works for all wallet types)
+          if (result === 0n) {
+            const requestRecords = (window as any).__aleoRequestRecords
+            if (typeof requestRecords === 'function') {
+              try {
+                devLog(`[Balance] ${label}: adapter requestRecords(${programId})...`)
+                const records = await requestRecords(programId, true)
+                result = sumUsdcxRecords(records, `${label}-adapter`)
+                if (result > 0n) break
+              } catch (err: any) {
+                devLog(`[Balance] ${label} adapter failed:`, err?.message || err)
+              }
             }
           }
 
-          // 2c: getRecords (some wallets)
-          if (usdcxPrivate === 0n && typeof wObj.getRecords === 'function') {
+          // Method 3: walletManager fallback
+          if (result === 0n) {
             try {
-              devLog(`[Balance] USDCX M2c: ${wName} getRecords(${usdcxProgramId})...`)
-              const result = await wObj.getRecords(usdcxProgramId)
-              usdcxPrivate = sumUsdcxRecords(result, `USDCX-M2c-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] USDCX M2c ${wName} failed:`, err)
+              devLog(`[Balance] ${label}: walletManager.getRecords(${programId})...`)
+              const records = await walletManager.getRecords(programId)
+              result = sumUsdcxRecords(records, `${label}-walletManager`)
+              if (result > 0n) break
+            } catch {
+              // Non-critical
             }
           }
+
+          // If all methods returned 0 on first try, retry (Shield sometimes needs warmup)
+          if (result > 0n) break
         }
+
+        if (result > 0n) {
+          devLog(`[Balance] ${label} private total: ${Number(result) / 1_000_000}`)
+        } else {
+          devLog(`[Balance] ${label} private: 0 (records not found after ${maxRetries + 1} attempts)`)
+        }
+        return result
       }
 
-      // USDCX Method 3: walletManager.getRecords fallback
-      if (usdcxPrivate === 0n) {
-        try {
-          devLog('[Balance] USDCX M3: walletManager.getRecords...')
-          const records = await walletManager.getRecords(usdcxProgramId)
-          usdcxPrivate = sumUsdcxRecords(records, 'USDCX-M3')
-        } catch {
-          // Non-critical
-        }
-      }
-
-      if (usdcxPrivate > 0n) {
-        devLog(`[Balance] USDCX private total: ${Number(usdcxPrivate) / 1_000_000} USDCX`)
-      } else {
-        devLog('[Balance] USDCX private: 0 (no Token records found or wallet does not support custom program records)')
-      }
+      // Fetch USDCX and USAD private balances (with retry)
+      usdcxPrivate = await fetchPrivateTokenBalance(usdcxProgramId, 'USDCX')
 
       // Fetch USAD public balance (same pattern as USDCX)
       let usadPublic = 0n
@@ -703,85 +569,10 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         // USAD balance is non-critical
       }
 
-      // Fetch USAD private balance from Token records (same 3-method pattern as USDCX)
+      // Fetch USAD private balance (same helper with retry)
       let usadPrivate = 0n
       const usadProgramId = 'test_usad_stablecoin.aleo'
-      // USAD Method 1: adapter requestRecords
-      if (usadPrivate === 0n && (window as any).__aleoRequestRecords) {
-        try {
-          devLog('[Balance] USAD M1: adapter requestRecords...')
-          const records = await (window as any).__aleoRequestRecords(usadProgramId, true)
-          usadPrivate = sumUsdcxRecords(records, 'USAD-M1')
-        } catch {
-          devLog('[Balance] USAD M1 failed')
-        }
-      }
-
-      // USAD Method 2: Direct wallet window object
-      if (usadPrivate === 0n) {
-        const usadWalletObjs: Array<{ name: string; obj: any }> = []
-        const shieldObjUsad = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
-        const leoObjUsad = (window as any).leoWallet || (window as any).leo
-        const foxObjUsad = (window as any).foxwallet?.aleo
-
-        if (connectedType === 'shield' && shieldObjUsad) usadWalletObjs.push({ name: 'Shield', obj: shieldObjUsad })
-        else if (connectedType === 'leo' && leoObjUsad) usadWalletObjs.push({ name: 'Leo', obj: leoObjUsad })
-        else if (connectedType === 'fox' && foxObjUsad) usadWalletObjs.push({ name: 'Fox', obj: foxObjUsad })
-
-        for (const { name: wName, obj: wObj } of usadWalletObjs) {
-          if (usadPrivate > 0n) break
-
-          // 2a: requestRecordPlaintexts
-          if (typeof wObj.requestRecordPlaintexts === 'function') {
-            try {
-              devLog(`[Balance] USAD M2a: ${wName} requestRecordPlaintexts(${usadProgramId})...`)
-              const result = await wObj.requestRecordPlaintexts(usadProgramId)
-              usadPrivate = sumUsdcxRecords(result, `USAD-M2a-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] USAD M2a ${wName} failed:`, err)
-            }
-          }
-
-          // 2b: requestRecords
-          if (usadPrivate === 0n && typeof wObj.requestRecords === 'function') {
-            try {
-              devLog(`[Balance] USAD M2b: ${wName} requestRecords(${usadProgramId})...`)
-              const result = await wObj.requestRecords(usadProgramId)
-              usadPrivate = sumUsdcxRecords(result, `USAD-M2b-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] USAD M2b ${wName} failed:`, err)
-            }
-          }
-
-          // 2c: getRecords (some wallets)
-          if (usadPrivate === 0n && typeof wObj.getRecords === 'function') {
-            try {
-              devLog(`[Balance] USAD M2c: ${wName} getRecords(${usadProgramId})...`)
-              const result = await wObj.getRecords(usadProgramId)
-              usadPrivate = sumUsdcxRecords(result, `USAD-M2c-${wName}`)
-            } catch (err) {
-              devLog(`[Balance] USAD M2c ${wName} failed:`, err)
-            }
-          }
-        }
-      }
-
-      // USAD Method 3: walletManager.getRecords fallback
-      if (usadPrivate === 0n) {
-        try {
-          devLog('[Balance] USAD M3: walletManager.getRecords...')
-          const records = await walletManager.getRecords(usadProgramId)
-          usadPrivate = sumUsdcxRecords(records, 'USAD-M3')
-        } catch {
-          // Non-critical
-        }
-      }
-
-      if (usadPrivate > 0n) {
-        devLog(`[Balance] USAD private total: ${Number(usadPrivate) / 1_000_000} USAD`)
-      } else {
-        devLog('[Balance] USAD private: 0 (no Token records found or wallet does not support custom program records)')
-      }
+      usadPrivate = await fetchPrivateTokenBalance(usadProgramId, 'USAD')
 
       // Record Scanner fallback — if wallet methods missed any private balances
       if (privateBalance === 0n || usdcxPrivate === 0n || usadPrivate === 0n) {
@@ -927,7 +718,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v29.aleo program.
+// in the veiled_markets_v34.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1667,12 +1458,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       }
 
       // Request transaction through wallet
-      const programId = tokenType === 'USAD' ? config.usadProgramId : CONTRACT_INFO.programId
+      const programId = getProgramIdForToken(tokenType)
       const transactionId = await walletManager.requestTransaction({
         programId,
         functionName: betFunctionName,
         inputs,
-        fee: 1.5, // 1.5 ALEO fee for v22
+        fee: 1.5, // 1.5 ALEO fee for v31
         recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
       })
 
@@ -2249,14 +2040,23 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 // ============================================================================
 
 interface UIStore {
-  theme: 'dark' | 'light'
+  theme: 'dark'
   sidebarOpen: boolean
   notificationsEnabled: boolean
 
   // Actions
-  setTheme: (theme: 'dark' | 'light') => void
+  setTheme: (_theme: 'dark' | 'light') => void
+  toggleTheme: () => void
   toggleSidebar: () => void
   setNotificationsEnabled: (enabled: boolean) => void
+}
+
+/** Apply theme class to <html> element */
+function applyThemeToDOM() {
+  const root = document.documentElement
+  root.classList.add('dark')
+  root.classList.remove('light')
+  root.style.colorScheme = 'dark'
 }
 
 export const useUIStore = create<UIStore>()(
@@ -2266,7 +2066,14 @@ export const useUIStore = create<UIStore>()(
       sidebarOpen: true,
       notificationsEnabled: true,
 
-      setTheme: (theme: 'light' | 'dark') => set({ theme }),
+      setTheme: (_theme: 'light' | 'dark') => {
+        applyThemeToDOM()
+        set({ theme: 'dark' })
+      },
+      toggleTheme: () => {
+        applyThemeToDOM()
+        set({ theme: 'dark' })
+      },
       toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
       setNotificationsEnabled: (enabled: boolean) => set({ notificationsEnabled: enabled }),
     }),

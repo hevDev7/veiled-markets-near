@@ -11,8 +11,8 @@ import { devLog } from './logger'
  * Initialize question text mappings for existing markets
  * Call this on app startup to populate the mapping
  * 
- * NOTE: veiled_markets_v9.aleo is the version 4 deployment with privacy fix
- * Includes delayed pool updates and noise addition for better privacy
+ * Legacy question mappings (v9–v16). New markets use IPFS + Supabase registry.
+ * Do NOT add new entries here — they are stored automatically via market creation flow.
  */
 export function initializeQuestionMappings(): void {
     const mappings: Record<string, string> = {

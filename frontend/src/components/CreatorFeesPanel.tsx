@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion'
 import { Coins, Loader2, Check, AlertCircle } from 'lucide-react'
 import { useState } from 'react'
-import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
+import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildWithdrawCreatorFeesInputs, type MarketFeesData, MARKET_STATUS } from '@/lib/aleo-client'
+import { buildWithdrawCreatorFeesInputs, type MarketFeesData, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
 
 interface CreatorFeesPanelProps {
@@ -42,7 +42,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
       )
 
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs,
         fee: 1.5,

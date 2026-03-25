@@ -16,11 +16,21 @@ import { config } from './lib/config'
 
 // Keep walletName in localStorage so autoConnect can reconnect on refresh
 
+function applyInitialTheme() {
+  const root = document.documentElement
+  root.classList.add('dark')
+  root.classList.remove('light')
+  root.style.colorScheme = 'dark'
+}
+
 // Initialize question hash to text mappings on app startup
 initializeQuestionMappings()
 
 // Initialize market IDs from indexer on app startup
 initializeMarketIds()
+
+// Apply persisted UI theme before the app renders.
+applyInitialTheme()
 
 const wallets = [
   new ShieldWalletAdapter(),
@@ -35,6 +45,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       decryptPermission={DecryptPermission.AutoDecrypt}
       programs={[
         config.programId,
+        config.usdcxMarketProgramId,
         config.usadProgramId,
         config.governanceProgramId,
         'credits.aleo',
@@ -58,4 +69,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </AleoWalletProvider>
   </React.StrictMode>,
 )
-

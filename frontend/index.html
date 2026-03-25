@@ -17,9 +17,23 @@
 
   <title>Veiled Markets | Predict Freely. Bet Privately.</title>
 
+  <script>
+    // Prevent FOUC: apply saved theme before first paint
+    (function() {
+      try {
+        var stored = JSON.parse(localStorage.getItem('veiled-markets-ui') || '{}');
+        var theme = (stored.state && stored.state.theme) || 'dark';
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+        document.documentElement.classList.toggle('light', theme === 'light');
+      } catch(e) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
   <style>
     /* Prevent FOUC */
-    html { background: #08090c; }
+    html.dark { background: #08090c; }
+    html.light { background: #f8f9fb; }
   </style>
 </head>
 

@@ -95,7 +95,7 @@ const mechanisms = [
     items: [
       'ALEO — Native Aleo blockchain token (credits.aleo)',
       'USDCX — Test stablecoin (test_usdcx_stablecoin.aleo)',
-      'USAD — Separate stablecoin with its own market contract (veiled_markets_usad_v8.aleo)',
+      'USAD — Separate stablecoin with its own market contract (veiled_markets_usad_v11.aleo)',
       'Stablecoin buys require a two-transaction flow (deposit + buy)',
     ],
   },

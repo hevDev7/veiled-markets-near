@@ -2,17 +2,20 @@
 # ============================================================================
 # VEILED GOVERNANCE — Deployment Script
 # ============================================================================
-# Deploy veiled_governance_v1.aleo to Aleo testnet
-# Prerequisites: snarkos CLI installed, private key set
+# Deploy veiled_governance_v4.aleo to Aleo testnet
+# Can be run from repo root OR from contracts-governance/ directory
 # ============================================================================
 
 set -e
 
-# Configuration
-PROGRAM_DIR="contracts-governance"
-PROGRAM_ID="veiled_governance_v1.aleo"
+# Detect script directory and resolve paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROGRAM_DIR="$SCRIPT_DIR"
+
+# Read program ID from program.json (single source of truth)
+PROGRAM_ID=$(grep -o '"program": "[^"]*"' "$PROGRAM_DIR/program.json" | cut -d'"' -f4)
 NETWORK="testnet"
-PRIORITY_FEE="1000000"  # 1 credit
+PRIORITY_FEE="0"
 
 # Colors
 GREEN='\033[0;32m'
@@ -24,44 +27,56 @@ echo -e "${GREEN}🏛️  Veiled Governance — Deployment${NC}"
 echo "=================================="
 echo "Program: ${PROGRAM_ID}"
 echo "Network: ${NETWORK}"
+echo "Directory: ${PROGRAM_DIR}"
 echo ""
+
+# Load .env if present (check script dir and parent)
+if [ -f "$PROGRAM_DIR/.env" ]; then
+    echo -e "${YELLOW}📄 Loading .env from $PROGRAM_DIR/.env${NC}"
+    set -a
+    source "$PROGRAM_DIR/.env"
+    set +a
+elif [ -f "$PROGRAM_DIR/../.env" ]; then
+    echo -e "${YELLOW}📄 Loading .env from repo root${NC}"
+    set -a
+    source "$PROGRAM_DIR/../.env"
+    set +a
+fi
 
 # Check environment
 if [ -z "$PRIVATE_KEY" ]; then
-    echo -e "${RED}❌ PRIVATE_KEY not set. Export it first:${NC}"
+    echo -e "${RED}❌ PRIVATE_KEY not set.${NC}"
+    echo "  Either add it to .env or export it:"
     echo "  export PRIVATE_KEY=APrivateKey1..."
     exit 1
 fi
 
-# Check for snarkos
-if ! command -v snarkos &> /dev/null; then
-    echo -e "${RED}❌ snarkos not found. Install it first.${NC}"
+# Check for leo
+if ! command -v leo &> /dev/null; then
+    echo -e "${RED}❌ leo not found. Install it first.${NC}"
     exit 1
 fi
 
-# Check for leo (optional — for compilation)
-if command -v leo &> /dev/null; then
-    echo -e "${YELLOW}📦 Compiling with Leo...${NC}"
-    cd "$PROGRAM_DIR"
-    leo build
-    cd ..
-    echo -e "${GREEN}✅ Compilation successful${NC}"
-else
-    echo -e "${YELLOW}⚠️  leo not found, skipping compilation. Using pre-built artifacts.${NC}"
+# Build
+echo -e "${YELLOW}📦 Compiling with Leo...${NC}"
+cd "$PROGRAM_DIR"
+leo build
+echo -e "${GREEN}✅ Compilation successful${NC}"
+
+# Count transitions
+TRANSITION_COUNT=$(grep -c "^function " build/main.aleo)
+echo "   Transitions: ${TRANSITION_COUNT}/31"
+if [ "$TRANSITION_COUNT" -gt 31 ]; then
+    echo -e "${RED}❌ Exceeds 31-transition limit!${NC}"
+    exit 1
 fi
 
 # Deploy
 echo ""
-echo -e "${YELLOW}🚀 Deploying to ${NETWORK}...${NC}"
+echo -e "${YELLOW}🚀 Deploying ${PROGRAM_ID} to ${NETWORK}...${NC}"
 echo ""
 
-snarkos developer deploy \
-    --private-key "$PRIVATE_KEY" \
-    --query "https://api.explorer.provable.com/v1/${NETWORK}" \
-    --priority-fee "$PRIORITY_FEE" \
-    --broadcast "https://api.explorer.provable.com/v1/${NETWORK}/transaction/broadcast" \
-    "${PROGRAM_ID}" \
-    --path "${PROGRAM_DIR}/build/"
+leo deploy --network "$NETWORK" --priority-fees "$PRIORITY_FEE" --yes --broadcast
 
 echo ""
 echo -e "${GREEN}✅ Deployment submitted!${NC}"
@@ -73,8 +88,3 @@ echo "     snarkos developer execute ${PROGRAM_ID} init_governance \\"
 echo "       'guardian_1_address' 'guardian_2_address' 'guardian_3_address' '2u8' \\"
 echo "       --private-key \$PRIVATE_KEY --query ... --broadcast ..."
 echo ""
-echo "  3. Run governance indexer:"
-echo "     cd backend && npx tsx src/governance-indexer.ts"
-echo ""
-echo "  4. Run Supabase migration:"
-echo "     psql \$DATABASE_URL < supabase-governance-schema.sql"

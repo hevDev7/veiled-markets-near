@@ -40,7 +40,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'What tokens can I use?',
-    answer: 'Markets support three token types: ALEO (native Aleo token), USDCX (test stablecoin via test_usdcx_stablecoin.aleo), and USAD (stablecoin via veiled_markets_usad_v8.aleo). Each market is denominated in one specific token. Stablecoin markets require a two-transaction flow: first a private-to-public deposit, then the buy.',
+    answer: 'Markets support three token types: ALEO (native Aleo token), USDCX (test stablecoin via test_usdcx_stablecoin.aleo), and USAD (stablecoin via veiled_markets_usad_v11.aleo). Each market is denominated in one specific token. Stablecoin markets require a two-transaction flow: first a private-to-public deposit, then the buy.',
   },
   {
     category: 'Trading',
@@ -124,7 +124,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Governance',
     question: 'How does governance work?',
-    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v3.aleo) powered by ALEO token voting. There are 6 proposal types: dispute resolution, fee changes, treasury management, parameter updates, emergency pause, and resolver election. Proposals require 10 ALEO to create and have a ~7-day voting period.',
+    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v4.aleo) powered by ALEO token voting. There are 6 proposal types: dispute resolution, fee changes, treasury management, parameter updates, emergency pause, and resolver election. Proposals require 10 ALEO to create and have a ~7-day voting period.',
   },
   {
     category: 'Governance',

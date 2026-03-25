@@ -8,7 +8,6 @@ import {
   Copy,
   Check,
   ArrowRight,
-  Search,
   Bell,
   Menu,
   X

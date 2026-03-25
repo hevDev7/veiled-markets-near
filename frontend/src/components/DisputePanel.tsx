@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { ShieldAlert, Clock, AlertTriangle, Loader2, Check } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
-import { type Market, useWalletStore, CONTRACT_INFO } from '@/lib/store'
+import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits } from '@/lib/utils'
 import {
@@ -10,6 +10,7 @@ import {
   getCurrentBlockHeight,
   MIN_DISPUTE_BOND,
   CHALLENGE_WINDOW_BLOCKS,
+  getProgramIdForToken,
 } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
 import { config } from '@/lib/config'
@@ -123,8 +124,10 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
         proposedOutcome,
       )
 
+      const tokenType: 'ALEO' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
+        : market.tokenType === 'USAD' ? 'USAD' : 'ALEO'
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs,
         fee: 1.5,

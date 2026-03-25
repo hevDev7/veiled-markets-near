@@ -268,12 +268,12 @@ export function DashboardHeader() {
                       <div className="pt-3 space-y-1.5 border-t border-white/[0.04]">
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">Public</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.public)} <img src="/aleo-logo.png" alt="" class="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.public)} <img src="/aleo-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                         {wallet.balance.private > 0n ? (
                           <div className="flex justify-between items-center">
                             <p className="text-xs text-surface-500">Private</p>
-                            <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.private)} <img src="/aleo-logo.png" alt="" class="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                            <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.private)} <img src="/aleo-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                           </div>
                         ) : wallet.walletType === 'shield' ? (
                           <p className="text-2xs text-surface-500 mt-1.5 leading-relaxed">
@@ -282,19 +282,19 @@ export function DashboardHeader() {
                         ) : null}
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">USDCX (Public)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPublic)} <img src="/usdcx-logo.png" alt="" class="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPublic)} <img src="/usdcx-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">USDCX (Private)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPrivate)} <img src="/usdcx-logo.png" alt="" class="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPrivate)} <img src="/usdcx-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">USAD (Public)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usadPublic)} <img src="/usad-logo.svg" alt="" class="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usadPublic)} <img src="/usad-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">USAD (Private)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usadPrivate)} <img src="/usad-logo.svg" alt="" class="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usadPrivate)} <img src="/usad-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                       </div>
                     </div>

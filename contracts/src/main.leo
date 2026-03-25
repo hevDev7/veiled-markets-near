@@ -1,44 +1,32 @@
 // ============================================================================
-// VEILED MARKETS v28 - Privacy-Preserving Prediction Market Protocol
+// VEILED MARKETS v32 - Privacy-Preserving Prediction Market Protocol
 // ============================================================================
 // FPMM (Fixed Product Market Maker) with complete-set minting/burning.
 // Privacy-first: buy, sell, redeem, refund all use private records.
-// USDCX dual-token markets supported with PRIVATE token transfers.
-// USAD supported via separate veiled_markets_usad_v2.aleo program.
+// ALEO-only contract — USDCX transitions moved to separate contract.
+// USAD supported via separate veiled_markets_usad program.
 // Dispute bond always in ALEO.
 //
-// v18 security fixes from v17:
-// - FIX: init_multisig restricted to deployer + unique signer validation
-// - FIX: ProposalSeed includes recipient + token_type (prevents replay/redirect)
-// - FIX: propose_treasury_withdrawal adds token_type + nonce parameters
-// - FIX: execute_proposal/exec_proposal_usdcx validate token_type + cleanup approvals
-// - FIX: cancel_market excludes STATUS_PENDING_RESOLUTION from emergency cancel
+// v32 changes from v31:
+// - REMOVED: All USDCX transitions (create_market_usdcx, buy_shares_usdcx,
+//   sell_shares_usdcx, add_liquidity_usdcx, withdraw_lp_resolved_usdcx,
+//   redeem_shares_usdcx, claim_refund_usdcx, claim_lp_refund_usdcx,
+//   withdraw_fees_usdcx, exec_proposal_usdcx)
+// - REMOVED: test_usdcx_stablecoin.aleo import dependency
+// - This is now an ALEO-only contract; USDCX is handled separately
 //
-// v19 changes from v18:
-// - FIX: claim_dispute_bond now allows claim on CANCELLED markets (bond recovery)
-// - FIX: sell FPMM underflow guard: assert(r_k >= p) before subtraction for r1/r2
-// - CHANGE: buy_shares_private_usdcx now native Leo (Leo 3.5.0 fixed ETYC0372117)
-//
-// v24 changes from v19:
-// - CHANGE: All USDCX inflow transitions now use transfer_private_to_public (Token record + MerkleProof)
-// - CHANGE: All USDCX outflow transitions now use transfer_public_to_private (returns Token record)
-// - CHANGE: USAD support via separate veiled_markets_usad_v2.aleo program
-//
-// v25 changes from v24:
-// - REMOVED: buy_shares_usdcx (redundant — buy_shares_private_usdcx handles private USDCX buys)
-// - NEW: set_resolver_status — on-chain resolver whitelist (deployer managed)
-// - NEW: claim_resolver_fee — resolver claims fee after market finalization
-// - NEW: resolver_rewards mapping — tracks fees owed to resolvers
-// - CHANGE: finalize_resolution allocates resolver fee from protocol_fees
-//
-// 31 transitions (at snarkVM limit)
+// v25 changes (historical):
+// - set_resolver_status — on-chain resolver whitelist (deployer managed)
+// - claim_resolver_fee — resolver claims fee after market finalization
+// - resolver_rewards mapping — tracks fees owed to resolvers
+// - finalize_resolution allocates resolver fee from protocol_fees
 // ============================================================================
 
 import credits.aleo;
-import test_usdcx_stablecoin.aleo;
-// import test_usad_stablecoin.aleo;  // USAD disabled (snarkVM 31-transition limit)
+// USDCX is now handled by a separate contract (removed in v32).
+// USAD is handled by a separate program: veiled_markets_usad_v11.aleo
 
-program veiled_markets_v30.aleo {
+program veiled_markets_v34.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -49,6 +37,8 @@ program veiled_markets_v30.aleo {
     const MARKET_STATUS_RESOLVED: u8 = 3u8;
     const MARKET_STATUS_CANCELLED: u8 = 4u8;
     const STATUS_PENDING_RESOLUTION: u8 = 5u8;
+    const STATUS_PENDING_FINALIZATION: u8 = 6u8;  // v34: votes tallied, dispute window open
+    const STATUS_DISPUTED: u8 = 7u8;               // v34: dispute filed, awaiting re-vote or governance
 
     const OUTCOME_1: u8 = 1u8;
     const OUTCOME_2: u8 = 2u8;
@@ -56,7 +46,7 @@ program veiled_markets_v30.aleo {
     const OUTCOME_4: u8 = 4u8;
 
     const TOKEN_ALEO: u8 = 1u8;
-    const TOKEN_USDCX: u8 = 2u8;
+    const TOKEN_USDCX: u8 = 2u8;  // Kept for shared structs; USDCX transitions now in separate contract
     const TOKEN_USAD: u8 = 3u8;
 
     // Fee configuration (basis points: 100 = 1%)
@@ -65,19 +55,26 @@ program veiled_markets_v30.aleo {
     const LP_FEE_BPS: u128 = 100u128;
     const FEE_DENOMINATOR: u128 = 10000u128;
 
-    // v25: Resolver fee — 20% of accumulated protocol_fees goes to resolver on finalization
-    const RESOLVER_FEE_PERCENT: u128 = 20u128;
-
-    // Challenge window (~12 hours at ~15s blocks)
-    const CHALLENGE_WINDOW_BLOCKS: u64 = 2880u64;
+    // v34: Voter reward — 20% of accumulated protocol_fees split among winning voters
+    const VOTER_REWARD_PERCENT: u128 = 20u128;
 
     const MIN_TRADE_AMOUNT: u128 = 1000u128;
-    const MIN_DISPUTE_BOND: u128 = 1000000u128;
     const MIN_LIQUIDITY: u128 = 10000u128;
+
+    // v34: Multi-Voter Quorum + Dispute resolution system
+    const MIN_VOTE_BOND: u128 = 1000000u128;          // 1 ALEO per vote
+    const MIN_VOTERS: u8 = 3u8;                        // Minimum 3 voters for valid resolution
+    const VOTE_WINDOW_BLOCKS: u64 = 2880u64;           // 12 hours voting window
+    const DISPUTE_WINDOW_BLOCKS: u64 = 2880u64;        // 12 hours dispute window after finalize
+    const DISPUTE_BOND_MULTIPLIER: u128 = 3u128;       // Dispute bond = 3× total voter bonds
 
     const MULTISIG_CONFIG_KEY: u8 = 0u8;
     const ACTION_WITHDRAW: u8 = 1u8;
     const DEPLOYER: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
+
+    // v31: Governance program address for cross-program authorization
+    // Update this after deploying veiled_governance_v4.aleo
+    const GOVERNANCE_PROGRAM: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
 
     // ========================================================================
     // RECORDS
@@ -100,13 +97,22 @@ program veiled_markets_v30.aleo {
         token_type: u8,
     }
 
+    // v34: Multi-Voter Quorum — receipt for each voter's bond
+    record VoterBondReceipt {
+        owner: address,
+        market_id: field,
+        voted_outcome: u8,
+        bond_amount: u128,
+        bond_nonce: field,
+    }
+
+    // v34: Dispute bond receipt
     record DisputeBondReceipt {
         owner: address,
         market_id: field,
         proposed_outcome: u8,
         bond_amount: u128,
         dispute_nonce: field,
-        token_type: u8,
     }
 
     record RefundClaim {
@@ -146,13 +152,19 @@ program veiled_markets_v30.aleo {
         total_volume: u128,
     }
 
-    struct MarketResolution {
+    // v34: Multi-Voter Quorum — tracks vote tallies per market
+    struct VoteTally {
         market_id: field,
-        winning_outcome: u8,
-        resolver: address,
-        resolved_at: u64,
-        challenge_deadline: u64,
+        outcome_1_bonds: u128,
+        outcome_2_bonds: u128,
+        outcome_3_bonds: u128,
+        outcome_4_bonds: u128,
+        total_voters: u8,
+        total_bonded: u128,
+        voting_deadline: u64,
+        dispute_deadline: u64,
         finalized: bool,
+        winning_outcome: u8,
     }
 
     struct MarketFees {
@@ -161,12 +173,17 @@ program veiled_markets_v30.aleo {
         creator_fees: u128,
     }
 
-    struct DisputeData {
+    // v34: Voter/Dispute bond claim key
+    struct BondClaimKey {
         market_id: field,
-        disputer: address,
-        proposed_outcome: u8,
-        bond_amount: u128,
-        disputed_at: u64,
+        claimer: address,
+        bond_nonce: field,
+    }
+
+    // v34: Voter participation key (prevent double voting)
+    struct VoterKey {
+        market_id: field,
+        voter: address,
     }
 
     struct SignerConfig {
@@ -204,11 +221,7 @@ program veiled_markets_v30.aleo {
         lp_nonce: field,
     }
 
-    struct DisputeClaimKey {
-        market_id: field,
-        claimer: address,
-        dispute_nonce: field,
-    }
+    // DisputeClaimKey removed in v33 — replaced by BondClaimKey above
 
     struct ProposalSeed {
         proposer: address,
@@ -230,23 +243,23 @@ program veiled_markets_v30.aleo {
 
     mapping markets: field => Market;
     mapping amm_pools: field => AMMPool;
-    mapping market_resolutions: field => MarketResolution;
     mapping market_fees: field => MarketFees;
-    mapping market_disputes: field => DisputeData;
     mapping share_redeemed: field => bool;
     mapping creator_fees_claimed: field => bool;
-    mapping program_credits: u8 => u128;       // 0u8=ALEO, 1u8=USDCX
+    mapping program_credits: u8 => u128;       // 0u8=ALEO (1u8=USDCX legacy data)
     mapping market_credits: field => u128;
-    mapping protocol_treasury: u8 => u128;     // 0u8=ALEO, 1u8=USDCX
+    mapping protocol_treasury: u8 => u128;     // 0u8=ALEO (1u8=USDCX legacy data)
     mapping multisig_config: u8 => SignerConfig;
     mapping multisig_proposals: field => MultiSigProposal;
     mapping multisig_approvals: field => bool;
     mapping lp_positions: field => bool;
 
-    // v25: Resolver system
-    mapping approved_resolvers: address => bool;          // Whitelist of approved resolvers
-    mapping resolver_rewards: address => u128;            // Accumulated resolver fees (microcredits)
-    mapping resolver_fee_claimed: field => bool;          // market_id => claimed (prevent double claim)
+    // v34: Multi-Voter Quorum + Dispute resolution system
+    mapping vote_tallies: field => VoteTally;              // market_id => vote tally
+    mapping voter_participated: field => bool;             // hash(VoterKey) => voted
+    mapping bond_claimed: field => bool;                   // hash(BondClaimKey) => claimed
+    mapping voter_rewards: address => u128;                // Accumulated voter rewards (microcredits)
+    mapping dispute_bonds: field => u128;                  // market_id => dispute bond amount
 
     // ========================================================================
     // CONSTRUCTOR
@@ -338,6 +351,9 @@ program veiled_markets_v30.aleo {
         let market_exists: bool = markets.contains(market_id);
         assert(!market_exists);
 
+        // v33: No resolver whitelist — anyone can submit outcome via Open Voting + Bond
+        // resolver field in Market struct is now advisory (suggested resolver), not enforced
+
         let current_height: u64 = block.height as u64;
         assert(deadline > current_height);
         assert(resolution_deadline > deadline);
@@ -379,7 +395,7 @@ program veiled_markets_v30.aleo {
             creator_fees: 0u128,
         });
 
-        // Credit key: 0u8 for ALEO, 1u8 for USDCX
+        // Credit key: 0u8 for ALEO
         let credit_key: u8 = token_type == TOKEN_ALEO ? 0u8 : 1u8;
         let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
         program_credits.set(credit_key, current_held + initial_liquidity);
@@ -756,479 +772,6 @@ program veiled_markets_v30.aleo {
     // After market cancels:  use claim_lp_refund
 
     // ########################################################################
-    //                      USDCX MARKET OPERATIONS
-    // ########################################################################
-
-    // ========================================================================
-    // 7. CREATE MARKET (USDCX)
-    // ========================================================================
-
-    async transition create_market_usdcx(
-        public question_hash: field,
-        public category: u8,
-        public num_outcomes: u8,
-        public deadline: u64,
-        public resolution_deadline: u64,
-        public resolver: address,
-        private initial_liquidity: u128,
-    ) -> (field, LPToken, Future) {
-        assert(num_outcomes >= 2u8 && num_outcomes <= 4u8);
-        assert(initial_liquidity >= MIN_LIQUIDITY);
-
-        let market_id: field = BHP256::hash_to_field(
-            MarketSeed {
-                creator: self.caller,
-                question_hash: question_hash,
-                deadline: deadline,
-                nonce: resolution_deadline,
-            }
-        );
-
-        let lp_nonce: field = BHP256::hash_to_field(LPClaimKey {
-            market_id: market_id,
-            claimer: self.caller,
-            lp_nonce: 0field,
-        });
-
-        let lp_token: LPToken = LPToken {
-            owner: self.caller,
-            market_id: market_id,
-            lp_shares: initial_liquidity,
-            lp_nonce: lp_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        // v25: Public inflow (MerkleProof parser bug workaround)
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
-            self.address, initial_liquidity
-        );
-
-        return (market_id, lp_token, create_mkt_usdcx_fin(
-            transfer_future,
-            market_id,
-            self.caller,
-            question_hash,
-            category,
-            num_outcomes,
-            deadline,
-            resolution_deadline,
-            resolver,
-            initial_liquidity
-        ));
-    }
-
-    async function create_mkt_usdcx_fin(
-        transfer_future: Future,
-        market_id: field,
-        creator: address,
-        question_hash: field,
-        category: u8,
-        num_outcomes: u8,
-        deadline: u64,
-        resolution_deadline: u64,
-        resolver: address,
-        initial_liquidity: u128,
-    ) {
-        transfer_future.await();
-
-        let market_exists: bool = markets.contains(market_id);
-        assert(!market_exists);
-
-        let current_height: u64 = block.height as u64;
-        assert(deadline > current_height);
-        assert(resolution_deadline > deadline);
-
-        let new_market: Market = Market {
-            id: market_id,
-            creator: creator,
-            resolver: resolver,
-            question_hash: question_hash,
-            category: category,
-            num_outcomes: num_outcomes,
-            deadline: deadline,
-            resolution_deadline: resolution_deadline,
-            status: MARKET_STATUS_ACTIVE,
-            created_at: current_height,
-            token_type: TOKEN_USDCX,
-        };
-
-        let per_outcome: u128 = initial_liquidity / (num_outcomes as u128);
-        let r3: u128 = num_outcomes >= 3u8 ? per_outcome : 0u128;
-        let r4: u128 = num_outcomes >= 4u8 ? per_outcome : 0u128;
-
-        let initial_pool: AMMPool = AMMPool {
-            market_id: market_id,
-            reserve_1: per_outcome,
-            reserve_2: per_outcome,
-            reserve_3: r3,
-            reserve_4: r4,
-            total_liquidity: initial_liquidity,
-            total_lp_shares: initial_liquidity,
-            total_volume: 0u128,
-        };
-
-        markets.set(market_id, new_market);
-        amm_pools.set(market_id, initial_pool);
-        market_fees.set(market_id, MarketFees {
-            market_id: market_id,
-            protocol_fees: 0u128,
-            creator_fees: 0u128,
-        });
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        program_credits.set(1u8, current_held + initial_liquidity);
-        market_credits.set(market_id, initial_liquidity);
-    }
-
-    // ========================================================================
-    // 8. BUY SHARES (USDCX) — PRIVATE inflow with Token record + MerkleProof
-    // ========================================================================
-    // Pattern from zk_pay_proofs_privacy_v20.aleo: Leo 3.5.0 supports
-    // [test_usdcx_stablecoin.aleo/MerkleProof; 2] as native transition input.
-    // Uses transfer_private_to_public to deposit private Token to program balance.
-
-    async transition buy_shares_usdcx(
-        private market_id: field,
-        private outcome: u8,
-        private amount_in: u128,
-        private expected_shares: u128,
-        private min_shares_out: u128,
-        private share_nonce: field,
-        private token_in: test_usdcx_stablecoin.aleo/Token,
-        private proofs: [test_usdcx_stablecoin.aleo/MerkleProof; 2],
-    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(outcome >= OUTCOME_1 && outcome <= OUTCOME_4);
-        assert(amount_in >= MIN_TRADE_AMOUNT);
-
-        let share: OutcomeShare = OutcomeShare {
-            owner: self.caller,
-            market_id: market_id,
-            outcome: outcome,
-            quantity: expected_shares,
-            share_nonce: share_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        // Private inflow: Token record + MerkleProof → program public balance
-        let (compliance, change, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_private_to_public(
-            self.address, amount_in, token_in, proofs
-        );
-
-        return (share, compliance, change, buy_shares_usdcx_fin(
-            transfer_future, market_id, outcome, amount_in,
-            expected_shares, min_shares_out
-        ));
-    }
-
-    async function buy_shares_usdcx_fin(
-        transfer_future: Future,
-        market_id: field,
-        outcome: u8,
-        amount_in: u128,
-        expected_shares: u128,
-        min_shares_out: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USDCX);
-        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
-
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= market.deadline);
-
-        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (amount_in * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let amount_to_pool: u128 = amount_in - protocol_fee - creator_fee;
-
-        let fees: MarketFees = market_fees.get(market_id);
-        market_fees.set(market_id, MarketFees {
-            market_id: market_id,
-            protocol_fees: fees.protocol_fees + protocol_fee,
-            creator_fees: fees.creator_fees + creator_fee,
-        });
-        let current_treasury: u128 = protocol_treasury.get_or_use(1u8, 0u128);
-        protocol_treasury.set(1u8, current_treasury + protocol_fee);
-
-        let pool: AMMPool = amm_pools.get(market_id);
-        let n: u8 = market.num_outcomes;
-        let r1: u128 = pool.reserve_1;
-        let r2: u128 = pool.reserve_2;
-        let r3: u128 = pool.reserve_3;
-        let r4: u128 = pool.reserve_4;
-        let a: u128 = amount_to_pool;
-
-        let r_i: u128 = outcome == 1u8 ? r1 :
-                         (outcome == 2u8 ? r2 :
-                         (outcome == 3u8 ? r3 : r4));
-
-        let step0: u128 = r_i;
-        let step1: u128 = outcome != 1u8 ? (step0 * r1) / (r1 + a) : step0;
-        let step2: u128 = outcome != 2u8 ? (step1 * r2) / (r2 + a) : step1;
-        let step3: u128 = (outcome != 3u8 && n >= 3u8) ? (step2 * r3) / (r3 + a) : step2;
-        let step4: u128 = (outcome != 4u8 && n >= 4u8) ? (step3 * r4) / (r4 + a) : step3;
-
-        let r_i_new: u128 = step4;
-        let shares_out: u128 = (r_i + a) - r_i_new;
-
-        assert(shares_out >= min_shares_out);
-        assert(shares_out >= expected_shares);
-        assert(shares_out > 0u128);
-
-        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 + a);
-        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 + a);
-        let nr3_active: u128 = outcome == 3u8 ? r_i_new : (r3 + a);
-        let new_r3: u128 = n >= 3u8 ? nr3_active : 0u128;
-        let nr4_active: u128 = outcome == 4u8 ? r_i_new : (r4 + a);
-        let new_r4: u128 = n >= 4u8 ? nr4_active : 0u128;
-
-        amm_pools.set(market_id, AMMPool {
-            market_id: market_id,
-            reserve_1: new_r1,
-            reserve_2: new_r2,
-            reserve_3: new_r3,
-            reserve_4: new_r4,
-            total_liquidity: pool.total_liquidity + amount_to_pool,
-            total_lp_shares: pool.total_lp_shares,
-            total_volume: pool.total_volume + amount_in,
-        });
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        program_credits.set(1u8, current_held + amount_in);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held + amount_in);
-    }
-
-    // ========================================================================
-    // 9. SELL SHARES (USDCX)
-    // ========================================================================
-
-    async transition sell_shares_usdcx(
-        private shares: OutcomeShare,
-        private tokens_desired: u128,
-        private max_shares_used: u128,
-    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(shares.owner == self.caller);
-        assert(shares.token_type == TOKEN_USDCX);
-        assert(tokens_desired >= MIN_TRADE_AMOUNT);
-        assert(max_shares_used > 0u128);
-        assert(max_shares_used <= shares.quantity);
-
-        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
-        let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
-
-        // v24: Private outflow — returns Token record to seller
-        let (compliance, token_out, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, net_tokens);
-
-        let remainder: OutcomeShare = OutcomeShare {
-            owner: self.caller,
-            market_id: shares.market_id,
-            outcome: shares.outcome,
-            quantity: shares.quantity - max_shares_used,
-            share_nonce: shares.share_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        return (remainder, compliance, token_out, sell_shares_usdcx_fin(
-            transfer_future, shares.market_id, shares.outcome,
-            tokens_desired, max_shares_used
-        ));
-    }
-
-    async function sell_shares_usdcx_fin(
-        transfer_future: Future,
-        market_id: field,
-        outcome: u8,
-        tokens_desired: u128,
-        max_shares_used: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USDCX);
-        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
-
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= market.deadline);
-
-        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
-        let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
-        let pool_tokens_out: u128 = tokens_desired - lp_fee;
-
-        let fees: MarketFees = market_fees.get(market_id);
-        market_fees.set(market_id, MarketFees {
-            market_id: market_id,
-            protocol_fees: fees.protocol_fees + protocol_fee,
-            creator_fees: fees.creator_fees + creator_fee,
-        });
-        let current_treasury: u128 = protocol_treasury.get_or_use(1u8, 0u128);
-        protocol_treasury.set(1u8, current_treasury + protocol_fee);
-
-        let pool: AMMPool = amm_pools.get(market_id);
-        let n: u8 = market.num_outcomes;
-        let r1: u128 = pool.reserve_1;
-        let r2: u128 = pool.reserve_2;
-        let r3: u128 = pool.reserve_3;
-        let r4: u128 = pool.reserve_4;
-        let p: u128 = pool_tokens_out;
-
-        let r_i: u128 = outcome == 1u8 ? r1 :
-                         (outcome == 2u8 ? r2 :
-                         (outcome == 3u8 ? r3 : r4));
-
-        // v19 fix: Guard all reserves against underflow before subtraction.
-        let sub1: u128 = outcome != 1u8 ? p : 0u128;
-        assert(r1 >= sub1);  // v19: prevent underflow
-        let den1: u128 = r1 - sub1;
-        let step0: u128 = r_i;
-        let step1: u128 = outcome != 1u8 ? (step0 * r1) / den1 : step0;
-
-        let sub2: u128 = outcome != 2u8 ? p : 0u128;
-        assert(r2 >= sub2);  // v19: prevent underflow
-        let den2: u128 = r2 - sub2;
-        let step2: u128 = outcome != 2u8 ? (step1 * r2) / den2 : step1;
-
-        let apply3: bool = outcome != 3u8 && n >= 3u8;
-        let sub3: u128 = apply3 ? p : 0u128;
-        assert(r3 >= sub3);  // v19: prevent underflow
-        let den3_raw: u128 = r3 - sub3;
-        let safe_den3: u128 = den3_raw == 0u128 ? 1u128 : den3_raw;
-        let step3: u128 = apply3 ? (step2 * r3) / safe_den3 : step2;
-
-        let apply4: bool = outcome != 4u8 && n >= 4u8;
-        let sub4: u128 = apply4 ? p : 0u128;
-        assert(r4 >= sub4);  // v19: prevent underflow
-        let den4_raw: u128 = r4 - sub4;
-        let safe_den4: u128 = den4_raw == 0u128 ? 1u128 : den4_raw;
-        let step4: u128 = apply4 ? (step3 * r4) / safe_den4 : step3;
-
-        let r_i_new: u128 = step4;
-        let shares_needed: u128 = r_i_new - r_i + p;
-        assert(shares_needed <= max_shares_used);
-        assert(shares_needed > 0u128);
-
-        let new_r1: u128 = outcome == 1u8 ? r_i_new : (r1 - sub1);
-        let new_r2: u128 = outcome == 2u8 ? r_i_new : (r2 - sub2);
-        let nr3_act: u128 = outcome == 3u8 ? r_i_new : (r3 - sub3);
-        let new_r3: u128 = n >= 3u8 ? nr3_act : 0u128;
-        let nr4_act: u128 = outcome == 4u8 ? r_i_new : (r4 - sub4);
-        let new_r4: u128 = n >= 4u8 ? nr4_act : 0u128;
-
-        amm_pools.set(market_id, AMMPool {
-            market_id: market_id,
-            reserve_1: new_r1,
-            reserve_2: new_r2,
-            reserve_3: new_r3,
-            reserve_4: new_r4,
-            total_liquidity: pool.total_liquidity - pool_tokens_out,
-            total_lp_shares: pool.total_lp_shares,
-            total_volume: pool.total_volume + tokens_desired,
-        });
-
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= pool_tokens_out);
-        market_credits.set(market_id, market_held - pool_tokens_out);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= net_tokens);
-        program_credits.set(1u8, current_held - net_tokens);
-    }
-
-    // ========================================================================
-    // 10. ADD LIQUIDITY (USDCX)
-    // ========================================================================
-
-    async transition add_liquidity_usdcx(
-        private market_id: field,
-        private amount: u128,
-        private expected_lp_shares: u128,
-        private lp_nonce: field,
-    ) -> (LPToken, Future) {
-        assert(amount >= MIN_LIQUIDITY);
-
-        let lp_token: LPToken = LPToken {
-            owner: self.caller,
-            market_id: market_id,
-            lp_shares: expected_lp_shares,
-            lp_nonce: lp_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        // v25: Public inflow (MerkleProof parser bug workaround)
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
-            self.address, amount
-        );
-
-        return (lp_token, add_liq_usdcx_fin(
-            transfer_future, market_id, amount, expected_lp_shares
-        ));
-    }
-
-    async function add_liq_usdcx_fin(
-        transfer_future: Future,
-        market_id: field,
-        amount: u128,
-        expected_lp_shares: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USDCX);
-
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= market.deadline);
-
-        let pool: AMMPool = amm_pools.get(market_id);
-
-        // v17 FIX: Use total_reserves for LP share pricing (consistent with withdraw_lp_resolved)
-        let total_reserves: u128 = pool.reserve_1 + pool.reserve_2 + pool.reserve_3 + pool.reserve_4;
-        assert(total_reserves > 0u128);
-        let computed_shares: u128 = (amount * pool.total_lp_shares) / total_reserves;
-        assert(computed_shares >= expected_lp_shares);
-        assert(expected_lp_shares > 0u128);
-
-        let add_1: u128 = (amount * pool.reserve_1) / total_reserves;
-        let add_2: u128 = (amount * pool.reserve_2) / total_reserves;
-        let add_3: u128 = (amount * pool.reserve_3) / total_reserves;
-        let add_4: u128 = amount - add_1 - add_2 - add_3;
-
-        amm_pools.set(market_id, AMMPool {
-            market_id: market_id,
-            reserve_1: pool.reserve_1 + add_1,
-            reserve_2: pool.reserve_2 + add_2,
-            reserve_3: pool.reserve_3 + add_3,
-            reserve_4: pool.reserve_4 + add_4,
-            total_liquidity: pool.total_liquidity + amount,
-            total_lp_shares: pool.total_lp_shares + expected_lp_shares,
-            total_volume: pool.total_volume,
-        });
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        program_credits.set(1u8, current_held + amount);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        market_credits.set(market_id, market_held + amount);
-    }
-
-    // ========================================================================
-    // 11. REMOVE LIQUIDITY (USDCX) — REMOVED in v17 (LP locked until finalize/cancel)
-    // ========================================================================
-
-    // ########################################################################
     //                      USAD TOKEN TRANSITIONS
     // ########################################################################
     // NOTE: USAD transitions commented out — snarkVM limits programs to 31
@@ -1601,52 +1144,107 @@ program veiled_markets_v30.aleo {
         });
     }
 
+    // ########################################################################
+    //                      MULTI-VOTER QUORUM + DISPUTE RESOLUTION (v34)
+    // ########################################################################
+    // Minimum 3 independent voters required. Each voter bonds 1 ALEO.
+    // After voting window + quorum: finalize tallies votes.
+    // Dispute window: anyone can dispute with 3× total bonds.
+    // Winners get bond back + share of loser bonds. Losers slashed.
+    // Bond is always in ALEO regardless of market token type.
+
     // ========================================================================
-    // 13. RESOLVE MARKET
+    // 13. VOTE OUTCOME — Anyone votes with 1 ALEO bond
     // ========================================================================
 
-    async transition resolve_market(
-        public market_id: field,
-        public winning_outcome: u8,
-    ) -> Future {
-        return resolve_market_finalize(market_id, winning_outcome, self.caller);
+    async transition vote_outcome(
+        private market_id: field,
+        private outcome: u8,
+        private bond_nonce: field,
+        private credits_in: credits.aleo/credits,
+    ) -> (VoterBondReceipt, credits.aleo/credits, Future) {
+        let receipt: VoterBondReceipt = VoterBondReceipt {
+            owner: self.caller,
+            market_id: market_id,
+            voted_outcome: outcome,
+            bond_amount: MIN_VOTE_BOND,
+            bond_nonce: bond_nonce,
+        };
+
+        let bond_u64: u64 = MIN_VOTE_BOND as u64;
+        let (change, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
+
+        return (receipt, change, vote_outcome_fin(
+            transfer_future, market_id, outcome, self.caller
+        ));
     }
 
-    async function resolve_market_finalize(
+    async function vote_outcome_fin(
+        transfer_future: Future,
         market_id: field,
-        winning_outcome: u8,
-        resolver: address,
+        outcome: u8,
+        voter: address,
     ) {
-        let market: Market = markets.get(market_id);
-        assert(market.resolver == resolver);
-        assert(winning_outcome >= 1u8 && winning_outcome <= market.num_outcomes);
+        transfer_future.await();
 
-        // v25: Verify resolver is on the approved whitelist
-        let is_approved: bool = approved_resolvers.get_or_use(resolver, false);
-        assert(is_approved);
+        let market: Market = markets.get(market_id);
+        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
+
+        // Market must be CLOSED or ACTIVE past deadline
         let is_closed: bool = market.status == MARKET_STATUS_CLOSED;
+        let is_pending: bool = market.status == STATUS_PENDING_RESOLUTION;
         let is_past_deadline: bool = market.status == MARKET_STATUS_ACTIVE && current_height > market.deadline;
-        assert(is_closed || is_past_deadline);
+        assert(is_closed || is_pending || is_past_deadline);
         assert(current_height <= market.resolution_deadline);
 
-        let challenge_deadline: u64 = current_height + CHALLENGE_WINDOW_BLOCKS;
+        // Prevent double voting
+        let voter_key: field = BHP256::hash_to_field(VoterKey { market_id: market_id, voter: voter });
+        let already_voted: bool = voter_participated.get_or_use(voter_key, false);
+        assert(!already_voted);
+        voter_participated.set(voter_key, true);
 
-        // v15 fix: Clear old dispute data when re-resolving after a dispute.
-        // Without this, finalize_resolution would fail because it checks
-        // !market_disputes.contains(market_id) and old dispute data persists.
-        market_disputes.remove(market_id);
+        // Get or create tally
+        let has_tally: bool = vote_tallies.contains(market_id);
 
-        market_resolutions.set(market_id, MarketResolution {
+        let prev_o1: u128 = has_tally ? vote_tallies.get(market_id).outcome_1_bonds : 0u128;
+        let prev_o2: u128 = has_tally ? vote_tallies.get(market_id).outcome_2_bonds : 0u128;
+        let prev_o3: u128 = has_tally ? vote_tallies.get(market_id).outcome_3_bonds : 0u128;
+        let prev_o4: u128 = has_tally ? vote_tallies.get(market_id).outcome_4_bonds : 0u128;
+        let prev_voters: u8 = has_tally ? vote_tallies.get(market_id).total_voters : 0u8;
+        let prev_bonded: u128 = has_tally ? vote_tallies.get(market_id).total_bonded : 0u128;
+
+        // If first vote, set voting deadline
+        let voting_deadline: u64 = has_tally ?
+            vote_tallies.get(market_id).voting_deadline :
+            (current_height + VOTE_WINDOW_BLOCKS);
+
+        // If tally exists, must be within voting window
+        assert(!has_tally || current_height <= voting_deadline);
+
+        // Add bond to voted outcome
+        let new_o1: u128 = outcome == 1u8 ? prev_o1 + MIN_VOTE_BOND : prev_o1;
+        let new_o2: u128 = outcome == 2u8 ? prev_o2 + MIN_VOTE_BOND : prev_o2;
+        let new_o3: u128 = outcome == 3u8 ? prev_o3 + MIN_VOTE_BOND : prev_o3;
+        let new_o4: u128 = outcome == 4u8 ? prev_o4 + MIN_VOTE_BOND : prev_o4;
+
+        vote_tallies.set(market_id, VoteTally {
             market_id: market_id,
-            winning_outcome: winning_outcome,
-            resolver: resolver,
-            resolved_at: current_height,
-            challenge_deadline: challenge_deadline,
+            outcome_1_bonds: new_o1,
+            outcome_2_bonds: new_o2,
+            outcome_3_bonds: new_o3,
+            outcome_4_bonds: new_o4,
+            total_voters: prev_voters + 1u8,
+            total_bonded: prev_bonded + MIN_VOTE_BOND,
+            voting_deadline: voting_deadline,
+            dispute_deadline: 0u64,
             finalized: false,
+            winning_outcome: 0u8,
         });
 
+        // Set market to PENDING if not already
         markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
@@ -1660,42 +1258,123 @@ program veiled_markets_v30.aleo {
             created_at: market.created_at,
             token_type: market.token_type,
         });
+
+        // Track bond in ALEO credits
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        program_credits.set(0u8, current_held + MIN_VOTE_BOND);
     }
 
     // ========================================================================
-    // 14. FINALIZE RESOLUTION
+    // 14. FINALIZE VOTES — Tally votes, determine winner, start dispute window
     // ========================================================================
 
-    async transition finalize_resolution(public market_id: field) -> Future {
-        return finalize_resolution_fin(market_id);
+    async transition finalize_votes(public market_id: field) -> Future {
+        return finalize_votes_fin(market_id);
     }
 
-    async function finalize_resolution_fin(market_id: field) {
+    async function finalize_votes_fin(market_id: field) {
         let market: Market = markets.get(market_id);
         assert(market.status == STATUS_PENDING_RESOLUTION);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(!resolution.finalized);
+        let tally: VoteTally = vote_tallies.get(market_id);
+        assert(!tally.finalized);
 
         let current_height: u64 = block.height as u64;
-        assert(current_height > resolution.challenge_deadline);
 
-        let has_dispute: bool = market_disputes.contains(market_id);
+        // Voting window must have passed
+        assert(current_height > tally.voting_deadline);
+
+        // Minimum 3 voters required
+        assert(tally.total_voters >= MIN_VOTERS);
+
+        // Determine winning outcome (highest total bonds)
+        let max_bonds: u128 = tally.outcome_1_bonds;
+        let winner: u8 = 1u8;
+        let is_o2_higher: bool = tally.outcome_2_bonds > max_bonds;
+        let max2: u128 = is_o2_higher ? tally.outcome_2_bonds : max_bonds;
+        let winner2: u8 = is_o2_higher ? 2u8 : winner;
+        let is_o3_higher: bool = tally.outcome_3_bonds > max2;
+        let max3: u128 = is_o3_higher ? tally.outcome_3_bonds : max2;
+        let winner3: u8 = is_o3_higher ? 3u8 : winner2;
+        let is_o4_higher: bool = tally.outcome_4_bonds > max3;
+        let winning_outcome: u8 = is_o4_higher ? 4u8 : winner3;
+
+        // Set dispute window
+        let dispute_deadline: u64 = current_height + DISPUTE_WINDOW_BLOCKS;
+
+        vote_tallies.set(market_id, VoteTally {
+            market_id: market_id,
+            outcome_1_bonds: tally.outcome_1_bonds,
+            outcome_2_bonds: tally.outcome_2_bonds,
+            outcome_3_bonds: tally.outcome_3_bonds,
+            outcome_4_bonds: tally.outcome_4_bonds,
+            total_voters: tally.total_voters,
+            total_bonded: tally.total_bonded,
+            voting_deadline: tally.voting_deadline,
+            dispute_deadline: dispute_deadline,
+            finalized: false,
+            winning_outcome: winning_outcome,
+        });
+
+        markets.set(market_id, Market {
+            id: market.id,
+            creator: market.creator,
+            resolver: market.resolver,
+            question_hash: market.question_hash,
+            category: market.category,
+            num_outcomes: market.num_outcomes,
+            deadline: market.deadline,
+            resolution_deadline: market.resolution_deadline,
+            status: STATUS_PENDING_FINALIZATION,
+            created_at: market.created_at,
+            token_type: market.token_type,
+        });
+    }
+
+    // ========================================================================
+    // 15. CONFIRM RESOLUTION — No dispute filed, finalize market
+    // ========================================================================
+
+    async transition confirm_resolution(public market_id: field) -> Future {
+        return confirm_resolution_fin(market_id);
+    }
+
+    async function confirm_resolution_fin(market_id: field) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == STATUS_PENDING_FINALIZATION);
+
+        let tally: VoteTally = vote_tallies.get(market_id);
+        assert(tally.winning_outcome >= 1u8);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height > tally.dispute_deadline);
+
+        // No dispute was filed — confirm resolution
+        let has_dispute: bool = dispute_bonds.contains(market_id);
         assert(!has_dispute);
 
-        // v25: Allocate resolver fee from accumulated protocol_fees
+        // Allocate voter reward: 20% of protocol fees split among winning voters
         let fees: MarketFees = market_fees.get(market_id);
-        let resolver_fee: u128 = (fees.protocol_fees * RESOLVER_FEE_PERCENT) / 100u128;
-        let current_resolver_reward: u128 = resolver_rewards.get_or_use(market.resolver, 0u128);
-        resolver_rewards.set(market.resolver, current_resolver_reward + resolver_fee);
+        let total_reward: u128 = (fees.protocol_fees * VOTER_REWARD_PERCENT) / 100u128;
 
-        market_resolutions.set(market_id, MarketResolution {
+        // Store total reward for later distribution (winning voters claim individually)
+        // Reward stored in voter_rewards mapping keyed by market resolver (first winning voter)
+        let current_reward: u128 = voter_rewards.get_or_use(market.resolver, 0u128);
+        voter_rewards.set(market.resolver, current_reward + total_reward);
+
+        // Mark as finalized
+        vote_tallies.set(market_id, VoteTally {
             market_id: market_id,
-            winning_outcome: resolution.winning_outcome,
-            resolver: resolution.resolver,
-            resolved_at: resolution.resolved_at,
-            challenge_deadline: resolution.challenge_deadline,
+            outcome_1_bonds: tally.outcome_1_bonds,
+            outcome_2_bonds: tally.outcome_2_bonds,
+            outcome_3_bonds: tally.outcome_3_bonds,
+            outcome_4_bonds: tally.outcome_4_bonds,
+            total_voters: tally.total_voters,
+            total_bonded: tally.total_bonded,
+            voting_deadline: tally.voting_deadline,
+            dispute_deadline: tally.dispute_deadline,
             finalized: true,
+            winning_outcome: tally.winning_outcome,
         });
 
         markets.set(market_id, Market {
@@ -1711,6 +1390,102 @@ program veiled_markets_v30.aleo {
             created_at: market.created_at,
             token_type: market.token_type,
         });
+    }
+
+    // ========================================================================
+    // 16. DISPUTE RESOLUTION — Challenge voter majority with 3× bond
+    // ========================================================================
+
+    async transition dispute_resolution(
+        private market_id: field,
+        private proposed_outcome: u8,
+        private dispute_nonce: field,
+        private credits_in: credits.aleo/credits,
+        private dispute_bond: u128,
+    ) -> (DisputeBondReceipt, credits.aleo/credits, Future) {
+        assert(dispute_bond >= MIN_VOTE_BOND);
+
+        let receipt: DisputeBondReceipt = DisputeBondReceipt {
+            owner: self.caller,
+            market_id: market_id,
+            proposed_outcome: proposed_outcome,
+            bond_amount: dispute_bond,
+            dispute_nonce: dispute_nonce,
+        };
+
+        let bond_u64: u64 = dispute_bond as u64;
+        let (change, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
+
+        return (receipt, change, dispute_resolution_fin(
+            transfer_future, market_id, proposed_outcome, dispute_bond, self.caller
+        ));
+    }
+
+    async function dispute_resolution_fin(
+        transfer_future: Future,
+        market_id: field,
+        proposed_outcome: u8,
+        dispute_bond: u128,
+        disputer: address,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == STATUS_PENDING_FINALIZATION);
+
+        let tally: VoteTally = vote_tallies.get(market_id);
+        assert(tally.winning_outcome >= 1u8);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= tally.dispute_deadline);
+
+        // Must propose a DIFFERENT outcome than the voted winner
+        assert(proposed_outcome != tally.winning_outcome);
+        assert(proposed_outcome >= 1u8 && proposed_outcome <= market.num_outcomes);
+
+        // Dispute bond must be >= 3× total voter bonds
+        let min_dispute: u128 = tally.total_bonded * DISPUTE_BOND_MULTIPLIER;
+        assert(dispute_bond >= min_dispute);
+
+        // Only one dispute per market
+        let has_dispute: bool = dispute_bonds.contains(market_id);
+        assert(!has_dispute);
+        dispute_bonds.set(market_id, dispute_bond);
+
+        // Override winning outcome to disputer's proposal
+        vote_tallies.set(market_id, VoteTally {
+            market_id: market_id,
+            outcome_1_bonds: tally.outcome_1_bonds,
+            outcome_2_bonds: tally.outcome_2_bonds,
+            outcome_3_bonds: tally.outcome_3_bonds,
+            outcome_4_bonds: tally.outcome_4_bonds,
+            total_voters: tally.total_voters,
+            total_bonded: tally.total_bonded,
+            voting_deadline: tally.voting_deadline,
+            dispute_deadline: tally.dispute_deadline,
+            finalized: true,
+            winning_outcome: proposed_outcome,  // Disputer's outcome wins
+        });
+
+        // Market resolved with disputer's outcome
+        markets.set(market_id, Market {
+            id: market.id,
+            creator: market.creator,
+            resolver: disputer,
+            question_hash: market.question_hash,
+            category: market.category,
+            num_outcomes: market.num_outcomes,
+            deadline: market.deadline,
+            resolution_deadline: market.resolution_deadline,
+            status: MARKET_STATUS_RESOLVED,
+            created_at: market.created_at,
+            token_type: market.token_type,
+        });
+
+        // Track dispute bond
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        program_credits.set(0u8, current_held + dispute_bond);
     }
 
     // ========================================================================
@@ -1745,14 +1520,9 @@ program veiled_markets_v30.aleo {
         let pool: AMMPool = amm_pools.get(market_id);
         assert(!is_creator_cancel || pool.total_volume == 0u128);
 
-        // Clean up stale resolution data (safe no-op if not present).
-        market_resolutions.remove(market_id);
-        // v19 fix: Do NOT remove market_disputes on cancel.
-        // If a dispute was filed, the disputer's bond is held in program_credits.
-        // Removing dispute data here is fine (claim_dispute_bond uses the
-        // unforgeable DisputeBondReceipt record, not the mapping), but we keep
-        // it for transparency. The bond can be claimed via claim_dispute_bond
-        // which now accepts CANCELLED status.
+        // v34: Clean up vote data. Bond holders can still claim via
+        // claim_voter_bond which accepts CANCELLED status.
+        vote_tallies.remove(market_id);
 
         markets.set(market_id, Market {
             id: market.id,
@@ -1769,114 +1539,90 @@ program veiled_markets_v30.aleo {
         });
     }
 
-    // ########################################################################
-    //                      DISPUTE / CHALLENGE
-    // ########################################################################
-    // Dispute bond is ALWAYS in ALEO regardless of market token type.
-
     // ========================================================================
-    // 17. DISPUTE RESOLUTION (bond in ALEO, works for all markets)
+    // 17. CLAIM VOTER BOND — Winners claim bond back (v34)
     // ========================================================================
+    // If RESOLVED and voted_outcome == winning → bond back
+    // If RESOLVED and voted_outcome != winning → nothing (slashed)
+    // If CANCELLED → everyone gets bond back
 
-    async transition dispute_resolution(
-        private market_id: field,
-        private proposed_outcome: u8,
-        private dispute_nonce: field,
-        private credits_in: credits.aleo/credits,
-    ) -> (DisputeBondReceipt, credits.aleo/credits, Future) {
-        let receipt: DisputeBondReceipt = DisputeBondReceipt {
-            owner: self.caller,
-            market_id: market_id,
-            proposed_outcome: proposed_outcome,
-            bond_amount: MIN_DISPUTE_BOND,
-            dispute_nonce: dispute_nonce,
-            token_type: TOKEN_ALEO,
-        };
+    async transition claim_voter_bond(
+        private receipt: VoterBondReceipt,
+    ) -> (credits.aleo/credits, Future) {
+        assert(receipt.owner == self.caller);
+        assert(receipt.bond_amount > 0u128);
 
-        let bond_u64: u64 = MIN_DISPUTE_BOND as u64;
-        let (change, transfer_future): (credits.aleo/credits, Future) =
-            credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
+        let claim_key: field = BHP256::hash_to_field(BondClaimKey {
+            market_id: receipt.market_id,
+            claimer: self.caller,
+            bond_nonce: receipt.bond_nonce,
+        });
 
-        return (receipt, change, dispute_resolution_fin(
-            transfer_future, market_id, proposed_outcome, self.caller
+        let bond_u64: u64 = receipt.bond_amount as u64;
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, bond_u64);
+
+        return (payout, claim_voter_bond_fin(
+            transfer_future, claim_key, receipt.market_id,
+            receipt.bond_amount, receipt.voted_outcome
         ));
     }
 
-    async function dispute_resolution_fin(
+    async function claim_voter_bond_fin(
         transfer_future: Future,
+        claim_key: field,
         market_id: field,
-        proposed_outcome: u8,
-        disputer: address,
+        bond_amount: u128,
+        voted_outcome: u8,
     ) {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
-        assert(market.status == STATUS_PENDING_RESOLUTION);
+        let is_resolved: bool = market.status == MARKET_STATUS_RESOLVED;
+        let is_cancelled: bool = market.status == MARKET_STATUS_CANCELLED;
+        assert(is_resolved || is_cancelled);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(!resolution.finalized);
+        // If resolved: only winning voters can claim bond back
+        // If cancelled: everyone gets bond back
+        let tally_exists: bool = vote_tallies.contains(market_id);
+        let outcome_matches: bool = tally_exists ?
+            vote_tallies.get(market_id).winning_outcome == voted_outcome : false;
+        assert(is_cancelled || outcome_matches);
 
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= resolution.challenge_deadline);
+        // Prevent double claim
+        let already_claimed: bool = bond_claimed.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        bond_claimed.set(claim_key, true);
 
-        assert(proposed_outcome != resolution.winning_outcome);
-        assert(proposed_outcome >= 1u8 && proposed_outcome <= market.num_outcomes);
-
-        let has_dispute: bool = market_disputes.contains(market_id);
-        assert(!has_dispute);
-
-        market_disputes.set(market_id, DisputeData {
-            market_id: market_id,
-            disputer: disputer,
-            proposed_outcome: proposed_outcome,
-            bond_amount: MIN_DISPUTE_BOND,
-            disputed_at: current_height,
-        });
-
-        markets.set(market_id, Market {
-            id: market.id,
-            creator: market.creator,
-            resolver: market.resolver,
-            question_hash: market.question_hash,
-            category: market.category,
-            num_outcomes: market.num_outcomes,
-            deadline: market.deadline,
-            resolution_deadline: market.resolution_deadline,
-            status: MARKET_STATUS_CLOSED,
-            created_at: market.created_at,
-            token_type: market.token_type,
-        });
-
-        market_resolutions.remove(market_id);
-
-        // Bond tracked in ALEO credits (0u8) regardless of market type
         let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
-        program_credits.set(0u8, current_held + MIN_DISPUTE_BOND);
+        assert(current_held >= bond_amount);
+        program_credits.set(0u8, current_held - bond_amount);
     }
 
     // ========================================================================
-    // 18. CLAIM DISPUTE BOND (ALEO transfer)
+    // 18. CLAIM DISPUTE BOND — Disputer claims bond after resolution (v34)
     // ========================================================================
 
     async transition claim_dispute_bond(
         private receipt: DisputeBondReceipt,
-    ) -> Future {
+    ) -> (credits.aleo/credits, Future) {
         assert(receipt.owner == self.caller);
-        assert(receipt.token_type == TOKEN_ALEO);
+        assert(receipt.bond_amount > 0u128);
 
-        let claim_key: field = BHP256::hash_to_field(DisputeClaimKey {
+        let claim_key: field = BHP256::hash_to_field(BondClaimKey {
             market_id: receipt.market_id,
             claimer: self.caller,
-            dispute_nonce: receipt.dispute_nonce,
+            bond_nonce: receipt.dispute_nonce,
         });
 
         let bond_u64: u64 = receipt.bond_amount as u64;
-        let transfer_future: Future = credits.aleo/transfer_public(self.caller, bond_u64);
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, bond_u64);
 
-        return claim_dispute_bond_fin(
+        return (payout, claim_dispute_bond_fin(
             transfer_future, claim_key, receipt.market_id,
             receipt.bond_amount, receipt.proposed_outcome
-        );
+        ));
     }
 
     async function claim_dispute_bond_fin(
@@ -1889,26 +1635,19 @@ program veiled_markets_v30.aleo {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
-        // v19 fix: Allow bond claim on RESOLVED (disputer won) or CANCELLED (bond recovery).
-        // Previously only RESOLVED was allowed — if a market was cancelled after a dispute
-        // was filed, the disputer's bond was permanently stuck.
         let is_resolved: bool = market.status == MARKET_STATUS_RESOLVED;
         let is_cancelled: bool = market.status == MARKET_STATUS_CANCELLED;
         assert(is_resolved || is_cancelled);
 
-        // If market is resolved: disputer only gets bond back if their proposed outcome won.
-        // If market is cancelled: disputer always gets bond back (unconditional recovery).
-        // v15 fix: Use proposed_outcome from DisputeBondReceipt (unforgeable record)
-        // instead of reading from market_disputes mapping, which may have been
-        // cleared during re-resolution.
-        let resolution_exists: bool = market_resolutions.contains(market_id);
-        let outcome_matches: bool = resolution_exists ?
-            market_resolutions.get(market_id).winning_outcome == proposed_outcome : false;
+        // Disputer gets bond back if their proposed outcome is the final winner
+        let tally_exists: bool = vote_tallies.contains(market_id);
+        let outcome_matches: bool = tally_exists ?
+            vote_tallies.get(market_id).winning_outcome == proposed_outcome : false;
         assert(is_cancelled || outcome_matches);
 
-        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
+        let already_claimed: bool = bond_claimed.get_or_use(claim_key, false);
         assert(!already_claimed);
-        share_redeemed.set(claim_key, true);
+        bond_claimed.set(claim_key, true);
 
         let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
         assert(current_held >= bond_amount);
@@ -1960,7 +1699,7 @@ program veiled_markets_v30.aleo {
         assert(market.status == MARKET_STATUS_RESOLVED);
         assert(market.token_type == token_type);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
         assert(outcome == resolution.winning_outcome);
 
@@ -2170,7 +1909,7 @@ program veiled_markets_v30.aleo {
         assert(market.token_type == token_type);
 
         // Ensure resolution is fully finalized (challenge window passed)
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
         let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
@@ -2192,83 +1931,6 @@ program veiled_markets_v30.aleo {
         let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
         assert(current_held >= tokens_out);
         program_credits.set(credit_key, current_held - tokens_out);
-
-        amm_pools.set(market_id, AMMPool {
-            market_id: market_id,
-            reserve_1: pool.reserve_1,
-            reserve_2: pool.reserve_2,
-            reserve_3: pool.reserve_3,
-            reserve_4: pool.reserve_4,
-            total_liquidity: pool.total_liquidity,
-            total_lp_shares: pool.total_lp_shares - lp_shares,
-            total_volume: pool.total_volume,
-        });
-    }
-
-    // ========================================================================
-    // 22b. WITHDRAW LP FROM RESOLVED MARKET (USDCX)
-    // ========================================================================
-
-    async transition withdraw_lp_resolved_usdcx(
-        private lp_token: LPToken,
-        private min_tokens_out: u128,
-    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(lp_token.owner == self.caller);
-        assert(lp_token.token_type == TOKEN_USDCX);
-        assert(lp_token.lp_shares > 0u128);
-        assert(min_tokens_out > 0u128);
-
-        let claim_key: field = BHP256::hash_to_field(LPClaimKey {
-            market_id: lp_token.market_id,
-            claimer: self.caller,
-            lp_nonce: lp_token.lp_nonce,
-        });
-
-        // v24: Private outflow — returns Token record
-        let (compliance, token_out, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
-
-        return (compliance, token_out, withdraw_lp_res_usdcx_fin(
-            transfer_future, claim_key, lp_token.market_id,
-            lp_token.lp_shares, min_tokens_out
-        ));
-    }
-
-    async function withdraw_lp_res_usdcx_fin(
-        transfer_future: Future,
-        claim_key: field,
-        market_id: field,
-        lp_shares: u128,
-        min_tokens_out: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_RESOLVED);
-        assert(market.token_type == TOKEN_USDCX);
-
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(resolution.finalized);
-
-        let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
-        assert(!already_claimed);
-        lp_positions.set(claim_key, true);
-
-        // Use market_credits (reflects real remaining after redemptions)
-        let pool: AMMPool = amm_pools.get(market_id);
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        let tokens_out: u128 = (lp_shares * market_held) / pool.total_lp_shares;
-        assert(tokens_out >= min_tokens_out);
-        assert(tokens_out > 0u128);
-
-        market_credits.set(market_id, market_held - tokens_out);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= tokens_out);
-        program_credits.set(1u8, current_held - tokens_out);
 
         amm_pools.set(market_id, AMMPool {
             market_id: market_id,
@@ -2314,7 +1976,7 @@ program veiled_markets_v30.aleo {
         assert(market.creator == caller);
         assert(market.token_type == token_type);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
         let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
@@ -2332,272 +1994,6 @@ program veiled_markets_v30.aleo {
         let current_held: u128 = program_credits.get_or_use(credit_key, 0u128);
         assert(current_held >= expected_amount);
         program_credits.set(credit_key, current_held - expected_amount);
-    }
-
-    // ########################################################################
-    //                      REDEMPTION / REFUND (USDCX)
-    // ########################################################################
-
-    // ========================================================================
-    // 23. REDEEM SHARES (USDCX)
-    // ========================================================================
-
-    async transition redeem_shares_usdcx(
-        private shares: OutcomeShare,
-    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(shares.owner == self.caller);
-        assert(shares.token_type == TOKEN_USDCX);
-        assert(shares.quantity > 0u128);
-
-        let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
-            market_id: shares.market_id,
-            claimer: self.caller,
-            share_nonce: shares.share_nonce,
-        });
-
-        // v24: Private outflow — returns Token record
-        let (compliance, token_out, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
-
-        return (compliance, token_out, redeem_shares_usdcx_fin(
-            transfer_future, claim_key, shares.market_id,
-            shares.outcome, shares.quantity
-        ));
-    }
-
-    async function redeem_shares_usdcx_fin(
-        transfer_future: Future,
-        claim_key: field,
-        market_id: field,
-        outcome: u8,
-        quantity: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_RESOLVED);
-        assert(market.token_type == TOKEN_USDCX);
-
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(resolution.finalized);
-        assert(outcome == resolution.winning_outcome);
-
-        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
-        assert(!already_claimed);
-        share_redeemed.set(claim_key, true);
-
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= quantity);
-        market_credits.set(market_id, market_held - quantity);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= quantity);
-        program_credits.set(1u8, current_held - quantity);
-    }
-
-    // ========================================================================
-    // 24. CLAIM REFUND (USDCX)
-    // ========================================================================
-
-    async transition claim_refund_usdcx(
-        private shares: OutcomeShare,
-    ) -> (RefundClaim, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(shares.owner == self.caller);
-        assert(shares.token_type == TOKEN_USDCX);
-        assert(shares.quantity > 0u128);
-
-        let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
-            market_id: shares.market_id,
-            claimer: self.caller,
-            share_nonce: shares.share_nonce,
-        });
-
-        let refund: RefundClaim = RefundClaim {
-            owner: self.caller,
-            market_id: shares.market_id,
-            amount: shares.quantity,
-            claim_nonce: shares.share_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        // v24: Private outflow — returns Token record
-        let (compliance, token_out, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
-
-        return (refund, compliance, token_out, claim_refund_usdcx_fin(
-            transfer_future, claim_key, shares.market_id, shares.quantity
-        ));
-    }
-
-    async function claim_refund_usdcx_fin(
-        transfer_future: Future,
-        claim_key: field,
-        market_id: field,
-        amount: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_CANCELLED);
-        assert(market.token_type == TOKEN_USDCX);
-
-        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
-        assert(!already_claimed);
-        share_redeemed.set(claim_key, true);
-
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= amount);
-        market_credits.set(market_id, market_held - amount);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= amount);
-        program_credits.set(1u8, current_held - amount);
-    }
-
-    // ========================================================================
-    // 25. CLAIM LP REFUND (USDCX)
-    // ========================================================================
-
-    async transition claim_lp_refund_usdcx(
-        private lp_token: LPToken,
-        private min_tokens_out: u128,
-    ) -> (RefundClaim, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(lp_token.owner == self.caller);
-        assert(lp_token.token_type == TOKEN_USDCX);
-        assert(lp_token.lp_shares > 0u128);
-        assert(min_tokens_out > 0u128);
-
-        let claim_key: field = BHP256::hash_to_field(LPClaimKey {
-            market_id: lp_token.market_id,
-            claimer: self.caller,
-            lp_nonce: lp_token.lp_nonce,
-        });
-
-        let refund: RefundClaim = RefundClaim {
-            owner: self.caller,
-            market_id: lp_token.market_id,
-            amount: min_tokens_out,
-            claim_nonce: lp_token.lp_nonce,
-            token_type: TOKEN_USDCX,
-        };
-
-        // v24: Private outflow — returns Token record to LP provider
-        let (compliance, token_out, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
-
-        return (refund, compliance, token_out, claim_lp_ref_usdcx_fin(
-            transfer_future, claim_key, lp_token.market_id,
-            lp_token.lp_shares, min_tokens_out
-        ));
-    }
-
-    async function claim_lp_ref_usdcx_fin(
-        transfer_future: Future,
-        claim_key: field,
-        market_id: field,
-        lp_shares: u128,
-        min_tokens_out: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_CANCELLED);
-        assert(market.token_type == TOKEN_USDCX);
-
-        let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
-        assert(!already_claimed);
-        lp_positions.set(claim_key, true);
-
-        let pool: AMMPool = amm_pools.get(market_id);
-        // v17 FIX: Use total_reserves instead of total_liquidity
-        let total_reserves: u128 = pool.reserve_1 + pool.reserve_2 + pool.reserve_3 + pool.reserve_4;
-        assert(total_reserves > 0u128);
-        let tokens_out: u128 = (lp_shares * total_reserves) / pool.total_lp_shares;
-        assert(tokens_out >= min_tokens_out);
-        assert(min_tokens_out > 0u128);
-
-        // Use min_tokens_out for all accounting (matches actual transfer from transition)
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= min_tokens_out);
-        market_credits.set(market_id, market_held - min_tokens_out);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= min_tokens_out);
-        program_credits.set(1u8, current_held - min_tokens_out);
-
-        amm_pools.set(market_id, AMMPool {
-            market_id: market_id,
-            reserve_1: pool.reserve_1,
-            reserve_2: pool.reserve_2,
-            reserve_3: pool.reserve_3,
-            reserve_4: pool.reserve_4,
-            total_liquidity: pool.total_liquidity - min_tokens_out,
-            total_lp_shares: pool.total_lp_shares - lp_shares,
-            total_volume: pool.total_volume,
-        });
-    }
-
-    // ========================================================================
-    // 26. WITHDRAW CREATOR FEES (USDCX)
-    // ========================================================================
-
-    async transition withdraw_fees_usdcx(
-        public market_id: field,
-        private expected_amount: u128,
-    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
-        assert(expected_amount > 0u128);
-
-        // v24: Private outflow — returns Token record to creator
-        let (compliance, token_out, transfer_future): (
-            test_usdcx_stablecoin.aleo/ComplianceRecord,
-            test_usdcx_stablecoin.aleo/Token,
-            Future
-        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, expected_amount);
-
-        return (compliance, token_out, withdraw_fees_usdcx_fin(
-            transfer_future, market_id, self.caller, expected_amount
-        ));
-    }
-
-    async function withdraw_fees_usdcx_fin(
-        transfer_future: Future,
-        market_id: field,
-        caller: address,
-        expected_amount: u128,
-    ) {
-        transfer_future.await();
-
-        let market: Market = markets.get(market_id);
-        assert(market.status == MARKET_STATUS_RESOLVED);
-        assert(market.creator == caller);
-        assert(market.token_type == TOKEN_USDCX);
-
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(resolution.finalized);
-
-        let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
-        assert(!already_claimed);
-        creator_fees_claimed.set(market_id, true);
-
-        let fees: MarketFees = market_fees.get(market_id);
-        assert(fees.creator_fees >= expected_amount);
-
-        let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
-        assert(market_held >= expected_amount);
-        market_credits.set(market_id, market_held - expected_amount);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= expected_amount);
-        program_credits.set(1u8, current_held - expected_amount);
     }
 
     /* USAD REDEMPTION/REFUND DISABLED (snarkVM 31-transition limit)
@@ -2647,7 +2043,7 @@ program veiled_markets_v30.aleo {
         assert(market.status == MARKET_STATUS_RESOLVED);
         assert(market.token_type == TOKEN_USAD);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
         let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
@@ -2718,7 +2114,7 @@ program veiled_markets_v30.aleo {
         assert(market.status == MARKET_STATUS_RESOLVED);
         assert(market.token_type == TOKEN_USAD);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
         assert(outcome == resolution.winning_outcome);
 
@@ -2907,7 +2303,7 @@ program veiled_markets_v30.aleo {
         assert(market.creator == caller);
         assert(market.token_type == TOKEN_USAD);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
         let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
@@ -2978,7 +2374,7 @@ program veiled_markets_v30.aleo {
         public nonce: u64,
     ) -> (field, Future) {
         assert(amount > 0u128);
-        assert(token_type == TOKEN_ALEO || token_type == TOKEN_USDCX);
+        assert(token_type == TOKEN_ALEO);  // v32: ALEO-only (USDCX removed)
 
         let proposal_id: field = BHP256::hash_to_field(ProposalSeed {
             proposer: self.caller,
@@ -3130,76 +2526,6 @@ program veiled_markets_v30.aleo {
         multisig_approvals.remove(key_3);
     }
 
-    // ========================================================================
-    // 31. EXECUTE PROPOSAL (USDCX treasury)
-    // ========================================================================
-
-    async transition exec_proposal_usdcx(
-        public proposal_id: field,
-        public amount: u128,
-        public recipient: address,
-    ) -> Future {
-        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
-            recipient, amount
-        );
-
-        return exec_proposal_usdcx_fin(
-            transfer_future, proposal_id, amount, recipient
-        );
-    }
-
-    async function exec_proposal_usdcx_fin(
-        transfer_future: Future,
-        proposal_id: field,
-        amount: u128,
-        recipient: address,
-    ) {
-        transfer_future.await();
-
-        let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
-        let proposal: MultiSigProposal = multisig_proposals.get(proposal_id);
-
-        assert(proposal.amount == amount);
-        assert(proposal.recipient == recipient);
-        assert(proposal.token_type == TOKEN_USDCX);
-
-        let key_1: field = BHP256::hash_to_field(ApprovalKey {
-            proposal_id: proposal_id,
-            signer: config.signer_1,
-        });
-        let key_2: field = BHP256::hash_to_field(ApprovalKey {
-            proposal_id: proposal_id,
-            signer: config.signer_2,
-        });
-        let key_3: field = BHP256::hash_to_field(ApprovalKey {
-            proposal_id: proposal_id,
-            signer: config.signer_3,
-        });
-
-        let a1: bool = multisig_approvals.get_or_use(key_1, false);
-        let a2: bool = multisig_approvals.get_or_use(key_2, false);
-        let a3: bool = multisig_approvals.get_or_use(key_3, false);
-
-        let c0: u8 = 0u8;
-        let c1: u8 = a1 ? c0 + 1u8 : c0;
-        let c2: u8 = a2 ? c1 + 1u8 : c1;
-        let count: u8 = a3 ? c2 + 1u8 : c2;
-        assert(count >= config.threshold);
-
-        let treasury_balance: u128 = protocol_treasury.get(1u8);
-        assert(treasury_balance >= amount);
-        protocol_treasury.set(1u8, treasury_balance - amount);
-
-        let current_held: u128 = program_credits.get_or_use(1u8, 0u128);
-        assert(current_held >= amount);
-        program_credits.set(1u8, current_held - amount);
-
-        multisig_proposals.remove(proposal_id);
-        multisig_approvals.remove(key_1);
-        multisig_approvals.remove(key_2);
-        multisig_approvals.remove(key_3);
-    }
-
     /* USAD EXEC_PROPOSAL DISABLED (snarkVM 31-transition limit)
     // ========================================================================
     // 41. EXECUTE PROPOSAL (USAD treasury)
@@ -3208,53 +2534,38 @@ program veiled_markets_v30.aleo {
     END USAD EXEC_PROPOSAL */
 
     // ########################################################################
-    //                      RESOLVER SYSTEM (v25)
+    //                      RESOLVER REWARD CLAIM (v33)
     // ########################################################################
 
     // ========================================================================
-    // 32. SET RESOLVER STATUS — Deployer manages resolver whitelist
+    // 28. CLAIM RESOLVER REWARD — Claim accumulated protocol fee rewards
     // ========================================================================
+    // Resolvers who successfully finalize markets accumulate rewards from
+    // protocol fees (20%). This transition claims those rewards as private ALEO.
 
-    async transition set_resolver_status(
-        public resolver: address,
-        public approved: bool,
-    ) -> Future {
-        assert(self.caller == DEPLOYER);
-        return set_resolver_status_fin(resolver, approved);
-    }
-
-    async function set_resolver_status_fin(
-        resolver: address,
-        approved: bool,
-    ) {
-        approved_resolvers.set(resolver, approved);
-    }
-
-    // ========================================================================
-    // 33. CLAIM RESOLVER FEE — Resolver claims accumulated fees as private ALEO
-    // ========================================================================
-
-    async transition claim_resolver_fee() -> (credits.aleo/credits, Future) {
-        // Transfer 1 microcredit placeholder — finalize validates actual amount
+    async transition claim_voter_reward(
+        public expected_reward: u64,
+    ) -> (credits.aleo/credits, Future) {
+        assert(expected_reward > 0u64);
         let (payout, transfer_future): (credits.aleo/credits, Future) =
-            credits.aleo/transfer_public_to_private(self.caller, 1u64);
+            credits.aleo/transfer_public_to_private(self.caller, expected_reward);
 
-        return (payout, claim_resolver_fee_fin(transfer_future, self.caller));
+        return (payout, claim_voter_reward_fin(transfer_future, self.caller, expected_reward as u128));
     }
 
-    async function claim_resolver_fee_fin(
+    async function claim_voter_reward_fin(
         transfer_future: Future,
-        resolver: address,
+        voter: address,
+        expected_reward: u128,
     ) {
         transfer_future.await();
 
-        let reward: u128 = resolver_rewards.get_or_use(resolver, 0u128);
+        let reward: u128 = voter_rewards.get_or_use(voter, 0u128);
         assert(reward > 0u128);
+        assert(reward == expected_reward);
 
-        // Reset reward balance
-        resolver_rewards.set(resolver, 0u128);
+        voter_rewards.set(voter, 0u128);
 
-        // Deduct from program credits (ALEO key = 0u8)
         let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
         assert(current_held >= reward);
         program_credits.set(0u8, current_held - reward);

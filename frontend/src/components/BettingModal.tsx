@@ -1,11 +1,11 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Shield, TrendingUp, Check, Loader2, AlertCircle } from 'lucide-react'
 import { useState } from 'react'
-import { type Market, useWalletStore, useBetsStore, CONTRACT_INFO } from '@/lib/store'
+import { type Market, useWalletStore, useBetsStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
-import { buildBuySharesInputs, getMarket, MARKET_STATUS } from '@/lib/aleo-client'
+import { buildBuySharesInputs, getMarket, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
 import { devWarn } from '../lib/logger'
 
@@ -46,7 +46,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       }
 
       const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-      const tokenType = market.tokenType || 'ALEO'
+      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
 
       // Pre-validate market status on-chain to avoid wasted gas
       try {
@@ -68,18 +68,21 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       let functionName = ''
       let inputs: string[] = []
 
-      if (tokenType === 'USDCX') {
-        const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
-        if (!wallet.isDemoMode && amountMicro > totalUsdcx) {
+      if (tokenType === 'USDCX' || tokenType === 'USAD') {
+        const totalStablecoin = tokenType === 'USDCX'
+          ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+          : wallet.balance.usadPublic + wallet.balance.usadPrivate
+        if (!wallet.isDemoMode && amountMicro > totalStablecoin) {
           throw new Error(
-            `Insufficient USDCX balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} USDCX ` +
-            `but only have ${(Number(totalUsdcx) / 1_000_000).toFixed(2)} USDCX.`
+            `Insufficient ${tokenType} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
+            `but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${tokenType}.`
           )
         }
-        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'USDCX')
+        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, tokenType)
         functionName = betResult.functionName
         inputs = betResult.inputs
-        setPrivacyMode(wallet.balance.usdcxPrivate > 0n ? 'private' : 'public')
+        const privateStablecoin = tokenType === 'USDCX' ? wallet.balance.usdcxPrivate : wallet.balance.usadPrivate
+        setPrivacyMode(privateStablecoin > 0n ? 'private' : 'public')
       } else {
         // ALEO: buy_shares_private with credits record
         const gasBuffer = 500_000
@@ -104,7 +107,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
         const { findTokenRecord } = await import('@/lib/private-stablecoin')
         const { buildMerkleProofsForAddress } = await import('@/lib/aleo-client')
-        const tokenRecord = await findTokenRecord(tokenType as 'USDCX' | 'USAD', amountMicro)
+        const tokenRecord = await findTokenRecord(tokenType, amountMicro)
         if (tokenRecord) {
           if (!wallet.address) {
             throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
@@ -117,11 +120,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           )
         }
       }
-      const programId = tokenType === 'USAD'
-        ? (await import('@/lib/config')).config.usadProgramId
-        : CONTRACT_INFO.programId
       const txPromise = executeTransaction({
-        program: programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs: inputs,
         fee: 1.5,
@@ -179,8 +179,15 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     : 0
 
   const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
+  const marketTokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
   const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'ALEO'
-  const isUsdcx = market?.tokenType === 'USDCX'
+  const isStablecoin = marketTokenType === 'USDCX' || marketTokenType === 'USAD'
+  const stablecoinTotalBalance = marketTokenType === 'USDCX'
+    ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+    : wallet.balance.usadPublic + wallet.balance.usadPrivate
+  const stablecoinPrivateBalance = marketTokenType === 'USDCX'
+    ? wallet.balance.usdcxPrivate
+    : wallet.balance.usadPrivate
 
   if (!market) return null
 
@@ -368,16 +375,15 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         <div className="mt-2 space-y-1">
                           <div className="flex justify-between text-sm">
                             <span className="text-surface-500">
-                              {isUsdcx
-                                ? `Balance: ${formatCredits(wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate)} USDCX (private: ${formatCredits(wallet.balance.usdcxPrivate)})`
+                              {isStablecoin
+                                ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${marketTokenType} (private: ${formatCredits(stablecoinPrivateBalance)})`
                                 : `Public: ${formatCredits(wallet.balance.public)} ALEO`
                               }
                             </span>
                             <button
                               onClick={() => {
-                                // All bets use public balance (private mode disabled)
-                                if (isUsdcx) {
-                                  const usable = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+                                if (isStablecoin) {
+                                  const usable = stablecoinTotalBalance
                                   setBetAmount((Number(usable) / 1_000_000).toString())
                                 } else {
                                   // Public balance minus gas reserve (~0.7 ALEO for tx fee)
@@ -419,8 +425,10 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         <div>
                           <p className="text-sm font-medium text-brand-300">Secure Transaction</p>
                           <p className="text-xs text-surface-400 mt-1">
-                            {isUsdcx
+                            {marketTokenType === 'USDCX'
                               ? 'USDCX market — private Token record used when available. Your address stays hidden on-chain.'
+                              : marketTokenType === 'USAD'
+                              ? 'USAD market — private Token record used when available. Your address stays hidden on-chain.'
                               : 'Bet uses private credits record. ZK proofs verify your transaction on-chain.'
                             }
                           </p>
@@ -429,8 +437,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
                       {/* Warning: insufficient balance */}
                       {!wallet.isDemoMode && (() => {
-                        const hasNoFunds = isUsdcx
-                          ? wallet.balance.usdcxPublic < 1_000_000n
+                        const hasNoFunds = isStablecoin
+                          ? stablecoinTotalBalance < 1_000_000n
                           : wallet.balance.public < 1_000_000n
                         if (!hasNoFunds) return null
                         return (
@@ -439,8 +447,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                             <div>
                               <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient balance</p>
                               <p className="text-xs text-surface-400 leading-relaxed">
-                                {isUsdcx
-                                  ? `You need USDCX public balance to bet on this market.`
+                                {isStablecoin
+                                  ? `You need private ${marketTokenType} Token balance to bet on this market, plus ALEO for gas.`
                                   : `You need ALEO (public or private) to place a bet. Public balance is needed for the transaction fee.`
                                 }
                               </p>

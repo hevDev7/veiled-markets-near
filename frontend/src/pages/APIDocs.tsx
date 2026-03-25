@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Package, Terminal, Code, BookOpen, ArrowRight } from 'lucide-react'
+import { ArrowLeft, Package, Terminal, Code, BookOpen } from 'lucide-react'
 import { Footer } from '../components/Footer'
 
 function CodeBlock({ children, title }: { children: string; title?: string }) {
@@ -63,7 +63,7 @@ export function APIDocs() {
 // Initialize client
 const client = createClient({
   rpcUrl: 'https://api.explorer.provable.com/v1/testnet',
-  programId: 'veiled_markets_v30.aleo',
+  programId: 'veiled_markets_v34.aleo',
 })
 
 // Fetch a market (marketId is a field string, e.g. "123field")
@@ -282,7 +282,7 @@ interface DisputeData {
             <h2 className="text-lg font-semibold text-white mb-4">On-Chain Programs</h2>
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_v30.aleo</h3>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_v34.aleo</h3>
                 <p className="text-xs text-surface-500 mb-3">Main market contract — 31 transitions (at snarkVM limit)</p>
                 <p className="text-sm text-surface-400">
                   Handles ALEO and USDCX markets: creation, trading (buy/sell), liquidity provision,
@@ -290,7 +290,7 @@ interface DisputeData {
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usad_v8.aleo</h3>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usad_v11.aleo</h3>
                 <p className="text-xs text-surface-500 mb-3">USAD market contract — separate program for USAD token</p>
                 <p className="text-sm text-surface-400">
                   Mirrors the main contract functionality for USAD-denominated markets. Separated due
@@ -298,7 +298,7 @@ interface DisputeData {
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_governance_v3.aleo</h3>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_governance_v4.aleo</h3>
                 <p className="text-xs text-surface-500 mb-3">Governance program — 6 proposal types</p>
                 <p className="text-sm text-surface-400">
                   On-chain governance for protocol decisions: dispute resolution, fee changes, treasury
@@ -314,13 +314,13 @@ interface DisputeData {
             <CodeBlock title="typescript">{`// Testnet (default)
 const client = createClient({
   networkUrl: 'https://api.explorer.provable.com/v1/testnet',
-  programId: 'veiled_markets_v30.aleo',
+  programId: 'veiled_markets_v34.aleo',
 })
 
 // Mainnet (future)
 const client = createClient({
   networkUrl: 'https://api.explorer.provable.com/v1/mainnet',
-  programId: 'veiled_markets_v30.aleo',
+  programId: 'veiled_markets_v34.aleo',
 })
 
 // Explorer URLs

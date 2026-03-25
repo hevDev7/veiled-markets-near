@@ -66,7 +66,7 @@ function getStablecoinProgramId(tokenType: 'USDCX' | 'USAD'): string {
  * Get the market program ID for a token type.
  */
 function getMarketProgramId(tokenType: 'USDCX' | 'USAD'): string {
-  return tokenType === 'USAD' ? config.usadProgramId : config.programId;
+  return tokenType === 'USAD' ? config.usadProgramId : config.usdcxMarketProgramId;
 }
 
 /**

@@ -4,8 +4,8 @@
 
 export const GOVERNANCE_CONFIG = {
   // Program
-  programId: process.env.GOV_PROGRAM_ID || 'veiled_governance_v3.aleo',
-  marketProgramId: process.env.PROGRAM_ID || 'veiled_markets_v29.aleo',
+  programId: process.env.GOV_PROGRAM_ID || 'veiled_governance_v4.aleo',
+  marketProgramId: process.env.PROGRAM_ID || 'veiled_markets_v34.aleo',
 
   // API
   apiBaseUrl: process.env.ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet',

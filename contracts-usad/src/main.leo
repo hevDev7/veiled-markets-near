@@ -1,22 +1,33 @@
 // ============================================================================
-// VEILED MARKETS USAD - Privacy-Preserving Prediction Market (USAD Token)
+// VEILED MARKETS USAD v11 - Privacy-Preserving Prediction Market (USAD Token)
 // ============================================================================
-// Companion program to veiled_markets_v22.aleo for USAD stablecoin markets.
+// Companion program to veiled_markets_v34.aleo (main contract) for USAD stablecoin markets.
 // Separated due to snarkVM 31-transition limit.
 //
 // All USAD transactions use PRIVATE token paths:
 //   Inflow:  test_usad_stablecoin.aleo/transfer_private_to_public (Token record + MerkleProof)
 //   Outflow: test_usad_stablecoin.aleo/transfer_public_to_private (returns Token record)
 //
-// Dispute bonds are always in ALEO (credits.aleo) regardless of market token.
+// Resolution bonds are always in ALEO (credits.aleo) regardless of market token.
 //
-// 19 transitions total (well within 31 limit)
+// v11 changes from v10:
+// - REMOVED: submit_outcome, challenge_outcome, finalize_outcome,
+//   claim_resolver_bond, claim_resolver_reward
+// - REMOVED: ResolverBondReceipt, ResolutionRound
+// - REMOVED: resolution_rounds, resolver_rewards mappings
+// - REMOVED: MIN_RESOLUTION_BOND, MAX_RESOLUTION_ROUNDS, BOND_MULTIPLIER,
+//   RESOLVER_FEE_PERCENT, CHALLENGE_WINDOW_BLOCKS
+// - ADDED: Multi-Voter Quorum + Dispute resolution system (vote_outcome,
+//   finalize_votes, confirm_resolution, dispute_resolution,
+//   claim_voter_bond, claim_dispute_bond, claim_voter_reward)
+// - ADDED: VoterBondReceipt, DisputeBondReceipt, VoteTally, VoterKey
+// - ADDED: vote_tallies, voter_participated, voter_rewards, dispute_bonds mappings
 // ============================================================================
 
 import credits.aleo;
 import test_usad_stablecoin.aleo;
 
-program veiled_markets_usad_v8.aleo {
+program veiled_markets_usad_v11.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -27,6 +38,8 @@ program veiled_markets_usad_v8.aleo {
     const MARKET_STATUS_RESOLVED: u8 = 3u8;
     const MARKET_STATUS_CANCELLED: u8 = 4u8;
     const STATUS_PENDING_RESOLUTION: u8 = 5u8;
+    const STATUS_PENDING_FINALIZATION: u8 = 6u8;  // v11: votes tallied, dispute window open
+    const STATUS_DISPUTED: u8 = 7u8;               // v11: dispute filed, awaiting re-vote or governance
 
     const OUTCOME_1: u8 = 1u8;
     const OUTCOME_2: u8 = 2u8;
@@ -42,16 +55,25 @@ program veiled_markets_usad_v8.aleo {
     const LP_FEE_BPS: u128 = 100u128;
     const FEE_DENOMINATOR: u128 = 10000u128;
 
-    // Challenge window (~12 hours at ~15s blocks)
-    const CHALLENGE_WINDOW_BLOCKS: u64 = 2880u64;
+    // v11: Voter reward — 20% of accumulated protocol_fees split among winning voters
+    const VOTER_REWARD_PERCENT: u128 = 20u128;
 
     const MIN_TRADE_AMOUNT: u128 = 1000u128;
-    const MIN_DISPUTE_BOND: u128 = 1000000u128;
     const MIN_LIQUIDITY: u128 = 10000u128;
+
+    // v11: Multi-Voter Quorum + Dispute resolution system
+    const MIN_VOTE_BOND: u128 = 1000000u128;          // 1 ALEO per vote
+    const MIN_VOTERS: u8 = 3u8;                        // Minimum 3 voters for valid resolution
+    const VOTE_WINDOW_BLOCKS: u64 = 2880u64;           // 12 hours voting window
+    const DISPUTE_WINDOW_BLOCKS: u64 = 2880u64;        // 12 hours dispute window after finalize
+    const DISPUTE_BOND_MULTIPLIER: u128 = 3u128;       // Dispute bond = 3x total voter bonds
 
     const MULTISIG_CONFIG_KEY: u8 = 0u8;
     const ACTION_WITHDRAW: u8 = 1u8;
     const DEPLOYER: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
+
+    // v11: Governance program address for cross-program authorization
+    const GOVERNANCE_PROGRAM: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
 
     // Treasury key for USAD
     const CREDIT_KEY_USAD: u8 = 2u8;
@@ -79,13 +101,22 @@ program veiled_markets_usad_v8.aleo {
         token_type: u8,
     }
 
+    // v11: Multi-Voter Quorum — receipt for each voter's bond
+    record VoterBondReceipt {
+        owner: address,
+        market_id: field,
+        voted_outcome: u8,
+        bond_amount: u128,
+        bond_nonce: field,
+    }
+
+    // v11: Dispute bond receipt
     record DisputeBondReceipt {
         owner: address,
         market_id: field,
         proposed_outcome: u8,
         bond_amount: u128,
         dispute_nonce: field,
-        token_type: u8,
     }
 
     record RefundClaim {
@@ -125,13 +156,19 @@ program veiled_markets_usad_v8.aleo {
         total_volume: u128,
     }
 
-    struct MarketResolution {
+    // v11: Multi-Voter Quorum — tracks vote tallies per market
+    struct VoteTally {
         market_id: field,
-        winning_outcome: u8,
-        resolver: address,
-        resolved_at: u64,
-        challenge_deadline: u64,
+        outcome_1_bonds: u128,
+        outcome_2_bonds: u128,
+        outcome_3_bonds: u128,
+        outcome_4_bonds: u128,
+        total_voters: u8,
+        total_bonded: u128,
+        voting_deadline: u64,
+        dispute_deadline: u64,
         finalized: bool,
+        winning_outcome: u8,
     }
 
     struct MarketFees {
@@ -140,12 +177,17 @@ program veiled_markets_usad_v8.aleo {
         creator_fees: u128,
     }
 
-    struct DisputeData {
+    // v11: Voter/Dispute bond claim key
+    struct BondClaimKey {
         market_id: field,
-        disputer: address,
-        proposed_outcome: u8,
-        bond_amount: u128,
-        disputed_at: u64,
+        claimer: address,
+        bond_nonce: field,
+    }
+
+    // v11: Voter participation key (prevent double voting)
+    struct VoterKey {
+        market_id: field,
+        voter: address,
     }
 
     struct SignerConfig {
@@ -183,12 +225,6 @@ program veiled_markets_usad_v8.aleo {
         lp_nonce: field,
     }
 
-    struct DisputeClaimKey {
-        market_id: field,
-        claimer: address,
-        dispute_nonce: field,
-    }
-
     struct ProposalSeed {
         proposer: address,
         action: u8,
@@ -204,14 +240,12 @@ program veiled_markets_usad_v8.aleo {
     }
 
     // ========================================================================
-    // MAPPINGS (14 total — mirrors main contract)
+    // MAPPINGS (17 total — mirrors main contract v34)
     // ========================================================================
 
     mapping markets: field => Market;
     mapping amm_pools: field => AMMPool;
-    mapping market_resolutions: field => MarketResolution;
     mapping market_fees: field => MarketFees;
-    mapping market_disputes: field => DisputeData;
     mapping share_redeemed: field => bool;
     mapping creator_fees_claimed: field => bool;
     mapping program_credits: u8 => u128;       // 0u8=ALEO(bonds), 2u8=USAD
@@ -221,6 +255,13 @@ program veiled_markets_usad_v8.aleo {
     mapping multisig_proposals: field => MultiSigProposal;
     mapping multisig_approvals: field => bool;
     mapping lp_positions: field => bool;
+
+    // v11: Multi-Voter Quorum + Dispute resolution system
+    mapping vote_tallies: field => VoteTally;              // market_id => vote tally
+    mapping voter_participated: field => bool;             // hash(VoterKey) => voted
+    mapping bond_claimed: field => bool;                   // hash(BondClaimKey) => claimed
+    mapping voter_rewards: address => u128;                // Accumulated voter rewards (microcredits)
+    mapping dispute_bonds: field => u128;                  // market_id => dispute bond amount
 
     // ========================================================================
     // CONSTRUCTOR
@@ -309,6 +350,9 @@ program veiled_markets_usad_v8.aleo {
         let market_exists: bool = markets.contains(market_id);
         assert(!market_exists);
 
+        // v9: No resolver whitelist — anyone can submit outcome via Open Voting + Bond
+        // resolver field in Market struct is now advisory (suggested resolver), not enforced
+
         let current_height: u64 = block.height as u64;
         assert(deadline > current_height);
         assert(resolution_deadline > deadline);
@@ -359,7 +403,7 @@ program veiled_markets_usad_v8.aleo {
     // 2. BUY SHARES (USAD) — PRIVATE inflow with Token record + MerkleProof
     // ========================================================================
     // Uses transfer_private_to_public to deposit private Token to program balance.
-    // Pattern matches buy_shares_usdcx in veiled_markets_v29.aleo.
+    // Pattern matches buy_shares_usdcx in veiled_markets_v34.aleo.
 
     async transition buy_shares_usad(
         private market_id: field,
@@ -733,45 +777,102 @@ program veiled_markets_usad_v8.aleo {
         });
     }
 
+    // ########################################################################
+    //              v11: MULTI-VOTER QUORUM + DISPUTE RESOLUTION (ALEO bonds)
+    // ########################################################################
+
     // ========================================================================
-    // 6. RESOLVE MARKET
+    // 6. VOTE OUTCOME — Anyone votes with 1 ALEO bond
     // ========================================================================
 
-    async transition resolve_market(
-        public market_id: field,
-        public winning_outcome: u8,
-    ) -> Future {
-        return resolve_market_finalize(market_id, winning_outcome, self.caller);
+    async transition vote_outcome(
+        private market_id: field,
+        private outcome: u8,
+        private bond_nonce: field,
+        private credits_in: credits.aleo/credits,
+    ) -> (VoterBondReceipt, credits.aleo/credits, Future) {
+        let receipt: VoterBondReceipt = VoterBondReceipt {
+            owner: self.caller,
+            market_id: market_id,
+            voted_outcome: outcome,
+            bond_amount: MIN_VOTE_BOND,
+            bond_nonce: bond_nonce,
+        };
+
+        let bond_u64: u64 = MIN_VOTE_BOND as u64;
+        let (change, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
+
+        return (receipt, change, vote_outcome_fin(
+            transfer_future, market_id, outcome, self.caller
+        ));
     }
 
-    async function resolve_market_finalize(
+    async function vote_outcome_fin(
+        transfer_future: Future,
         market_id: field,
-        winning_outcome: u8,
-        resolver: address,
+        outcome: u8,
+        voter: address,
     ) {
+        transfer_future.await();
+
         let market: Market = markets.get(market_id);
-        assert(market.resolver == resolver);
-        assert(winning_outcome >= 1u8 && winning_outcome <= market.num_outcomes);
+        assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
+
+        // Market must be CLOSED or ACTIVE past deadline
         let is_closed: bool = market.status == MARKET_STATUS_CLOSED;
+        let is_pending: bool = market.status == STATUS_PENDING_RESOLUTION;
         let is_past_deadline: bool = market.status == MARKET_STATUS_ACTIVE && current_height > market.deadline;
-        assert(is_closed || is_past_deadline);
+        assert(is_closed || is_pending || is_past_deadline);
         assert(current_height <= market.resolution_deadline);
 
-        let challenge_deadline: u64 = current_height + CHALLENGE_WINDOW_BLOCKS;
+        // Prevent double voting
+        let voter_key: field = BHP256::hash_to_field(VoterKey { market_id: market_id, voter: voter });
+        let already_voted: bool = voter_participated.get_or_use(voter_key, false);
+        assert(!already_voted);
+        voter_participated.set(voter_key, true);
 
-        market_disputes.remove(market_id);
+        // Get or create tally
+        let has_tally: bool = vote_tallies.contains(market_id);
 
-        market_resolutions.set(market_id, MarketResolution {
+        let prev_o1: u128 = has_tally ? vote_tallies.get(market_id).outcome_1_bonds : 0u128;
+        let prev_o2: u128 = has_tally ? vote_tallies.get(market_id).outcome_2_bonds : 0u128;
+        let prev_o3: u128 = has_tally ? vote_tallies.get(market_id).outcome_3_bonds : 0u128;
+        let prev_o4: u128 = has_tally ? vote_tallies.get(market_id).outcome_4_bonds : 0u128;
+        let prev_voters: u8 = has_tally ? vote_tallies.get(market_id).total_voters : 0u8;
+        let prev_bonded: u128 = has_tally ? vote_tallies.get(market_id).total_bonded : 0u128;
+
+        // If first vote, set voting deadline
+        let voting_deadline: u64 = has_tally ?
+            vote_tallies.get(market_id).voting_deadline :
+            (current_height + VOTE_WINDOW_BLOCKS);
+
+        // If tally exists, must be within voting window
+        assert(!has_tally || current_height <= voting_deadline);
+
+        // Add bond to voted outcome
+        let new_o1: u128 = outcome == 1u8 ? prev_o1 + MIN_VOTE_BOND : prev_o1;
+        let new_o2: u128 = outcome == 2u8 ? prev_o2 + MIN_VOTE_BOND : prev_o2;
+        let new_o3: u128 = outcome == 3u8 ? prev_o3 + MIN_VOTE_BOND : prev_o3;
+        let new_o4: u128 = outcome == 4u8 ? prev_o4 + MIN_VOTE_BOND : prev_o4;
+
+        vote_tallies.set(market_id, VoteTally {
             market_id: market_id,
-            winning_outcome: winning_outcome,
-            resolver: resolver,
-            resolved_at: current_height,
-            challenge_deadline: challenge_deadline,
+            outcome_1_bonds: new_o1,
+            outcome_2_bonds: new_o2,
+            outcome_3_bonds: new_o3,
+            outcome_4_bonds: new_o4,
+            total_voters: prev_voters + 1u8,
+            total_bonded: prev_bonded + MIN_VOTE_BOND,
+            voting_deadline: voting_deadline,
+            dispute_deadline: 0u64,
             finalized: false,
+            winning_outcome: 0u8,
         });
 
+        // Set market to PENDING if not already
         markets.set(market_id, Market {
             id: market.id,
             creator: market.creator,
@@ -785,36 +886,122 @@ program veiled_markets_usad_v8.aleo {
             created_at: market.created_at,
             token_type: market.token_type,
         });
+
+        // Track bond in ALEO credits
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
+        program_credits.set(CREDIT_KEY_ALEO, current_held + MIN_VOTE_BOND);
     }
 
     // ========================================================================
-    // 7. FINALIZE RESOLUTION
+    // 7. FINALIZE VOTES — Tally votes, determine winner, start dispute window
     // ========================================================================
 
-    async transition finalize_resolution(public market_id: field) -> Future {
-        return finalize_resolution_fin(market_id);
+    async transition finalize_votes(public market_id: field) -> Future {
+        return finalize_votes_fin(market_id);
     }
 
-    async function finalize_resolution_fin(market_id: field) {
+    async function finalize_votes_fin(market_id: field) {
         let market: Market = markets.get(market_id);
         assert(market.status == STATUS_PENDING_RESOLUTION);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(!resolution.finalized);
+        let tally: VoteTally = vote_tallies.get(market_id);
+        assert(!tally.finalized);
 
         let current_height: u64 = block.height as u64;
-        assert(current_height > resolution.challenge_deadline);
 
-        let has_dispute: bool = market_disputes.contains(market_id);
+        // Voting window must have passed
+        assert(current_height > tally.voting_deadline);
+
+        // Minimum 3 voters required
+        assert(tally.total_voters >= MIN_VOTERS);
+
+        // Determine winning outcome (highest total bonds)
+        let max_bonds: u128 = tally.outcome_1_bonds;
+        let winner: u8 = 1u8;
+        let is_o2_higher: bool = tally.outcome_2_bonds > max_bonds;
+        let max2: u128 = is_o2_higher ? tally.outcome_2_bonds : max_bonds;
+        let winner2: u8 = is_o2_higher ? 2u8 : winner;
+        let is_o3_higher: bool = tally.outcome_3_bonds > max2;
+        let max3: u128 = is_o3_higher ? tally.outcome_3_bonds : max2;
+        let winner3: u8 = is_o3_higher ? 3u8 : winner2;
+        let is_o4_higher: bool = tally.outcome_4_bonds > max3;
+        let winning_outcome: u8 = is_o4_higher ? 4u8 : winner3;
+
+        // Set dispute window
+        let dispute_deadline: u64 = current_height + DISPUTE_WINDOW_BLOCKS;
+
+        vote_tallies.set(market_id, VoteTally {
+            market_id: market_id,
+            outcome_1_bonds: tally.outcome_1_bonds,
+            outcome_2_bonds: tally.outcome_2_bonds,
+            outcome_3_bonds: tally.outcome_3_bonds,
+            outcome_4_bonds: tally.outcome_4_bonds,
+            total_voters: tally.total_voters,
+            total_bonded: tally.total_bonded,
+            voting_deadline: tally.voting_deadline,
+            dispute_deadline: dispute_deadline,
+            finalized: false,
+            winning_outcome: winning_outcome,
+        });
+
+        markets.set(market_id, Market {
+            id: market.id,
+            creator: market.creator,
+            resolver: market.resolver,
+            question_hash: market.question_hash,
+            category: market.category,
+            num_outcomes: market.num_outcomes,
+            deadline: market.deadline,
+            resolution_deadline: market.resolution_deadline,
+            status: STATUS_PENDING_FINALIZATION,
+            created_at: market.created_at,
+            token_type: market.token_type,
+        });
+    }
+
+    // ========================================================================
+    // 8. CONFIRM RESOLUTION — No dispute filed, finalize market
+    // ========================================================================
+
+    async transition confirm_resolution(public market_id: field) -> Future {
+        return confirm_resolution_fin(market_id);
+    }
+
+    async function confirm_resolution_fin(market_id: field) {
+        let market: Market = markets.get(market_id);
+        assert(market.status == STATUS_PENDING_FINALIZATION);
+
+        let tally: VoteTally = vote_tallies.get(market_id);
+        assert(tally.winning_outcome >= 1u8);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height > tally.dispute_deadline);
+
+        // No dispute was filed — confirm resolution
+        let has_dispute: bool = dispute_bonds.contains(market_id);
         assert(!has_dispute);
 
-        market_resolutions.set(market_id, MarketResolution {
+        // Allocate voter reward: 20% of protocol fees split among winning voters
+        let fees: MarketFees = market_fees.get(market_id);
+        let total_reward: u128 = (fees.protocol_fees * VOTER_REWARD_PERCENT) / 100u128;
+
+        // Store total reward for later distribution (winning voters claim individually)
+        let current_reward: u128 = voter_rewards.get_or_use(market.resolver, 0u128);
+        voter_rewards.set(market.resolver, current_reward + total_reward);
+
+        // Mark as finalized
+        vote_tallies.set(market_id, VoteTally {
             market_id: market_id,
-            winning_outcome: resolution.winning_outcome,
-            resolver: resolution.resolver,
-            resolved_at: resolution.resolved_at,
-            challenge_deadline: resolution.challenge_deadline,
+            outcome_1_bonds: tally.outcome_1_bonds,
+            outcome_2_bonds: tally.outcome_2_bonds,
+            outcome_3_bonds: tally.outcome_3_bonds,
+            outcome_4_bonds: tally.outcome_4_bonds,
+            total_voters: tally.total_voters,
+            total_bonded: tally.total_bonded,
+            voting_deadline: tally.voting_deadline,
+            dispute_deadline: tally.dispute_deadline,
             finalized: true,
+            winning_outcome: tally.winning_outcome,
         });
 
         markets.set(market_id, Market {
@@ -833,7 +1020,103 @@ program veiled_markets_usad_v8.aleo {
     }
 
     // ========================================================================
-    // 8. CANCEL MARKET
+    // 9. DISPUTE RESOLUTION — Challenge voter majority with 3x bond
+    // ========================================================================
+
+    async transition dispute_resolution(
+        private market_id: field,
+        private proposed_outcome: u8,
+        private dispute_nonce: field,
+        private credits_in: credits.aleo/credits,
+        private dispute_bond: u128,
+    ) -> (DisputeBondReceipt, credits.aleo/credits, Future) {
+        assert(dispute_bond >= MIN_VOTE_BOND);
+
+        let receipt: DisputeBondReceipt = DisputeBondReceipt {
+            owner: self.caller,
+            market_id: market_id,
+            proposed_outcome: proposed_outcome,
+            bond_amount: dispute_bond,
+            dispute_nonce: dispute_nonce,
+        };
+
+        let bond_u64: u64 = dispute_bond as u64;
+        let (change, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
+
+        return (receipt, change, dispute_resolution_fin(
+            transfer_future, market_id, proposed_outcome, dispute_bond, self.caller
+        ));
+    }
+
+    async function dispute_resolution_fin(
+        transfer_future: Future,
+        market_id: field,
+        proposed_outcome: u8,
+        dispute_bond: u128,
+        disputer: address,
+    ) {
+        transfer_future.await();
+
+        let market: Market = markets.get(market_id);
+        assert(market.status == STATUS_PENDING_FINALIZATION);
+
+        let tally: VoteTally = vote_tallies.get(market_id);
+        assert(tally.winning_outcome >= 1u8);
+
+        let current_height: u64 = block.height as u64;
+        assert(current_height <= tally.dispute_deadline);
+
+        // Must propose a DIFFERENT outcome than the voted winner
+        assert(proposed_outcome != tally.winning_outcome);
+        assert(proposed_outcome >= 1u8 && proposed_outcome <= market.num_outcomes);
+
+        // Dispute bond must be >= 3x total voter bonds
+        let min_dispute: u128 = tally.total_bonded * DISPUTE_BOND_MULTIPLIER;
+        assert(dispute_bond >= min_dispute);
+
+        // Only one dispute per market
+        let has_dispute: bool = dispute_bonds.contains(market_id);
+        assert(!has_dispute);
+        dispute_bonds.set(market_id, dispute_bond);
+
+        // Override winning outcome to disputer's proposal
+        vote_tallies.set(market_id, VoteTally {
+            market_id: market_id,
+            outcome_1_bonds: tally.outcome_1_bonds,
+            outcome_2_bonds: tally.outcome_2_bonds,
+            outcome_3_bonds: tally.outcome_3_bonds,
+            outcome_4_bonds: tally.outcome_4_bonds,
+            total_voters: tally.total_voters,
+            total_bonded: tally.total_bonded,
+            voting_deadline: tally.voting_deadline,
+            dispute_deadline: tally.dispute_deadline,
+            finalized: true,
+            winning_outcome: proposed_outcome,  // Disputer's outcome wins
+        });
+
+        // Market resolved with disputer's outcome
+        markets.set(market_id, Market {
+            id: market.id,
+            creator: market.creator,
+            resolver: disputer,
+            question_hash: market.question_hash,
+            category: market.category,
+            num_outcomes: market.num_outcomes,
+            deadline: market.deadline,
+            resolution_deadline: market.resolution_deadline,
+            status: MARKET_STATUS_RESOLVED,
+            created_at: market.created_at,
+            token_type: market.token_type,
+        });
+
+        // Track dispute bond
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
+        program_credits.set(CREDIT_KEY_ALEO, current_held + dispute_bond);
+    }
+
+    // ========================================================================
+    // 10. CANCEL MARKET
     // ========================================================================
 
     async transition cancel_market(public market_id: field) -> Future {
@@ -844,9 +1127,12 @@ program veiled_markets_usad_v8.aleo {
         let market: Market = markets.get(market_id);
         let current_height: u64 = block.height as u64;
 
+        // Path A: Creator cancel — active market with no volume
         let is_creator_cancel: bool = market.creator == caller
             && market.status == MARKET_STATUS_ACTIVE;
 
+        // Path B: Emergency cancel — anyone, past resolution_deadline
+        // Excludes RESOLVED, CANCELLED, and PENDING_RESOLUTION (challenge window)
         let is_emergency: bool = current_height > market.resolution_deadline
             && market.status != MARKET_STATUS_RESOLVED
             && market.status != MARKET_STATUS_CANCELLED
@@ -854,10 +1140,13 @@ program veiled_markets_usad_v8.aleo {
 
         assert(is_creator_cancel || is_emergency);
 
+        // Creator cancel requires zero volume
         let pool: AMMPool = amm_pools.get(market_id);
         assert(!is_creator_cancel || pool.total_volume == 0u128);
 
-        market_resolutions.remove(market_id);
+        // v11: Clean up vote data. Bond holders can still claim via
+        // claim_voter_bond which accepts CANCELLED status.
+        vote_tallies.remove(market_id);
 
         markets.set(market_id, Market {
             id: market.id,
@@ -874,112 +1163,91 @@ program veiled_markets_usad_v8.aleo {
         });
     }
 
-    // ########################################################################
-    //                      DISPUTE / CHALLENGE (ALEO bonds)
-    // ########################################################################
-
     // ========================================================================
-    // 9. DISPUTE RESOLUTION (bond in ALEO)
+    // 11. CLAIM VOTER BOND — Winners claim bond back (v11)
     // ========================================================================
+    // If RESOLVED and voted_outcome == winning -> bond back
+    // If RESOLVED and voted_outcome != winning -> nothing (slashed)
+    // If CANCELLED -> everyone gets bond back
 
-    async transition dispute_resolution(
-        private market_id: field,
-        private proposed_outcome: u8,
-        private dispute_nonce: field,
-        private credits_in: credits.aleo/credits,
-    ) -> (DisputeBondReceipt, credits.aleo/credits, Future) {
-        let receipt: DisputeBondReceipt = DisputeBondReceipt {
-            owner: self.caller,
-            market_id: market_id,
-            proposed_outcome: proposed_outcome,
-            bond_amount: MIN_DISPUTE_BOND,
-            dispute_nonce: dispute_nonce,
-            token_type: TOKEN_ALEO,
-        };
+    async transition claim_voter_bond(
+        private receipt: VoterBondReceipt,
+    ) -> (credits.aleo/credits, Future) {
+        assert(receipt.owner == self.caller);
+        assert(receipt.bond_amount > 0u128);
 
-        let bond_u64: u64 = MIN_DISPUTE_BOND as u64;
-        let (change, transfer_future): (credits.aleo/credits, Future) =
-            credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
+        let claim_key: field = BHP256::hash_to_field(BondClaimKey {
+            market_id: receipt.market_id,
+            claimer: self.caller,
+            bond_nonce: receipt.bond_nonce,
+        });
 
-        return (receipt, change, dispute_resolution_fin(
-            transfer_future, market_id, proposed_outcome, self.caller
+        let bond_u64: u64 = receipt.bond_amount as u64;
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, bond_u64);
+
+        return (payout, claim_voter_bond_fin(
+            transfer_future, claim_key, receipt.market_id,
+            receipt.bond_amount, receipt.voted_outcome
         ));
     }
 
-    async function dispute_resolution_fin(
+    async function claim_voter_bond_fin(
         transfer_future: Future,
+        claim_key: field,
         market_id: field,
-        proposed_outcome: u8,
-        disputer: address,
+        bond_amount: u128,
+        voted_outcome: u8,
     ) {
         transfer_future.await();
 
         let market: Market = markets.get(market_id);
-        assert(market.status == STATUS_PENDING_RESOLUTION);
+        let is_resolved: bool = market.status == MARKET_STATUS_RESOLVED;
+        let is_cancelled: bool = market.status == MARKET_STATUS_CANCELLED;
+        assert(is_resolved || is_cancelled);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
-        assert(!resolution.finalized);
+        // If resolved: only winning voters can claim bond back
+        // If cancelled: everyone gets bond back
+        let tally_exists: bool = vote_tallies.contains(market_id);
+        let outcome_matches: bool = tally_exists ?
+            vote_tallies.get(market_id).winning_outcome == voted_outcome : false;
+        assert(is_cancelled || outcome_matches);
 
-        let current_height: u64 = block.height as u64;
-        assert(current_height <= resolution.challenge_deadline);
+        // Prevent double claim
+        let already_claimed: bool = bond_claimed.get_or_use(claim_key, false);
+        assert(!already_claimed);
+        bond_claimed.set(claim_key, true);
 
-        assert(proposed_outcome != resolution.winning_outcome);
-        assert(proposed_outcome >= 1u8 && proposed_outcome <= market.num_outcomes);
-
-        let has_dispute: bool = market_disputes.contains(market_id);
-        assert(!has_dispute);
-
-        market_disputes.set(market_id, DisputeData {
-            market_id: market_id,
-            disputer: disputer,
-            proposed_outcome: proposed_outcome,
-            bond_amount: MIN_DISPUTE_BOND,
-            disputed_at: current_height,
-        });
-
-        markets.set(market_id, Market {
-            id: market.id,
-            creator: market.creator,
-            resolver: market.resolver,
-            question_hash: market.question_hash,
-            category: market.category,
-            num_outcomes: market.num_outcomes,
-            deadline: market.deadline,
-            resolution_deadline: market.resolution_deadline,
-            status: MARKET_STATUS_CLOSED,
-            created_at: market.created_at,
-            token_type: market.token_type,
-        });
-
-        market_resolutions.remove(market_id);
-
+        // Deduct from program credits
         let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
-        program_credits.set(CREDIT_KEY_ALEO, current_held + MIN_DISPUTE_BOND);
+        assert(current_held >= bond_amount);
+        program_credits.set(CREDIT_KEY_ALEO, current_held - bond_amount);
     }
 
     // ========================================================================
-    // 10. CLAIM DISPUTE BOND (ALEO)
+    // 12. CLAIM DISPUTE BOND — Disputer claims bond after resolution (v11)
     // ========================================================================
 
     async transition claim_dispute_bond(
         private receipt: DisputeBondReceipt,
-    ) -> Future {
+    ) -> (credits.aleo/credits, Future) {
         assert(receipt.owner == self.caller);
-        assert(receipt.token_type == TOKEN_ALEO);
+        assert(receipt.bond_amount > 0u128);
 
-        let claim_key: field = BHP256::hash_to_field(DisputeClaimKey {
+        let claim_key: field = BHP256::hash_to_field(BondClaimKey {
             market_id: receipt.market_id,
             claimer: self.caller,
-            dispute_nonce: receipt.dispute_nonce,
+            bond_nonce: receipt.dispute_nonce,
         });
 
         let bond_u64: u64 = receipt.bond_amount as u64;
-        let transfer_future: Future = credits.aleo/transfer_public(self.caller, bond_u64);
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, bond_u64);
 
-        return claim_dispute_bond_fin(
+        return (payout, claim_dispute_bond_fin(
             transfer_future, claim_key, receipt.market_id,
             receipt.bond_amount, receipt.proposed_outcome
-        );
+        ));
     }
 
     async function claim_dispute_bond_fin(
@@ -996,14 +1264,15 @@ program veiled_markets_usad_v8.aleo {
         let is_cancelled: bool = market.status == MARKET_STATUS_CANCELLED;
         assert(is_resolved || is_cancelled);
 
-        let resolution_exists: bool = market_resolutions.contains(market_id);
-        let outcome_matches: bool = resolution_exists ?
-            market_resolutions.get(market_id).winning_outcome == proposed_outcome : false;
+        // Disputer gets bond back if their proposed outcome is the final winner
+        let tally_exists: bool = vote_tallies.contains(market_id);
+        let outcome_matches: bool = tally_exists ?
+            vote_tallies.get(market_id).winning_outcome == proposed_outcome : false;
         assert(is_cancelled || outcome_matches);
 
-        let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
+        let already_claimed: bool = bond_claimed.get_or_use(claim_key, false);
         assert(!already_claimed);
-        share_redeemed.set(claim_key, true);
+        bond_claimed.set(claim_key, true);
 
         let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
         assert(current_held >= bond_amount);
@@ -1056,7 +1325,7 @@ program veiled_markets_usad_v8.aleo {
         assert(market.status == MARKET_STATUS_RESOLVED);
         assert(market.token_type == TOKEN_USAD);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
         assert(outcome == resolution.winning_outcome);
 
@@ -1262,7 +1531,7 @@ program veiled_markets_usad_v8.aleo {
         assert(market.status == MARKET_STATUS_RESOLVED);
         assert(market.token_type == TOKEN_USAD);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
         let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
@@ -1325,7 +1594,7 @@ program veiled_markets_usad_v8.aleo {
         assert(market.status == MARKET_STATUS_RESOLVED);
         assert(market.token_type == TOKEN_USAD);
 
-        let resolution: MarketResolution = market_resolutions.get(market_id);
+        let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
         let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
@@ -1534,5 +1803,39 @@ program veiled_markets_usad_v8.aleo {
         multisig_approvals.remove(key_1);
         multisig_approvals.remove(key_2);
         multisig_approvals.remove(key_3);
+    }
+
+    // ========================================================================
+    // 27. CLAIM VOTER REWARD — Claim accumulated protocol fee rewards (ALEO)
+    // ========================================================================
+    // Voters who successfully finalize markets accumulate rewards from
+    // protocol fees (20%). This transition claims those rewards as private ALEO.
+
+    async transition claim_voter_reward(
+        public expected_reward: u64,
+    ) -> (credits.aleo/credits, Future) {
+        assert(expected_reward > 0u64);
+        let (payout, transfer_future): (credits.aleo/credits, Future) =
+            credits.aleo/transfer_public_to_private(self.caller, expected_reward);
+
+        return (payout, claim_voter_reward_fin(transfer_future, self.caller, expected_reward as u128));
+    }
+
+    async function claim_voter_reward_fin(
+        transfer_future: Future,
+        voter: address,
+        expected_reward: u128,
+    ) {
+        transfer_future.await();
+
+        let reward: u128 = voter_rewards.get_or_use(voter, 0u128);
+        assert(reward > 0u128);
+        assert(reward == expected_reward);
+
+        voter_rewards.set(voter, 0u128);
+
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
+        assert(current_held >= reward);
+        program_credits.set(CREDIT_KEY_ALEO, current_held - reward);
     }
 }

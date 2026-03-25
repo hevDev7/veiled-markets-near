@@ -9,10 +9,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore } from '@/lib/store'
 import { config } from '@/lib/config'
-import { cn, sanitizeUrl } from '@/lib/utils'
+import { cn, formatCredits, sanitizeUrl } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
   hashToField, getCurrentBlockHeight, CONTRACT_INFO, getTransactionUrl,
+  getMappingValue,
   registerQuestionText, registerOutcomeLabels, registerMarketTransaction, setMarketThumbnailUrl,
   waitForMarketCreation, savePendingMarket, updatePendingMarketTxId,
 } from '@/lib/aleo-client'
@@ -67,6 +68,51 @@ function saveDraft(data: MarketFormData) { try { localStorage.setItem(DRAFT_KEY,
 function loadDraft(): MarketFormData | null { try { const raw = localStorage.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null } catch { return null } }
 function clearDraft() { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
 function hasFormContent(data: MarketFormData) { return data.question.trim() !== '' || data.description.trim() !== '' }
+
+function getCreateMarketBalanceError(
+  tokenType: 'ALEO' | 'USDCX' | 'USAD',
+  liquidityMicro: bigint,
+  balances: {
+    public: bigint
+    private: bigint
+    usdcxPublic: bigint
+    usadPublic: bigint
+  },
+): string | null {
+  const feeMicro = 1_500_000n
+
+  if (tokenType === 'ALEO') {
+    const totalNeeded = liquidityMicro + feeMicro
+    if (balances.public < totalNeeded) {
+      return (
+        `Insufficient public ALEO. Market creation uses public ALEO, not private credits. ` +
+        `Need ${formatCredits(totalNeeded)} ALEO total ` +
+        `(${formatCredits(liquidityMicro)} ALEO liquidity + ${formatCredits(feeMicro)} ALEO fee), ` +
+        `but only have ${formatCredits(balances.public)} public ALEO. ` +
+        `Private ALEO available: ${formatCredits(balances.private)}.`
+      )
+    }
+    return null
+  }
+
+  const publicStableBalance = tokenType === 'USDCX' ? balances.usdcxPublic : balances.usadPublic
+  if (publicStableBalance < liquidityMicro) {
+    return (
+      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity. ` +
+      `Need ${formatCredits(liquidityMicro)} ${tokenType}, ` +
+      `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.`
+    )
+  }
+
+  if (balances.public < 1_500_000n) {
+    return (
+      `Insufficient public ALEO for network fee. Market creation also needs ${formatCredits(1_500_000n)} public ALEO ` +
+      `for the transaction fee, but only have ${formatCredits(balances.public)} public ALEO.`
+    )
+  }
+
+  return null
+}
 
 // ── Thumbnail Input (URL or file upload) ──
 function ThumbnailInput({ value, onChange }: { value: string; onChange: (url: string) => void }) {
@@ -271,13 +317,21 @@ export function CreateMarketPage() {
         `${liquidityMicro}u128`,
       ]
 
-      const createProgramId = formData.tokenType === 'USAD' ? config.usadProgramId : CREATE_MARKET_PROGRAM_ID
+      const createProgramId = formData.tokenType === 'USAD' ? config.usadProgramId
+        : formData.tokenType === 'USDCX' ? config.usdcxMarketProgramId
+        : config.programId
+
+      // v33: No resolver whitelist — Open Voting + Bond system allows anyone to resolve
 
       for (let i = 0; i < inputs.length; i++) {
         if (typeof inputs[i] !== 'string' || !inputs[i]) throw new Error(`Input ${i} is invalid`)
       }
       if (deadlineBlockHeight <= currentBlock) throw new Error('Deadline must be in the future')
       if (resolutionBlockHeight <= deadlineBlockHeight) throw new Error('Resolution deadline must be after betting deadline')
+      if (!wallet.isDemoMode) {
+        const balanceError = getCreateMarketBalanceError(formData.tokenType, liquidityMicro, wallet.balance)
+        if (balanceError) throw new Error(balanceError)
+      }
 
       setIsSlowTransaction(false)
       const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
@@ -374,7 +428,14 @@ export function CreateMarketPage() {
       const errObj = err as any; const msg = errObj?.message || String(err)
       let errorMsg = msg
       if (msg.includes('abort')) errorMsg = 'Network request timed out.'
-      else if (msg.includes('rejected') || msg.includes('denied') || msg.includes('cancel')) errorMsg = 'Transaction was rejected in your wallet.'
+      else if (msg.includes('Resolver') && msg.includes('not approved')) errorMsg = msg
+      else if (
+        msg.toLowerCase().includes('rejected by user')
+        || msg.toLowerCase().includes('user rejected')
+        || msg.toLowerCase().includes('denied by user')
+        || msg.toLowerCase().includes('cancelled by user')
+        || msg.toLowerCase().includes('canceled by user')
+      ) errorMsg = 'Transaction was rejected in your wallet.'
       setError(errorMsg); setStep('error'); setIsSubmitting(false)
     }
   }
@@ -513,7 +574,12 @@ export function CreateMarketPage() {
                           <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500" />
                           <input type="number" value={formData.initialLiquidity} onChange={(e) => updateForm({ initialLiquidity: e.target.value })} placeholder="10" min="1" className="input-field pl-10 text-lg font-semibold" />
                         </div>
-                        <p className="text-2xs text-surface-500 mt-2">Seeds the AMM pool. Split equally across outcomes.</p>
+                        <p className="text-2xs text-surface-500 mt-2">
+                          Seeds the AMM pool. Split equally across outcomes.
+                          {formData.tokenType === 'ALEO'
+                            ? ' Uses public ALEO balance; private credits cannot be used here.'
+                            : ` Uses public ${formData.tokenType} balance, plus 1.5 public ALEO for the network fee.`}
+                        </p>
                       </div>
                       {deadline && resolutionDeadline && (
                         <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] space-y-3">

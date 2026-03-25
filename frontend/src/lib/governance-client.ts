@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED GOVERNANCE — Blockchain Client
 // ============================================================================
-// Client for interacting with the veiled_governance_v3.aleo program (pure ALEO)
+// Client for interacting with the veiled_governance_v4.aleo program (pure ALEO)
 // ============================================================================
 
 import { config } from './config';
@@ -22,7 +22,7 @@ import {
 // ============================================================================
 
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const GOV_PROGRAM_ID = config.governanceProgramId || 'veiled_governance_v3.aleo';
+const GOV_PROGRAM_ID = config.governanceProgramId || 'veiled_governance_v4.aleo';
 // v2: No separate token program — governance uses native ALEO credits
 const TOKEN_PROGRAM_ID = 'credits.aleo';
 const FETCH_TIMEOUT_MS = 15_000;

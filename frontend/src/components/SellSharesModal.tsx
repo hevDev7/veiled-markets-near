@@ -1,10 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, TrendingDown, AlertTriangle, Loader2, Check, Shield } from 'lucide-react'
 import { useState, useMemo } from 'react'
-import { type Market, CONTRACT_INFO } from '@/lib/store'
+import { type Market } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildSellSharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS } from '@/lib/aleo-client'
+import { buildSellSharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { devWarn } from '@/lib/logger'
 import {
   calculateSellSharesNeeded,
@@ -147,7 +147,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
       )
 
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs,
         fee: 1.5,

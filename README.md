@@ -9,7 +9,7 @@
 Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiledmarkets.xyz)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v30.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v32.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -28,7 +28,7 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 - **Market Resolution** — 3-step on-chain flow (close → resolve → finalize) with dispute mechanism and challenge window
 - **Resolver System** — On-chain resolver whitelist with 20% fee allocation from protocol fees
 - **Multi-Sig Treasury** — 2-of-3 multisig for protocol fund withdrawals (ALEO + USDCX)
-- **On-Chain Governance** — Proposal creation, voting, delegation via `veiled_governance_v3.aleo`
+- **On-Chain Governance** — Proposal creation, voting, delegation via `veiled_governance_v4.aleo`
 - **Encrypted Storage** — Supabase with AES-256-GCM client-side encryption for cross-device bet sync
 - **IPFS Metadata** — Market metadata (question, description, resolution source) stored on IPFS via Pinata
 
@@ -36,11 +36,13 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 
 | Contract | Program ID | Transitions | Purpose |
 |----------|-----------|-------------|---------|
-| **Main** | `veiled_markets_v30.aleo` | 31 | ALEO + USDCX markets, lifecycle, dispute, multisig, resolver |
-| **USAD** | `veiled_markets_usad_v8.aleo` | 19 | USAD stablecoin markets (separate due to 31-transition limit) |
-| **Governance** | `veiled_governance_v3.aleo` | — | On-chain governance (proposals, voting, delegation) |
+| **Main** | `veiled_markets_v32.aleo` | 31 | ALEO + USDCX markets, lifecycle, dispute, multisig, resolver |
+| **USAD** | `veiled_markets_usad_v8.aleo` | 19 | Fully functional USAD stablecoin markets (separate program — same features as main, split due to snarkVM 31-transition limit) |
+| **Governance** | `veiled_governance_v4.aleo` | — | On-chain governance target in this repo (public deployment may still be on an older version until rollout) |
 
 **Dependencies:** `credits.aleo`, `test_usdcx_stablecoin.aleo`, `test_usad_stablecoin.aleo`, `merkle_tree.aleo`
+
+> **Note:** All three token types (ALEO, USDCX, USAD) are fully functional with identical features. USAD lives in a separate program because the main contract hit snarkVM's 31-transition limit. The frontend routes transactions automatically based on token type — users see a unified experience.
 
 ## Architecture
 
@@ -48,7 +50,7 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 ┌──────────────────┐     ┌───────────────────────┐     ┌──────────────────────────┐
 │   Frontend       │────▶│   Shield Wallet       │────▶│   Aleo Testnet           │
 │   React 18/Vite  │     │  (ProvableHQ adapter) │     │                          │
-│   TypeScript     │     │                       │     │  veiled_markets_v30.aleo  │
+│   TypeScript     │     │                       │     │  veiled_markets_v32.aleo  │
 │   Tailwind CSS   │     │  recordIndices hint   │     │  ├─ ALEO markets         │
 │   Framer Motion  │     │  for Token records    │     │  └─ USDCX markets        │
 │                  │     └───────────────────────┘     │                          │
@@ -57,7 +59,7 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 │  - Dashboard     │────▶│  Supabase (encrypted) │     │  └─ USAD markets         │
 │  - MarketDetail  │     │  Bet sync + registry  │     │                          │
 │  - Portfolio     │     └───────────────────────┘     │  veiled_governance_      │
-│  - Governance    │                                   │  v3.aleo                 │
+│  - Governance    │                                   │  v4.aleo                 │
 │  - Create Market │     ┌───────────────────────┐     │  └─ Proposals & voting   │
 │  - History       │────▶│  IPFS (Pinata)        │     │                          │
 │  - Settings      │     │  Market metadata      │     │  Dependencies:           │
@@ -226,7 +228,7 @@ No observer can determine: who bet, on which market, which outcome, or how much.
 
 ## Key Transitions
 
-### Main Contract (v30 — 31 transitions)
+### Main Contract (v31 — 31 transitions)
 
 **Market Lifecycle:**
 `create_market` / `create_market_usdcx` · `close_market` · `resolve_market` · `finalize_resolution` · `cancel_market`
@@ -295,10 +297,10 @@ VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 VITE_EXPLORER_URL=https://testnet.explorer.provable.com
 
 # Contracts
-VITE_PROGRAM_ID=veiled_markets_v30.aleo
+VITE_PROGRAM_ID=veiled_markets_v32.aleo
 VITE_USAD_PROGRAM_ID=veiled_markets_usad_v8.aleo
 VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
-VITE_GOVERNANCE_PROGRAM_ID=veiled_governance_v3.aleo
+VITE_GOVERNANCE_PROGRAM_ID=veiled_governance_v4.aleo
 
 # Supabase (cross-device bet sync + market registry)
 VITE_SUPABASE_URL=https://your-project.supabase.co
@@ -317,7 +319,7 @@ See [`.env.example`](./frontend/.env.example) for all available configuration op
 cd contracts && leo build
 # Patch MerkleProof for Shield Wallet compatibility
 sed -i 's/test_usdcx_stablecoin\.aleo\/MerkleProof/MerkleProof/g' build/main.aleo
-snarkos developer deploy veiled_markets_v30.aleo --path build --network 1 --broadcast
+snarkos developer deploy veiled_markets_v32.aleo --path build --network 1 --broadcast
 
 # USAD contract (separate program)
 cd ../contracts-usad && leo build
@@ -364,6 +366,6 @@ MIT License - see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [Main Contract](https://testnet.explorer.provable.com/program/veiled_markets_v30.aleo) · [USAD Contract](https://testnet.explorer.provable.com/program/veiled_markets_usad_v8.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v3.aleo)
+[Live Demo](https://veiledmarkets.xyz) · [Main Contract](https://testnet.explorer.provable.com/program/veiled_markets_v32.aleo) · [USAD Contract](https://testnet.explorer.provable.com/program/veiled_markets_usad_v8.aleo) · [Governance Target](https://testnet.explorer.provable.com/program/veiled_governance_v4.aleo)
 
 </div>

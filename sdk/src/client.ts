@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Aleo Client
 // ============================================================================
-// Main client for interacting with the veiled_markets_v30.aleo program
+// Main client for interacting with the veiled_markets_v34.aleo program
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -44,7 +44,7 @@ import {
  */
 const DEFAULT_CONFIG: VeiledMarketsConfig = {
   network: 'testnet',
-  programId: 'veiled_markets_v30.aleo',
+  programId: 'veiled_markets_v34.aleo',
 };
 
 /**

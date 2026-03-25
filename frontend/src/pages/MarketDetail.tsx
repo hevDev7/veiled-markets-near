@@ -41,6 +41,7 @@ import {
   getMarketResolution,
   getMarketFees,
   getMarketDispute,
+  getProgramIdForToken,
   diagnoseTransaction,
   MARKET_STATUS,
   type MarketResolutionData,
@@ -68,7 +69,7 @@ import { Footer } from '@/components/Footer'
 import { OutcomeSelector } from '@/components/OutcomeSelector'
 import { ProbabilityDonut } from '@/components/ProbabilityDonut'
 import { LiquidityPanel } from '@/components/LiquidityPanel'
-import { DisputePanel } from '@/components/DisputePanel'
+// DisputePanel removed in v33 — challenge integrated in ResolvePanel
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
 import { cn, formatCredits, getTokenSymbol, sanitizeUrl, safeHostname, isValidAleoAddress } from '@/lib/utils'
@@ -605,7 +606,10 @@ export function MarketDetail() {
     setFetchRecordError(null)
     try {
       const { fetchOutcomeShareRecords } = await import('@/lib/credits-record')
-      const records = await fetchOutcomeShareRecords(CONTRACT_INFO.programId, market?.id)
+      // Use correct program ID based on market token type
+      const tokenType = market?.tokenType || 'ALEO'
+      const programId = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
+      const records = await fetchOutcomeShareRecords(programId, market?.id)
       setWalletShareRecords(records)
       if (records.length === 0) {
         setFetchRecordError('No share positions found for this market. Your wallet may not support record fetching.')
@@ -617,6 +621,13 @@ export function MarketDetail() {
       setIsFetchingRecords(false)
     }
   }
+
+  // Auto-fetch share records when switching to sell tab
+  useEffect(() => {
+    if (tradeMode === 'sell' && walletShareRecords.length === 0 && !isFetchingRecords && market) {
+      handleFetchRecords()
+    }
+  }, [tradeMode, market?.id])
 
   if (!wallet.connected) return null
 
@@ -701,7 +712,9 @@ export function MarketDetail() {
   }
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
-  const isUsdcx = market.tokenType === 'USDCX'
+  const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const isUsdcx = tokenType === 'USDCX'
+  const isStablecoin = tokenType === 'USDCX' || tokenType === 'USAD'
   const numOutcomes = market.numOutcomes ?? 2
   const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
 
@@ -741,10 +754,12 @@ export function MarketDetail() {
 
       // Pre-flight: Balance verification
       const feeInMicro = 1_500_000n
-      if (isUsdcx) {
-        const totalUsdcx = wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
-        if (buyAmountMicro > totalUsdcx) {
-          throw new Error(`Insufficient USDCX balance. You need ${buyAmount} USDCX but only have ${(Number(totalUsdcx) / 1_000_000).toFixed(2)} USDCX.`)
+      if (isStablecoin) {
+        const totalStablecoin = tokenType === 'USDCX'
+          ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
+          : wallet.balance.usadPublic + wallet.balance.usadPrivate
+        if (buyAmountMicro > totalStablecoin) {
+          throw new Error(`Insufficient ${tokenType} balance. You need ${buyAmount} ${tokenType} but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${tokenType}.`)
         }
         // Gas fees always in ALEO
         const publicBalance = wallet.balance.public
@@ -754,7 +769,6 @@ export function MarketDetail() {
       }
 
       // Build inputs
-      const tokenType = market.tokenType || 'ALEO'
       let functionName: string
       let inputs: string[]
 
@@ -834,7 +848,7 @@ export function MarketDetail() {
       let result: any
       {
         // v7: Single TX — all bet inputs private, USAD uses transfer_public_as_signer
-        const programId = tokenType === 'USAD' ? config.usadProgramId : CONTRACT_INFO.programId
+        const programId = getProgramIdForToken(tokenType)
         result = await executeTransaction({
           program: programId,
           function: functionName,
@@ -915,10 +929,11 @@ export function MarketDetail() {
 
   // Determine which panels to show based on market status
   const showResolve = isExpired || market.status === MARKET_STATUS.CLOSED || market.status === MARKET_STATUS.PENDING_RESOLUTION || market.status === MARKET_STATUS.RESOLVED
-  const showDispute = market.status === MARKET_STATUS.PENDING_RESOLUTION && resolution
+  // v33: showDispute removed — challenge is in ResolvePanel
   const showCreatorFees = market.status === MARKET_STATUS.RESOLVED && fees && wallet.address === market.creator
   const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired
-  const showLiquidity = canTrade || market.status === MARKET_STATUS.RESOLVED || market.status === MARKET_STATUS.CANCELLED
+  // v33: Show liquidity tab for ALL statuses — LP needs to see positions and withdraw
+  const showLiquidity = true
 
   // Re-fetch market + resolution data after a resolution action
   const refreshExtras = async () => {
@@ -1353,20 +1368,7 @@ export function MarketDetail() {
                       {canTrade ? 'Liquidity' : 'Withdraw LP'}
                     </button>
                   )}
-                  {showDispute && (
-                    <button
-                      onClick={() => setActiveTab('dispute')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                        activeTab === 'dispute'
-                          ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
-                      )}
-                    >
-                      <ShieldAlert className="w-4 h-4" />
-                      Dispute
-                    </button>
-                  )}
+                  {/* v33: Dispute tab removed — challenge is now part of ResolvePanel */}
                   {showCreatorFees && (
                     <button
                       onClick={() => setActiveTab('fees')}
@@ -1401,9 +1403,7 @@ export function MarketDetail() {
                 {activeTab === 'liquidity' && showLiquidity && (
                   <LiquidityPanel market={market} />
                 )}
-                {activeTab === 'dispute' && showDispute && resolution && (
-                  <DisputePanel market={market} resolution={resolution} />
-                )}
+                {/* v33: DisputePanel removed — challenge integrated in ResolvePanel */}
                 {activeTab === 'fees' && showCreatorFees && fees && (
                   <CreatorFeesPanel market={market} fees={fees} />
                 )}
@@ -1639,17 +1639,17 @@ export function MarketDetail() {
                         </div>
 
                         <div className="mt-2 space-y-1">
-                          {!isUsdcx && wallet.balance.public === 0n && (
+                          {wallet.balance.public === 0n && (
                             <div className="flex items-start gap-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 mb-1">
                               <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
                               <p className="text-xs text-yellow-300 leading-relaxed">
-                                You have <strong>0 public ALEO</strong>. Trading requires public credits.
+                                You have <strong>0 public ALEO</strong>. Trading requires public ALEO for gas.
                               </p>
                             </div>
                           )}
                           <p className="text-xs text-surface-500">
-                            {isUsdcx
-                              ? `USDCX Balance: ${formatCredits(wallet.balance.usdcxPublic)} USDCX`
+                            {isStablecoin
+                              ? `${tokenType} Balance: ${formatCredits(tokenType === 'USDCX' ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate : wallet.balance.usadPublic + wallet.balance.usadPrivate)} ${tokenType}`
                               : <>Public Balance: {formatCredits(wallet.balance.public)} ALEO</>
                             }
                           </p>

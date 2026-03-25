@@ -15,7 +15,7 @@ describe('VeiledMarketsClient', () => {
   beforeEach(() => {
     client = createClient({
       network: 'testnet',
-      programId: 'veiled_markets_v30.aleo',
+      programId: 'veiled_markets_v34.aleo',
     });
     vi.clearAllMocks();
   });
@@ -23,7 +23,7 @@ describe('VeiledMarketsClient', () => {
   describe('constructor', () => {
     it('should create client with default config', () => {
       const defaultClient = createClient();
-      expect(defaultClient.programId).toBe('veiled_markets_v30.aleo');
+      expect(defaultClient.programId).toBe('veiled_markets_v34.aleo');
       expect(defaultClient.network).toBe('testnet');
     });
 

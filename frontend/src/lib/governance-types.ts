@@ -234,7 +234,7 @@ export const MIN_PROPOSAL_STAKE = 10_000000n;            // 10 ALEO
 export const MIN_VOTE_AMOUNT = 1_000000n;                // 1 ALEO
 export const RESOLVER_STAKE_BRONZE = 50_000000n;         // 50 ALEO
 export const VOTING_PERIOD_BLOCKS = 40320n;              // ~7 days
-export const GOVERNANCE_PROGRAM_ID = 'veiled_governance_v3.aleo';
+export const GOVERNANCE_PROGRAM_ID = 'veiled_governance_v4.aleo';
 export const VEIL_TOKEN_PROGRAM_ID = 'credits.aleo'; // v2: uses native ALEO
 
 // --- Parameter Registry (keys for governance parameter updates) ---

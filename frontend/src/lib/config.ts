@@ -32,6 +32,7 @@ export interface AppConfig {
   programId: string;
   creditsProgramId: string;
   usdcxProgramId: string;
+  usdcxMarketProgramId: string;
   usadProgramId: string;
   governanceProgramId: string;
   // Legacy program IDs for querying old markets
@@ -111,11 +112,12 @@ function loadConfig(): AppConfig {
     msPerBlock: network === 'mainnet' ? 15000 : 4000,
 
     // Program
-    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v30.aleo'),
+    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v34.aleo'),
     creditsProgramId: getEnv('VITE_CREDITS_PROGRAM_ID', 'credits.aleo'),
     usdcxProgramId: getEnv('VITE_USDCX_PROGRAM_ID', 'test_usdcx_stablecoin.aleo'),
-    usadProgramId: getEnv('VITE_USAD_PROGRAM_ID', 'veiled_markets_usad_v8.aleo'),
-    governanceProgramId: getEnv('VITE_GOVERNANCE_PROGRAM_ID', 'veiled_governance_v3.aleo'),
+    usdcxMarketProgramId: getEnv('VITE_USDCX_MARKET_PROGRAM_ID', 'veiled_markets_usdcx_v4.aleo'),
+    usadProgramId: getEnv('VITE_USAD_PROGRAM_ID', 'veiled_markets_usad_v11.aleo'),
+    governanceProgramId: getEnv('VITE_GOVERNANCE_PROGRAM_ID', 'veiled_governance_v4.aleo'),
     // Legacy programs — markets created on older versions still live there
     legacyProgramIds: [],
     legacyUsadProgramIds: [],

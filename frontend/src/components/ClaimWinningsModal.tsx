@@ -15,10 +15,10 @@ import {
   ClipboardPaste,
 } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
-import { type Bet, useBetsStore, useWalletStore, CONTRACT_INFO, outcomeToIndex } from '@/lib/store'
+import { type Bet, useBetsStore, useWalletStore, outcomeToIndex } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { getRedeemFunction, getRefundFunction } from '@/lib/aleo-client'
+import { getRedeemFunction, getRefundFunction, getProgramIdForToken } from '@/lib/aleo-client'
 import { fetchOutcomeShareRecords, type ParsedOutcomeShare } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
 
@@ -65,7 +65,8 @@ export function ClaimWinningsModal({
     setIsFetchingRecords(true)
     setFetchError(null)
     try {
-      const records = await fetchOutcomeShareRecords(CONTRACT_INFO.programId, bet.marketId)
+      const betTokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const records = await fetchOutcomeShareRecords(getProgramIdForToken(betTokenType), bet.marketId)
       setShareRecords(records)
       if (records.length === 1) {
         setSelectedRecord(records[0])
@@ -147,13 +148,13 @@ export function ClaimWinningsModal({
     setIsSubmitting(true)
     setError(null)
     try {
-      const tokenType = bet.tokenType || 'ALEO'
+      const tokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       const functionName = isRefund
         ? getRefundFunction(tokenType)
         : getRedeemFunction(tokenType)
 
       const result = await executeTransaction({
-        program: CONTRACT_INFO.programId,
+        program: getProgramIdForToken(tokenType),
         function: functionName,
         inputs: [recordPlaintext],
         fee: 1.5,
@@ -198,13 +199,14 @@ export function ClaimWinningsModal({
   const hasRecord = !!getRecordPlaintext()
 
   // CLI commands as fallback
-  const claimRefundCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${refundFn} \\
+  const claimProgramId = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
+  const claimRefundCmd = `snarkos developer execute ${claimProgramId} ${refundFn} \\
   "<YOUR_OUTCOME_SHARE_RECORD>" \\
   --private-key <YOUR_PRIVATE_KEY> \\
   --endpoint https://api.explorer.provable.com \\
   --broadcast --network 1 --priority-fee 500000`
 
-  const redeemSharesCmd = `snarkos developer execute ${CONTRACT_INFO.programId} ${redeemFn} \\
+  const redeemSharesCmd = `snarkos developer execute ${claimProgramId} ${redeemFn} \\
   "<YOUR_OUTCOME_SHARE_RECORD>" \\
   --private-key <YOUR_PRIVATE_KEY> \\
   --endpoint https://api.explorer.provable.com \\

@@ -75,6 +75,19 @@ function isShieldReconnectableError(message: string): boolean {
   )
 }
 
+function isLikelyUserRejectedTransaction(message: string): boolean {
+  const msg = message.toLowerCase()
+  return (
+    msg.includes('user rejected')
+    || msg.includes('rejected by user')
+    || msg.includes('user denied')
+    || msg.includes('denied by user')
+    || msg.includes('cancelled by user')
+    || msg.includes('canceled by user')
+    || msg.includes('user cancel')
+  )
+}
+
 export function useAleoTransaction() {
   const {
     executeTransaction: adapterExecute,
@@ -211,7 +224,7 @@ export function useAleoTransaction() {
         const errName = err?.name || ''
         console.error('[TX] Failed:', { name: errName, message: msg, raw: err })
 
-        if (msg.includes('reject') || msg.includes('denied') || msg.includes('cancel')) {
+        if (isLikelyUserRejectedTransaction(msg)) {
           throw new Error('Transaction rejected by user')
         }
 

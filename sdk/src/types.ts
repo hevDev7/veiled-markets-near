@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS SDK - Type Definitions
 // ============================================================================
-// Matches the Leo contract: veiled_markets_v30.aleo
+// Matches the Leo contract: veiled_markets_v34.aleo
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
