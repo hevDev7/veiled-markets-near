@@ -41,6 +41,9 @@ export const TOKEN_SYMBOLS: Record<number, string> = {
   3: 'USAD',
 };
 
+// Must stay in sync with WINNER_CLAIM_PRIORITY_BLOCKS in contracts/src/main.leo.
+export const WINNER_CLAIM_PRIORITY_BLOCKS = 2880n;
+
 export const FEES = {
   PROTOCOL_FEE_BPS: 50n,  // 0.5% per trade
   CREATOR_FEE_BPS: 50n,   // 0.5% per trade
@@ -719,8 +722,6 @@ export async function getMappingValue<T>(
 
   try {
     const url = `${API_BASE_URL}/program/${pid}/mapping/${mappingName}/${key}`;
-    devLog('Fetching mapping:', url);
-
     const response = await fetchWithRetry(url);
     if (!response.ok) {
       if (response.status === 404) return null;
@@ -728,7 +729,6 @@ export async function getMappingValue<T>(
     }
 
     const data = await response.text();
-    devLog('Mapping response:', data);
 
     // Parse the JSON string first (API returns JSON-encoded string)
     const cleanData = JSON.parse(data);

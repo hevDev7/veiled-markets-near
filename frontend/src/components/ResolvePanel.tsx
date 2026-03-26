@@ -15,6 +15,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, getTokenSymbol } from '@/lib/utils'
+import { devLog, devWarn } from '@/lib/logger'
 import {
   buildCloseMarketInputs,
   buildSubmitOutcomeInputs as buildVoteOutcomeInputs,
@@ -42,6 +43,140 @@ type ResolveStep = 'close' | 'submit' | 'challenge' | 'finalize' | 'done'
 const MIN_RESOLUTION_BOND = 1_000_000n // 1 ALEO
 const BOND_MULTIPLIER = 2n
 
+interface ParsedVoterBondReceipt {
+  plaintext: string
+  marketId: string | null
+  votedOutcome: number | null
+  owner: string | null
+}
+
+type BondIndicatorStatus = 'idle' | 'wallet_required' | 'checking' | 'claimable' | 'slashed' | 'claimed' | 'missing' | 'error'
+
+interface BondIndicatorState {
+  status: BondIndicatorStatus
+  receipt: ParsedVoterBondReceipt | null
+  message?: string
+}
+
+interface MarketReceiptScanResult {
+  unspent: ParsedVoterBondReceipt | null
+  spent: ParsedVoterBondReceipt | null
+}
+
+function parseVoterBondReceipt(text: string): ParsedVoterBondReceipt | null {
+  const plaintext = String(text)
+  if (!plaintext.includes('voted_outcome') || !plaintext.includes('bond_nonce')) return null
+
+  const marketMatch = plaintext.match(/market_id:\s*([0-9]+field)/)
+  const outcomeMatch = plaintext.match(/voted_outcome:\s*(\d+)u8/)
+  const ownerMatch = plaintext.match(/owner:\s*(aleo1[a-z0-9]+)/)
+
+  if (!marketMatch || !outcomeMatch) return null
+
+  return {
+    plaintext,
+    marketId: marketMatch[1] ?? null,
+    votedOutcome: Number(outcomeMatch[1]),
+    owner: ownerMatch?.[1] ?? null,
+  }
+}
+
+function isSpentRecord(record: any): boolean {
+  return record?.spent === true
+    || record?.is_spent === true
+    || record?.isSpent === true
+    || record?.status === 'spent'
+    || record?.status === 'Spent'
+    || record?.recordStatus === 'spent'
+    || record?.recordStatus === 'Spent'
+}
+
+async function inspectVoterBondReceiptsForMarket(
+  programId: string,
+  marketId: string,
+  logPrefix: string = '[ClaimBond]',
+): Promise<MarketReceiptScanResult> {
+  let matchedUnspent: ParsedVoterBondReceipt | null = null
+  let matchedSpent: ParsedVoterBondReceipt | null = null
+  const tryUseReceipt = (candidate: unknown, source: string, spent: boolean): boolean => {
+    const parsed = parseVoterBondReceipt(String(candidate ?? ''))
+    if (!parsed) return false
+    if (parsed.marketId !== marketId) {
+      devLog(`${logPrefix} Skipping ${source} receipt for different market:`, parsed.marketId)
+      return false
+    }
+    if (spent) {
+      if (!matchedSpent) {
+        matchedSpent = parsed
+        devLog(`${logPrefix} Found spent receipt from ${source} for market ${parsed.marketId}, outcome ${parsed.votedOutcome}`)
+      }
+      return Boolean(matchedUnspent)
+    }
+    matchedUnspent = parsed
+    devLog(`${logPrefix} Matched unspent receipt from ${source} for market ${parsed.marketId}, outcome ${parsed.votedOutcome}`)
+    return true
+  }
+
+  const adapterFn = (window as any).__aleoRequestRecords
+  if (!matchedUnspent && typeof adapterFn === 'function') {
+    try {
+      devLog(`${logPrefix} Strategy 1: adapter requestRecords(programId, true)`)
+      const records = await adapterFn(programId, true)
+      const arr = Array.isArray(records) ? records : (records?.records || [])
+      devLog(`${logPrefix} Got ${arr.length} records, names:`, arr.map((r: any) => r?.recordName || '?').join(', '))
+      for (const r of arr) {
+        if (!r) continue
+        const name = r?.recordName || r?.record_name || ''
+        if (name !== 'VoterBondReceipt') continue
+        const plain = r?.plaintext || r?.data || r?.value || ''
+        if (tryUseReceipt(plain, 'adapter plaintext', isSpentRecord(r))) break
+      }
+    } catch (error) {
+      devWarn(`${logPrefix} Strategy 1 failed:`, error)
+    }
+  }
+
+  const shieldObj = (window as any).shield || (window as any).shieldWallet
+  if (!matchedUnspent && shieldObj?.requestRecords) {
+    try {
+      devLog(`${logPrefix} Strategy 2: requestRecords + decrypt`)
+      const records = await shieldObj.requestRecords(programId)
+      const arr = Array.isArray(records) ? records : (records?.records || [])
+      const decryptFn = (window as any).__aleoDecrypt
+      for (const r of arr) {
+        if (!r) continue
+        const name = r?.recordName || r?.record_name || ''
+        if (name !== 'VoterBondReceipt') continue
+        const isSpent = isSpentRecord(r)
+        const ciphertext = r?.recordCiphertext || r?.record_ciphertext || r?.ciphertext
+        if (ciphertext && typeof decryptFn === 'function') {
+          try {
+            devLog(`${logPrefix} Decrypting VoterBondReceipt ciphertext...`)
+            const decrypted = await decryptFn(String(ciphertext))
+            if (tryUseReceipt(decrypted, 'decrypted ciphertext', isSpent)) break
+          } catch (decryptError) {
+            devWarn(`${logPrefix} Decrypt failed:`, decryptError)
+          }
+        }
+
+        const plain = r?.plaintext || r?.data || r?.value || ''
+        if (tryUseReceipt(plain, 'wallet plaintext', isSpent)) break
+      }
+    } catch (error) {
+      devWarn(`${logPrefix} Strategy 2 failed:`, error)
+    }
+  }
+
+  if (!matchedUnspent && !matchedSpent) {
+    devLog(`${logPrefix} No VoterBondReceipt found for market:`, marketId)
+  }
+
+  return {
+    unspent: matchedUnspent,
+    spent: matchedSpent,
+  }
+}
+
 export function ResolvePanel({ market, resolution, onResolutionChange }: ResolvePanelProps) {
   const { wallet } = useWalletStore()
   const { executeTransaction } = useAleoTransaction()
@@ -51,6 +186,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   const [error, setError] = useState<string | null>(null)
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
   const [currentBlock, setCurrentBlock] = useState<bigint>(0n)
+  const [bondIndicator, setBondIndicator] = useState<BondIndicatorState>({ status: 'idle', receipt: null })
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
   const tokenTypeStr: 'ALEO' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
@@ -80,8 +216,9 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   const currentStep: ResolveStep = useMemo(() => {
     if (market.status === MARKET_STATUS.RESOLVED) return 'done'
     if (market.status === STATUS_PENDING_FINALIZATION) {
-      // Dispute window — can dispute or confirm
-      if (resolution && currentBlock > 0n && currentBlock > (resolution as any).dispute_deadline) {
+      // Dispute window — challenge_deadline is set to dispute_deadline when status=6
+      // (see getMarketResolution: challengeDeadline = disputeDeadline when PENDING_FINALIZATION)
+      if (resolution && currentBlock > 0n && resolution.challenge_deadline > 0n && currentBlock > resolution.challenge_deadline) {
         return 'finalize' // Dispute window passed → confirm_resolution
       }
       return 'challenge' // Within dispute window — can file dispute
@@ -130,6 +267,84 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
       blocksLeft,
     }
   }, [resolution, currentBlock])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (currentStep !== 'done' || market.status !== MARKET_STATUS.RESOLVED || !resolution) {
+      setBondIndicator({ status: 'idle', receipt: null })
+      return () => { cancelled = true }
+    }
+
+    if (!wallet.connected || !wallet.address) {
+      setBondIndicator({
+        status: 'wallet_required',
+        receipt: null,
+        message: 'Connect your wallet to check whether your bond is claimable or slashed.',
+      })
+      return () => { cancelled = true }
+    }
+
+    setBondIndicator({ status: 'checking', receipt: null })
+
+    ;(async () => {
+      try {
+        const receipt = await inspectVoterBondReceiptsForMarket(
+          getProgramIdForToken(tokenTypeStr),
+          market.id,
+          '[BondStatus]',
+        )
+
+        if (cancelled) return
+
+        if (receipt.unspent?.votedOutcome === resolution.winning_outcome) {
+          setBondIndicator({ status: 'claimable', receipt: receipt.unspent })
+          return
+        }
+
+        if (receipt.unspent) {
+          setBondIndicator({ status: 'slashed', receipt: receipt.unspent })
+          return
+        }
+
+        if (receipt.spent) {
+          setBondIndicator({
+            status: 'claimed',
+            receipt: receipt.spent,
+            message: 'This bond receipt has already been spent in a successful claim.',
+          })
+          return
+        }
+
+        if (!receipt.unspent && !receipt.spent) {
+          setBondIndicator({
+            status: 'missing',
+            receipt: null,
+            message: 'This wallet does not have a VoterBondReceipt for this market.',
+          })
+          return
+        }
+      } catch (err) {
+        if (cancelled) return
+        console.error('[BondStatus] Failed to inspect voter bond receipt:', err)
+        setBondIndicator({
+          status: 'error',
+          receipt: null,
+          message: 'Bond status could not be checked automatically. Try reconnecting your wallet and refreshing the page.',
+        })
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [
+    currentStep,
+    market.id,
+    market.status,
+    resolution,
+    tokenTypeStr,
+    wallet.connected,
+    wallet.address,
+  ])
 
   // Steps config
   const steps: { key: ResolveStep; label: string; icon: React.ElementType }[] = [
@@ -358,59 +573,55 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   }
 
   const handleClaimVoterBond = async () => {
+    devLog('[ClaimBond] Starting claim for market:', market.id)
     setIsSubmitting(true)
     setError(null)
     try {
-      // claim_voter_bond requires a VoterBondReceipt record from the wallet
-      // The receipt was returned when vote_outcome was called
-      // We need to find it in the wallet's records
       const programId = getProgramIdForToken(tokenTypeStr)
+      devLog('[ClaimBond] Program:', programId)
 
-      // For now, we call claim_voter_bond with a placeholder — the wallet should have the receipt
-      // Shield wallet will find the record automatically when recordIndices is set
-      // Actually, claim_voter_bond takes a VoterBondReceipt RECORD as input
-      // The user needs to have this record from their vote_outcome transaction
-
-      // Try to find VoterBondReceipt from wallet
-      let receiptRecord: string | null = null
-      const shieldObj = (window as any).shield || (window as any).shieldWallet
-      if (shieldObj?.requestRecordPlaintexts) {
-        try {
-          const records = await shieldObj.requestRecordPlaintexts(programId)
-          const arr = Array.isArray(records) ? records : (records?.records || [])
-          for (const r of arr) {
-            const text = typeof r === 'string' ? r : (r?.plaintext || r?.data || '')
-            const textStr = String(text)
-            if (textStr.includes('voted_outcome') && textStr.includes('bond_amount') && textStr.includes(market.id.replace('field', ''))) {
-              receiptRecord = textStr
-              break
-            }
-          }
-        } catch { /* ignore */ }
-      }
-
-      if (!receiptRecord) {
-        // Fallback: try requestRecords
-        if (shieldObj?.requestRecords) {
-          try {
-            const records = await shieldObj.requestRecords(programId)
-            const arr = Array.isArray(records) ? records : (records?.records || [])
-            for (const r of arr) {
-              const text = typeof r === 'string' ? r : (r?.plaintext || r?.data || '')
-              const textStr = String(text)
-              if (textStr.includes('voted_outcome') && textStr.includes('bond_amount')) {
-                receiptRecord = textStr
-                break
-              }
-            }
-          } catch { /* ignore */ }
+      let matchedReceipt: ParsedVoterBondReceipt | null = bondIndicator.receipt
+      if (!matchedReceipt) {
+        const receiptScan = await inspectVoterBondReceiptsForMarket(programId, market.id, '[ClaimBond]')
+        matchedReceipt = receiptScan.unspent
+        if (!matchedReceipt && receiptScan.spent) {
+          setBondIndicator({
+            status: 'claimed',
+            receipt: receiptScan.spent,
+            message: 'This bond receipt has already been spent in a successful claim.',
+          })
+          throw new Error('This bond has already been claimed.')
         }
       }
 
+      const receiptRecord = matchedReceipt?.plaintext ?? null
+
       if (!receiptRecord) {
-        throw new Error('VoterBondReceipt not found in wallet. You may have already claimed, or your wallet does not support record fetching for this program.')
+        setBondIndicator({
+          status: 'missing',
+          receipt: null,
+          message: 'This wallet does not have a VoterBondReceipt for this market.',
+        })
+        throw new Error('No VoterBondReceipt for this market was found in your wallet. If you voted from another wallet, already claimed, or only have receipts from other ALEO markets, this claim will fail.')
       }
 
+      if (
+        matchedReceipt?.votedOutcome != null
+        && resolution
+        && market.status === MARKET_STATUS.RESOLVED
+        && matchedReceipt.votedOutcome !== resolution.winning_outcome
+      ) {
+        setBondIndicator({ status: 'slashed', receipt: matchedReceipt })
+        throw new Error(
+          `Your recorded vote was outcome ${matchedReceipt.votedOutcome}, but the resolved winner is outcome ${resolution.winning_outcome}. Losing voter bonds are slashed and cannot be claimed.`
+        )
+      }
+
+      if (matchedReceipt) {
+        setBondIndicator({ status: 'claimable', receipt: matchedReceipt })
+      }
+
+      devLog('[ClaimBond] Submitting claim_voter_bond')
       const result = await executeTransaction({
         program: programId,
         function: 'claim_voter_bond',
@@ -425,6 +636,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
+      devWarn('[ClaimBond] Error:', err)
       setError(err instanceof Error ? err.message : 'Failed to claim voter bond')
     } finally {
       setIsSubmitting(false)
@@ -444,6 +656,17 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     'bg-purple-500/10 border-purple-500/30 text-purple-400',
     'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
   ]
+  const votedOutcomeLabel = bondIndicator.receipt?.votedOutcome
+    ? outcomeLabels[bondIndicator.receipt.votedOutcome - 1] || `Outcome ${bondIndicator.receipt.votedOutcome}`
+    : null
+  const winningOutcomeLabel = resolution?.winning_outcome
+    ? outcomeLabels[resolution.winning_outcome - 1] || `Outcome ${resolution.winning_outcome}`
+    : null
+  const claimButtonDisabled = isSubmitting
+    || !wallet.address
+    || bondIndicator.status === 'checking'
+    || bondIndicator.status === 'slashed'
+    || bondIndicator.status === 'claimed'
 
   return (
     <div className="glass-card overflow-hidden">
@@ -531,6 +754,77 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 If you voted on the winning outcome, claim your 1 ALEO bond back.
                 Wrong voters' bonds are forfeited (slashed).
               </p>
+              {bondIndicator.status === 'checking' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-brand-500/5 border border-brand-500/20">
+                  <Loader2 className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
+                  <div>
+                    <p className="text-xs font-medium text-brand-300">Checking bond status...</p>
+                    <p className="text-xs text-surface-400 mt-1">We are looking for the vote receipt for this market in your wallet.</p>
+                  </div>
+                </div>
+              )}
+              {bondIndicator.status === 'claimable' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-yes-500/5 border border-yes-500/20">
+                  <CheckCircle2 className="w-4 h-4 text-yes-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-yes-300">Bond can be claimed</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      Your vote: <span className="text-white">{votedOutcomeLabel}</span>. Final outcome: <span className="text-white">{winningOutcomeLabel}</span>.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {bondIndicator.status === 'slashed' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-no-500/5 border border-no-500/20">
+                  <AlertCircle className="w-4 h-4 text-no-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-no-300">Bond was slashed</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      Your vote: <span className="text-white">{votedOutcomeLabel}</span>. Final outcome: <span className="text-white">{winningOutcomeLabel}</span>.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {bondIndicator.status === 'claimed' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-yes-500/5 border border-yes-500/20">
+                  <CheckCircle2 className="w-4 h-4 text-yes-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-yes-300">Bond already claimed</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      Your vote: <span className="text-white">{votedOutcomeLabel}</span>. Final outcome: <span className="text-white">{winningOutcomeLabel}</span>.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {bondIndicator.status === 'wallet_required' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                  <Shield className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-yellow-300">Connect wallet to check bond</p>
+                    <p className="text-xs text-surface-400 mt-1">{bondIndicator.message}</p>
+                  </div>
+                </div>
+              )}
+              {bondIndicator.status === 'missing' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                  <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-yellow-300">Bond receipt not found</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      {bondIndicator.message} If you are sure you voted, try reconnecting your wallet and refreshing the page.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {bondIndicator.status === 'error' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                  <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-medium text-yellow-300">Bond status not yet verified</p>
+                    <p className="text-xs text-surface-400 mt-1">{bondIndicator.message}</p>
+                  </div>
+                </div>
+              )}
               {roundInfo && (
                 <div className="flex justify-between text-xs text-surface-500">
                   <span>Total Voters</span>
@@ -545,11 +839,22 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
               )}
               <button
                 onClick={handleClaimVoterBond}
-                disabled={isSubmitting}
-                className="w-full flex items-center justify-center gap-2 btn-primary"
+                disabled={claimButtonDisabled}
+                className={cn(
+                  'w-full flex items-center justify-center gap-2 btn-primary',
+                  claimButtonDisabled && 'opacity-60 cursor-not-allowed',
+                )}
               >
                 {isSubmitting ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /><span>Claiming...</span></>
+                ) : bondIndicator.status === 'checking' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /><span>Checking Bond...</span></>
+                ) : bondIndicator.status === 'slashed' ? (
+                  <><AlertCircle className="w-4 h-4" /><span>Bond Slashed</span></>
+                ) : bondIndicator.status === 'claimed' ? (
+                  <><CheckCircle2 className="w-4 h-4" /><span>Bond Claimed</span></>
+                ) : !wallet.address ? (
+                  <><Shield className="w-4 h-4" /><span>Connect Wallet</span></>
                 ) : (
                   <><Coins className="w-4 h-4" /><span>Claim 1 ALEO Bond</span></>
                 )}

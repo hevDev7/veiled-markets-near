@@ -610,34 +610,60 @@ export async function fetchOutcomeShareRecords(
     }
   }
 
-  // Strategy 2: Adapter requestRecordPlaintexts
+  // Strategy 2: Record scanner (unspent records only, best for Shield)
   if (allRecords.length === 0) {
-    const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
-    if (typeof adapterPlaintexts === 'function') {
-      try {
-        devLog('[Sell] Strategy 2: adapter requestRecordPlaintexts(program)')
-        const records = await adapterPlaintexts(programId)
-        const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-        devLog(`[Sell] Strategy 2 → Got ${recordsArr.length} record(s)`)
-        allRecords = extractShareRecords(recordsArr)
-      } catch (err) {
-        devLog('[Sell] Strategy 2 failed:', err)
-      }
+    try {
+      const { findOutcomeShares } = await import('./record-scanner')
+      devLog('[Sell] Strategy 2: record scanner findOutcomeShares(program)')
+      const records = await findOutcomeShares(programId)
+      devLog(`[Sell] Strategy 2 → Got ${records.length} record(s)`)
+      allRecords = extractShareRecords(records.map(record => ({
+        plaintext: record.plaintext,
+        spent: record.spent,
+        status: record.spent ? 'spent' : 'unspent',
+      })))
+    } catch (err) {
+      devLog('[Sell] Strategy 2 failed:', err)
     }
   }
 
-  // Strategy 3: Native wallet API
+  // Strategy 3: Native wallet API (Shield/Leo)
   if (allRecords.length === 0) {
-    const wallet = (window as any).leoWallet || (window as any).leo
-    if (wallet && typeof wallet.requestRecords === 'function') {
+    const wallets = [
+      (window as any).shield,
+      (window as any).shieldWallet,
+      (window as any).shieldAleo,
+      (window as any).leoWallet,
+      (window as any).leo,
+    ].filter(Boolean)
+
+    for (const wallet of wallets) {
+      if (typeof wallet.requestRecords !== 'function') continue
       try {
         devLog('[Sell] Strategy 3: native wallet requestRecords(program)')
         const result = await wallet.requestRecords(programId)
         const recordsArr = result?.records || (Array.isArray(result) ? result : [])
         devLog(`[Sell] Strategy 3 → Got ${recordsArr.length} record(s)`)
         allRecords = extractShareRecords(recordsArr)
+        if (allRecords.length > 0) break
       } catch (err) {
         devLog('[Sell] Strategy 3 failed:', err)
+      }
+    }
+  }
+
+  // Strategy 4: Adapter requestRecordPlaintexts
+  if (allRecords.length === 0) {
+    const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
+    if (typeof adapterPlaintexts === 'function') {
+      try {
+        devLog('[Sell] Strategy 4: adapter requestRecordPlaintexts(program)')
+        const records = await adapterPlaintexts(programId)
+        const recordsArr = Array.isArray(records) ? records : (records?.records || [])
+        devLog(`[Sell] Strategy 4 → Got ${recordsArr.length} record(s)`)
+        allRecords = extractShareRecords(recordsArr)
+      } catch (err) {
+        devLog('[Sell] Strategy 4 failed:', err)
       }
     }
   }

@@ -4,7 +4,16 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildAddLiquidityInputs, buildWithdrawLpResolvedInputs, buildClaimLpRefundInputs, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
+import {
+  buildAddLiquidityInputs,
+  buildWithdrawLpResolvedInputs,
+  buildClaimLpRefundInputs,
+  formatTimeRemaining,
+  getCurrentBlockHeight,
+  MARKET_STATUS,
+  getProgramIdForToken,
+  WINNER_CLAIM_PRIORITY_BLOCKS,
+} from '@/lib/aleo-client'
 import { calculateLPSharesOut } from '@/lib/amm'
 import { fetchLPTokenRecords, type ParsedLPToken } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
@@ -39,6 +48,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const [isFetchingLP, setIsFetchingLP] = useState(false)
   const [lpFetchError, setLpFetchError] = useState<string | null>(null)
   const [showManualPaste, setShowManualPaste] = useState(false)
+  const [currentBlock, setCurrentBlock] = useState<bigint | null>(null)
   const lpFetchedRef = useRef(false)
 
   const fetchLPTokens = useCallback(async () => {
@@ -76,6 +86,37 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     }
   }, [activeTab, wallet.connected, isFetchingLP, fetchLPTokens])
 
+  useEffect(() => {
+    if (!isResolved) {
+      setCurrentBlock(null)
+      return
+    }
+
+    let cancelled = false
+    const updateCurrentBlock = async () => {
+      try {
+        const height = await getCurrentBlockHeight()
+        if (!cancelled) {
+          setCurrentBlock(height)
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentBlock(null)
+        }
+      }
+    }
+
+    void updateCurrentBlock()
+    const intervalId = window.setInterval(() => {
+      void updateCurrentBlock()
+    }, 30_000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [isResolved, market.id])
+
   const tokenSymbol = getTokenSymbol(market.tokenType)
 
   // v20: Use total reserves (sum of AMM reserves) for LP calculations
@@ -92,6 +133,19 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const amountMicro = amount
     ? BigInt(Math.floor(parseFloat(amount) * 1_000_000))
     : 0n
+
+  const winnerClaimUnlockBlock = useMemo(() => {
+    if (!isResolved || market.challengeDeadline === undefined) return null
+    return market.challengeDeadline + WINNER_CLAIM_PRIORITY_BLOCKS
+  }, [isResolved, market.challengeDeadline])
+
+  const winnerClaimWindowActive = isResolved
+    && !isCancelled
+    && (winnerClaimUnlockBlock === null || currentBlock === null || currentBlock <= winnerClaimUnlockBlock)
+
+  const winnerClaimTimeRemaining = winnerClaimUnlockBlock !== null && currentBlock !== null
+    ? formatTimeRemaining(winnerClaimUnlockBlock, currentBlock)
+    : null
 
   // Calculate LP shares for adding
   const lpSharesOut = useMemo(() => {
@@ -146,6 +200,14 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     setError(null)
 
     try {
+      if (winnerClaimWindowActive) {
+        throw new Error(
+          winnerClaimTimeRemaining
+            ? `Winner claims still have priority for about ${winnerClaimTimeRemaining}. LP withdrawals unlock after that window ends.`
+            : 'Winner claims still have priority. LP withdrawals are temporarily locked until the winner claim window ends.'
+        )
+      }
+
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       // CRITICAL: min_tokens_out is used as the ACTUAL transfer amount in the transition.
       // Estimate LP share value from on-chain pool data, apply 2% slippage buffer.
@@ -220,7 +282,11 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium bg-brand-500/20 text-brand-400"
             >
               <Minus className="w-4 h-4" />
-              Withdraw LP
+              {isCancelled
+                ? 'Claim LP Refund'
+                : winnerClaimWindowActive
+                  ? 'Winner Claim Window'
+                  : 'Withdraw LP'}
             </button>
           ) : (
             <button
@@ -265,16 +331,33 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
           <>
             {activeTab === 'withdraw' ? (
               <div className="space-y-4">
-                <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-2">
-                  <div className="flex items-center gap-2">
-                    <Droplets className="w-5 h-5 text-brand-400 flex-shrink-0" />
-                    <p className="text-sm text-brand-400">
-                      {isCancelled
-                        ? 'This market was cancelled. Claim your LP tokens back.'
-                        : 'This market has been resolved. Withdraw your LP share.'}
-                    </p>
+                {winnerClaimWindowActive ? (
+                  <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-2">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-yellow-300">Winner claim window is active</p>
+                        <p className="text-xs text-yellow-200/80 mt-1 leading-relaxed">
+                          Winning traders must be able to redeem before LP collateral can leave the market.
+                          {winnerClaimTimeRemaining
+                            ? ` LP withdrawals unlock in about ${winnerClaimTimeRemaining}.`
+                            : ' LP withdrawals will unlock after the current block height is verified and the priority window ends.'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-brand-500/10 border border-brand-500/20 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Droplets className="w-5 h-5 text-brand-400 flex-shrink-0" />
+                      <p className="text-sm text-brand-400">
+                        {isCancelled
+                          ? 'This market was cancelled. Claim your LP tokens back.'
+                          : 'This market has been resolved. Withdraw your LP share.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* LP Token Record — auto-fetch or manual */}
                 <LPTokenSelector
@@ -306,10 +389,10 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
 
                 <button
                   onClick={handleWithdrawLpResolved}
-                  disabled={!lpTokenRecord || isSubmitting}
+                  disabled={!lpTokenRecord || isSubmitting || winnerClaimWindowActive}
                   className={cn(
                     'w-full flex items-center justify-center gap-2 btn-primary',
-                    !lpTokenRecord && 'opacity-50 cursor-not-allowed'
+                    (!lpTokenRecord || winnerClaimWindowActive) && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   {isSubmitting ? (
@@ -320,7 +403,13 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                   ) : (
                     <>
                       <Minus className="w-5 h-5" />
-                      <span>{isCancelled ? 'Claim LP Refund' : 'Withdraw LP'}</span>
+                      <span>
+                        {isCancelled
+                          ? 'Claim LP Refund'
+                          : winnerClaimWindowActive
+                            ? 'Winner Claim Window Active'
+                            : 'Withdraw LP'}
+                      </span>
                     </>
                   )}
                 </button>

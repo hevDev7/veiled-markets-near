@@ -18,7 +18,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { type Bet, useBetsStore, useWalletStore, outcomeToIndex } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { getRedeemFunction, getRefundFunction, getProgramIdForToken } from '@/lib/aleo-client'
+import { diagnoseTransaction, getMarketCredits, getRedeemFunction, getRefundFunction, getProgramIdForToken } from '@/lib/aleo-client'
 import { fetchOutcomeShareRecords, type ParsedOutcomeShare } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
 
@@ -29,6 +29,27 @@ interface ClaimWinningsModalProps {
   bets: Bet[]
   market?: { outcomeLabels?: string[] }
   onClaimSuccess?: () => void
+}
+
+interface InspectedOutcomeShareInput {
+  marketId: string | null
+  owner: string | null
+  outcome: number | null
+  quantity: bigint | null
+}
+
+function inspectOutcomeShareInput(text: string): InspectedOutcomeShareInput {
+  const outcomeMatch = text.match(/outcome:\s*(\d+)u8/)
+  const qtyMatch = text.match(/quantity:\s*(\d+)u128/)
+  const marketMatch = text.match(/market_id:\s*(\d+field)/)
+  const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/)
+
+  return {
+    marketId: marketMatch ? marketMatch[1] : null,
+    owner: ownerMatch ? ownerMatch[1] : null,
+    outcome: outcomeMatch ? parseInt(outcomeMatch[1]) : null,
+    quantity: qtyMatch ? BigInt(qtyMatch[1]) : null,
+  }
 }
 
 export function ClaimWinningsModal({
@@ -42,11 +63,12 @@ export function ClaimWinningsModal({
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [txId, setTxId] = useState<string | null>(null)
+  const [txPhase, setTxPhase] = useState<'idle' | 'pending' | 'confirmed'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [showCli, setShowCli] = useState(false)
   const { markBetClaimed } = useBetsStore()
   const { wallet } = useWalletStore()
-  const { executeTransaction } = useAleoTransaction()
+  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   // Record fetching state
   const [shareRecords, setShareRecords] = useState<ParsedOutcomeShare[]>([])
@@ -58,6 +80,28 @@ export function ClaimWinningsModal({
 
   const isRefund = mode === 'refund'
   const bet = bets[0] // We handle one bet at a time
+  const expectedOutcome = bet ? outcomeToIndex(bet.outcome) : null
+  const expectedQuantity = bet ? (bet.sharesReceived || bet.amount) : null
+
+  const matchesCurrentBet = useCallback((record: ParsedOutcomeShare) => {
+    if (!bet) return false
+    if (record.marketId && record.marketId !== bet.marketId) return false
+    if (record.owner && wallet.address && record.owner !== wallet.address) return false
+    return record.outcome === expectedOutcome
+  }, [bet, expectedOutcome, wallet.address])
+
+  const sortRecordsForBet = useCallback((records: ParsedOutcomeShare[]) => {
+    if (!bet) return records
+
+    return [...records].sort((a, b) => {
+      const aExactQty = expectedQuantity != null && a.quantity === expectedQuantity ? 1 : 0
+      const bExactQty = expectedQuantity != null && b.quantity === expectedQuantity ? 1 : 0
+      if (aExactQty !== bExactQty) return bExactQty - aExactQty
+      if (a.outcome !== b.outcome) return a.outcome - b.outcome
+      if (a.quantity === b.quantity) return 0
+      return a.quantity > b.quantity ? -1 : 1
+    })
+  }, [bet, expectedQuantity])
 
   // Fetch records when modal opens
   const fetchRecords = useCallback(async () => {
@@ -67,11 +111,23 @@ export function ClaimWinningsModal({
     try {
       const betTokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       const records = await fetchOutcomeShareRecords(getProgramIdForToken(betTokenType), bet.marketId)
-      setShareRecords(records)
-      if (records.length === 1) {
-        setSelectedRecord(records[0])
+      const matchingRecords = sortRecordsForBet(records.filter(matchesCurrentBet))
+
+      setShareRecords(matchingRecords)
+
+      if (matchingRecords.length >= 1) {
+        const exactMatch = matchingRecords.find(record => expectedQuantity != null && record.quantity === expectedQuantity)
+        setSelectedRecord(exactMatch || (matchingRecords.length === 1 ? matchingRecords[0] : null))
       } else if (records.length === 0) {
+        setSelectedRecord(null)
         setFetchError('No OutcomeShare records found. Your wallet may not support record fetching, or records may be spent.')
+      } else {
+        setSelectedRecord(null)
+        setFetchError(
+          isRefund
+            ? 'No OutcomeShare record matching this position was found. Remaining records for this market belong to a different outcome or trade.'
+            : 'No winning OutcomeShare record matching this bet was found. Remaining records for this market belong to a different outcome or trade.'
+        )
       }
     } catch (err) {
       console.error('Failed to fetch OutcomeShare records:', err)
@@ -79,7 +135,7 @@ export function ClaimWinningsModal({
     } finally {
       setIsFetchingRecords(false)
     }
-  }, [bet])
+  }, [bet, expectedQuantity, isRefund, matchesCurrentBet, sortRecordsForBet])
 
   useEffect(() => {
     if (isOpen && bet && wallet.connected) {
@@ -99,6 +155,7 @@ export function ClaimWinningsModal({
     setCopiedCommand(null)
     setError(null)
     setTxId(null)
+    setTxPhase('idle')
     setShowCli(false)
     onClose()
   }
@@ -148,7 +205,46 @@ export function ClaimWinningsModal({
     setIsSubmitting(true)
     setError(null)
     try {
+      const publicFeeRequired = 1_500_000n
+      if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
+        throw new Error(
+          `Insufficient public ALEO for transaction fee. ${isRefund ? 'claim_refund' : 'redeem_shares'} needs 1.50 public ALEO for gas, ` +
+          `but only ${Number(wallet.balance.public) / 1_000_000} ALEO is public in your wallet.`
+        )
+      }
+
+      const inspectedRecord = selectedRecord ?? inspectOutcomeShareInput(recordPlaintext)
+      if (inspectedRecord.marketId && inspectedRecord.marketId !== bet.marketId) {
+        throw new Error('The selected OutcomeShare record belongs to a different market.')
+      }
+      if (inspectedRecord.owner && wallet.address && inspectedRecord.owner !== wallet.address) {
+        throw new Error('The selected OutcomeShare record belongs to a different wallet address.')
+      }
+      if (inspectedRecord.outcome != null && inspectedRecord.outcome !== expectedOutcome) {
+        throw new Error(
+          `The selected OutcomeShare record is for ${resolveOutcomeLabel(inspectedRecord.outcome)}, ` +
+          `but this bet needs ${resolveOutcomeLabel(expectedOutcome || 1)}.`
+        )
+      }
+
       const tokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      if (inspectedRecord.quantity != null) {
+        try {
+          const remainingCollateral = await getMarketCredits(bet.marketId, getProgramIdForToken(tokenType))
+          if (remainingCollateral !== null && remainingCollateral < inspectedRecord.quantity) {
+            throw new Error(
+              `This market only has ${formatCredits(remainingCollateral)} ${tokenType} remaining on-chain, ` +
+              `but this share record needs ${formatCredits(inspectedRecord.quantity)} ${tokenType}. ` +
+              `Redemption will be rejected until enough collateral remains.`
+            )
+          }
+        } catch (collateralErr) {
+          if (collateralErr instanceof Error && collateralErr.message.includes('remaining on-chain')) {
+            throw collateralErr
+          }
+        }
+      }
+
       const functionName = isRefund
         ? getRefundFunction(tokenType)
         : getRedeemFunction(tokenType)
@@ -158,12 +254,68 @@ export function ClaimWinningsModal({
         function: functionName,
         inputs: [recordPlaintext],
         fee: 1.5,
+        recordIndices: [0],
       })
 
       if (result?.transactionId) {
-        setTxId(result.transactionId)
-        markBetClaimed(bet.id)
-        onClaimSuccess?.()
+        const submittedTxId = result.transactionId
+        setTxId(submittedTxId)
+        setTxPhase('pending')
+
+        const onChainVerify = submittedTxId.startsWith('at1')
+          ? async () => {
+              const diagnosis = await diagnoseTransaction(submittedTxId)
+              return diagnosis.status === 'accepted'
+            }
+          : undefined
+
+        void pollTransactionStatus(
+          submittedTxId,
+          async (status, onChainTxId) => {
+            const finalTxId = onChainTxId || submittedTxId
+            if (onChainTxId) {
+              setTxId(onChainTxId)
+            }
+
+            if (status === 'confirmed') {
+              setTxPhase('confirmed')
+              markBetClaimed(bet.id)
+              onClaimSuccess?.()
+              return
+            }
+
+            setTxPhase('idle')
+            setTxId(null)
+
+            if (status === 'failed') {
+              let message = `${isRefund ? 'Refund' : 'Redemption'} failed. Your portfolio was not marked as claimed.`
+              try {
+                if (finalTxId.startsWith('at1')) {
+                  const diagnosis = await diagnoseTransaction(finalTxId)
+                  const suffix = diagnosis.message ? ` ${diagnosis.message}` : ''
+                  if (diagnosis.status === 'rejected') {
+                    message = `Transaction was rejected on-chain.${suffix} Your portfolio was not marked as claimed.`
+                  } else if (diagnosis.status === 'accepted') {
+                    message = `Transaction was accepted on-chain, but wallet status reported a failure. Please refresh and verify your claim manually.`
+                  }
+                }
+              } catch {
+                // keep fallback message
+              }
+              setError(message)
+              return
+            }
+
+            setError(
+              `Transaction was submitted, but final confirmation could not be verified yet. ` +
+              `Your portfolio was not marked as claimed. ` +
+              `Check the explorer or reopen this modal later to verify the result.`
+            )
+          },
+          30,
+          10_000,
+          onChainVerify,
+        )
       } else {
         throw new Error('No transaction ID returned from wallet')
       }
@@ -197,6 +349,8 @@ export function ClaimWinningsModal({
   }
 
   const hasRecord = !!getRecordPlaintext()
+  const canMarkClaimedManually = fetchError === 'No OutcomeShare records found. Your wallet may not support record fetching, or records may be spent.'
+  const hasRecordMismatch = !!fetchError && fetchError.includes('different outcome or trade')
 
   // CLI commands as fallback
   const claimProgramId = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
@@ -278,16 +432,26 @@ export function ClaimWinningsModal({
                   >
                     <div className={cn(
                       "w-16 h-16 rounded-full mx-auto flex items-center justify-center",
-                      isRefund ? "bg-orange-500/20" : "bg-yes-500/20"
+                      txPhase === 'pending'
+                        ? "bg-brand-500/20"
+                        : isRefund ? "bg-orange-500/20" : "bg-yes-500/20"
                     )}>
-                      <Check className={cn("w-8 h-8", isRefund ? "text-orange-400" : "text-yes-400")} />
+                      {txPhase === 'pending' ? (
+                        <Loader2 className="w-8 h-8 animate-spin text-brand-400" />
+                      ) : (
+                        <Check className={cn("w-8 h-8", isRefund ? "text-orange-400" : "text-yes-400")} />
+                      )}
                     </div>
                     <div>
                       <h4 className="text-lg font-semibold text-white">
-                        {isRefund ? 'Refund Submitted' : 'Redemption Submitted'}
+                        {txPhase === 'pending'
+                          ? 'Transaction Submitted'
+                          : isRefund ? 'Refund Submitted' : 'Redemption Submitted'}
                       </h4>
                       <p className="text-sm text-surface-400 mt-1">
-                        Transaction sent. Please wait for on-chain confirmation (1-3 minutes).
+                        {txPhase === 'pending'
+                          ? 'Waiting for final confirmation. Your portfolio will only be marked as claimed after the transaction is accepted.'
+                          : 'Transaction confirmed. Your portfolio has been marked as claimed.'}
                       </p>
                     </div>
                     <TransactionLink
@@ -296,7 +460,7 @@ export function ClaimWinningsModal({
                       showNote={true}
                     />
                     <button onClick={handleClose} className="w-full btn-secondary mt-4">
-                      Close
+                      {txPhase === 'pending' ? 'Close' : 'Done'}
                     </button>
                   </motion.div>
                 ) : (
@@ -413,19 +577,25 @@ export function ClaimWinningsModal({
                             <div className="flex items-start gap-3">
                               <Check className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
                               <div>
-                                <p className="text-sm font-medium text-yellow-300">Already Redeemed?</p>
+                                <p className="text-sm font-medium text-yellow-300">
+                                  {hasRecordMismatch ? 'Record Mismatch' : 'Already Redeemed?'}
+                                </p>
                                 <p className="text-xs text-surface-400 mt-1">
-                                  No unspent OutcomeShare records found for this market. If you already redeemed these shares, mark this bet as claimed.
+                                  {hasRecordMismatch
+                                    ? fetchError
+                                    : 'No unspent OutcomeShare records were found for this market. Only mark this bet as claimed if you have already verified a successful redemption in your wallet or on the explorer.'}
                                 </p>
                               </div>
                             </div>
-                            <button
-                              onClick={handleMarkClaimed}
-                              className="w-full py-2.5 rounded-xl font-medium bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 border border-yellow-500/30 transition-colors flex items-center justify-center gap-2"
-                            >
-                              <Check className="w-4 h-4" />
-                              Mark as Already Claimed
-                            </button>
+                            {canMarkClaimedManually && (
+                              <button
+                                onClick={handleMarkClaimed}
+                                className="w-full py-2.5 rounded-xl font-medium bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 border border-yellow-500/30 transition-colors flex items-center justify-center gap-2"
+                              >
+                                <Check className="w-4 h-4" />
+                                Mark as Claimed Manually
+                              </button>
+                            )}
                           </div>
                         )}
 
@@ -495,7 +665,7 @@ export function ClaimWinningsModal({
                           ) : (
                             <>
                               <Wallet className="w-5 h-5" />
-                              <span>{isRefund ? 'Claim Refund via Wallet' : 'Redeem via Wallet'}</span>
+                              <span>{isRefund ? 'Claim Refund' : 'Redeem'}</span>
                             </>
                           )}
                         </button>
@@ -520,71 +690,6 @@ export function ClaimWinningsModal({
                       </div>
                     </div>
 
-                    {/* CLI Fallback (collapsible) */}
-                    <div className="border border-white/[0.06] rounded-xl overflow-hidden">
-                      <button
-                        onClick={() => setShowCli(!showCli)}
-                        className="w-full flex items-center justify-between p-3 text-sm text-surface-400 hover:text-surface-300 transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Terminal className="w-4 h-4" />
-                          <span>CLI Fallback (Advanced)</span>
-                        </div>
-                        <span className="text-xs">{showCli ? 'Hide' : 'Show'}</span>
-                      </button>
-
-                      {showCli && (
-                        <div className="p-3 pt-0 space-y-3">
-                          <p className="text-xs text-surface-500">
-                            If the wallet cannot find your record, use the CLI with your private key:
-                          </p>
-                          <div className="relative">
-                            <pre className="p-3 rounded-lg bg-surface-900 border border-surface-700 text-xs text-surface-300 overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                              {isRefund ? claimRefundCmd : redeemSharesCmd}
-                            </pre>
-                            <button
-                              onClick={() => copyToClipboard(isRefund ? claimRefundCmd : redeemSharesCmd, 'cmd')}
-                              className="absolute top-2 right-2 p-1.5 rounded-lg bg-surface-800 hover:bg-surface-700 transition-colors"
-                              title="Copy command"
-                            >
-                              {copiedCommand === 'cmd' ? (
-                                <Check className="w-3.5 h-3.5 text-yes-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5 text-surface-400" />
-                              )}
-                            </button>
-                          </div>
-                          <p className="text-xs text-surface-500">
-                            Replace <code className="text-surface-300">&lt;YOUR_OUTCOME_SHARE_RECORD&gt;</code> with your OutcomeShare record plaintext.
-                          </p>
-
-                          {/* Record hint */}
-                          <div className="text-xs text-surface-500 p-3 rounded-lg bg-white/[0.03]">
-                            <p className="font-medium text-surface-400 mb-1">Finding your OutcomeShare record:</p>
-                            <p>
-                              Look up your buy transaction on the{' '}
-                              <a
-                                href="https://testnet.explorer.provable.com"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-brand-400 hover:text-brand-300 inline-flex items-center gap-1"
-                              >
-                                Aleo Explorer <ExternalLink className="w-3 h-3" />
-                              </a>
-                              {' '}and decrypt the record output with your view key.
-                            </p>
-                          </div>
-
-                          <button
-                            onClick={handleMarkClaimed}
-                            className="w-full py-2 rounded-lg border border-surface-600 text-sm text-surface-300 hover:bg-surface-800 transition-colors flex items-center justify-center gap-2"
-                          >
-                            <Check className="w-4 h-4" />
-                            Mark as Claimed (CLI done)
-                          </button>
-                        </div>
-                      )}
-                    </div>
 
                     {/* Close button */}
                     <button onClick={handleClose} className="w-full btn-secondary">

@@ -66,6 +66,7 @@ program veiled_markets_v35.aleo {
     const MIN_VOTERS: u8 = 3u8;                        // Minimum 3 voters for valid resolution
     const VOTE_WINDOW_BLOCKS: u64 = 2880u64;           // 12 hours voting window
     const DISPUTE_WINDOW_BLOCKS: u64 = 2880u64;        // 12 hours dispute window after finalize
+    const WINNER_CLAIM_PRIORITY_BLOCKS: u64 = 2880u64; // Lock LP/creator withdrawals so winners can redeem first
     const DISPUTE_BOND_MULTIPLIER: u128 = 3u128;       // Dispute bond = 3× total voter bonds
 
     const MULTISIG_CONFIG_KEY: u8 = 0u8;
@@ -1926,6 +1927,11 @@ program veiled_markets_v35.aleo {
         let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
 
+        // Winner claims must be prioritized before LP withdrawals.
+        let current_height: u64 = block.height as u64;
+        let winner_claim_unlock: u64 = resolution.dispute_deadline + WINNER_CLAIM_PRIORITY_BLOCKS;
+        assert(current_height > winner_claim_unlock);
+
         let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
         assert(!already_claimed);
         lp_positions.set(claim_key, true);
@@ -1992,6 +1998,11 @@ program veiled_markets_v35.aleo {
 
         let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
+
+        // Winner claims must be prioritized before creator fees are withdrawn.
+        let current_height: u64 = block.height as u64;
+        let winner_claim_unlock: u64 = resolution.dispute_deadline + WINNER_CLAIM_PRIORITY_BLOCKS;
+        assert(current_height > winner_claim_unlock);
 
         let already_claimed: bool = creator_fees_claimed.get_or_use(market_id, false);
         assert(!already_claimed);

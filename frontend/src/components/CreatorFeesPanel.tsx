@@ -1,10 +1,18 @@
 import { motion } from 'framer-motion'
 import { Coins, Loader2, Check, AlertCircle } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildWithdrawCreatorFeesInputs, type MarketFeesData, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
+import {
+  buildWithdrawCreatorFeesInputs,
+  formatTimeRemaining,
+  getCurrentBlockHeight,
+  type MarketFeesData,
+  MARKET_STATUS,
+  getProgramIdForToken,
+  WINNER_CLAIM_PRIORITY_BLOCKS,
+} from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
 
 interface CreatorFeesPanelProps {
@@ -19,13 +27,53 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
   const [isWithdrawing, setIsWithdrawing] = useState(false)
   const [transactionId, setTransactionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [currentBlock, setCurrentBlock] = useState<bigint | null>(null)
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
   const isCreator = wallet.address === market.creator
   const isResolved = market.status === MARKET_STATUS.RESOLVED
+  const winnerClaimUnlockBlock = isResolved && market.challengeDeadline !== undefined
+    ? market.challengeDeadline + WINNER_CLAIM_PRIORITY_BLOCKS
+    : null
+  const winnerClaimWindowActive = isResolved
+    && (winnerClaimUnlockBlock === null || currentBlock === null || currentBlock <= winnerClaimUnlockBlock)
+  const winnerClaimTimeRemaining = winnerClaimUnlockBlock !== null && currentBlock !== null
+    ? formatTimeRemaining(winnerClaimUnlockBlock, currentBlock)
+    : null
 
   // Creator can withdraw fees only after market is resolved and finalized
-  const canWithdraw = isCreator && isResolved && fees.creator_fees > 0n
+  const canWithdraw = isCreator && isResolved && fees.creator_fees > 0n && !winnerClaimWindowActive
+
+  useEffect(() => {
+    if (!isResolved) {
+      setCurrentBlock(null)
+      return
+    }
+
+    let cancelled = false
+    const updateCurrentBlock = async () => {
+      try {
+        const height = await getCurrentBlockHeight()
+        if (!cancelled) {
+          setCurrentBlock(height)
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentBlock(null)
+        }
+      }
+    }
+
+    void updateCurrentBlock()
+    const intervalId = window.setInterval(() => {
+      void updateCurrentBlock()
+    }, 30_000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [isResolved, market.id])
 
   const handleWithdraw = async () => {
     if (!canWithdraw) return
@@ -34,6 +82,14 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
     setError(null)
 
     try {
+      if (winnerClaimWindowActive) {
+        throw new Error(
+          winnerClaimTimeRemaining
+            ? `Winner claims still have priority for about ${winnerClaimTimeRemaining}. Creator fees unlock after that window ends.`
+            : 'Winner claims still have priority. Creator fees are temporarily locked until the winner claim window ends.'
+        )
+      }
+
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
       const { functionName, inputs } = buildWithdrawCreatorFeesInputs(
         market.id,
@@ -115,6 +171,21 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
               {isCreator ? 'Yes' : 'No'}
             </span>
           </div>
+          {isResolved && (
+            <div className="flex justify-between items-center mt-2">
+              <span className="text-surface-400 text-sm">Winner Claim Window</span>
+              <span className={cn(
+                'text-sm font-medium',
+                winnerClaimWindowActive ? 'text-yellow-400' : 'text-yes-400'
+              )}>
+                {winnerClaimWindowActive
+                  ? winnerClaimTimeRemaining
+                    ? `Active (${winnerClaimTimeRemaining})`
+                    : 'Checking'
+                  : 'Ended'}
+              </span>
+            </div>
+          )}
         </div>
 
         {transactionId ? (
@@ -159,6 +230,21 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
               </div>
             )}
 
+            {isCreator && isResolved && fees.creator_fees > 0n && winnerClaimWindowActive && (
+              <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
+                <AlertCircle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-300">Winner claims come first</p>
+                  <p className="text-xs text-surface-400 mt-1">
+                    Creator fees stay locked until the winner claim priority window ends.
+                    {winnerClaimTimeRemaining
+                      ? ` Estimated unlock: ${winnerClaimTimeRemaining}.`
+                      : ' The app is still verifying the current block height.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {isCreator && isResolved && fees.creator_fees === 0n && (
               <div className="p-4 rounded-xl bg-white/[0.02] text-center">
                 <p className="text-surface-400 text-sm">
@@ -193,10 +279,12 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
                 <>
                   <Coins className="w-5 h-5" />
                   <span>
-                    Withdraw {fees.creator_fees > 0n
-                      ? `${formatCredits(fees.creator_fees)} ${tokenSymbol}`
-                      : 'Fees'
-                    }
+                    {winnerClaimWindowActive
+                      ? 'Winner Claim Window Active'
+                      : `Withdraw ${fees.creator_fees > 0n
+                        ? `${formatCredits(fees.creator_fees)} ${tokenSymbol}`
+                        : 'Fees'
+                      }`}
                   </span>
                 </>
               )}

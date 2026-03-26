@@ -342,22 +342,22 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           devLog(`[Balance] ${label}: 0 records returned`)
           return 0n
         }
-        devLog(`[Balance] ${label}: ${recordsArr.length} records returned`)
+        let spentCount = 0
+        let unspentCount = 0
         for (let i = 0; i < recordsArr.length; i++) {
           const record = recordsArr[i]
           if (isRecordSpent(record)) {
-            devLog(`[Balance] ${label} record ${i}: SPENT, skipping`)
+            spentCount++
             continue
           }
+          unspentCount++
           const text = typeof record === 'string'
             ? record
             : ((record as any)?.plaintext || (record as any)?.data || JSON.stringify(record))
           const mc = parseMicrocredits(String(text))
-          if (mc > 0n) {
-            devLog(`[Balance] ${label} record ${i}: ${Number(mc) / 1_000_000} ALEO`)
-          }
           sum += mc
         }
+        devLog(`[Balance] ${label}: ${recordsArr.length} records (${unspentCount} unspent, ${spentCount} spent) = ${Number(sum) / 1_000_000} ALEO`)
         return sum
       }
 
@@ -1058,6 +1058,8 @@ interface BetsStore {
   loadBetsForAddress: (address: string) => void
   syncBetStatuses: () => Promise<void>
   markBetClaimed: (betId: string) => void
+  markBetUnclaimed: (betId: string) => void
+  reconcileClaimedBets: () => Promise<number>
   getBetsByMarket: (marketId: string) => Bet[]
   getTotalBetsValue: () => bigint
   getCommitmentRecords: (marketId?: string) => CommitmentRecord[]
@@ -2002,6 +2004,84 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     )
     set({ userBets: updatedBets })
     saveBetsToStorage(updatedBets)
+  },
+
+  markBetUnclaimed: (betId: string) => {
+    const updatedBets = get().userBets.map(bet =>
+      bet.id === betId ? { ...bet, claimed: false } : bet
+    )
+    set({ userBets: updatedBets })
+    saveBetsToStorage(updatedBets)
+  },
+
+  reconcileClaimedBets: async () => {
+    const { connected, address } = useWalletStore.getState().wallet
+    if (!connected || !address) return 0
+
+    const claimedBets = get().userBets.filter(bet =>
+      bet.claimed
+      && bet.type !== 'sell'
+      && (bet.status === 'won' || bet.status === 'refunded')
+    )
+
+    if (claimedBets.length === 0) return 0
+
+    try {
+      const { fetchOutcomeShareRecords } = await import('./credits-record')
+      const restoredBetIds = new Set<string>()
+      const groups = new Map<string, Bet[]>()
+
+      for (const bet of claimedBets) {
+        const tokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+        const groupKey = `${getProgramIdForToken(tokenType)}::${bet.marketId}`
+        const existing = groups.get(groupKey) || []
+        existing.push(bet)
+        groups.set(groupKey, existing)
+      }
+
+      for (const bets of groups.values()) {
+        const sampleBet = bets[0]
+        const tokenType = (sampleBet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+        const programId = getProgramIdForToken(tokenType)
+
+        let records = await fetchOutcomeShareRecords(programId, sampleBet.marketId)
+        records = records.filter(record => !record.owner || record.owner === address)
+
+        if (records.length === 0) continue
+
+        const remainingRecords = [...records]
+        for (const bet of bets) {
+          const expectedOutcome = outcomeToIndex(bet.outcome)
+          const expectedQuantity = bet.sharesReceived || bet.amount
+          const matchIndex = remainingRecords.findIndex(record =>
+            (!record.marketId || record.marketId === bet.marketId)
+            && record.outcome === expectedOutcome
+            && record.quantity === expectedQuantity
+          )
+
+          if (matchIndex >= 0) {
+            restoredBetIds.add(bet.id)
+            remainingRecords.splice(matchIndex, 1)
+          }
+        }
+      }
+
+      if (restoredBetIds.size === 0) return 0
+
+      const updatedBets = get().userBets.map(bet =>
+        restoredBetIds.has(bet.id)
+          ? { ...bet, claimed: false }
+          : bet
+      )
+
+      set({ userBets: updatedBets })
+      saveBetsToStorage(updatedBets)
+      devWarn(`[Bets] Restored ${restoredBetIds.size} claimed bet(s) after wallet reconciliation`)
+      return restoredBetIds.size
+    } catch (err) {
+      devWarn('[Bets] Failed to reconcile claimed bets:', err)
+      return 0
+    }
   },
 
   getBetsByMarket: (marketId) => {

@@ -94,7 +94,7 @@ async function rowToBet(row: any, encryptionKey: CryptoKey | null): Promise<Bet 
 
   // If we can't decrypt the core fields, skip this row
   if (outcome === null || amount === null) {
-    devWarn('[Supabase] Cannot decrypt bet row (wrong key or no key):', row.id)
+    // Silently skip — caller logs summary of decrypt failures
     return null
   }
 

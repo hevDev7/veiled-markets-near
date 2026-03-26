@@ -57,12 +57,22 @@ const DEFAULT_LABELS = ['YES', 'NO', 'OPTION C', 'OPTION D']
 export function MyBets() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
-  const { userBets, pendingBets, fetchUserBets, syncBetStatuses, addPendingBet, removePendingBet } = useBetsStore()
+  const {
+    userBets,
+    pendingBets,
+    fetchUserBets,
+    syncBetStatuses,
+    reconcileClaimedBets,
+    markBetUnclaimed,
+    addPendingBet,
+    removePendingBet,
+  } = useBetsStore()
   const { markets } = useRealMarketsStore()
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState<BetFilter>('accepted')
   const [claimModalBet, setClaimModalBet] = useState<Bet | null>(null)
   const [claimModalMode, setClaimModalMode] = useState<'winnings' | 'refund'>('winnings')
+  const [claimRepairNotice, setClaimRepairNotice] = useState<string | null>(null)
 
   // Import Bet state
   const [showImport, setShowImport] = useState(false)
@@ -151,6 +161,12 @@ export function MyBets() {
 
       await fetchUserBets()
       await syncBetStatuses()
+      const restoredClaims = await reconcileClaimedBets()
+      setClaimRepairNotice(
+        restoredClaims > 0
+          ? `${restoredClaims} claimed ${restoredClaims === 1 ? 'position was' : 'positions were'} restored after checking your wallet records.`
+          : null
+      )
 
       // Debug: Check store state after load (read directly from store, not stale closure)
       const storeState = useBetsStore.getState()
@@ -165,7 +181,7 @@ export function MyBets() {
       setIsLoading(false)
     }
     loadAndSync()
-  }, [fetchUserBets, syncBetStatuses])
+  }, [fetchUserBets, syncBetStatuses, reconcileClaimedBets])
 
   // Get market info for a bet
   const getMarketInfo = (marketId: string) => {
@@ -177,6 +193,12 @@ export function MyBets() {
     setIsLoading(true)
     await fetchUserBets()
     await syncBetStatuses()
+    const restoredClaims = await reconcileClaimedBets()
+    setClaimRepairNotice(
+      restoredClaims > 0
+        ? `${restoredClaims} claimed ${restoredClaims === 1 ? 'position was' : 'positions were'} restored after checking your wallet records.`
+        : null
+    )
     setIsLoading(false)
   }
 
@@ -411,6 +433,22 @@ export function MyBets() {
             ))}
           </div>
 
+          {claimRepairNotice && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-8 rounded-2xl border border-yellow-500/20 bg-yellow-500/8 px-4 py-3"
+            >
+              <div className="flex items-start gap-3">
+                <RefreshCcw className="w-4 h-4 text-yellow-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-100">Claim status repaired</p>
+                  <p className="text-xs text-yellow-200/75 mt-0.5">{claimRepairNotice}</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Content */}
           {filter === 'watchlist' ? (
             <div className="glass-card rounded-2xl p-12 text-center">
@@ -634,8 +672,9 @@ export function MyBets() {
                         </div>
                       </motion.div>
                     )
-                  })}
-                </div>
+            })}
+          </div>
+
               </motion.div>
             </AnimatePresence>
           ) : (
@@ -656,6 +695,10 @@ export function MyBets() {
                     market={getMarketInfo(bet.marketId)}
                     index={index}
                     onClaim={(mode) => openClaimModal(bet, mode)}
+                    onRestoreClaim={() => {
+                      markBetUnclaimed(bet.id)
+                      setClaimRepairNotice('Claim status was restored manually. You can retry redemption now.')
+                    }}
                     onRemove={bet.status === 'pending' ? () => removePendingBet(bet.id) : undefined}
                     showClaimAction={filter === 'unredeemed' || filter === 'all'}
                   />
@@ -845,6 +888,7 @@ function BetCard({
   market,
   index,
   onClaim,
+  onRestoreClaim,
   onRemove,
   showClaimAction,
 }: {
@@ -852,6 +896,7 @@ function BetCard({
   market?: { question: string; tokenType?: 'ALEO' | 'USDCX' | 'USAD'; numOutcomes?: number; outcomeLabels?: string[] }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
+  onRestoreClaim: () => void
   onRemove?: () => void
   showClaimAction: boolean
 }) {
@@ -1040,6 +1085,17 @@ function BetCard({
             >
               <RefreshCcw className="w-3.5 h-3.5" />
               Refund
+            </button>
+          )}
+
+          {!isSell && bet.claimed && (isWon || isRefunded) && (
+            <button
+              onClick={onRestoreClaim}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.03] border border-white/[0.08] hover:bg-white/[0.06] text-surface-300 transition-colors flex items-center gap-1.5"
+              title="Use this if your redemption was rejected but this bet still shows claimed"
+            >
+              <RefreshCcw className="w-3.5 h-3.5" />
+              Restore Claim
             </button>
           )}
 

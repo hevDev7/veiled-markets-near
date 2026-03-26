@@ -22,6 +22,7 @@ import {
 import { DashboardHeader } from '../components/DashboardHeader';
 import { Footer } from '../components/Footer';
 import { useWalletStore } from '../lib/store';
+import { devLog } from '../lib/logger';
 
 type Tab = 'proposals' | 'resolver';
 
@@ -66,13 +67,13 @@ export function Governance() {
             try {
               const sdk = await import('@provablehq/sdk');
               const structStr = `{ proposer: ${wallet.address}, proposal_type: ${data.proposalType}u8, target: ${targetField.endsWith('field') ? targetField : targetField + 'field'}, payload_1: ${payload1Value}u128, nonce: ${nonce}u64 }`;
-              console.log('[Governance] Computing BHP256 hash for:', structStr);
+              devLog('[Governance] Computing BHP256 hash for:', structStr);
               // @provablehq/sdk exposes WASM hash functions
               const hashResult = sdk.Field ? sdk.Field.hashBhp256(structStr) : null;
               if (hashResult) {
                 proposalId = hashResult.toString();
                 if (!proposalId.endsWith('field')) proposalId += 'field';
-                console.log('[Governance] Computed proposal_id:', proposalId);
+                devLog('[Governance] Computed proposal_id:', proposalId);
               }
             } catch (hashErr) {
               console.warn('[Governance] BHP256 hash computation failed:', hashErr);
@@ -88,7 +89,7 @@ export function Governance() {
                   const fieldMatches = txData.match(/(\d{20,})field/g);
                   if (fieldMatches && fieldMatches.length > 0) {
                     proposalId = fieldMatches[fieldMatches.length - 1];
-                    console.log('[Governance] Found proposal_id from TX:', proposalId);
+                    devLog('[Governance] Found proposal_id from TX:', proposalId);
                   }
                 }
               } catch { /* ignore */ }
