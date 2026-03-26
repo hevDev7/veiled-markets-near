@@ -246,33 +246,57 @@ export async function fetchCreditsRecord(minAmountMicro: number, expectedOwner?:
     devLog(`[Bet] Expecting Credits record owner: ${expectedOwner}`)
   }
 
-  // Strategy 1: Adapter requestRecords with plaintext=true
+  // Strategy 1: Record Scanner SDK (best source for confirmed unspent records)
+  try {
+    devLog('[Bet] Strategy 1: Record Scanner SDK')
+    const { findCreditsRecord: scannerFindCredits } = await import('./record-scanner')
+    const scannedRecord = await scannerFindCredits(minAmountMicro)
+    if (scannedRecord) {
+      if (isCreditsRecordReserved(scannedRecord)) {
+        devLog('[Bet] Strategy 1: scanner record skipped because it is temporarily reserved')
+      } else {
+        const owner = extractCreditsRecordOwner(scannedRecord)
+        if (expectedOwner && owner !== expectedOwner.toLowerCase()) {
+          devLog(
+            `[Bet] Strategy 1: scanner record owner ${owner || 'unknown'} does not match connected wallet ${expectedOwner.toLowerCase()}`,
+          )
+        } else {
+          devLog('[Bet] Strategy 1 → Found credits record via scanner')
+          return scannedRecord
+        }
+      }
+    }
+  } catch (err) {
+    devLog('[Bet] Strategy 1 (scanner) failed:', err)
+  }
+
+  // Strategy 2: Adapter requestRecords with plaintext=true
   // This is the SAME approach that works in store.ts balance detection (line 314)
   const adapterRecords = (window as any).__aleoRequestRecords
   if (typeof adapterRecords === 'function') {
     try {
-      devLog('[Bet] Strategy 1: adapter requestRecords("credits.aleo", true) — plaintext mode')
+      devLog('[Bet] Strategy 2: adapter requestRecords("credits.aleo", true) — plaintext mode')
       const records = await adapterRecords('credits.aleo', true)
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      devLog(`[Bet] Strategy 1 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Bet] Strategy 2 → Got ${recordsArr.length} record(s)`)
       if (recordsArr.length > 0) {
-        devLog('[Bet] Strategy 1 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 500))
+        devLog('[Bet] Strategy 2 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 500))
         // Show last record too (record 6 is the one with 5 ALEO in balance detection)
         const last = recordsArr[recordsArr.length - 1]
-        devLog(`[Bet] Strategy 1 → Last record (#${recordsArr.length - 1}) sample:`, JSON.stringify(last)?.slice(0, 500))
+        devLog(`[Bet] Strategy 2 → Last record (#${recordsArr.length - 1}) sample:`, JSON.stringify(last)?.slice(0, 500))
       }
       const found = findSuitableRecord(recordsArr, minAmountMicro, expectedOwner)
       if (found) return found
     } catch (err) {
-      devLog('[Bet] Strategy 1 failed:', err)
+      devLog('[Bet] Strategy 2 failed:', err)
     }
 
-    // Strategy 2: Adapter requestRecords without plaintext flag + decrypt
+    // Strategy 3: Adapter requestRecords without plaintext flag + decrypt
     try {
-      devLog('[Bet] Strategy 2: adapter requestRecords("credits.aleo", false) + decrypt')
+      devLog('[Bet] Strategy 3: adapter requestRecords("credits.aleo", false) + decrypt')
       const records = await adapterRecords('credits.aleo', false)
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      devLog(`[Bet] Strategy 2 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Bet] Strategy 3 → Got ${recordsArr.length} record(s)`)
 
       // First try parsing as-is (some wallets include plaintext even without flag)
       const found = findSuitableRecord(recordsArr, minAmountMicro, expectedOwner)
@@ -281,7 +305,7 @@ export async function fetchCreditsRecord(minAmountMicro: number, expectedOwner?:
       // Try decrypting ciphertext records
       const decryptFn = (window as any).__aleoDecrypt
       if (typeof decryptFn === 'function' && recordsArr.length > 0) {
-        devLog('[Bet] Strategy 2b: decrypting ciphertext records...')
+        devLog('[Bet] Strategy 3b: decrypting ciphertext records...')
         let decryptAttempts = 0
         for (let idx = 0; idx < recordsArr.length; idx++) {
           const record = recordsArr[idx]
@@ -291,110 +315,90 @@ export async function fetchCreditsRecord(minAmountMicro: number, expectedOwner?:
           // Shield Wallet uses camelCase 'recordCiphertext'
           const ciphertext = record.ciphertext || record.recordCiphertext || record.record_ciphertext || record.data
           if (!ciphertext || typeof ciphertext !== 'string') {
-            devLog(`[Bet] Strategy 2b: record ${idx} — no ciphertext field found`)
+            devLog(`[Bet] Strategy 3b: record ${idx} — no ciphertext field found`)
             continue
           }
           decryptAttempts++
           try {
-            devLog(`[Bet] Strategy 2b: decrypting record ${idx} (${ciphertext.slice(0, 40)}...)`)
+            devLog(`[Bet] Strategy 3b: decrypting record ${idx} (${ciphertext.slice(0, 40)}...)`)
             const decrypted = await decryptFn(ciphertext)
             const textStr = String(decrypted)
-            devLog(`[Bet] Strategy 2b: decrypted record ${idx}:`, textStr.slice(0, 200))
+            devLog(`[Bet] Strategy 3b: decrypted record ${idx}:`, textStr.slice(0, 200))
             const mcMatch = textStr.match(/microcredits\s*:\s*(\d+)u64/)
             if (mcMatch) {
               const mc = parseInt(mcMatch[1], 10)
-              devLog(`[Bet] Strategy 2b: record ${idx} has ${mc} microcredits (need ${minAmountMicro})`)
+              devLog(`[Bet] Strategy 3b: record ${idx} has ${mc} microcredits (need ${minAmountMicro})`)
               if (mc >= minAmountMicro && textStr.includes('{') && textStr.includes('owner')) {
                 const owner = extractCreditsRecordOwner(textStr)
                 if (expectedOwner && owner !== expectedOwner.toLowerCase()) {
                   devLog(
-                    `[Bet] Strategy 2b: skipping record ${idx} because owner ${owner || 'unknown'} does not match connected wallet ${expectedOwner.toLowerCase()}`,
+                    `[Bet] Strategy 3b: skipping record ${idx} because owner ${owner || 'unknown'} does not match connected wallet ${expectedOwner.toLowerCase()}`,
                   )
                   continue
                 }
-                devLog(`[Bet] Strategy 2b: FOUND suitable record with ${mc} microcredits`)
+                devLog(`[Bet] Strategy 3b: FOUND suitable record with ${mc} microcredits`)
                 return textStr
               }
             }
           } catch (decErr) {
-            devLog(`[Bet] Strategy 2b: decrypt failed for record ${idx}:`, (decErr as any)?.message || decErr)
+            devLog(`[Bet] Strategy 3b: decrypt failed for record ${idx}:`, (decErr as any)?.message || decErr)
           }
         }
-        devLog(`[Bet] Strategy 2b: tried ${decryptAttempts} decrypt(s), none suitable`)
+        devLog(`[Bet] Strategy 3b: tried ${decryptAttempts} decrypt(s), none suitable`)
       }
     } catch (err) {
-      devLog('[Bet] Strategy 2 failed:', err)
+      devLog('[Bet] Strategy 3 failed:', err)
     }
   } else {
     devLog('[Bet] No __aleoRequestRecords adapter found on window')
   }
 
-  // Strategy 3: Adapter's requestRecordPlaintexts
+  // Strategy 4: Adapter's requestRecordPlaintexts
   const adapterPlaintexts = (window as any).__aleoRequestRecordPlaintexts
   if (typeof adapterPlaintexts === 'function') {
     try {
-      devLog('[Bet] Strategy 3: adapter requestRecordPlaintexts("credits.aleo")')
+      devLog('[Bet] Strategy 4: adapter requestRecordPlaintexts("credits.aleo")')
       const records = await adapterPlaintexts('credits.aleo')
       const recordsArr = Array.isArray(records) ? records : (records?.records || [])
-      devLog(`[Bet] Strategy 3 → Got ${recordsArr.length} record(s)`)
+      devLog(`[Bet] Strategy 4 → Got ${recordsArr.length} record(s)`)
       if (recordsArr.length > 0) {
-        devLog('[Bet] Strategy 3 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
+        devLog('[Bet] Strategy 4 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
       }
       const found = findSuitableRecord(recordsArr, minAmountMicro, expectedOwner)
       if (found) return found
     } catch (err) {
-      devLog('[Bet] Strategy 3 failed:', err)
+      devLog('[Bet] Strategy 4 failed:', err)
     }
   }
 
-  // Strategy 4: Native wallet API (Leo Wallet or Shield direct)
+  // Strategy 5: Native wallet API (Leo Wallet or Shield direct)
   const leoWallet = (window as any).leoWallet || (window as any).leo
   if (leoWallet) {
     if (typeof leoWallet.requestRecordPlaintexts === 'function') {
       try {
-        devLog('[Bet] Strategy 4a: leoWallet.requestRecordPlaintexts("credits.aleo")')
+        devLog('[Bet] Strategy 5a: leoWallet.requestRecordPlaintexts("credits.aleo")')
         const result = await leoWallet.requestRecordPlaintexts('credits.aleo')
         const records = result?.records || (Array.isArray(result) ? result : [])
-        devLog(`[Bet] Strategy 4a → Got ${records.length} record(s)`)
+        devLog(`[Bet] Strategy 5a → Got ${records.length} record(s)`)
         const found = findSuitableRecord(records, minAmountMicro, expectedOwner)
         if (found) return found
       } catch (err) {
-        devLog('[Bet] Strategy 4a failed:', err)
+        devLog('[Bet] Strategy 5a failed:', err)
       }
     }
 
     if (typeof leoWallet.requestRecords === 'function') {
       try {
-        devLog('[Bet] Strategy 4b: leoWallet.requestRecords("credits.aleo")')
+        devLog('[Bet] Strategy 5b: leoWallet.requestRecords("credits.aleo")')
         const result = await leoWallet.requestRecords('credits.aleo')
         const records = result?.records || (Array.isArray(result) ? result : [])
-        devLog(`[Bet] Strategy 4b → Got ${records.length} record(s)`)
+        devLog(`[Bet] Strategy 5b → Got ${records.length} record(s)`)
         const found = findSuitableRecord(records, minAmountMicro, expectedOwner)
         if (found) return found
       } catch (err) {
-        devLog('[Bet] Strategy 4b failed:', err)
+        devLog('[Bet] Strategy 5b failed:', err)
       }
     }
-  }
-
-  // Strategy 5: Record Scanner SDK (fallback for all wallet types)
-  try {
-    devLog('[Bet] Strategy 5: Record Scanner SDK')
-    const { findCreditsRecord: scannerFindCredits } = await import('./record-scanner')
-    const scannedRecord = await scannerFindCredits(minAmountMicro)
-    if (scannedRecord) {
-      const owner = extractCreditsRecordOwner(scannedRecord)
-      if (expectedOwner && owner !== expectedOwner.toLowerCase()) {
-        devLog(
-          `[Bet] Strategy 5: scanner record owner ${owner || 'unknown'} does not match connected wallet ${expectedOwner.toLowerCase()}`,
-        )
-      } else {
-      devLog('[Bet] Strategy 5 → Found credits record via scanner')
-      return scannedRecord
-      }
-    }
-  } catch (err) {
-    devLog('[Bet] Strategy 5 (scanner) failed:', err)
   }
 
   devLog('[Bet] All strategies exhausted — no Credits record found for buy_shares_private')

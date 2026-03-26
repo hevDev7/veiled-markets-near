@@ -250,26 +250,30 @@ export async function findTokenRecord(
 
   devLog(`[PrivateStablecoin] Finding ${label} Token record >= ${Number(minAmount) / 1_000000}`);
 
-  // Strategy 1: Wallet adapter requestRecordPlaintexts
+  // Strategy 1: Record Scanner SDK (best source for confirmed unspent records)
+  try {
+    const { findUsdcxTokenRecord, findUsadTokenRecord } = await import('./record-scanner');
+    const record = tokenType === 'USAD'
+      ? await findUsadTokenRecord(minAmount)
+      : await findUsdcxTokenRecord(minAmount);
+    if (record) {
+      if (isTokenRecordReserved(tokenType, record)) {
+        devLog(`[PrivateStablecoin] Strategy 1 scanner record skipped because it is temporarily reserved`);
+      } else {
+        devLog(`[PrivateStablecoin] Found via scanner: ${label}`);
+        return record;
+      }
+    }
+  } catch {
+    devLog(`[PrivateStablecoin] Strategy 1 scanner fallback unavailable`);
+  }
+
+  // Strategy 2: Wallet adapter requestRecordPlaintexts
   const requestPlaintexts = (window as any).__aleoRequestRecordPlaintexts;
   if (typeof requestPlaintexts === 'function') {
     try {
-      devLog(`[PrivateStablecoin] Strategy 1: adapter requestRecordPlaintexts(${programId})`);
+      devLog(`[PrivateStablecoin] Strategy 2: adapter requestRecordPlaintexts(${programId})`);
       const records = await requestPlaintexts(programId);
-      const arr = Array.isArray(records) ? records : (records?.records || []);
-      const found = findBestTokenRecord(tokenType, arr, minAmount, label);
-      if (found) return found;
-    } catch (err) {
-      devWarn(`[PrivateStablecoin] Strategy 1 failed:`, err);
-    }
-  }
-
-  // Strategy 2: Wallet adapter requestRecords
-  const requestRecords = (window as any).__aleoRequestRecords;
-  if (typeof requestRecords === 'function') {
-    try {
-      devLog(`[PrivateStablecoin] Strategy 2: adapter requestRecords(${programId})`);
-      const records = await requestRecords(programId, true);
       const arr = Array.isArray(records) ? records : (records?.records || []);
       const found = findBestTokenRecord(tokenType, arr, minAmount, label);
       if (found) return found;
@@ -278,7 +282,21 @@ export async function findTokenRecord(
     }
   }
 
-  // Strategy 3: Direct wallet object (Shield/Leo/Fox)
+  // Strategy 3: Wallet adapter requestRecords
+  const requestRecords = (window as any).__aleoRequestRecords;
+  if (typeof requestRecords === 'function') {
+    try {
+      devLog(`[PrivateStablecoin] Strategy 3: adapter requestRecords(${programId})`);
+      const records = await requestRecords(programId, true);
+      const arr = Array.isArray(records) ? records : (records?.records || []);
+      const found = findBestTokenRecord(tokenType, arr, minAmount, label);
+      if (found) return found;
+    } catch (err) {
+      devWarn(`[PrivateStablecoin] Strategy 3 failed:`, err);
+    }
+  }
+
+  // Strategy 4: Direct wallet object (Shield/Leo/Fox)
   const walletObjs: Array<{ name: string; obj: any }> = [];
   const shieldObj = (window as any).shield || (window as any).shieldWallet;
   if (shieldObj) walletObjs.push({ name: 'Shield', obj: shieldObj });
@@ -286,41 +304,27 @@ export async function findTokenRecord(
   for (const { name, obj } of walletObjs) {
     if (typeof obj.requestRecordPlaintexts === 'function') {
       try {
-        devLog(`[PrivateStablecoin] Strategy 3a: ${name} requestRecordPlaintexts(${programId})`);
+        devLog(`[PrivateStablecoin] Strategy 4a: ${name} requestRecordPlaintexts(${programId})`);
         const result = await obj.requestRecordPlaintexts(programId);
         const arr = Array.isArray(result) ? result : (result?.records || []);
         const found = findBestTokenRecord(tokenType, arr, minAmount, label);
         if (found) return found;
       } catch (err) {
-        devWarn(`[PrivateStablecoin] Strategy 3a ${name} failed:`, err);
+        devWarn(`[PrivateStablecoin] Strategy 4a ${name} failed:`, err);
       }
     }
 
     if (typeof obj.requestRecords === 'function') {
       try {
-        devLog(`[PrivateStablecoin] Strategy 3b: ${name} requestRecords(${programId})`);
+        devLog(`[PrivateStablecoin] Strategy 4b: ${name} requestRecords(${programId})`);
         const result = await obj.requestRecords(programId, true);
         const arr = Array.isArray(result) ? result : (result?.records || []);
         const found = findBestTokenRecord(tokenType, arr, minAmount, label);
         if (found) return found;
       } catch (err) {
-        devWarn(`[PrivateStablecoin] Strategy 3b ${name} failed:`, err);
+        devWarn(`[PrivateStablecoin] Strategy 4b ${name} failed:`, err);
       }
     }
-  }
-
-  // Strategy 4: Record Scanner SDK
-  try {
-    const { findUsdcxTokenRecord, findUsadTokenRecord } = await import('./record-scanner');
-    const record = tokenType === 'USAD'
-      ? await findUsadTokenRecord(minAmount)
-      : await findUsdcxTokenRecord(minAmount);
-    if (record) {
-      devLog(`[PrivateStablecoin] Found via scanner: ${label}`);
-      return record;
-    }
-  } catch {
-    devLog(`[PrivateStablecoin] Scanner fallback unavailable`);
   }
 
   devWarn(`[PrivateStablecoin] No ${label} Token record found >= ${Number(minAmount) / 1_000000}`);

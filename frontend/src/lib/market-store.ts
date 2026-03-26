@@ -237,23 +237,9 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 )
             )
 
-            // Only collapse markets that share the same listing identity.
-            // Deduping by question text alone can hide valid markets that happen
-            // to reuse the same prompt across tokens or deadlines.
-            const deduped = new Map<string, Market>()
-            for (const m of allMarkets) {
-                const key = [
-                    m.question,
-                    m.tokenType || 'ALEO',
-                    m.deadline.toString(),
-                    m.creator || '',
-                ].join('|')
-                const existing = deduped.get(key)
-                if (!existing || m.totalLiquidity > existing.totalLiquidity) {
-                    deduped.set(key, m)
-                }
-            }
-            const markets = Array.from(deduped.values())
+            // Keep every distinct on-chain market ID visible. KNOWN_MARKET_IDS is already
+            // unique, so collapsing by question/deadline can hide legitimate retry markets.
+            const markets = allMarkets
 
             // Record price snapshots for chart history
             for (const m of markets) {

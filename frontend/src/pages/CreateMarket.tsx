@@ -96,11 +96,15 @@ function getCreateMarketBalanceError(
   }
 
   const publicStableBalance = tokenType === 'USDCX' ? balances.usdcxPublic : balances.usadPublic
+  const privateStableBalance = tokenType === 'USDCX' ? balances.usdcxPrivate : balances.usadPrivate
   if (publicStableBalance < liquidityMicro) {
     return (
-      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity. ` +
+      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity via transfer_public_as_signer. ` +
       `Need ${formatCredits(liquidityMicro)} ${tokenType}, ` +
-      `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.`
+      `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.` +
+      (privateStableBalance > 0n
+        ? ` Private ${tokenType} available: ${formatCredits(privateStableBalance)}. Unshield ${tokenType} first.`
+        : '')
     )
   }
 
@@ -109,6 +113,44 @@ function getCreateMarketBalanceError(
       `Insufficient public ALEO for network fee. Market creation also needs ${formatCredits(1_500_000n)} public ALEO ` +
       `for the transaction fee, but only have ${formatCredits(balances.public)} public ALEO.`
     )
+  }
+
+  return null
+}
+
+async function getStablecoinCreateFundingError(
+  tokenType: 'USDCX' | 'USAD',
+  address: string,
+  liquidityMicro: bigint,
+  balances: {
+    public: bigint
+    private: bigint
+    usdcxPublic: bigint
+    usdcxPrivate: bigint
+    usadPublic: bigint
+    usadPrivate: bigint
+  },
+): Promise<string | null> {
+  const stableProgramId = tokenType === 'USAD' ? 'test_usad_stablecoin.aleo' : config.usdcxProgramId
+  const privateStableBalance = tokenType === 'USDCX' ? balances.usdcxPrivate : balances.usadPrivate
+
+  try {
+    const onChainPublicBalance = await getMappingValue<bigint>('balances', address, stableProgramId)
+    const livePublicBalance = onChainPublicBalance ?? 0n
+
+    if (livePublicBalance < liquidityMicro) {
+      return (
+        `On-chain public ${tokenType} is too low for market creation. ` +
+        `create_market_${tokenType.toLowerCase()} calls ${stableProgramId}/transfer_public_as_signer, ` +
+        `so only public ${tokenType} can fund the initial liquidity. ` +
+        `Need ${formatCredits(liquidityMicro)} ${tokenType}, but the stablecoin mapping shows ${formatCredits(livePublicBalance)} public ${tokenType}.` +
+        (privateStableBalance > 0n
+          ? ` You still have ${formatCredits(privateStableBalance)} private ${tokenType}; unshield it first.`
+          : '')
+      )
+    }
+  } catch (error) {
+    devWarn(`[CreateMarket] Failed to verify live public ${tokenType} balance:`, error)
   }
 
   return null
@@ -337,6 +379,15 @@ export function CreateMarketPage() {
       if (!wallet.isDemoMode) {
         const balanceError = getCreateMarketBalanceError(formData.tokenType, liquidityMicro, wallet.balance)
         if (balanceError) throw new Error(balanceError)
+        if (formData.tokenType !== 'ALEO') {
+          const fundingError = await getStablecoinCreateFundingError(
+            formData.tokenType,
+            wallet.address!,
+            liquidityMicro,
+            wallet.balance,
+          )
+          if (fundingError) throw new Error(fundingError)
+        }
       }
 
       setIsSlowTransaction(false)

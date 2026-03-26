@@ -120,7 +120,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       // Pre-validate market status, deadline, AND token type
       try {
         const [onChainMarket, currentBlock] = await Promise.all([
-          getMarket(market.id),
+          getMarket(market.id, getProgramIdForToken(marketTokenType)),
           getCurrentBlockHeight(),
         ])
         if (onChainMarket && onChainMarket.status !== MARKET_STATUS.ACTIVE) {

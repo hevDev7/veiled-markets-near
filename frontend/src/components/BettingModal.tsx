@@ -50,7 +50,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
       // Pre-validate market status on-chain to avoid wasted gas
       try {
-        const onChainMarket = await getMarket(market.id)
+        const onChainMarket = await getMarket(market.id, getProgramIdForToken(tokenType))
         if (onChainMarket && onChainMarket.status !== MARKET_STATUS.ACTIVE) {
           const statusNames: Record<number, string> = { 2: 'CLOSED', 3: 'RESOLVED', 4: 'CANCELLED' }
           throw new Error(
