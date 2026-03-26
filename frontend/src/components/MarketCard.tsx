@@ -102,6 +102,13 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
         {/* Question + Thumbnail */}
         <MarketThumb url={getMarketThumbnail(market.question, market.category, market.thumbnailUrl)} question={market.question} />
 
+        {/* Description snippet */}
+        {market.description && (
+          <p className="text-xs text-surface-500 line-clamp-2 leading-relaxed -mt-1 mb-3">
+            {market.description}
+          </p>
+        )}
+
         {/* Odds Display */}
         <div className="mb-4">
           {isBinary ? (
