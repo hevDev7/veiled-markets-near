@@ -62,3 +62,6 @@ frontend/mt4ubuntu.sh
 
 # Market proposals
 markets-proposals.md
+
+# Supabase
+supabase/
