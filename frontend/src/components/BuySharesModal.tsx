@@ -115,6 +115,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
       const amountMicro = BigInt(Math.floor(parseFloat(amount) * 1_000_000))
       const minSharesOut = tradePreview?.minShares || 0n
+      const feeInMicro = 1_500_000n
 
       // Pre-validate market status, deadline, AND token type
       try {
@@ -158,6 +159,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
       let functionName: string
       let inputs: string[]
+      let releaseSelectedRecord: (() => void) | null = null
 
       // expected_shares goes into the OutcomeShare record's quantity field.
       // Set to minSharesOut (conservative) so record quantity <= actual shares_out.
@@ -167,6 +169,9 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       const tokenType = marketTokenType
 
       if (isStablecoin) {
+        if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
+          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+        }
         if (!wallet.isDemoMode && amountMicro > stablecoinTotalBalance) {
           throw new Error(
             `Insufficient ${tokenType} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
@@ -178,11 +183,13 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         inputs = result.inputs
         setPrivacyMode(stablecoinPrivateBalance > 0n ? 'private' : 'public')
       } else {
+        if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
+          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+        }
         // ALEO: buy_shares_private uses transfer_private_to_public (needs credits record)
-        // Need enough for bet amount + gas fee buffer (1.5 ALEO = 1,500,000 microcredits)
-        const gasBuffer = 1_500_000
-        const totalNeeded = Number(amountMicro) + gasBuffer
-        const creditsRecord = await fetchCreditsRecord(totalNeeded)
+        const totalNeeded = Number(amountMicro)
+        const { reserveCreditsRecord, releaseCreditsRecord } = await import('@/lib/credits-record')
+        const creditsRecord = await fetchCreditsRecord(totalNeeded, wallet.address)
         if (!creditsRecord) {
           throw new Error(
             `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
@@ -190,10 +197,12 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
             `Make sure your wallet has private ALEO credits (not just public balance).`
           )
         }
+        reserveCreditsRecord(creditsRecord)
         const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'ALEO', creditsRecord)
         functionName = result.functionName
         inputs = result.inputs
         setPrivacyMode('private')
+        releaseSelectedRecord = () => releaseCreditsRecord(creditsRecord)
       }
 
       // Add timeout — Shield wallet can hang after confirmation
@@ -203,13 +212,15 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
       // v8: Single TX — append Token record + MerkleProof for stablecoins
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
-        const { findTokenRecord } = await import('@/lib/private-stablecoin')
+        const { findTokenRecord, reserveTokenRecord, releaseTokenRecord } = await import('@/lib/private-stablecoin')
         const { buildMerkleProofsForAddress } = await import('@/lib/aleo-client')
         const tokenRecord = await findTokenRecord(tokenType, amountMicro)
         if (tokenRecord) {
           if (!wallet.address) {
             throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
           }
+          reserveTokenRecord(tokenType, tokenRecord)
+          releaseSelectedRecord = () => releaseTokenRecord(tokenType, tokenRecord)
           inputs!.push(tokenRecord)
           inputs!.push(await buildMerkleProofsForAddress(wallet.address))
         } else {
@@ -223,7 +234,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         function: functionName!,
         inputs: inputs!,
         fee: 1.5,
-        recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
+        recordIndices: [6],
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -264,6 +275,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
+      releaseSelectedRecord?.()
       console.error('Failed to buy shares:', err)
       setError(err instanceof Error ? err.message : 'An unknown error occurred.')
     } finally {

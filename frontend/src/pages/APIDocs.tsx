@@ -63,7 +63,7 @@ export function APIDocs() {
 // Initialize client
 const client = createClient({
   rpcUrl: 'https://api.explorer.provable.com/v1/testnet',
-  programId: 'veiled_markets_v34.aleo',
+  programId: 'veiled_markets_v35.aleo',
 })
 
 // Fetch a market (marketId is a field string, e.g. "123field")
@@ -109,7 +109,7 @@ const value = await client.getMappingValue('markets', '123field')`}</CodeBlock>
                 {
                   name: 'getMarketDispute(marketId: string)',
                   returns: 'Promise<DisputeData | null>',
-                  desc: 'Get dispute information including disputer, bond amount, and proposed outcome.',
+                  desc: 'Get dispute information including disputer, bond amount (3x total voter bonds), and proposed outcome.',
                 },
                 {
                   name: 'getActiveMarkets()',
@@ -218,7 +218,6 @@ enum MarketCategory {
 interface Market {
   id: string                     // field — Unique market identifier
   creator: string                // address
-  resolver: string               // address — Designated resolver
   questionHash: string           // field — Hash of the market question
   question?: string              // Resolved from IPFS/off-chain
   category: MarketCategory       // u8
@@ -256,9 +255,10 @@ interface AMMPool {
 interface MarketResolution {
   marketId: string
   winningOutcome: number         // u8 (1-4)
-  resolver: string               // address
-  resolvedAt: bigint             // u64
-  challengeDeadline: bigint      // u64
+  totalVoters: number            // u32 — Number of voters
+  totalBonds: bigint             // u128 — Total bonds posted
+  votingDeadline: bigint         // u64
+  disputeDeadline: bigint        // u64
   finalized: boolean
 }
 
@@ -282,27 +282,36 @@ interface DisputeData {
             <h2 className="text-lg font-semibold text-white mb-4">On-Chain Programs</h2>
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_v34.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">Main market contract — 31 transitions (at snarkVM limit)</p>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_v35.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">ALEO market contract — 22 transitions</p>
                 <p className="text-sm text-surface-400">
-                  Handles ALEO and USDCX markets: creation, trading (buy/sell), liquidity provision,
-                  resolution, disputes, fee collection, and multisig treasury.
+                  Handles ALEO-denominated markets: creation, trading (buy/sell), liquidity provision,
+                  Multi-Voter Quorum resolution (vote_outcome, finalize_votes, confirm_resolution, dispute_resolution),
+                  bond claiming (claim_voter_bond, claim_dispute_bond, claim_voter_reward), fee collection, and multisig treasury.
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usad_v11.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">USAD market contract — separate program for USAD token</p>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usdcx_v5.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">USDCX market contract — 22 transitions</p>
                 <p className="text-sm text-surface-400">
-                  Mirrors the main contract functionality for USAD-denominated markets. Separated due
-                  to the 31-transition limit per program in snarkVM.
+                  Handles USDCX-denominated markets with the same functionality as the ALEO contract.
+                  Uses Token records with MerkleProof for private trading.
+                </p>
+              </div>
+              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usad_v12.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">USAD market contract — 22 transitions</p>
+                <p className="text-sm text-surface-400">
+                  Handles USAD-denominated markets with the same functionality as the ALEO contract.
+                  Uses Token records with MerkleProof for private trading.
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                 <h3 className="font-mono text-sm text-white mb-1">veiled_governance_v4.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">Governance program — 6 proposal types</p>
+                <p className="text-xs text-surface-500 mb-3">Governance program — 29 transitions</p>
                 <p className="text-sm text-surface-400">
-                  On-chain governance for protocol decisions: dispute resolution, fee changes, treasury
-                  management, parameter updates, emergency pause, and resolver elections.
+                  On-chain governance for protocol decisions: dispute resolution overrides, fee changes, 3-of-N
+                  multisig treasury management, parameter updates, and emergency pause. ALEO native staking governance is Coming Soon.
                 </p>
               </div>
             </div>
@@ -314,13 +323,13 @@ interface DisputeData {
             <CodeBlock title="typescript">{`// Testnet (default)
 const client = createClient({
   networkUrl: 'https://api.explorer.provable.com/v1/testnet',
-  programId: 'veiled_markets_v34.aleo',
+  programId: 'veiled_markets_v35.aleo',
 })
 
 // Mainnet (future)
 const client = createClient({
   networkUrl: 'https://api.explorer.provable.com/v1/mainnet',
-  programId: 'veiled_markets_v34.aleo',
+  programId: 'veiled_markets_v35.aleo',
 })
 
 // Explorer URLs

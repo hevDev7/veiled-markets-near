@@ -718,7 +718,7 @@ const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v34.aleo program.
+// in the veiled_markets_v35.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list
@@ -1399,7 +1399,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         const { fetchCreditsRecord } = await import('./credits-record')
         const gasBuffer = 500_000
         const totalNeeded = Number(amount) + gasBuffer
-        const record = await fetchCreditsRecord(totalNeeded)
+        const record = await fetchCreditsRecord(totalNeeded, walletState.address)
         if (!record) {
           throw new Error(
             `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +

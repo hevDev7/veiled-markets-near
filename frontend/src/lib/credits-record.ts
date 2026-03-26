@@ -4,6 +4,37 @@ import { devLog } from './logger'
  * Used by BettingModal and MarketDetail for private trading (buy_shares_private).
  */
 
+const RESERVED_CREDITS_RECORDS = new Map<string, number>()
+const RESERVED_CREDITS_TTL_MS = 3 * 60 * 1000
+
+function cleanupReservedCreditsRecords(): void {
+  const now = Date.now()
+  for (const [key, expiresAt] of RESERVED_CREDITS_RECORDS.entries()) {
+    if (expiresAt <= now) {
+      RESERVED_CREDITS_RECORDS.delete(key)
+    }
+  }
+}
+
+function makeCreditsRecordKey(record: string): string {
+  return record.trim()
+}
+
+export function reserveCreditsRecord(record: string, ttlMs: number = RESERVED_CREDITS_TTL_MS): void {
+  cleanupReservedCreditsRecords()
+  RESERVED_CREDITS_RECORDS.set(makeCreditsRecordKey(record), Date.now() + ttlMs)
+}
+
+export function releaseCreditsRecord(record: string): void {
+  RESERVED_CREDITS_RECORDS.delete(makeCreditsRecordKey(record))
+}
+
+function isCreditsRecordReserved(record: string): boolean {
+  cleanupReservedCreditsRecords()
+  const expiresAt = RESERVED_CREDITS_RECORDS.get(makeCreditsRecordKey(record))
+  return typeof expiresAt === 'number' && expiresAt > Date.now()
+}
+
 /**
  * Validate that a string looks like a Leo record plaintext (NOT JSON metadata).
  * Valid: "{ owner: aleo1xxx.private, microcredits: 5000000u64.private, _nonce: ...group.public }"
@@ -20,13 +51,59 @@ function isLeoRecordPlaintext(s: string): boolean {
   return true
 }
 
-export function findSuitableRecord(records: any[], minAmountMicro: number): string | null {
+function extractCreditsRecordOwner(plaintext: string): string | null {
+  const ownerMatch = plaintext.match(/owner:\s*(aleo1[a-z0-9]+)/)
+  return ownerMatch ? ownerMatch[1].toLowerCase() : null
+}
+
+function isRecordMarkedSpent(record: any): boolean {
+  if (!record || typeof record !== 'object') return false
+  if (record.spent === true || record.is_spent === true || record.isSpent === true) return true
+  if (record.spent === 'true' || record.is_spent === 'true' || record.isSpent === 'true') return true
+  if (record.status === 'spent' || record.status === 'Spent') return true
+  if (record.recordStatus === 'spent' || record.recordStatus === 'Spent') return true
+  return false
+}
+
+function isRecordExplicitlyUnspent(record: any): boolean {
+  if (!record || typeof record !== 'object') return false
+  return record.spent === false
+    || record.is_spent === false
+    || record.isSpent === false
+    || record.status === 'unspent'
+    || record.status === 'Unspent'
+    || record.recordStatus === 'unspent'
+    || record.recordStatus === 'Unspent'
+}
+
+function extractRecordBlockHeight(record: any): number {
+  if (!record || typeof record !== 'object') return -1
+  const candidates = [record.blockHeight, record.block_height, record.height]
+  for (const value of candidates) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && /^\d+$/.test(value)) return parseInt(value, 10)
+  }
+  return -1
+}
+
+export function findSuitableRecord(records: any[], minAmountMicro: number, expectedOwner?: string | null): string | null {
+  type Candidate = {
+    plaintext: string
+    microcredits: number
+    arrayIndex: number
+    blockHeight: number
+    hasMetadata: boolean
+    explicitlyUnspent: boolean
+    owner: string | null
+  }
+
+  const candidates: Candidate[] = []
+  const normalizedExpectedOwner = expectedOwner?.toLowerCase() || null
+
   for (let i = 0; i < records.length; i++) {
     const record = records[i]
     if (!record) continue
-    // Skip spent records
-    if (record.spent === true || record.is_spent === true) continue
-    if (record.status === 'spent' || record.status === 'Spent') continue
+    if (isRecordMarkedSpent(record)) continue
 
     // Try to extract Leo record plaintext from various record formats.
     // IMPORTANT: We must return a Leo record plaintext string, NOT JSON metadata.
@@ -102,17 +179,56 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
     devLog(`[Bet] Record ${i}: ${mc} microcredits (need ${minAmountMicro})`)
 
     if (mc >= minAmountMicro) {
+      if (isCreditsRecordReserved(plaintext)) {
+        devLog(`[Bet] Record ${i}: skipped because it is temporarily reserved from a recent transaction attempt`)
+        continue
+      }
       // Validate it's a proper Leo record plaintext, not JSON metadata
       if (isLeoRecordPlaintext(plaintext)) {
-        devLog(`[Bet] Found suitable Credits record: ${mc} microcredits`)
-        devLog(`[Bet] Record plaintext (first 300 chars):`, plaintext.slice(0, 300))
-        return plaintext
+        const owner = extractCreditsRecordOwner(plaintext)
+        if (normalizedExpectedOwner && owner !== normalizedExpectedOwner) {
+          devLog(
+            `[Bet] Record ${i}: skipped because owner ${owner || 'unknown'} does not match connected wallet ${normalizedExpectedOwner}`,
+          )
+          continue
+        }
+        candidates.push({
+          plaintext,
+          microcredits: mc,
+          arrayIndex: i,
+          blockHeight: extractRecordBlockHeight(record),
+          hasMetadata: typeof record === 'object' && record !== null,
+          explicitlyUnspent: isRecordExplicitlyUnspent(record),
+          owner,
+        })
       } else {
         devLog(`[Bet] Record ${i}: has ${mc} mc but NOT Leo format. Starts with:`, plaintext.slice(0, 80))
       }
     }
   }
-  return null
+
+  if (candidates.length === 0) return null
+
+  const metadataCandidates = candidates.filter(candidate => candidate.hasMetadata)
+  const pool = metadataCandidates.length > 0 ? metadataCandidates : candidates
+
+  pool.sort((a, b) => {
+    if (a.explicitlyUnspent !== b.explicitlyUnspent) {
+      return a.explicitlyUnspent ? -1 : 1
+    }
+    if (a.blockHeight !== b.blockHeight) {
+      return b.blockHeight - a.blockHeight
+    }
+    if (a.arrayIndex !== b.arrayIndex) {
+      return b.arrayIndex - a.arrayIndex
+    }
+    return b.microcredits - a.microcredits
+  })
+
+  const best = pool[0]
+  devLog(`[Bet] Selected Credits record #${best.arrayIndex} (${best.microcredits} microcredits, blockHeight=${best.blockHeight})`)
+  devLog(`[Bet] Record plaintext (first 300 chars):`, best.plaintext.slice(0, 300))
+  return best.plaintext
 }
 
 /**
@@ -123,9 +239,12 @@ export function findSuitableRecord(records: any[], minAmountMicro: number): stri
  * 3. Adapter requestRecordPlaintexts
  * 4. Native wallet API (Leo/Shield direct)
  */
-export async function fetchCreditsRecord(minAmountMicro: number): Promise<string | null> {
+export async function fetchCreditsRecord(minAmountMicro: number, expectedOwner?: string | null): Promise<string | null> {
   devLog('[Bet] === Fetching Credits record for private betting ===')
   devLog(`[Bet] Need record with >= ${minAmountMicro} microcredits (${minAmountMicro / 1_000_000} ALEO)`)
+  if (expectedOwner) {
+    devLog(`[Bet] Expecting Credits record owner: ${expectedOwner}`)
+  }
 
   // Strategy 1: Adapter requestRecords with plaintext=true
   // This is the SAME approach that works in store.ts balance detection (line 314)
@@ -142,7 +261,7 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
         const last = recordsArr[recordsArr.length - 1]
         devLog(`[Bet] Strategy 1 → Last record (#${recordsArr.length - 1}) sample:`, JSON.stringify(last)?.slice(0, 500))
       }
-      const found = findSuitableRecord(recordsArr, minAmountMicro)
+      const found = findSuitableRecord(recordsArr, minAmountMicro, expectedOwner)
       if (found) return found
     } catch (err) {
       devLog('[Bet] Strategy 1 failed:', err)
@@ -156,7 +275,7 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
       devLog(`[Bet] Strategy 2 → Got ${recordsArr.length} record(s)`)
 
       // First try parsing as-is (some wallets include plaintext even without flag)
-      const found = findSuitableRecord(recordsArr, minAmountMicro)
+      const found = findSuitableRecord(recordsArr, minAmountMicro, expectedOwner)
       if (found) return found
 
       // Try decrypting ciphertext records
@@ -186,6 +305,13 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
               const mc = parseInt(mcMatch[1], 10)
               devLog(`[Bet] Strategy 2b: record ${idx} has ${mc} microcredits (need ${minAmountMicro})`)
               if (mc >= minAmountMicro && textStr.includes('{') && textStr.includes('owner')) {
+                const owner = extractCreditsRecordOwner(textStr)
+                if (expectedOwner && owner !== expectedOwner.toLowerCase()) {
+                  devLog(
+                    `[Bet] Strategy 2b: skipping record ${idx} because owner ${owner || 'unknown'} does not match connected wallet ${expectedOwner.toLowerCase()}`,
+                  )
+                  continue
+                }
                 devLog(`[Bet] Strategy 2b: FOUND suitable record with ${mc} microcredits`)
                 return textStr
               }
@@ -214,7 +340,7 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
       if (recordsArr.length > 0) {
         devLog('[Bet] Strategy 3 → First record sample:', JSON.stringify(recordsArr[0])?.slice(0, 300))
       }
-      const found = findSuitableRecord(recordsArr, minAmountMicro)
+      const found = findSuitableRecord(recordsArr, minAmountMicro, expectedOwner)
       if (found) return found
     } catch (err) {
       devLog('[Bet] Strategy 3 failed:', err)
@@ -230,7 +356,7 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
         const result = await leoWallet.requestRecordPlaintexts('credits.aleo')
         const records = result?.records || (Array.isArray(result) ? result : [])
         devLog(`[Bet] Strategy 4a → Got ${records.length} record(s)`)
-        const found = findSuitableRecord(records, minAmountMicro)
+        const found = findSuitableRecord(records, minAmountMicro, expectedOwner)
         if (found) return found
       } catch (err) {
         devLog('[Bet] Strategy 4a failed:', err)
@@ -243,7 +369,7 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
         const result = await leoWallet.requestRecords('credits.aleo')
         const records = result?.records || (Array.isArray(result) ? result : [])
         devLog(`[Bet] Strategy 4b → Got ${records.length} record(s)`)
-        const found = findSuitableRecord(records, minAmountMicro)
+        const found = findSuitableRecord(records, minAmountMicro, expectedOwner)
         if (found) return found
       } catch (err) {
         devLog('[Bet] Strategy 4b failed:', err)
@@ -257,8 +383,15 @@ export async function fetchCreditsRecord(minAmountMicro: number): Promise<string
     const { findCreditsRecord: scannerFindCredits } = await import('./record-scanner')
     const scannedRecord = await scannerFindCredits(minAmountMicro)
     if (scannedRecord) {
+      const owner = extractCreditsRecordOwner(scannedRecord)
+      if (expectedOwner && owner !== expectedOwner.toLowerCase()) {
+        devLog(
+          `[Bet] Strategy 5: scanner record owner ${owner || 'unknown'} does not match connected wallet ${expectedOwner.toLowerCase()}`,
+        )
+      } else {
       devLog('[Bet] Strategy 5 → Found credits record via scanner')
       return scannedRecord
+      }
     }
   } catch (err) {
     devLog('[Bet] Strategy 5 (scanner) failed:', err)

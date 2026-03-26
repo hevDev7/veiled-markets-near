@@ -18,7 +18,7 @@ export function RiskDisclosure() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Risk Disclosure</h1>
-        <p className="text-sm text-surface-500 mb-8">Last updated: March 22, 2026</p>
+        <p className="text-sm text-surface-500 mb-8">Last updated: March 26, 2026</p>
 
         {/* Warning Banner */}
         <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/[0.06] border border-yellow-500/[0.12] mb-12">
@@ -48,8 +48,8 @@ export function RiskDisclosure() {
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Code Vulnerabilities:</strong> Despite testing and review, smart contracts may contain undiscovered bugs or vulnerabilities that could result in loss of funds.</li>
               <li><strong className="text-surface-300">Immutability:</strong> Once deployed, smart contract code cannot be easily modified. Fixes may require deploying new contracts and migrating state.</li>
-              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (main market contract, USAD stablecoin, governance). Issues in any component could affect the entire system.</li>
-              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program, which constrains the functionality that can be included in a single contract.</li>
+              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v35.aleo for ALEO markets, veiled_markets_usdcx_v5.aleo for USDCX markets, veiled_markets_usad_v12.aleo for USAD markets, and veiled_governance_v4.aleo for governance). Issues in any component could affect the entire system.</li>
+              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses 22 transitions and the governance contract uses 29 transitions.</li>
             </ul>
           </section>
 
@@ -69,7 +69,8 @@ export function RiskDisclosure() {
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Price Volatility:</strong> Market share prices are determined by the FPMM (Fixed Product Market Maker) algorithm and can change rapidly based on trading activity.</li>
               <li><strong className="text-surface-300">Liquidity Risk:</strong> Markets with low liquidity may result in high slippage, meaning you may receive significantly less value than expected.</li>
-              <li><strong className="text-surface-300">Resolution Risk:</strong> Markets are resolved by designated resolvers (not automated oracles). The resolution process includes an initial resolver decision, a 2,880-block challenge window (~12 hours on testnet), and the ability for any user to dispute by posting a bond. While governance can override incorrect resolutions, the process is human-initiated and may be subject to errors or disputes.</li>
+              <li><strong className="text-surface-300">Resolution Risk:</strong> Markets are resolved through a Multi-Voter Quorum system (not automated oracles). After a market closes, anyone can vote on the outcome by posting a 1 ALEO bond, requiring a minimum of 3 voters to reach quorum. After the voting window (~3 hours), votes are finalized, followed by a dispute window (~3 hours) where anyone can override the result by posting 3x the total bonds. Voters who vote with the majority can claim rewards, while those who vote against the majority lose their bond (slashing). The process is human-initiated and may be subject to errors or disputes.</li>
+              <li><strong className="text-surface-300">Voter Slashing Risk:</strong> If you participate in market resolution voting and your vote does not match the final outcome, your 1 ALEO bond is slashed. Only vote on outcomes you are confident about.</li>
               <li><strong className="text-surface-300">Impermanent Loss:</strong> Liquidity providers face impermanent loss risk when the market price diverges from the initial provision ratio. The FPMM formula (x * y = k) means LP value may decrease as outcomes become more certain.</li>
               <li><strong className="text-surface-300">LP Share Non-Transferability:</strong> LP shares are currently non-transferable due to claim key constraints. You cannot transfer your liquidity position to another wallet.</li>
             </ul>
@@ -93,10 +94,10 @@ export function RiskDisclosure() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">6. Stablecoin Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens: native ALEO, USDCX (test_usdcx_stablecoin.aleo), and USAD (veiled_markets_usad_v11.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
+              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens, each with its own market contract: native ALEO (veiled_markets_v35.aleo), USDCX (veiled_markets_usdcx_v5.aleo), and USAD (veiled_markets_usad_v12.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
               <li><strong className="text-surface-300">De-peg Risk:</strong> Stablecoins can lose their peg due to market conditions, smart contract issues, or governance failures.</li>
               <li><strong className="text-surface-300">Two-Transaction Flow:</strong> Buying shares with USDCX or USAD requires two sequential blockchain transactions (deposit to public, then buy). If the first transaction succeeds but the second fails, your funds may be temporarily locked in the contract's public balance until you retry.</li>
-              <li><strong className="text-surface-300">Separate Contract Risk:</strong> USAD operates through a separate smart contract (veiled_markets_usad_v11.aleo) due to snarkVM transition limits. This adds additional composability risk compared to ALEO or USDCX markets.</li>
+              <li><strong className="text-surface-300">Separate Contract Risk:</strong> Each token type operates through its own smart contract (ALEO via veiled_markets_v35.aleo, USDCX via veiled_markets_usdcx_v5.aleo, USAD via veiled_markets_usad_v12.aleo). This multi-contract architecture adds composability risk.</li>
             </ul>
           </section>
 

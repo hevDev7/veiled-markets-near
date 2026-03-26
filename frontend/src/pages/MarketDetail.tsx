@@ -329,6 +329,18 @@ export function MarketDetail() {
 
   // Ref for mobile scroll-to-trading
   const tradingPanelRef = useRef<HTMLDivElement>(null)
+  const tabPanelRef = useRef<HTMLDivElement>(null)
+
+  // Close tab panels when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (activeTab !== 'trade' && tabPanelRef.current && !tabPanelRef.current.contains(e.target as Node)) {
+        setActiveTab('trade')
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [activeTab])
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -388,10 +400,12 @@ export function MarketDetail() {
     if (!market?.id) return
     const fetchExtras = async () => {
       try {
+        const tokenType = market.tokenType || 'ALEO'
+        const pid = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
         const [res, feesData, disputeData] = await Promise.all([
-          getMarketResolution(market.id),
-          getMarketFees(market.id),
-          getMarketDispute(market.id),
+          getMarketResolution(market.id, pid),
+          getMarketFees(market.id, pid),
+          getMarketDispute(market.id, pid),
         ])
         if (res) setResolution(res)
         if (feesData) setFees(feesData)
@@ -754,6 +768,10 @@ export function MarketDetail() {
 
       // Pre-flight: Balance verification
       const feeInMicro = 1_500_000n
+      if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
+        throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+      }
+
       if (isStablecoin) {
         const totalStablecoin = tokenType === 'USDCX'
           ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
@@ -761,16 +779,12 @@ export function MarketDetail() {
         if (buyAmountMicro > totalStablecoin) {
           throw new Error(`Insufficient ${tokenType} balance. You need ${buyAmount} ${tokenType} but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${tokenType}.`)
         }
-        // Gas fees always in ALEO
-        const publicBalance = wallet.balance.public
-        if (publicBalance < feeInMicro) {
-          throw new Error(`Insufficient ALEO for transaction fee. Gas fees are always paid in ALEO.`)
-        }
       }
 
       // Build inputs
       let functionName: string
       let inputs: string[]
+      let releaseSelectedRecord: (() => void) | null = null
 
       {
         // expectedShares = minShares (conservative) so record quantity <= actual shares_out
@@ -779,16 +793,17 @@ export function MarketDetail() {
 
         if (tokenType === 'ALEO') {
           // ALEO: buy_shares_private needs credits record
-          const { fetchCreditsRecord } = await import('@/lib/credits-record')
-          const gasBuffer = 500_000
-          const totalNeeded = Number(buyAmountMicro) + gasBuffer
-          const record = await fetchCreditsRecord(totalNeeded)
+          const { fetchCreditsRecord, reserveCreditsRecord, releaseCreditsRecord } = await import('@/lib/credits-record')
+          const totalNeeded = Number(buyAmountMicro)
+          const record = await fetchCreditsRecord(totalNeeded, wallet.address)
           if (!record) {
             throw new Error(
               `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
               `Private betting requires an unspent Credits record.`
             )
           }
+          reserveCreditsRecord(record)
+          releaseSelectedRecord = () => releaseCreditsRecord(record)
           creditsRecord = record
         }
 
@@ -806,12 +821,14 @@ export function MarketDetail() {
 
         // v29: USDCX private buy — append Token record + MerkleProof to inputs
         if (tokenType === 'USDCX') {
-          const { findTokenRecord } = await import('@/lib/private-stablecoin')
+          const { findTokenRecord, reserveTokenRecord, releaseTokenRecord } = await import('@/lib/private-stablecoin')
           const tokenRecord = await findTokenRecord('USDCX', buyAmountMicro)
           if (tokenRecord) {
             if (!wallet.address) {
               throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
             }
+            reserveTokenRecord('USDCX', tokenRecord)
+            releaseSelectedRecord = () => releaseTokenRecord('USDCX', tokenRecord)
             inputs.push(tokenRecord)
             inputs.push(await buildMerkleProofsForAddress(wallet.address))
             devWarn('[Trade] USDCX PRIVATE buy — Token record + MerkleProof appended')
@@ -825,12 +842,14 @@ export function MarketDetail() {
 
         // USAD v8: private buy — append Token record + MerkleProof (same as USDCX)
         if (tokenType === 'USAD') {
-          const { findTokenRecord } = await import('@/lib/private-stablecoin')
+          const { findTokenRecord, reserveTokenRecord, releaseTokenRecord } = await import('@/lib/private-stablecoin')
           const tokenRecord = await findTokenRecord('USAD', buyAmountMicro)
           if (tokenRecord) {
             if (!wallet.address) {
               throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
             }
+            reserveTokenRecord('USAD', tokenRecord)
+            releaseSelectedRecord = () => releaseTokenRecord('USAD', tokenRecord)
             inputs.push(tokenRecord)
             inputs.push(await buildMerkleProofsForAddress(wallet.address))
             devWarn('[Trade] USAD PRIVATE buy — Token record + MerkleProof appended')
@@ -854,7 +873,7 @@ export function MarketDetail() {
           function: functionName,
           inputs,
           fee: 1.5,
-          recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
+          recordIndices: [6],
         })
       }
 
@@ -911,6 +930,7 @@ export function MarketDetail() {
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
+      releaseSelectedRecord?.()
       console.error('Trade failed:', err)
       setError(err instanceof Error ? err.message : 'Failed to buy shares')
       setStep('error')
@@ -941,10 +961,12 @@ export function MarketDetail() {
     try {
       // Refresh markets to get updated status (e.g. ACTIVE → CLOSED)
       await fetchMarkets()
+      const tt = market.tokenType || 'ALEO'
+      const programId = getProgramIdForToken(tt as 'ALEO' | 'USDCX' | 'USAD')
       const [res, feesData, disputeData] = await Promise.all([
-        getMarketResolution(market.id),
-        getMarketFees(market.id),
-        getMarketDispute(market.id),
+        getMarketResolution(market.id, programId),
+        getMarketFees(market.id, programId),
+        getMarketDispute(market.id, programId),
       ])
       if (res) setResolution(res)
       if (feesData) setFees(feesData)
@@ -1348,6 +1370,7 @@ export function MarketDetail() {
 
               {/* Tab panels: Liquidity, Dispute, Creator Fees */}
               <motion.div
+                ref={tabPanelRef}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
@@ -1356,7 +1379,7 @@ export function MarketDetail() {
                 <div className="flex gap-2 mb-4">
                   {showLiquidity && (
                     <button
-                      onClick={() => setActiveTab('liquidity')}
+                      onClick={() => setActiveTab(activeTab === 'liquidity' ? 'trade' : 'liquidity')}
                       className={cn(
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'liquidity'
@@ -1371,7 +1394,7 @@ export function MarketDetail() {
                   {/* v33: Dispute tab removed — challenge is now part of ResolvePanel */}
                   {showCreatorFees && (
                     <button
-                      onClick={() => setActiveTab('fees')}
+                      onClick={() => setActiveTab(activeTab === 'fees' ? 'trade' : 'fees')}
                       className={cn(
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'fees'
@@ -1385,7 +1408,7 @@ export function MarketDetail() {
                   )}
                   {showResolve && (
                     <button
-                      onClick={() => setActiveTab('resolve')}
+                      onClick={() => setActiveTab(activeTab === 'resolve' ? 'trade' : 'resolve')}
                       className={cn(
                         'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
                         activeTab === 'resolve'

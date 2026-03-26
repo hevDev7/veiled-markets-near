@@ -14,6 +14,35 @@ import { config } from './config';
 import { buildDefaultMerkleProofs } from './aleo-client';
 import { devLog, devWarn } from './logger';
 
+const RESERVED_TOKEN_RECORDS = new Map<string, number>();
+const RESERVED_TOKEN_RECORD_TTL_MS = 3 * 60 * 1000;
+
+function cleanupReservedTokenRecords(): void {
+  const now = Date.now();
+  for (const [key, expiresAt] of RESERVED_TOKEN_RECORDS.entries()) {
+    if (expiresAt <= now) RESERVED_TOKEN_RECORDS.delete(key);
+  }
+}
+
+function makeReservedTokenKey(tokenType: 'USDCX' | 'USAD', record: string): string {
+  return `${tokenType}:${record.trim()}`;
+}
+
+export function reserveTokenRecord(tokenType: 'USDCX' | 'USAD', record: string, ttlMs: number = RESERVED_TOKEN_RECORD_TTL_MS): void {
+  cleanupReservedTokenRecords();
+  RESERVED_TOKEN_RECORDS.set(makeReservedTokenKey(tokenType, record), Date.now() + ttlMs);
+}
+
+export function releaseTokenRecord(tokenType: 'USDCX' | 'USAD', record: string): void {
+  RESERVED_TOKEN_RECORDS.delete(makeReservedTokenKey(tokenType, record));
+}
+
+function isTokenRecordReserved(tokenType: 'USDCX' | 'USAD', record: string): boolean {
+  cleanupReservedTokenRecords();
+  const expiresAt = RESERVED_TOKEN_RECORDS.get(makeReservedTokenKey(tokenType, record));
+  return typeof expiresAt === 'number' && expiresAt > Date.now();
+}
+
 function isTokenRecordPlaintext(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed.startsWith('{')) return false;
@@ -53,6 +82,113 @@ function extractTokenPlaintext(record: unknown): string | null {
   }
 
   return null;
+}
+
+function isRecordMarkedSpent(record: unknown): boolean {
+  if (!record || typeof record !== 'object') return false;
+  const obj = record as Record<string, unknown>;
+  return obj.spent === true
+    || obj.is_spent === true
+    || obj.isSpent === true
+    || obj.spent === 'true'
+    || obj.is_spent === 'true'
+    || obj.isSpent === 'true'
+    || obj.status === 'spent'
+    || obj.status === 'Spent'
+    || obj.recordStatus === 'spent'
+    || obj.recordStatus === 'Spent';
+}
+
+function isRecordExplicitlyUnspent(record: unknown): boolean {
+  if (!record || typeof record !== 'object') return false;
+  const obj = record as Record<string, unknown>;
+  return obj.spent === false
+    || obj.is_spent === false
+    || obj.isSpent === false
+    || obj.status === 'unspent'
+    || obj.status === 'Unspent'
+    || obj.recordStatus === 'unspent'
+    || obj.recordStatus === 'Unspent';
+}
+
+function extractRecordBlockHeight(record: unknown): number {
+  if (!record || typeof record !== 'object') return -1;
+  const obj = record as Record<string, unknown>;
+  for (const value of [obj.blockHeight, obj.block_height, obj.height]) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && /^\d+$/.test(value)) return parseInt(value, 10);
+  }
+  return -1;
+}
+
+function findBestTokenRecord(
+  tokenType: 'USDCX' | 'USAD',
+  records: unknown[],
+  minAmount: bigint,
+  label: string,
+): string | null {
+  type Candidate = {
+    plaintext: string;
+    amount: bigint;
+    arrayIndex: number;
+    blockHeight: number;
+    hasMetadata: boolean;
+    explicitlyUnspent: boolean;
+  };
+
+  const candidates: Candidate[] = [];
+
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    if (!record || isRecordMarkedSpent(record)) continue;
+
+    const plaintext = extractTokenPlaintext(record);
+    if (!plaintext) continue;
+
+    const match = plaintext.match(/amount\s*:\s*(\d+)u128/);
+    if (!match) continue;
+
+    const amount = BigInt(match[1]);
+    if (amount < minAmount) continue;
+    if (isTokenRecordReserved(tokenType, plaintext)) {
+      devLog(`[PrivateStablecoin] ${label} record ${i} skipped because it is temporarily reserved`);
+      continue;
+    }
+
+    candidates.push({
+      plaintext,
+      amount,
+      arrayIndex: i,
+      blockHeight: extractRecordBlockHeight(record),
+      hasMetadata: typeof record === 'object' && record !== null,
+      explicitlyUnspent: isRecordExplicitlyUnspent(record),
+    });
+  }
+
+  if (candidates.length === 0) return null;
+
+  const metadataCandidates = candidates.filter(candidate => candidate.hasMetadata);
+  const pool = metadataCandidates.length > 0 ? metadataCandidates : candidates;
+
+  pool.sort((a, b) => {
+    if (a.explicitlyUnspent !== b.explicitlyUnspent) {
+      return a.explicitlyUnspent ? -1 : 1;
+    }
+    if (a.blockHeight !== b.blockHeight) {
+      return b.blockHeight - a.blockHeight;
+    }
+    if (a.arrayIndex !== b.arrayIndex) {
+      return b.arrayIndex - a.arrayIndex;
+    }
+    if (a.amount !== b.amount) {
+      return a.amount > b.amount ? -1 : 1;
+    }
+    return 0;
+  });
+
+  const best = pool[0];
+  devLog(`[PrivateStablecoin] Selected ${label} Token record #${best.arrayIndex} (${Number(best.amount) / 1_000000}, blockHeight=${best.blockHeight})`);
+  return best.plaintext;
 }
 
 /**
@@ -121,21 +257,8 @@ export async function findTokenRecord(
       devLog(`[PrivateStablecoin] Strategy 1: adapter requestRecordPlaintexts(${programId})`);
       const records = await requestPlaintexts(programId);
       const arr = Array.isArray(records) ? records : (records?.records || []);
-
-      for (const r of arr) {
-        if ((r as any)?.spent === true) continue;
-        const plaintext = extractTokenPlaintext(r);
-        if (!plaintext) continue;
-
-        const match = plaintext.match(/amount\s*:\s*(\d+)u128/);
-        if (!match) continue;
-
-        const amt = BigInt(match[1]);
-        if (amt >= minAmount) {
-          devLog(`[PrivateStablecoin] Found ${label} Token via plaintext API: ${Number(amt) / 1_000000}`);
-          return plaintext;
-        }
-      }
+      const found = findBestTokenRecord(tokenType, arr, minAmount, label);
+      if (found) return found;
     } catch (err) {
       devWarn(`[PrivateStablecoin] Strategy 1 failed:`, err);
     }
@@ -148,24 +271,8 @@ export async function findTokenRecord(
       devLog(`[PrivateStablecoin] Strategy 2: adapter requestRecords(${programId})`);
       const records = await requestRecords(programId, true);
       const arr = Array.isArray(records) ? records : (records?.records || []);
-
-      for (const r of arr) {
-        // Skip spent records
-        if ((r as any)?.spent === true) continue;
-
-        const plaintext = extractTokenPlaintext(r);
-        if (!plaintext) continue;
-
-        // Parse amount
-        const match = plaintext.match(/amount\s*:\s*(\d+)u128/);
-        if (match) {
-          const amt = BigInt(match[1]);
-          if (amt >= minAmount) {
-            devLog(`[PrivateStablecoin] Found ${label} Token: ${Number(amt) / 1_000000}`);
-            return plaintext;
-          }
-        }
-      }
+      const found = findBestTokenRecord(tokenType, arr, minAmount, label);
+      if (found) return found;
     } catch (err) {
       devWarn(`[PrivateStablecoin] Strategy 2 failed:`, err);
     }
@@ -182,18 +289,8 @@ export async function findTokenRecord(
         devLog(`[PrivateStablecoin] Strategy 3a: ${name} requestRecordPlaintexts(${programId})`);
         const result = await obj.requestRecordPlaintexts(programId);
         const arr = Array.isArray(result) ? result : (result?.records || []);
-
-        for (const r of arr) {
-          if ((r as any)?.spent === true) continue;
-          const plaintext = extractTokenPlaintext(r);
-          if (!plaintext) continue;
-
-          const match = plaintext.match(/amount\s*:\s*(\d+)u128/);
-          if (match && BigInt(match[1]) >= minAmount) {
-            devLog(`[PrivateStablecoin] Found via ${name} plaintext API: ${Number(BigInt(match[1])) / 1_000000} ${label}`);
-            return plaintext;
-          }
-        }
+        const found = findBestTokenRecord(tokenType, arr, minAmount, label);
+        if (found) return found;
       } catch (err) {
         devWarn(`[PrivateStablecoin] Strategy 3a ${name} failed:`, err);
       }
@@ -204,18 +301,8 @@ export async function findTokenRecord(
         devLog(`[PrivateStablecoin] Strategy 3b: ${name} requestRecords(${programId})`);
         const result = await obj.requestRecords(programId, true);
         const arr = Array.isArray(result) ? result : (result?.records || []);
-
-        for (const r of arr) {
-          if ((r as any)?.spent === true) continue;
-          const plaintext = extractTokenPlaintext(r);
-          if (!plaintext) continue;
-
-          const match = plaintext.match(/amount\s*:\s*(\d+)u128/);
-          if (match && BigInt(match[1]) >= minAmount) {
-            devLog(`[PrivateStablecoin] Found via ${name}: ${Number(BigInt(match[1])) / 1_000000} ${label}`);
-            return plaintext;
-          }
-        }
+        const found = findBestTokenRecord(tokenType, arr, minAmount, label);
+        if (found) return found;
       } catch (err) {
         devWarn(`[PrivateStablecoin] Strategy 3b ${name} failed:`, err);
       }

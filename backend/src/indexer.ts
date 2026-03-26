@@ -24,7 +24,7 @@ export interface IndexedMarket {
  * In production, this would be fetched from an indexer service or custom node
  * Question hashes are generated from actual market questions using SHA-256
  * 
- * Current deployed contract: veiled_markets_v34.aleo
+ * Current deployed contract: veiled_markets_v35.aleo
  * Markets below are hardcoded legacy entries; dynamic blockchain scanning planned
  */
 const KNOWN_MARKETS: IndexedMarket[] = [

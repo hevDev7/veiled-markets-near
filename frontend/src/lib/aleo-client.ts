@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v34.aleo program
+// Client for interacting with the deployed veiled_markets_v35.aleo program
 // ============================================================================
 
 import { config } from './config';
@@ -15,6 +15,8 @@ export const MARKET_STATUS = {
   RESOLVED: 3,
   CANCELLED: 4,
   PENDING_RESOLUTION: 5,
+  PENDING_FINALIZATION: 6,
+  DISPUTED: 7,
 } as const;
 
 export const OUTCOME = {
@@ -405,6 +407,19 @@ export async function waitForMarketCreation(
 
   devWarn('[waitForMarket] All strategies exhausted');
   return null;
+}
+
+function getCreateMarketProgramIds(preferredProgramId?: string): string[] {
+  const programIds = [
+    preferredProgramId,
+    PROGRAM_ID,
+    config.usdcxMarketProgramId,
+    config.usadProgramId,
+    ...config.legacyUsadProgramIds,
+    ...config.legacyProgramIds,
+  ].filter((pid): pid is string => Boolean(pid));
+
+  return [...new Set(programIds)];
 }
 
 /**
@@ -805,7 +820,40 @@ export const getMarketPool = getAMMPool;
  * Fetch market resolution data (v12 - with challenge window fields)
  */
 export async function getMarketResolution(marketId: string, programId?: string): Promise<MarketResolutionData | null> {
-  // v33: Query resolution_rounds mapping (renamed from market_resolutions)
+  // v34: Resolution state lives in vote_tallies, not resolution_rounds.
+  const [market, tally] = await Promise.all([
+    getMarket(marketId, programId),
+    getMappingValue<Record<string, string>>('vote_tallies', marketId, programId),
+  ]);
+
+  if (tally) {
+    const winningOutcome = Number(parseAleoValue(tally.winning_outcome || '0u8'));
+    const votingDeadline = BigInt(parseAleoValue(tally.voting_deadline || '0u64') as bigint);
+    const disputeDeadline = BigInt(parseAleoValue(tally.dispute_deadline || '0u64') as bigint);
+    const totalBonded = BigInt(parseAleoValue(tally.total_bonded || '0u128') as bigint);
+    const totalVoters = Number(parseAleoValue(tally.total_voters || '0u8'));
+    const finalized = String(parseAleoValue(tally.finalized || 'false')) === 'true';
+
+    const challengeDeadline = market?.status === MARKET_STATUS.PENDING_FINALIZATION || market?.status === MARKET_STATUS.RESOLVED
+      ? disputeDeadline
+      : votingDeadline;
+
+    return {
+      market_id: String(tally.market_id || marketId),
+      winning_outcome: winningOutcome,
+      resolver: market?.resolver || '',
+      resolved_at: market?.created_at || 0n,
+      challenge_deadline: challengeDeadline,
+      finalized,
+      round: totalVoters,  // v35: round = total_voters count
+      proposer: market?.resolver || '',
+      proposed_outcome: winningOutcome,
+      bond_amount: totalVoters > 0 ? 1_000_000n : 0n,
+      total_bonded: totalBonded,
+    };
+  }
+
+  // Legacy fallback for older contracts
   const data = await getMappingValue<Record<string, string>>('resolution_rounds', marketId, programId);
   if (!data) return null;
 
@@ -814,12 +862,11 @@ export async function getMarketResolution(marketId: string, programId?: string):
 
   return {
     market_id: String(data.market_id || marketId),
-    winning_outcome: proposedOutcome,  // backward compat
-    resolver: proposer,                 // backward compat
+    winning_outcome: proposedOutcome,
+    resolver: proposer,
     resolved_at: BigInt(parseAleoValue(data.submitted_at || data.resolved_at || '0u64') as bigint),
     challenge_deadline: BigInt(parseAleoValue(data.challenge_deadline || '0u64') as bigint),
     finalized: String(parseAleoValue(data.finalized || 'false')) === 'true',
-    // v33: Open Voting + Bond fields
     round: Number(parseAleoValue(data.round || '1u8')),
     proposer: proposer,
     proposed_outcome: proposedOutcome,
@@ -1283,8 +1330,8 @@ export function buildSubmitOutcomeInputs(
 }
 
 /**
- * v33: Build inputs for challenge_outcome (Open Voting + Bond)
- * Challenge with 2x previous bond
+ * v34: Build inputs for dispute_resolution (Multi-Voter Quorum)
+ * dispute_resolution(market_id, proposed_outcome, dispute_nonce, credits_in, dispute_bond)
  */
 export function buildChallengeOutcomeInputs(
   marketId: string,
@@ -1292,7 +1339,8 @@ export function buildChallengeOutcomeInputs(
   bondAmount: bigint,
   bondNonce: string,
 ): string[] {
-  return [marketId, `${proposedOutcome}u8`, `${bondAmount}u128`, bondNonce];
+  // v34: order is market_id, outcome, nonce — credits_in and bond_amount appended by caller
+  return [marketId, `${proposedOutcome}u8`, bondNonce];
 }
 
 /**
@@ -1534,6 +1582,7 @@ export function addKnownMarketId(marketId: string): void {
 export async function resolveMarketFromTransaction(
   transactionId: string,
   questionText?: string,
+  programId?: string,
 ): Promise<string | null> {
   if (!transactionId.startsWith('at1')) return null;
 
@@ -1544,9 +1593,10 @@ export async function resolveMarketFromTransaction(
 
     const data = await response.json();
     const transitions = data.execution?.transitions || [];
+    const candidatePrograms = new Set(getCreateMarketProgramIds(programId));
 
     for (const transition of transitions) {
-      if (transition.program !== PROGRAM_ID || !isCreateMarketFunction(transition.function)) continue;
+      if (!candidatePrograms.has(transition.program) || !isCreateMarketFunction(transition.function)) continue;
 
       for (const output of (transition.outputs || [])) {
         if (output.type !== 'future') continue;
@@ -1588,6 +1638,8 @@ interface PendingMarket {
   questionHash: string
   questionText: string
   transactionId: string   // wallet event ID (shield_, UUID, or at1...)
+  programId?: string
+  tokenType?: 'ALEO' | 'USDCX' | 'USAD'
   createdAt: number
   retryCount?: number     // number of scan attempts (auto-remove after MAX_PENDING_RETRIES)
   status?: 'pending' | 'scanning' | 'likely_failed'
@@ -1799,6 +1851,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
       // Increment retry count
       pending.retryCount = (pending.retryCount || 0) + 1
       pending.status = 'scanning'
+      let didResolve = false
 
       try {
         // First: if pending already has an on-chain tx ID, resolve directly from tx.
@@ -1806,7 +1859,11 @@ export async function resolvePendingMarkets(): Promise<string[]> {
         let marketId: string | null = null
         let realTxId: string = pending.transactionId
         if (pending.transactionId.startsWith('at1')) {
-          marketId = await resolveMarketFromTransaction(pending.transactionId, pending.questionText)
+          marketId = await resolveMarketFromTransaction(
+            pending.transactionId,
+            pending.questionText,
+            pending.programId,
+          )
         }
 
         // Fallback: blockchain scan by question hash.
@@ -1814,14 +1871,20 @@ export async function resolvePendingMarkets(): Promise<string[]> {
           // Use deeper scan for older pending markets
           const ageMs = Date.now() - pending.createdAt
           const blocksToScan = Math.min(2000, Math.max(500, Math.floor(ageMs / config.msPerBlock) + 200))
-          const scanResult = await scanBlockchainForMarket(pending.questionHash, blocksToScan)
-          if (scanResult) {
-            marketId = scanResult.marketId
-            realTxId = scanResult.transactionId || pending.transactionId
+          const candidatePrograms = getCreateMarketProgramIds(pending.programId)
+          for (const pid of candidatePrograms) {
+            const scanResult = await scanBlockchainForMarket(pending.questionHash, blocksToScan, pid)
+            if (scanResult) {
+              marketId = scanResult.marketId
+              realTxId = scanResult.transactionId || pending.transactionId
+              pending.programId = pid
+              break
+            }
           }
         }
 
         if (marketId) {
+          didResolve = true
           devLog('[Pending] Resolved:', pending.questionHash.slice(0, 20), '→', marketId.slice(0, 20), 'tx:', realTxId.slice(0, 15))
           addKnownMarketId(marketId)
           registerQuestionText(marketId, pending.questionText)
@@ -1859,7 +1922,7 @@ export async function resolvePendingMarkets(): Promise<string[]> {
       }
 
       // Mark as likely_failed after MAX_PENDING_RETRIES if not resolved
-      if (!resolved.includes(pending.questionHash) && pending.retryCount >= MAX_PENDING_RETRIES) {
+      if (!didResolve && pending.retryCount >= MAX_PENDING_RETRIES) {
         pending.status = 'likely_failed'
         devLog('[Pending] Marked as likely_failed after', pending.retryCount, 'attempts:', pending.questionText.slice(0, 40))
       } else if (pending.status === 'scanning') {

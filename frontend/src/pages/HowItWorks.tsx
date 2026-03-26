@@ -29,7 +29,7 @@ const steps = [
     icon: Zap,
     title: 'Claim Winnings',
     description: 'When a market resolves, winning shares can be redeemed for tokens. The payout is delivered privately as an encrypted Aleo record — fully on-chain and verifiable.',
-    detail: 'Markets are resolved by designated resolvers with a community challenge window.',
+    detail: 'Markets are resolved by Multi-Voter Quorum with dispute protection.',
   },
 ]
 
@@ -47,12 +47,14 @@ const mechanisms = [
   {
     icon: GitBranch,
     title: 'Market Resolution',
-    description: 'Markets go through a multi-stage resolution process designed to ensure fair outcomes:',
+    description: 'Markets go through a Multi-Voter Quorum resolution process designed to ensure fair outcomes:',
     items: [
-      'Designated resolver submits the outcome after the market deadline',
-      '2,880-block challenge window (~12 hours) for community disputes',
-      'Anyone can dispute by posting a bond with an alternative outcome',
-      'Governance can override via community vote if needed',
+      'After close_market, anyone can vote on the outcome by posting a 1 ALEO bond (vote_outcome)',
+      'Minimum 3 voters required to reach quorum; voting window ~3 hours',
+      'Votes are finalized (finalize_votes), then a dispute window (~3 hours) begins',
+      'Anyone can dispute by posting 3x total bonds to override the result (dispute_resolution)',
+      'After dispute window passes without dispute, outcome is confirmed (confirm_resolution)',
+      'Majority voters claim rewards; minority voters lose their bond (slashing)',
     ],
   },
   {
@@ -80,23 +82,23 @@ const mechanisms = [
   {
     icon: Vote,
     title: 'Governance',
-    description: 'The Protocol is governed by ALEO token holders through on-chain governance:',
+    description: 'The Protocol is governed by ALEO token holders through on-chain governance (veiled_governance_v4.aleo, 29 transitions):',
     items: [
-      '6 proposal types: dispute resolution, fee changes, treasury, parameters, emergency pause, resolver election',
-      'Proposals require 10 ALEO stake to create',
-      'Voting period: ~7 days (40,320 blocks)',
+      '3-of-N multisig treasury management',
+      'Dispute resolution overrides, fee changes, parameter updates, emergency pause',
+      'ALEO native staking governance (Coming Soon in UI)',
       'Variable quorum (5%–30%) and timelock (0–72 hours) per proposal type',
     ],
   },
   {
     icon: Coins,
     title: 'Supported Tokens',
-    description: 'Markets can be denominated in three different tokens:',
+    description: 'Markets can be denominated in three different tokens, each with its own market contract:',
     items: [
-      'ALEO — Native Aleo blockchain token (credits.aleo)',
-      'USDCX — Test stablecoin (test_usdcx_stablecoin.aleo)',
-      'USAD — Separate stablecoin with its own market contract (veiled_markets_usad_v11.aleo)',
-      'Stablecoin buys require a two-transaction flow (deposit + buy)',
+      'ALEO — Native Aleo blockchain token via veiled_markets_v35.aleo (22 transitions)',
+      'USDCX — Test stablecoin via veiled_markets_usdcx_v5.aleo (22 transitions)',
+      'USAD — Stablecoin via veiled_markets_usad_v12.aleo (22 transitions)',
+      'ALEO uses private credits records; USDCX/USAD use Token records + MerkleProof for private trading',
     ],
   },
 ]

@@ -248,6 +248,15 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       setError('Resolution deadline must be after betting deadline')
       return false
     }
+    // v35: Resolution deadline must allow enough time for voting + dispute windows
+    // Voting window: ~3h (2880 blocks × 4s) + Dispute window: ~3h (2880 blocks × 4s) = ~6h minimum
+    const minResolutionMs = 6 * 60 * 60 * 1000 // 6 hours
+    const timeBetweenDeadlines = resolutionDeadline.getTime() - deadline.getTime()
+    if (timeBetweenDeadlines < minResolutionMs) {
+      const hoursNeeded = Math.ceil(minResolutionMs / (60 * 60 * 1000))
+      setError(`Resolution deadline must be at least ${hoursNeeded} hours after betting deadline to allow for voting (~3h) and dispute (~3h) windows`)
+      return false
+    }
     // Validate initial liquidity bounds
     const liquidity = parseFloat(formData.initialLiquidity)
     if (isNaN(liquidity) || liquidity < 1) {
@@ -277,6 +286,11 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
   const handleCreate = async () => {
     if (isSubmitting) return
+    // Re-validate timing before submitting (safety net)
+    if (!validateTiming()) {
+      setStep('timing')
+      return
+    }
     setIsSubmitting(true)
     setStep('creating')
     setError(null)
@@ -491,6 +505,8 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         questionHash,
         questionText: formData.question,
         transactionId,
+        programId: createProgramId,
+        tokenType: formData.tokenType,
         createdAt: Date.now(),
       })
 
@@ -1122,8 +1138,11 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             <Clock className="w-4 h-4 text-surface-400" />
                             Resolution Deadline
                           </label>
-                          <p className="text-xs text-surface-400 mb-3">
+                          <p className="text-xs text-surface-400 mb-1">
                             The market must be resolved by this time. If not resolved, it can be cancelled for refunds.
+                          </p>
+                          <p className="text-xs text-yellow-400/80 mb-3">
+                            Must be at least 6 hours after betting deadline (3h voting + 3h dispute window)
                           </p>
                           <div className="grid grid-cols-2 gap-3">
                             <input
@@ -1140,6 +1159,25 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                               className="input-field"
                             />
                           </div>
+                          {/* Inline warning if resolution too close to deadline */}
+                          {formData.deadlineDate && formData.resolutionDeadlineDate && (() => {
+                            const dl = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`)
+                            const rd = new Date(`${formData.resolutionDeadlineDate}T${formData.resolutionDeadlineTime}`)
+                            const diffMs = rd.getTime() - dl.getTime()
+                            const minMs = 6 * 60 * 60 * 1000
+                            if (diffMs > 0 && diffMs < minMs) {
+                              const minTime = new Date(dl.getTime() + minMs)
+                              const minTimeStr = minTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              const minDateStr = minTime.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                              return <p className="text-xs text-no-400 mt-2">Too close — resolution must be after {minDateStr} {minTimeStr} (6h after betting deadline)</p>
+                            }
+                            if (diffMs > 0 && diffMs >= minMs) {
+                              const hours = Math.floor(diffMs / (60 * 60 * 1000))
+                              const mins = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000))
+                              return <p className="text-xs text-yes-400/60 mt-2">Duration OK — {hours}h {mins}m after betting deadline</p>
+                            }
+                            return null
+                          })()}
                         </div>
 
                         {/* Timeline Preview */}

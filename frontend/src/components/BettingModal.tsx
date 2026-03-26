@@ -67,8 +67,13 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       const outcomeNum = selectedOutcome === 'yes' ? 1 : 2
       let functionName = ''
       let inputs: string[] = []
+      const feeInMicro = 1_500_000n
+      let releaseSelectedRecord: (() => void) | null = null
 
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
+        if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
+          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+        }
         const totalStablecoin = tokenType === 'USDCX'
           ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
           : wallet.balance.usadPublic + wallet.balance.usadPrivate
@@ -84,16 +89,21 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         const privateStablecoin = tokenType === 'USDCX' ? wallet.balance.usdcxPrivate : wallet.balance.usadPrivate
         setPrivacyMode(privateStablecoin > 0n ? 'private' : 'public')
       } else {
+        if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
+          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+        }
         // ALEO: buy_shares_private with credits record
-        const gasBuffer = 500_000
-        const totalNeeded = Number(amountMicro) + gasBuffer
-        const creditsRecord = await fetchCreditsRecord(totalNeeded)
+        const totalNeeded = Number(amountMicro)
+        const { reserveCreditsRecord, releaseCreditsRecord } = await import('@/lib/credits-record')
+        const creditsRecord = await fetchCreditsRecord(totalNeeded, wallet.address)
         if (!creditsRecord) {
           throw new Error(
             `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
             `Private betting requires an unspent Credits record.`
           )
         }
+        reserveCreditsRecord(creditsRecord)
+        releaseSelectedRecord = () => releaseCreditsRecord(creditsRecord)
         const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'ALEO', creditsRecord)
         functionName = betResult.functionName
         inputs = betResult.inputs
@@ -105,13 +115,15 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       // v8: Single TX — append Token record + MerkleProof for stablecoins
       const WALLET_TIMEOUT_MS = 120_000
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
-        const { findTokenRecord } = await import('@/lib/private-stablecoin')
+        const { findTokenRecord, reserveTokenRecord, releaseTokenRecord } = await import('@/lib/private-stablecoin')
         const { buildMerkleProofsForAddress } = await import('@/lib/aleo-client')
         const tokenRecord = await findTokenRecord(tokenType, amountMicro)
         if (tokenRecord) {
           if (!wallet.address) {
             throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
           }
+          reserveTokenRecord(tokenType, tokenRecord)
+          releaseSelectedRecord = () => releaseTokenRecord(tokenType, tokenRecord)
           inputs.push(tokenRecord)
           inputs.push(await buildMerkleProofsForAddress(wallet.address))
         } else {
@@ -125,7 +137,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         function: functionName,
         inputs: inputs,
         fee: 1.5,
-        recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
+        recordIndices: [6],
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -156,6 +168,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
+      releaseSelectedRecord?.()
       console.error('Failed to place bet:', err)
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred. Please try again.'
       setError(errorMessage)

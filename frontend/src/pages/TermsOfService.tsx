@@ -18,7 +18,7 @@ export function TermsOfService() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Terms of Service</h1>
-        <p className="text-sm text-surface-500 mb-12">Last updated: March 22, 2026</p>
+        <p className="text-sm text-surface-500 mb-12">Last updated: March 26, 2026</p>
 
         <div className="space-y-10 text-sm leading-relaxed">
           <section>
@@ -104,10 +104,10 @@ export function TermsOfService() {
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li>Dispute resolution overrides for contested market outcomes.</li>
               <li>Fee structure modifications.</li>
-              <li>Treasury fund management.</li>
+              <li>Treasury fund management via 3-of-N multisig.</li>
               <li>Protocol parameter updates.</li>
               <li>Emergency pause capabilities.</li>
-              <li>Resolver election and management.</li>
+              <li>ALEO native staking governance (Coming Soon).</li>
             </ul>
             <p className="mt-3 text-surface-400">
               Governance proposals require staking ALEO tokens and are subject to quorum thresholds, voting periods, and timelock delays. By using the Protocol, you acknowledge that governance decisions may affect your positions and experience.

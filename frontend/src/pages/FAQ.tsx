@@ -40,7 +40,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'What tokens can I use?',
-    answer: 'Markets support three token types: ALEO (native Aleo token), USDCX (test stablecoin via test_usdcx_stablecoin.aleo), and USAD (stablecoin via veiled_markets_usad_v11.aleo). Each market is denominated in one specific token. Stablecoin markets require a two-transaction flow: first a private-to-public deposit, then the buy.',
+    answer: 'Markets support three token types, each with its own market contract: ALEO (native token via veiled_markets_v35.aleo), USDCX (test stablecoin via veiled_markets_usdcx_v5.aleo), and USAD (stablecoin via veiled_markets_usad_v12.aleo). Each market is denominated in one specific token. ALEO markets use private credits records, while USDCX and USAD markets use Token records with MerkleProof verification for private trading.',
   },
   {
     category: 'Trading',
@@ -66,12 +66,12 @@ const faqs: FAQItem[] = [
   {
     category: 'Markets',
     question: 'How are markets resolved?',
-    answer: 'Markets are resolved by designated resolvers (not automated oracles). After the market deadline passes, a resolver submits the outcome on-chain. There is a 2,880-block challenge window (~12 hours on testnet) where anyone can dispute the resolution by posting a bond. If disputed, governance can override the outcome through community vote.',
+    answer: 'Markets use a Multi-Voter Quorum resolution system (not automated oracles or single resolvers). After the market deadline passes and the market is closed (close_market), anyone can vote on the outcome by posting a 1 ALEO bond (vote_outcome). A minimum of 3 voters is required to reach quorum. After the voting window (~3 hours), votes are finalized (finalize_votes). A dispute window (~3 hours) follows, during which anyone can override the result by posting 3x the total bonds (dispute_resolution). If no dispute occurs, the outcome is confirmed (confirm_resolution). Majority voters can claim their bonds plus rewards, while minority voters lose their bonds (slashing).',
   },
   {
     category: 'Markets',
     question: 'What happens if a market is disputed?',
-    answer: 'Any user can dispute a market resolution by proposing an alternative outcome and posting a dispute bond. During the challenge window, governance can create a RESOLVE_DISPUTE proposal for community voting. If the dispute is upheld, the original resolver\'s decision is overridden. Successful disputors can reclaim their bond.',
+    answer: 'After votes are finalized, there is a dispute window (~3 hours). During this window, any user can dispute the resolution by posting a bond equal to 3x the total voter bonds and proposing an alternative outcome (dispute_resolution). If a dispute is submitted, the disputed outcome overrides the voter result. Successful disputors can reclaim their bond (claim_dispute_bond). If no dispute is filed within the window, the voted outcome is confirmed (confirm_resolution).',
   },
   {
     category: 'Markets',
@@ -124,12 +124,12 @@ const faqs: FAQItem[] = [
   {
     category: 'Governance',
     question: 'How does governance work?',
-    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v4.aleo) powered by ALEO token voting. There are 6 proposal types: dispute resolution, fee changes, treasury management, parameter updates, emergency pause, and resolver election. Proposals require 10 ALEO to create and have a ~7-day voting period.',
+    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v4.aleo, 29 transitions) powered by ALEO token voting. Features include dispute resolution overrides, fee changes, 3-of-N multisig treasury management, parameter updates, and emergency pause. ALEO native staking governance is Coming Soon in the UI.',
   },
   {
     category: 'Governance',
     question: 'What are the quorum requirements?',
-    answer: 'Quorum varies by proposal type: Emergency Pause needs only 5%, Dispute Resolution and Parameter changes need 10-15%, Fee Changes and Resolver Elections need 20%, and Treasury proposals need 30%. After passing, proposals enter a timelock (0-72 hours) before execution.',
+    answer: 'Quorum varies by proposal type: Emergency Pause needs only 5%, Dispute Resolution and Parameter changes need 10-15%, Fee Changes need 20%, and Treasury proposals need 30%. After passing, proposals enter a timelock (0-72 hours) before execution.',
   },
 ]
 

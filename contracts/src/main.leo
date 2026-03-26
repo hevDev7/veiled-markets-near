@@ -24,9 +24,9 @@
 
 import credits.aleo;
 // USDCX is now handled by a separate contract (removed in v32).
-// USAD is handled by a separate program: veiled_markets_usad_v11.aleo
+// USAD is handled by a separate program: veiled_markets_usad_v12.aleo
 
-program veiled_markets_v34.aleo {
+program veiled_markets_v35.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -1206,20 +1206,34 @@ program veiled_markets_v34.aleo {
         assert(!already_voted);
         voter_participated.set(voter_key, true);
 
-        // Get or create tally
+        // Get or create tally using get_or_use with default empty tally
+        // CRITICAL: Leo does NOT short-circuit ternary — get() on missing key panics!
+        // Must use get_or_use to safely handle first vote (no tally exists yet)
+        let default_tally: VoteTally = VoteTally {
+            market_id: market_id,
+            outcome_1_bonds: 0u128,
+            outcome_2_bonds: 0u128,
+            outcome_3_bonds: 0u128,
+            outcome_4_bonds: 0u128,
+            total_voters: 0u8,
+            total_bonded: 0u128,
+            voting_deadline: 0u64,
+            dispute_deadline: 0u64,
+            finalized: false,
+            winning_outcome: 0u8,
+        };
         let has_tally: bool = vote_tallies.contains(market_id);
+        let tally: VoteTally = vote_tallies.get_or_use(market_id, default_tally);
 
-        let prev_o1: u128 = has_tally ? vote_tallies.get(market_id).outcome_1_bonds : 0u128;
-        let prev_o2: u128 = has_tally ? vote_tallies.get(market_id).outcome_2_bonds : 0u128;
-        let prev_o3: u128 = has_tally ? vote_tallies.get(market_id).outcome_3_bonds : 0u128;
-        let prev_o4: u128 = has_tally ? vote_tallies.get(market_id).outcome_4_bonds : 0u128;
-        let prev_voters: u8 = has_tally ? vote_tallies.get(market_id).total_voters : 0u8;
-        let prev_bonded: u128 = has_tally ? vote_tallies.get(market_id).total_bonded : 0u128;
+        let prev_o1: u128 = tally.outcome_1_bonds;
+        let prev_o2: u128 = tally.outcome_2_bonds;
+        let prev_o3: u128 = tally.outcome_3_bonds;
+        let prev_o4: u128 = tally.outcome_4_bonds;
+        let prev_voters: u8 = tally.total_voters;
+        let prev_bonded: u128 = tally.total_bonded;
 
-        // If first vote, set voting deadline
-        let voting_deadline: u64 = has_tally ?
-            vote_tallies.get(market_id).voting_deadline :
-            (current_height + VOTE_WINDOW_BLOCKS);
+        // If first vote, set voting deadline; otherwise use existing
+        let voting_deadline: u64 = has_tally ? tally.voting_deadline : (current_height + VOTE_WINDOW_BLOCKS);
 
         // If tally exists, must be within voting window
         assert(!has_tally || current_height <= voting_deadline);
@@ -1508,11 +1522,11 @@ program veiled_markets_v34.aleo {
             && market.status == MARKET_STATUS_ACTIVE;
 
         // Path B: Emergency cancel — anyone, past resolution_deadline
-        // Excludes RESOLVED, CANCELLED, and PENDING_RESOLUTION (challenge window)
+        // Excludes only RESOLVED and CANCELLED
+        // v35: Allow emergency cancel on PENDING_RESOLUTION (< MIN_VOTERS, stuck market)
         let is_emergency: bool = current_height > market.resolution_deadline
             && market.status != MARKET_STATUS_RESOLVED
-            && market.status != MARKET_STATUS_CANCELLED
-            && market.status != STATUS_PENDING_RESOLUTION;
+            && market.status != MARKET_STATUS_CANCELLED;
 
         assert(is_creator_cancel || is_emergency);
 

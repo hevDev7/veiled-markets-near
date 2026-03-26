@@ -275,6 +275,11 @@ export function CreateMarketPage() {
     if (deadline <= now) { setError('Deadline must be in the future'); return false }
     if (!formData.resolutionDeadlineDate) { setError('Please set a resolution deadline'); return false }
     if (resDeadline <= deadline) { setError('Resolution deadline must be after betting deadline'); return false }
+    const minResMs = 6 * 60 * 60 * 1000
+    if (resDeadline.getTime() - deadline.getTime() < minResMs) {
+      setError('Resolution deadline must be at least 6 hours after betting deadline (3h voting + 3h dispute window)')
+      return false
+    }
     const liq = parseFloat(formData.initialLiquidity)
     if (isNaN(liq) || liq < 1) { setError('Initial liquidity must be at least 1 token'); return false }
     if (liq > 10_000) { setError('Initial liquidity cannot exceed 10,000 tokens'); return false }
@@ -296,6 +301,7 @@ export function CreateMarketPage() {
   // ═══════════════════════════════════════════
   const handleCreate = async () => {
     if (isSubmitting) return
+    if (!validateTiming()) { setStep('timing'); return }
     setIsSubmitting(true); setStep('creating'); setError(null)
     try {
       const questionHash = await hashToField(formData.question)
@@ -365,7 +371,14 @@ export function CreateMarketPage() {
       }
 
       setMarketId(transactionId); clearDraft(); setStep('success')
-      savePendingMarket({ questionHash, questionText: formData.question, transactionId, createdAt: Date.now() })
+      savePendingMarket({
+        questionHash,
+        questionText: formData.question,
+        transactionId,
+        programId: createProgramId,
+        tokenType: formData.tokenType,
+        createdAt: Date.now(),
+      })
 
       if (isSupabaseAvailable()) {
         registerMarketInRegistry({
@@ -562,11 +575,30 @@ export function CreateMarketPage() {
                       </div>
                       <div>
                         <label className="text-sm font-medium text-white mb-2 block">Resolution Deadline *</label>
-                        <p className="text-2xs text-surface-500 mb-3">Must be resolved by this time. If not, it can be cancelled for refunds.</p>
+                        <p className="text-[10px] text-surface-500 mb-1">Must be resolved by this time. If not, it can be cancelled for refunds.</p>
+                        <p className="text-[10px] text-yellow-400/80 mb-3">Must be at least 6 hours after betting deadline (3h voting + 3h dispute)</p>
                         <div className="grid grid-cols-2 gap-3">
                           <input type="date" value={formData.resolutionDeadlineDate} onChange={(e) => updateForm({ resolutionDeadlineDate: e.target.value })} min={minResDate} className="input-field" />
                           <input type="time" value={formData.resolutionDeadlineTime} onChange={(e) => updateForm({ resolutionDeadlineTime: e.target.value })} className="input-field" />
                         </div>
+                        {formData.deadlineDate && formData.resolutionDeadlineDate && (() => {
+                          const dl = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`)
+                          const rd = new Date(`${formData.resolutionDeadlineDate}T${formData.resolutionDeadlineTime}`)
+                          const diffMs = rd.getTime() - dl.getTime()
+                          const minMs = 6 * 60 * 60 * 1000
+                          if (diffMs > 0 && diffMs < minMs) {
+                            const minTime = new Date(dl.getTime() + minMs)
+                            const minTimeStr = minTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                            const minDateStr = minTime.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                            return <p className="text-xs text-no-400 mt-2">Too close — resolution must be after {minDateStr} {minTimeStr} (6h after betting deadline)</p>
+                          }
+                          if (diffMs > 0 && diffMs >= minMs) {
+                            const hours = Math.floor(diffMs / (60 * 60 * 1000))
+                            const mins = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000))
+                            return <p className="text-xs text-yes-400/60 mt-2">Duration OK — {hours}h {mins}m after betting deadline</p>
+                          }
+                          return null
+                        })()}
                       </div>
                       <div>
                         <label className="text-sm font-medium text-white mb-2 block">Initial Liquidity ({formData.tokenType}) *</label>

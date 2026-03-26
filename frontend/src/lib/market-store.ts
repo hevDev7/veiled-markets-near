@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets_v34.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v35.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 
@@ -124,6 +124,8 @@ async function transformMarketData(
         : defaultLabels
 
     const questionText = getQuestionText(market.question_hash)
+        || getQuestionText(market.id)
+        || `Market ${market.id.slice(0, 12)}...`
     const transactionId = getMarketTransactionId(market.id)
     const registryDescription = getMarketDescription(market.id) || getMarketDescription(market.question_hash)
     const registryResolutionSource = getMarketResolutionSource(market.id) || getMarketResolutionSource(market.question_hash)
@@ -235,11 +237,17 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 )
             )
 
-            // Deduplicate markets with the same question (can happen from double-submission).
-            // Keep the one with highest liquidity (most established).
+            // Only collapse markets that share the same listing identity.
+            // Deduping by question text alone can hide valid markets that happen
+            // to reuse the same prompt across tokens or deadlines.
             const deduped = new Map<string, Market>()
             for (const m of allMarkets) {
-                const key = m.question
+                const key = [
+                    m.question,
+                    m.tokenType || 'ALEO',
+                    m.deadline.toString(),
+                    m.creator || '',
+                ].join('|')
                 const existing = deduped.get(key)
                 if (!existing || m.totalLiquidity > existing.totalLiquidity) {
                     deduped.set(key, m)

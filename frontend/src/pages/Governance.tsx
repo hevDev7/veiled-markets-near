@@ -41,7 +41,7 @@ export function Governance() {
     try {
       const nonce = BigInt(Date.now());
       const { fetchCreditsRecord } = await import('../lib/credits-record');
-      const creditsRecord = await fetchCreditsRecord(10_000000);
+      const creditsRecord = await fetchCreditsRecord(10_000000, wallet.address);
       if (!creditsRecord) throw new Error('No credits record found. Need at least 10 ALEO private balance to create a proposal.');
 
       const targetField = data.target || '0field';
@@ -131,7 +131,7 @@ export function Governance() {
     governance.setIsVoting(true);
     try {
       const { fetchCreditsRecord } = await import('../lib/credits-record');
-      const creditsRecord = await fetchCreditsRecord(Number(amount));
+      const creditsRecord = await fetchCreditsRecord(Number(amount), wallet.address);
       if (!creditsRecord) throw new Error(`No credits record found. Need at least ${Number(amount) / 1_000000} ALEO private balance to vote.`);
       const inputs = buildVoteInputs(creditsRecord, proposalId, amount);
       await executeTransaction({ program: config.governanceProgramId, function: direction === 'for' ? 'vote_for' : 'vote_against', inputs, fee: 1.5 });
@@ -152,7 +152,7 @@ export function Governance() {
 
   const handleRegisterResolver = useCallback(async (_tier: ResolverTier) => {
     const { fetchCreditsRecord } = await import('../lib/credits-record');
-    const creditsRecord = await fetchCreditsRecord(50_000000);
+    const creditsRecord = await fetchCreditsRecord(50_000000, wallet.address);
     if (!creditsRecord) throw new Error('No credits record found with sufficient balance. Need at least 50 ALEO private balance.');
     const inputs = buildRegisterResolverInputs(creditsRecord);
     await executeTransaction({ program: config.governanceProgramId, function: 'register_resolver', inputs, fee: 0.5 });
@@ -161,7 +161,7 @@ export function Governance() {
 
   const handleUpgradeResolver = useCallback(async (_newTier: ResolverTier) => {
     const { fetchCreditsRecord } = await import('../lib/credits-record');
-    const creditsRecord = await fetchCreditsRecord(50_000000);
+    const creditsRecord = await fetchCreditsRecord(50_000000, wallet.address);
     if (!creditsRecord) throw new Error('No credits record found with sufficient balance.');
     await executeTransaction({ program: config.governanceProgramId, function: 'register_resolver', inputs: [creditsRecord], fee: 0.5 });
     await governance.refetch();

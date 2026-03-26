@@ -18,7 +18,7 @@ export function PrivacyPolicy() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Privacy Policy</h1>
-        <p className="text-sm text-surface-500 mb-12">Last updated: March 22, 2026</p>
+        <p className="text-sm text-surface-500 mb-12">Last updated: March 26, 2026</p>
 
         <div className="space-y-10 text-sm leading-relaxed">
           <section>
@@ -37,7 +37,7 @@ export function PrivacyPolicy() {
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Zero-Knowledge Proofs:</strong> All transactions are verified using zk-SNARKs, meaning your bets, positions, and balances remain private on-chain.</li>
-              <li><strong className="text-surface-300">Private Records:</strong> Your holdings are stored as encrypted records on the Aleo blockchain, visible only to you with your view key.</li>
+              <li><strong className="text-surface-300">Private Records:</strong> Your holdings are stored as encrypted records on the Aleo blockchain, visible only to you with your view key. ALEO markets use private credits records, while USDCX and USAD markets use Token records with MerkleProof verification for private trading.</li>
               <li><strong className="text-surface-300">Non-Custodial:</strong> We never have access to your private keys, view keys, or wallet credentials.</li>
               <li><strong className="text-surface-300">Client-Side Encryption:</strong> Any data stored locally is encrypted with AES-256-GCM before storage.</li>
             </ul>
