@@ -738,8 +738,8 @@ export function CreateMarketPage() {
             </div>
 
             {/* Side Panel — Tips */}
-            <div className="lg:col-span-5 xl:col-span-4">
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="sticky top-28 space-y-4">
+            <div className="lg:col-span-5 xl:col-span-4 lg:mt-[168px]">
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="sticky top-24 space-y-4">
                 <div className="glass-card p-6">
                   <div className="flex items-center gap-2 mb-4">
                     <Lightbulb className="w-4 h-4 text-brand-400" />
