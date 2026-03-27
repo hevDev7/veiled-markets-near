@@ -149,7 +149,7 @@ export function MyBets() {
     addPendingBet,
     removePendingBet,
   } = useBetsStore()
-  const { markets } = useRealMarketsStore()
+  const { markets, fetchMarkets } = useRealMarketsStore()
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState<BetFilter>('accepted')
   const [claimModalBet, setClaimModalBet] = useState<Bet | null>(null)
@@ -248,7 +248,10 @@ export function MyBets() {
         devWarn('[MyBets] No wallet address available!')
       }
 
-      await fetchUserBets()
+      await Promise.all([
+        fetchMarkets(),
+        fetchUserBets(),
+      ])
       await syncBetStatuses()
       const restoredClaims = await reconcileClaimedBets()
       setClaimRepairNotice(
@@ -270,7 +273,7 @@ export function MyBets() {
       setIsLoading(false)
     }
     loadAndSync()
-  }, [fetchUserBets, syncBetStatuses, reconcileClaimedBets])
+  }, [fetchMarkets, fetchUserBets, syncBetStatuses, reconcileClaimedBets])
 
   // Get market info for a bet
   const getMarketInfo = (marketId: string) => {
@@ -280,7 +283,10 @@ export function MyBets() {
   // Handle refresh with sync
   const handleRefresh = async () => {
     setIsLoading(true)
-    await fetchUserBets()
+    await Promise.all([
+      fetchMarkets(),
+      fetchUserBets(),
+    ])
     await syncBetStatuses()
     const restoredClaims = await reconcileClaimedBets()
     setClaimRepairNotice(
