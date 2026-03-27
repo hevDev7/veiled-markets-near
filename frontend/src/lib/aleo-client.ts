@@ -2281,46 +2281,52 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
       return null;
     };
 
-    // Resolve pending Supabase entries during initialization so successful creates
-    // can show up immediately on the Dashboard, even when the wallet returned
-    // a non-at1 temporary transaction ID.
+    // Resolve pending Supabase entries in the background (non-blocking).
+    // Previously this was awaited sequentially, causing the dashboard to hang
+    // for minutes while scanning blocks for each pending market.
     if (pendingToResolve.length > 0) {
-      devLog(`[Supabase] Resolving ${pendingToResolve.length} pending market(s) from registry`);
-      for (const entry of pendingToResolve.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))) {
-        try {
-          const resolved = await resolvePendingRegistryEntry(entry);
-          if (!resolved) continue;
+      devLog(`[Supabase] Scheduling background resolution of ${pendingToResolve.length} pending market(s)`);
+      const resolvePendingInBackground = async () => {
+        for (const entry of pendingToResolve.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))) {
+          try {
+            const resolved = await resolvePendingRegistryEntry(entry);
+            if (!resolved) continue;
 
-          const { marketId, transactionId } = resolved;
-          devLog('[Supabase] Resolved pending market:', marketId.slice(0, 20));
-          applyResolvedRegistryEntry(entry, marketId, transactionId);
+            const { marketId, transactionId } = resolved;
+            devLog('[Supabase] Resolved pending market:', marketId.slice(0, 20));
+            applyResolvedRegistryEntry(entry, marketId, transactionId);
 
-          await registerMarketInRegistry({
-            market_id: marketId,
-            question_hash: entry.question_hash,
-            question_text: entry.question_text,
-            description: entry.description,
-            resolution_source: entry.resolution_source,
-            thumbnail_url: entry.thumbnail_url,
-            category: entry.category,
-            creator_address: entry.creator_address,
-            transaction_id: transactionId,
-            created_at: entry.created_at,
-            ipfs_cid: entry.ipfs_cid,
-            outcome_labels: entry.outcome_labels,
-          }).catch(() => {});
+            await registerMarketInRegistry({
+              market_id: marketId,
+              question_hash: entry.question_hash,
+              question_text: entry.question_text,
+              description: entry.description,
+              resolution_source: entry.resolution_source,
+              thumbnail_url: entry.thumbnail_url,
+              category: entry.category,
+              creator_address: entry.creator_address,
+              transaction_id: transactionId,
+              created_at: entry.created_at,
+              ipfs_cid: entry.ipfs_cid,
+              outcome_labels: entry.outcome_labels,
+            }).catch(() => {});
 
-          if (supabase) {
-            await supabase.from('market_registry')
-              .delete()
-              .eq('market_id', entry.market_id)
-              .catch(() => {});
+            if (supabase) {
+              await supabase.from('market_registry')
+                .delete()
+                .eq('market_id', entry.market_id)
+                .catch(() => {});
+            }
+          } catch (e) {
+            const ref = entry.transaction_id || entry.question_hash || entry.market_id;
+            devWarn('[Supabase] Failed to resolve pending market:', ref.slice(0, 20), e);
           }
-        } catch (e) {
-          const ref = entry.transaction_id || entry.question_hash || entry.market_id;
-          devWarn('[Supabase] Failed to resolve pending market:', ref.slice(0, 20), e);
         }
-      }
+      };
+      // Fire and forget — don't block market loading
+      resolvePendingInBackground().catch(e =>
+        devWarn('[Supabase] Background pending resolution failed:', e)
+      );
     }
 
     devLog(`[Supabase] Loaded ${ids.length} markets from registry`);
@@ -2537,7 +2543,7 @@ export async function fetchMarketById(marketId: string) {
       getMarketResolution(marketId),
     ]);
 
-    // Fallback: try USAD programs and legacy program versions
+    // Fallback: try USAD programs and legacy program versions in parallel
     let usedProgramId: string | undefined;
     if (!market || !pool) {
       const fallbackPids = [
@@ -2549,12 +2555,20 @@ export async function fetchMarketById(marketId: string) {
       // Deduplicate
       const uniquePids = [...new Set(fallbackPids)];
 
-      for (const pid of uniquePids) {
-        const [fbMarket, fbPool, fbResolution] = await Promise.all([
-          getMarket(marketId, pid),
-          getMarketPool(marketId, pid),
-          getMarketResolution(marketId, pid),
-        ]);
+      // Fetch all fallback programs in parallel instead of sequentially
+      const fallbackResults = await Promise.all(
+        uniquePids.map(async (pid) => {
+          const [fbMarket, fbPool, fbResolution] = await Promise.all([
+            getMarket(marketId, pid),
+            getMarketPool(marketId, pid),
+            getMarketResolution(marketId, pid),
+          ]);
+          return { pid, fbMarket, fbPool, fbResolution };
+        })
+      );
+
+      // Use the first valid result
+      for (const { pid, fbMarket, fbPool, fbResolution } of fallbackResults) {
         if (fbMarket && fbPool) {
           market = fbMarket;
           pool = fbPool;
