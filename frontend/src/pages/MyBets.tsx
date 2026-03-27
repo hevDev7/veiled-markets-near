@@ -54,6 +54,29 @@ const OUTCOME_BADGE_COLORS = [
 ]
 const DEFAULT_LABELS = ['YES', 'NO', 'OPTION C', 'OPTION D']
 
+function formatPurchaseTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return 'Purchase time unavailable'
+
+  const now = new Date()
+  const sameDay = date.toDateString() === now.toDateString()
+  const timeLabel = date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  if (sameDay) {
+    return `Bought at ${timeLabel}`
+  }
+
+  const dateLabel = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  })
+
+  return `Bought ${dateLabel}, ${timeLabel}`
+}
+
 export function MyBets() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
@@ -557,6 +580,9 @@ export function MyBets() {
                               <p className="text-sm font-heading font-medium text-white truncate">
                                 {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
                               </p>
+                              <p className="text-[10px] text-surface-400 mt-1">
+                                {formatPurchaseTime(bet.placedAt)}
+                              </p>
                               <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
                                 Avg. ${avgPrice.toFixed(2)} &rarr; ${(avgPrice * (1 + pnlPct / 100)).toFixed(2)}
                               </p>
@@ -654,6 +680,9 @@ export function MyBets() {
                             </div>
                             <p className="text-sm font-heading font-medium text-white truncate">
                               {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
+                            </p>
+                            <p className="text-[10px] text-surface-400 mt-1">
+                              {formatPurchaseTime(bet.placedAt)}
                             </p>
                           </div>
                           <ChevronRight className="w-4 h-4 text-surface-600 flex-shrink-0 mt-1" />
