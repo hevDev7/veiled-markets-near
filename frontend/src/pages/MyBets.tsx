@@ -58,23 +58,17 @@ function formatPurchaseTime(timestamp: number): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) return 'Purchase time unavailable'
 
-  const now = new Date()
-  const sameDay = date.toDateString() === now.toDateString()
+  const dateLabel = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
   const timeLabel = date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
   })
 
-  if (sameDay) {
-    return `Bought at ${timeLabel}`
-  }
-
-  const dateLabel = date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  })
-
-  return `Bought ${dateLabel}, ${timeLabel}`
+  return `Bought on ${dateLabel} at ${timeLabel}`
 }
 
 export function MyBets() {
