@@ -87,8 +87,8 @@ export function MyBets() {
   const userBetIds = new Set(userBets.map(b => b.id))
   const uniquePending = pendingBets.filter(b => !userBetIds.has(b.id))
   const allBets = [...uniquePending, ...userBets]
-  // Sell bets with status 'active' are completed trades — show in settled, not accepted
-  const acceptedBets = [...uniquePending, ...userBets.filter(b => b.status === 'active' && b.type !== 'sell')]
+  // Open Positions should only show confirmed active buys, not still-pending submissions.
+  const acceptedBets = userBets.filter(b => b.status === 'active' && b.type !== 'sell')
   const unredeemedBets = userBets.filter(b =>
     (b.status === 'won' || b.status === 'refunded') && !b.claimed && b.type !== 'sell'
   )
@@ -367,8 +367,8 @@ export function MyBets() {
               <p className="text-xs text-surface-500 mt-0.5">Portfolio value over time</p>
             </div>
             {performanceData ? (
-              <div className="h-[200px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[200px] w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <LineChart data={performanceData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                     <XAxis
                       dataKey="date"

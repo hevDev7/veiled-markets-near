@@ -9,6 +9,7 @@
 
 import { useCallback } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
+import { diagnoseTransaction } from '@/lib/aleo-client'
 import { useWalletStore } from '@/lib/store'
 import { devWarn } from '../lib/logger'
 import { ShieldWalletAdapter as DirectShieldWalletAdapter } from '../lib/wallet'
@@ -309,6 +310,24 @@ export function useAleoTransaction() {
           }
         }
 
+        if (txId.startsWith('at1') && i > 0 && i % 3 === 0) {
+          try {
+            const diagnosis = await diagnoseTransaction(txId)
+            if (diagnosis.status === 'accepted') {
+              devWarn(`[TX] Explorer diagnosis CONFIRMED tx at poll ${i + 1}`)
+              onStatusChange('confirmed', txId)
+              return
+            }
+            if (diagnosis.status === 'rejected') {
+              devWarn(`[TX] Explorer diagnosis REJECTED tx at poll ${i + 1}`)
+              onStatusChange('failed', txId)
+              return
+            }
+          } catch (diagErr) {
+            devWarn(`[TX] Explorer diagnosis poll ${i + 1} error (will retry):`, diagErr)
+          }
+        }
+
         // === Strategy 2: Adapter status API (secondary, for txId) ===
         try {
           const result = await adapterTxStatus(txId)
@@ -365,11 +384,13 @@ export function useAleoTransaction() {
           devWarn(`[TX] Poll ${i + 1} wallet error:`, err)
           if (txId.startsWith('at1')) {
             try {
-              const resp = await fetch(
-                `https://api.explorer.provable.com/v1/testnet/transaction/${txId}`
-              )
-              if (resp.ok) {
+              const diagnosis = await diagnoseTransaction(txId)
+              if (diagnosis.status === 'accepted') {
                 onStatusChange('confirmed', txId)
+                return
+              }
+              if (diagnosis.status === 'rejected') {
+                onStatusChange('failed', txId)
                 return
               }
             } catch { /* continue */ }
@@ -393,7 +414,23 @@ export function useAleoTransaction() {
         }
       }
 
-      if (walletFinalStatus === 'Failed' || walletFinalStatus === 'Rejected') {
+      if (txId.startsWith('at1')) {
+        try {
+          const diagnosis = await diagnoseTransaction(txId)
+          if (diagnosis.status === 'accepted') {
+            onStatusChange('confirmed', txId)
+            return
+          }
+          if (diagnosis.status === 'rejected') {
+            onStatusChange('failed', txId)
+            return
+          }
+        } catch {
+          // Fall through to wallet-derived status below.
+        }
+      }
+
+      if (walletFinalStatus && ['failed', 'rejected'].includes(walletFinalStatus.toLowerCase())) {
         onStatusChange('failed', walletTxId)
       } else {
         onStatusChange('unknown')

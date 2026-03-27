@@ -276,8 +276,8 @@ export function Dashboard() {
                     })()}
 
                     {/* Your Positions */}
-                    {(userBets.filter(b => b.status === 'active' && b.type !== 'sell').length + pendingBets.filter(b => b.type !== 'sell').length) > 0 && (() => {
-                        const allPositions = [...pendingBets.filter(b => b.type !== 'sell'), ...userBets.filter(b => b.status === 'active' && b.type !== 'sell')]
+                    {userBets.filter(b => b.status === 'active' && b.type !== 'sell').length > 0 && (() => {
+                        const allPositions = userBets.filter(b => b.status === 'active' && b.type !== 'sell')
                         const displayed = expandPositions ? allPositions : allPositions.slice(0, 3)
                         const hasMorePositions = allPositions.length > 3
                         return (

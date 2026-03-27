@@ -590,8 +590,8 @@ export function MarketDetail() {
             setSellError('Transaction failed on-chain.')
             setSellStep('error')
           } else {
-            confirmPendingBet(sellTxId, onChainTxId)
-            setSellStep('success')
+            devWarn('[Sell] Transaction status still unknown, keeping sell pending:', sellTxId)
+            setSellStep('pending')
           }
         }, 30, 10_000)
       } else {
@@ -922,8 +922,8 @@ export function MarketDetail() {
             setError(diagMsg)
             setStep('error')
           } else {
-            confirmPendingBet(submittedTxId, onChainTxId)
-            setStep('success')
+            devWarn('[Trade] Transaction status still unknown, keeping buy pending:', submittedTxId)
+            setStep('pending')
           }
         }, 30, 10_000)
       } else {

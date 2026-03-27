@@ -12,6 +12,7 @@ import {
 import {
   buildBuySharesInputs,
   CONTRACT_INFO,
+  diagnoseTransaction,
   getMarket,
   getMarketResolution,
   getProgramIdForToken,
@@ -1871,67 +1872,88 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
     if (stalePending.length > 0) {
       const promoted: string[] = []
+      const rejected: string[] = []
 
       for (const bet of stalePending) {
         if (bet.id.startsWith('at1')) {
-          // Verify on-chain via explorer API
+          // Verify on-chain via explorer/RPC diagnosis. Rejects must be removed,
+          // not promoted to active positions.
           try {
-            const resp = await fetch(
-              `https://api.explorer.provable.com/v1/testnet/transaction/${bet.id}`
-            )
-            if (resp.ok) {
+            const diagnosis = await diagnoseTransaction(bet.id)
+            if (diagnosis.status === 'accepted') {
               devWarn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... confirmed on-chain → promoting`)
               promoted.push(bet.id)
+            } else if (diagnosis.status === 'rejected') {
+              devWarn(`[Bets] Pending bet ${bet.id.slice(0, 20)}... was rejected on-chain → removing`)
+              rejected.push(bet.id)
             }
           } catch { /* keep as pending */ }
         } else {
-          // Shield wallet or other non-at1 IDs — do NOT auto-promote blindly.
-          // Shield can reject transactions silently. Only promote after 10 minutes
-          // to give the user time to notice and remove manually.
-          const SHIELD_PROMOTE_THRESHOLD = 10 * 60 * 1000 // 10 minutes
           const age = Date.now() - bet.placedAt
-          if (age > SHIELD_PROMOTE_THRESHOLD) {
-            devWarn(`[Bets] Stale shield bet ${bet.id.slice(0, 20)}... (${Math.round(age / 1000)}s old) → auto-promoting (>10min)`)
-            promoted.push(bet.id)
-          } else {
-            devWarn(`[Bets] Shield bet ${bet.id.slice(0, 20)}... is ${Math.round(age / 1000)}s old — keeping as pending (wait 10min before auto-promote)`)
-          }
+          devWarn(`[Bets] Wallet bet ${bet.id.slice(0, 20)}... is ${Math.round(age / 1000)}s old — keeping as pending until a final wallet/on-chain status is known`)
         }
       }
 
-      if (promoted.length > 0) {
-        const updatedPending = pendingBets.filter(b => !promoted.includes(b.id))
+      if (promoted.length > 0 || rejected.length > 0) {
+        const settledIds = new Set([...promoted, ...rejected])
+        const updatedPending = pendingBets.filter(b => !settledIds.has(b.id))
         const newActive = stalePending
           .filter(b => promoted.includes(b.id))
           .map(b => ({ ...b, status: 'active' as const }))
 
-        // Deduplicate: skip bets whose ID already exists in userBets
-        const existingIds = new Set(get().userBets.map(b => b.id))
+        const preservedUserBets = get().userBets.filter(b => !rejected.includes(b.id))
+        const existingIds = new Set(preservedUserBets.map(b => b.id))
         const dedupedActive = newActive.filter(b => !existingIds.has(b.id))
         const updatedUserBets = dedupedActive.length > 0
-          ? [...get().userBets, ...dedupedActive]
-          : get().userBets
+          ? [...preservedUserBets, ...dedupedActive]
+          : preservedUserBets
 
         set({ pendingBets: updatedPending, userBets: updatedUserBets })
         savePendingBetsToStorage(updatedPending)
-        if (dedupedActive.length > 0) {
+        if (dedupedActive.length > 0 || rejected.length > 0) {
           saveBetsToStorage(updatedUserBets)
         }
 
-        // Clean up promoted bets from Supabase pending_bets
+        // Clean up finalized pending bets from Supabase.
         const address = useWalletStore.getState().wallet.address
         if (isSupabaseAvailable() && address) {
-          for (const id of promoted) {
+          for (const id of settledIds) {
             sbRemovePendingBet(id, address)
+          }
+          for (const id of rejected) {
+            sbRemoveUserBet(id, address)
           }
         }
 
-        devWarn(`[Bets] Promoted ${promoted.length} stale pending bet(s) to active (${dedupedActive.length} new, ${promoted.length - dedupedActive.length} deduped)`)
+        devWarn(
+          `[Bets] Reconciled stale pending bets: ${promoted.length} confirmed, ${rejected.length} rejected, ${dedupedActive.length} new active`
+        )
 
         // Best-effort: refresh sharesReceived from actual wallet records
         for (const bet of dedupedActive) {
           refreshSharesFromWallet(bet, get, set)
         }
+      }
+    }
+
+    // --- Repair legacy false-active bets whose original tx was actually rejected ---
+    const rejectedActiveBetIds: string[] = []
+    for (const bet of get().userBets) {
+      if (bet.status !== 'active' || bet.type === 'sell' || !bet.id.startsWith('at1')) continue
+      try {
+        const diagnosis = await diagnoseTransaction(bet.id)
+        if (diagnosis.status === 'rejected') {
+          rejectedActiveBetIds.push(bet.id)
+        }
+      } catch {
+        // Keep bet unchanged if diagnosis is temporarily unavailable.
+      }
+    }
+
+    if (rejectedActiveBetIds.length > 0) {
+      devWarn(`[Bets] Removing ${rejectedActiveBetIds.length} legacy active bet(s) whose tx was rejected on-chain`)
+      for (const betId of rejectedActiveBetIds) {
+        get().removePendingBet(betId)
       }
     }
 

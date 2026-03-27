@@ -20,6 +20,7 @@ import {
     getMarketResolutionSource,
     getMarketThumbnailUrl,
     TOKEN_SYMBOLS,
+    isTransientNetworkError,
     type MarketData,
     type AMMPoolData,
     type MarketResolutionData,
@@ -300,10 +301,16 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 }))
             })
         } catch (error) {
-            console.error('Failed to fetch markets:', error)
+            if (isTransientNetworkError(error)) {
+                devWarn('[Markets] Transient network change while fetching markets')
+            } else {
+                console.error('Failed to fetch markets:', error)
+            }
             // On error during refresh, keep existing markets visible
             set((state) => ({
-                error: error instanceof Error ? error.message : 'Failed to fetch markets',
+                error: isTransientNetworkError(error)
+                    ? null
+                    : (error instanceof Error ? error.message : 'Failed to fetch markets'),
                 isLoading: false,
                 isRefreshing: false,
                 // Only clear markets if it was initial load that failed

@@ -175,6 +175,11 @@ function getCachedMapping<T>(key: string): T | undefined {
   return entry.data as T;
 }
 
+function getAnyCachedMapping<T>(key: string): T | undefined {
+  const entry = mappingCache.get(key);
+  return entry?.data as T | undefined;
+}
+
 function setCachedMapping<T>(key: string, data: T): void {
   mappingCache.set(key, { data, timestamp: Date.now() });
 }
@@ -183,6 +188,10 @@ function getCachedBlockHeight(): bigint | undefined {
   if (!blockHeightCache) return undefined;
   if (Date.now() - blockHeightCache.timestamp > BLOCK_HEIGHT_CACHE_TTL_MS) return undefined;
   return blockHeightCache.data;
+}
+
+function getAnyCachedBlockHeight(): bigint | undefined {
+  return blockHeightCache?.data;
 }
 
 function setCachedBlockHeight(height: bigint): void {
@@ -197,6 +206,55 @@ async function fetchWithTimeout(url: string, timeoutMs: number = FETCH_TIMEOUT_M
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export function isTransientNetworkError(error: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return true;
+  }
+
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError' || error.name === 'NetworkError';
+  }
+
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('err_network_changed')
+    || normalized.includes('network changed')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('networkerror')
+    || normalized.includes('load failed')
+    || normalized.includes('the network connection was lost')
+    || normalized.includes('network request failed')
+    || normalized.includes('fetch failed')
+  );
+}
+
+async function waitForNetworkRecovery(delayMs: number): Promise<void> {
+  if (typeof window === 'undefined') {
+    await new Promise(r => setTimeout(r, delayMs));
+    return;
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('online', handleOnline);
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      const handleOnline = () => finish();
+      const timeoutId = window.setTimeout(finish, delayMs);
+      window.addEventListener('online', handleOnline, { once: true });
+    });
+    return;
+  }
+
+  await new Promise(r => setTimeout(r, delayMs));
 }
 
 // Retry wrapper for flaky API (testnet often returns 522 errors)
@@ -220,7 +278,10 @@ async function fetchWithRetry(url: string, maxRetries: number = 2): Promise<Resp
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        const retryDelay = isTransientNetworkError(lastError)
+          ? 1_000 * (attempt + 1)
+          : 500 * (attempt + 1);
+        await waitForNetworkRecovery(retryDelay);
       }
     }
   }
@@ -526,7 +587,7 @@ async function scanBlockForCreateMarket(
   programId: string = PROGRAM_ID
 ): Promise<ScanResult | null> {
   const url = `${API_BASE_URL}/block/${blockHeight}`;
-  const response = await fetchWithTimeout(url, 10000);
+  const response = await fetchWithRetry(url, 3);
   if (!response.ok) {
     if (response.status === 404) return null; // Block doesn't exist
     throw new Error(`Block ${blockHeight}: HTTP ${response.status}`);
@@ -706,12 +767,21 @@ export async function getCurrentBlockHeight(): Promise<bigint> {
   const cached = getCachedBlockHeight();
   if (cached !== undefined) return cached;
 
-  const response = await fetchWithRetry(`${API_BASE_URL}/latest/height`);
-  if (!response.ok) throw new Error(`Failed to fetch block height: ${response.status}`);
-  const height = await response.json();
-  const result = BigInt(height);
-  setCachedBlockHeight(result);
-  return result;
+  try {
+    const response = await fetchWithRetry(`${API_BASE_URL}/latest/height`, 3);
+    if (!response.ok) throw new Error(`Failed to fetch block height: ${response.status}`);
+    const height = await response.json();
+    const result = BigInt(height);
+    setCachedBlockHeight(result);
+    return result;
+  } catch (error) {
+    const stale = getAnyCachedBlockHeight();
+    if (stale !== undefined && isTransientNetworkError(error)) {
+      devWarn('[BlockHeight] Network changed while fetching latest height, using cached value');
+      return stale;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -729,7 +799,7 @@ export async function getMappingValue<T>(
 
   try {
     const url = `${API_BASE_URL}/program/${pid}/mapping/${mappingName}/${key}`;
-    const response = await fetchWithRetry(url);
+    const response = await fetchWithRetry(url, 3);
     if (!response.ok) {
       if (response.status === 404) return null;
       throw new Error(`Failed to fetch mapping: ${response.status}`);
@@ -755,9 +825,13 @@ export async function getMappingValue<T>(
     setCachedMapping(cacheKey, result);
     return result;
   } catch (error) {
-    // Suppress AbortError (timeout) noise — these are expected on slow testnet API
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      devWarn(`Timeout fetching mapping ${mappingName}[${key}]`);
+    const stale = getAnyCachedMapping<T>(cacheKey);
+    if (stale !== undefined && isTransientNetworkError(error)) {
+      devWarn(`[Mapping] Network changed while fetching ${mappingName}[${key}] — using cached value`);
+      return stale;
+    }
+    if (isTransientNetworkError(error)) {
+      devWarn(`Transient network issue fetching mapping ${mappingName}[${key}]`);
       return null;
     }
     console.error(`Failed to fetch mapping ${mappingName}[${key}]:`, error);

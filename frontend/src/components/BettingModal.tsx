@@ -20,8 +20,8 @@ type BetStep = 'select' | 'amount' | 'confirm' | 'success'
 
 export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const { wallet } = useWalletStore()
-  const { addPendingBet } = useBetsStore()
-  const { executeTransaction } = useAleoTransaction()
+  const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
+  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [selectedOutcome, setSelectedOutcome] = useState<BetOutcome>(null)
   const [betAmount, setBetAmount] = useState('')
@@ -148,11 +148,12 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       const result = await Promise.race([txPromise, timeoutPromise])
 
       if (result?.transactionId) {
-        setTransactionId(result.transactionId)
+        const submittedTxId = result.transactionId
+        setTransactionId(submittedTxId)
         setStep('success')
 
         addPendingBet({
-          id: result.transactionId,
+          id: submittedTxId,
           marketId: market.id,
           amount: amountMicro,
           outcome: selectedOutcome,
@@ -164,6 +165,18 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
             : market.potentialNoPayout,
           tokenType: market.tokenType || 'ALEO',
         })
+
+        pollTransactionStatus(submittedTxId, (status, onChainTxId) => {
+          if (status === 'confirmed') {
+            confirmPendingBet(submittedTxId, onChainTxId)
+            return
+          }
+          if (status === 'failed') {
+            releaseSelectedRecord?.()
+            removePendingBet(submittedTxId)
+            devWarn('[BettingModal] Removed rejected buy from portfolio:', submittedTxId)
+          }
+        }, 30, 10_000)
       } else {
         throw new Error('No transaction ID returned from wallet')
       }

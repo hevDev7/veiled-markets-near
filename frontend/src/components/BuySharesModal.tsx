@@ -27,8 +27,8 @@ function getOutcomeColor(outcome: number): string {
 
 export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps) {
   const { wallet } = useWalletStore()
-  const { addPendingBet } = useBetsStore()
-  const { executeTransaction } = useAleoTransaction()
+  const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
+  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
   const [amount, setAmount] = useState('')
@@ -252,11 +252,12 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       }
 
       if (txResult?.transactionId) {
-        setTransactionId(txResult.transactionId)
+        const submittedTxId = txResult.transactionId
+        setTransactionId(submittedTxId)
         setStep('success')
 
         addPendingBet({
-          id: txResult.transactionId,
+          id: submittedTxId,
           marketId: market.id,
           amount: amountMicro,
           outcome: outcomeToString(selectedOutcome),
@@ -267,6 +268,18 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           sharesReceived: minSharesOut,  // matches on-chain OutcomeShare.quantity (= expected_shares)
           tokenType: market.tokenType || 'ALEO',
         })
+
+        pollTransactionStatus(submittedTxId, (status, onChainTxId) => {
+          if (status === 'confirmed') {
+            confirmPendingBet(submittedTxId, onChainTxId)
+            return
+          }
+          if (status === 'failed') {
+            releaseSelectedRecord?.()
+            removePendingBet(submittedTxId)
+            devWarn('[BuySharesModal] Removed rejected buy from portfolio:', submittedTxId)
+          }
+        }, 30, 10_000)
 
         // Refresh balance
         setTimeout(() => useWalletStore.getState().refreshBalance(), 3000)
