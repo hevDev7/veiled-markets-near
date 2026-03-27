@@ -608,7 +608,7 @@ export function MyBets() {
                         <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Side</th>
                         <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Shares</th>
                         <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Value</th>
-                        <th className="text-right px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">P&L</th>
+                        <th className="text-right px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Unrealized P&L</th>
                         <th className="w-10 px-3 py-3"></th>
                       </tr>
                     </thead>
@@ -769,7 +769,7 @@ export function MyBets() {
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">P&L</p>
+                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Unrealized P&L</p>
                             <div className="flex items-center justify-end gap-0.5">
                               {pnlAmount >= 0 ? (
                                 <ArrowUpRight className="w-3 h-3 text-yes-400" />
