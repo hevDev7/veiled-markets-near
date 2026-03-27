@@ -12,7 +12,10 @@ import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { diagnoseTransaction } from '@/lib/aleo-client'
 import { useWalletStore } from '@/lib/store'
 import { devWarn } from '../lib/logger'
-import { ShieldWalletAdapter as DirectShieldWalletAdapter } from '../lib/wallet'
+import {
+  ShieldWalletAdapter as DirectShieldWalletAdapter,
+  lookupWalletTransactionStatus,
+} from '../lib/wallet'
 
 interface TransactionOptions {
   program: string
@@ -87,6 +90,29 @@ function isLikelyUserRejectedTransaction(message: string): boolean {
     || msg.includes('canceled by user')
     || msg.includes('user cancel')
   )
+}
+
+function extractStatusTransactionId(result: any, fallbackTxId: string): string | undefined {
+  const candidates: unknown[] = [
+    result?.transactionId,
+    result?.transaction_id,
+    result?.txId,
+    result?.aleoTransactionId,
+    result?.onChainTransactionId,
+    result?.on_chain_transaction_id,
+    result?.transaction?.id,
+    result?.transaction?.transactionId,
+    result?.transaction?.transaction_id,
+    result?.transaction?.txId,
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.startsWith('at1')) {
+      return candidate
+    }
+  }
+
+  return fallbackTxId.startsWith('at1') ? fallbackTxId : undefined
 }
 
 export function useAleoTransaction() {
@@ -332,28 +358,29 @@ export function useAleoTransaction() {
         try {
           const result = await adapterTxStatus(txId)
           devWarn(`[TX] Poll ${i + 1}/${maxAttempts}:`, JSON.stringify(result))
+          const resolvedTxId = extractStatusTransactionId(result, txId)
 
           if (result?.status === 'accepted' || result?.status === 'Finalized' || result?.status === 'Settled') {
-            onStatusChange('confirmed', result.transactionId || txId)
+            onStatusChange('confirmed', resolvedTxId || txId)
             return
           }
           if (result?.status === 'failed' || result?.status === 'rejected' || result?.status === 'Failed' || result?.status === 'Rejected') {
             walletFailedCount++
-            walletTxId = result?.transactionId || walletTxId
+            walletTxId = resolvedTxId || walletTxId
             walletFinalStatus = result?.status
 
-            if (result?.transactionId) {
-              devWarn('[TX] Transaction CONFIRMED FAILED on-chain:', result.transactionId)
+            if (resolvedTxId) {
+              devWarn('[TX] Transaction CONFIRMED FAILED on-chain:', resolvedTxId)
               if (onChainVerify) {
                 try {
                   const verified = await onChainVerify()
                   if (verified) {
-                    onStatusChange('confirmed', result.transactionId)
+                    onStatusChange('confirmed', resolvedTxId)
                     return
                   }
                 } catch { /* fall through */ }
               }
-              onStatusChange('failed', result.transactionId)
+              onStatusChange('failed', resolvedTxId)
               return
             }
 
@@ -380,6 +407,33 @@ export function useAleoTransaction() {
             continue
           }
           walletFailedCount = 0
+
+          const walletNativeStatus = await lookupWalletTransactionStatus(txId)
+          if (walletNativeStatus?.transactionId?.startsWith('at1')) {
+            try {
+              const diagnosis = await diagnoseTransaction(walletNativeStatus.transactionId)
+              if (diagnosis.status === 'accepted') {
+                onStatusChange('confirmed', walletNativeStatus.transactionId)
+                return
+              }
+              if (diagnosis.status === 'rejected') {
+                onStatusChange('failed', walletNativeStatus.transactionId)
+                return
+              }
+            } catch (nativeDiagErr) {
+              devWarn('[TX] Native wallet tx diagnosis failed (will retry):', nativeDiagErr)
+            }
+          }
+
+          if (walletNativeStatus?.status === 'accepted') {
+            onStatusChange('confirmed', walletNativeStatus.transactionId || txId)
+            return
+          }
+
+          if (walletNativeStatus?.status === 'rejected') {
+            onStatusChange('failed', walletNativeStatus.transactionId)
+            return
+          }
         } catch (err) {
           devWarn(`[TX] Poll ${i + 1} wallet error:`, err)
           if (txId.startsWith('at1')) {
@@ -394,6 +448,31 @@ export function useAleoTransaction() {
                 return
               }
             } catch { /* continue */ }
+          }
+
+          try {
+            const walletNativeStatus = await lookupWalletTransactionStatus(txId)
+            if (walletNativeStatus?.transactionId?.startsWith('at1')) {
+              const diagnosis = await diagnoseTransaction(walletNativeStatus.transactionId)
+              if (diagnosis.status === 'accepted') {
+                onStatusChange('confirmed', walletNativeStatus.transactionId)
+                return
+              }
+              if (diagnosis.status === 'rejected') {
+                onStatusChange('failed', walletNativeStatus.transactionId)
+                return
+              }
+            }
+            if (walletNativeStatus?.status === 'accepted') {
+              onStatusChange('confirmed', walletNativeStatus.transactionId || txId)
+              return
+            }
+            if (walletNativeStatus?.status === 'rejected') {
+              onStatusChange('failed', walletNativeStatus.transactionId)
+              return
+            }
+          } catch {
+            // Continue polling on transient native-wallet errors.
           }
         }
       }
@@ -428,6 +507,32 @@ export function useAleoTransaction() {
         } catch {
           // Fall through to wallet-derived status below.
         }
+      }
+
+      try {
+        const walletNativeStatus = await lookupWalletTransactionStatus(txId)
+        if (walletNativeStatus?.transactionId?.startsWith('at1')) {
+          const diagnosis = await diagnoseTransaction(walletNativeStatus.transactionId)
+          if (diagnosis.status === 'accepted') {
+            onStatusChange('confirmed', walletNativeStatus.transactionId)
+            return
+          }
+          if (diagnosis.status === 'rejected') {
+            onStatusChange('failed', walletNativeStatus.transactionId)
+            return
+          }
+        }
+
+        if (walletNativeStatus?.status === 'accepted') {
+          onStatusChange('confirmed', walletNativeStatus.transactionId || txId)
+          return
+        }
+        if (walletNativeStatus?.status === 'rejected') {
+          onStatusChange('failed', walletNativeStatus.transactionId)
+          return
+        }
+      } catch {
+        // Fall through to wallet-derived status below.
       }
 
       if (walletFinalStatus && ['failed', 'rejected'].includes(walletFinalStatus.toLowerCase())) {

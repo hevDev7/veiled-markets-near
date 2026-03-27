@@ -4,6 +4,7 @@ import {
   walletManager,
   fetchPublicBalance,
   fetchUsdcxPublicBalance,
+  lookupWalletTransactionStatus,
   type WalletType,
   type NetworkType,
   type WalletAccount,
@@ -1353,6 +1354,48 @@ function mergeBets(local: Bet[], remote: Bet[]): Bet[] {
   return Array.from(byId.values())
 }
 
+async function resolvePendingBetStatus(bet: Bet): Promise<{
+  status: 'confirmed' | 'rejected' | 'pending';
+  transactionId?: string;
+}> {
+  if (bet.id.startsWith('at1')) {
+    const diagnosis = await diagnoseTransaction(bet.id)
+    if (diagnosis.status === 'accepted') {
+      return { status: 'confirmed', transactionId: bet.id }
+    }
+    if (diagnosis.status === 'rejected') {
+      return { status: 'rejected', transactionId: bet.id }
+    }
+  }
+
+  const walletStatus = await lookupWalletTransactionStatus(bet.id)
+  const resolvedTxId = walletStatus?.transactionId
+
+  if (resolvedTxId?.startsWith('at1')) {
+    try {
+      const diagnosis = await diagnoseTransaction(resolvedTxId)
+      if (diagnosis.status === 'accepted') {
+        return { status: 'confirmed', transactionId: resolvedTxId }
+      }
+      if (diagnosis.status === 'rejected') {
+        return { status: 'rejected', transactionId: resolvedTxId }
+      }
+    } catch {
+      // Fall back to the wallet-native status below.
+    }
+  }
+
+  if (walletStatus?.status === 'accepted') {
+    return { status: 'confirmed', transactionId: resolvedTxId }
+  }
+
+  if (walletStatus?.status === 'rejected') {
+    return { status: 'rejected', transactionId: resolvedTxId }
+  }
+
+  return { status: 'pending', transactionId: resolvedTxId }
+}
+
 function mergeCommitments(local: CommitmentRecord[], remote: CommitmentRecord[]): CommitmentRecord[] {
   const byId = new Map<string, CommitmentRecord>()
   for (const r of local) byId.set(r.id, r)
@@ -1436,7 +1479,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         }
 
         inputs.push(tokenRecord)
-        const walletAddress = get().wallet.address
+        const walletAddress = useWalletStore.getState().wallet.address
         if (!walletAddress) {
           throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
         }
@@ -1865,74 +1908,46 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   },
 
   syncBetStatuses: async () => {
-    // --- Auto-promote stale pending bets (>2 minutes old) ---
-    const pendingBets = get().pendingBets
-    const STALE_THRESHOLD = 2 * 60 * 1000 // 2 minutes
-    const stalePending = pendingBets.filter(b => Date.now() - b.placedAt > STALE_THRESHOLD)
-
-    if (stalePending.length > 0) {
-      const promoted: string[] = []
+    // --- Reconcile pending bets using on-chain + native wallet status ---
+    const pendingSnapshot = [...get().pendingBets]
+    if (pendingSnapshot.length > 0) {
+      const confirmed: Array<{ pendingId: string; confirmedTxId?: string }> = []
       const rejected: string[] = []
 
-      for (const bet of stalePending) {
-        if (bet.id.startsWith('at1')) {
-          // Verify on-chain via explorer/RPC diagnosis. Rejects must be removed,
-          // not promoted to active positions.
-          try {
-            const diagnosis = await diagnoseTransaction(bet.id)
-            if (diagnosis.status === 'accepted') {
-              devWarn(`[Bets] Stale pending bet ${bet.id.slice(0, 20)}... confirmed on-chain → promoting`)
-              promoted.push(bet.id)
-            } else if (diagnosis.status === 'rejected') {
-              devWarn(`[Bets] Pending bet ${bet.id.slice(0, 20)}... was rejected on-chain → removing`)
-              rejected.push(bet.id)
-            }
-          } catch { /* keep as pending */ }
-        } else {
-          const age = Date.now() - bet.placedAt
-          devWarn(`[Bets] Wallet bet ${bet.id.slice(0, 20)}... is ${Math.round(age / 1000)}s old — keeping as pending until a final wallet/on-chain status is known`)
+      for (const bet of pendingSnapshot) {
+        try {
+          const resolution = await resolvePendingBetStatus(bet)
+          if (resolution.status === 'confirmed') {
+            devWarn(
+              `[Bets] Pending bet ${bet.id.slice(0, 20)}... confirmed${resolution.transactionId && resolution.transactionId !== bet.id ? ` as ${resolution.transactionId.slice(0, 20)}...` : ''}`
+            )
+            confirmed.push({ pendingId: bet.id, confirmedTxId: resolution.transactionId })
+          } else if (resolution.status === 'rejected') {
+            devWarn(`[Bets] Pending bet ${bet.id.slice(0, 20)}... was rejected → removing`)
+            rejected.push(bet.id)
+          }
+        } catch (err) {
+          devWarn(`[Bets] Pending bet ${bet.id.slice(0, 20)}... still unresolved`, err)
         }
       }
 
-      if (promoted.length > 0 || rejected.length > 0) {
-        const settledIds = new Set([...promoted, ...rejected])
-        const updatedPending = pendingBets.filter(b => !settledIds.has(b.id))
-        const newActive = stalePending
-          .filter(b => promoted.includes(b.id))
-          .map(b => ({ ...b, status: 'active' as const }))
-
-        const preservedUserBets = get().userBets.filter(b => !rejected.includes(b.id))
-        const existingIds = new Set(preservedUserBets.map(b => b.id))
-        const dedupedActive = newActive.filter(b => !existingIds.has(b.id))
-        const updatedUserBets = dedupedActive.length > 0
-          ? [...preservedUserBets, ...dedupedActive]
-          : preservedUserBets
-
-        set({ pendingBets: updatedPending, userBets: updatedUserBets })
-        savePendingBetsToStorage(updatedPending)
-        if (dedupedActive.length > 0 || rejected.length > 0) {
-          saveBetsToStorage(updatedUserBets)
+      for (const item of confirmed) {
+        get().confirmPendingBet(item.pendingId, item.confirmedTxId)
+        const activeId = item.confirmedTxId || item.pendingId
+        const activeBet = useBetsStore.getState().userBets.find(b => b.id === activeId)
+        if (activeBet) {
+          refreshSharesFromWallet(activeBet, get, set)
         }
+      }
 
-        // Clean up finalized pending bets from Supabase.
-        const address = useWalletStore.getState().wallet.address
-        if (isSupabaseAvailable() && address) {
-          for (const id of settledIds) {
-            sbRemovePendingBet(id, address)
-          }
-          for (const id of rejected) {
-            sbRemoveUserBet(id, address)
-          }
-        }
+      for (const betId of rejected) {
+        get().removePendingBet(betId)
+      }
 
+      if (confirmed.length > 0 || rejected.length > 0) {
         devWarn(
-          `[Bets] Reconciled stale pending bets: ${promoted.length} confirmed, ${rejected.length} rejected, ${dedupedActive.length} new active`
+          `[Bets] Reconciled pending bets: ${confirmed.length} confirmed, ${rejected.length} rejected`
         )
-
-        // Best-effort: refresh sharesReceived from actual wallet records
-        for (const bet of dedupedActive) {
-          refreshSharesFromWallet(bet, get, set)
-        }
       }
     }
 

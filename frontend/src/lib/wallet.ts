@@ -45,6 +45,7 @@ export interface TransactionRequest {
   functionName: string;
   inputs: string[];
   fee: number;
+  privateFee?: boolean;
   network?: string;
   recordIndices?: number[];
 }
@@ -54,6 +55,13 @@ export interface WalletEvents {
   onDisconnect: () => void;
   onAccountChange: (account: WalletAccount | null) => void;
   onNetworkChange: (network: NetworkType) => void;
+}
+
+export interface WalletTransactionStatusResult {
+  status: 'accepted' | 'rejected' | 'pending' | 'unknown';
+  transactionId?: string;
+  raw?: unknown;
+  source?: string;
 }
 
 // ============================================================================
@@ -121,6 +129,174 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: s
     promise,
     createTimeoutPromise<T>(ms, timeoutMessage)
   ]);
+}
+
+function extractOnChainTransactionId(payload: any): string | undefined {
+  if (!payload) return undefined;
+
+  const candidates: unknown[] = [];
+
+  if (typeof payload === 'string') {
+    candidates.push(payload);
+  } else if (typeof payload === 'object') {
+    candidates.push(
+      payload.transactionId,
+      payload.transaction_id,
+      payload.txId,
+      payload.aleoTransactionId,
+      payload.onChainTransactionId,
+      payload.on_chain_transaction_id,
+      payload.id,
+    );
+
+    if (payload.transaction && typeof payload.transaction === 'object') {
+      candidates.push(
+        payload.transaction.id,
+        payload.transaction.transactionId,
+        payload.transaction.transaction_id,
+        payload.transaction.txId,
+      );
+    }
+
+    if (payload.data && typeof payload.data === 'object') {
+      candidates.push(
+        payload.data.transactionId,
+        payload.data.transaction_id,
+        payload.data.txId,
+        payload.data.id,
+      );
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.startsWith('at1')) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeWalletTransactionStatus(value: unknown): WalletTransactionStatusResult['status'] {
+  if (typeof value !== 'string') return 'unknown';
+
+  const status = value.toLowerCase();
+
+  if (
+    status.includes('accepted')
+    || status.includes('finalized')
+    || status.includes('settled')
+    || status.includes('completed')
+    || status.includes('complete')
+    || status.includes('confirmed')
+    || status.includes('success')
+    || status.includes('succeeded')
+  ) {
+    return 'accepted';
+  }
+
+  if (
+    status.includes('rejected')
+    || status.includes('failed')
+    || status.includes('error')
+    || status.includes('aborted')
+    || status.includes('cancelled')
+    || status.includes('canceled')
+    || status.includes('denied')
+  ) {
+    return 'rejected';
+  }
+
+  if (
+    status.includes('pending')
+    || status.includes('processing')
+    || status.includes('proving')
+    || status.includes('broadcast')
+    || status.includes('submitted')
+    || status.includes('queued')
+    || status.includes('signing')
+    || status.includes('confirming')
+  ) {
+    return 'pending';
+  }
+
+  return 'unknown';
+}
+
+function parseWalletTransactionStatus(
+  payload: any,
+  fallbackTxId: string,
+  source: string,
+): WalletTransactionStatusResult | null {
+  if (!payload) return null;
+
+  const rawStatus =
+    typeof payload === 'string'
+      ? payload
+      : payload.status
+        || payload.state
+        || payload.phase
+        || payload.result
+        || payload.transaction?.status
+        || payload.data?.status;
+
+  const transactionId = extractOnChainTransactionId(payload)
+    || (fallbackTxId.startsWith('at1') ? fallbackTxId : undefined);
+  const status = normalizeWalletTransactionStatus(rawStatus);
+
+  if (status === 'unknown' && !transactionId) {
+    return null;
+  }
+
+  return {
+    status,
+    transactionId,
+    raw: payload,
+    source,
+  };
+}
+
+export async function lookupWalletTransactionStatus(txId: string): Promise<WalletTransactionStatusResult | null> {
+  if (!txId || typeof window === 'undefined') return null;
+
+  const walletCandidates: Array<{ name: string; wallet: any }> = [
+    { name: 'shield', wallet: (window as any).shield },
+    { name: 'shieldWallet', wallet: (window as any).shieldWallet },
+    { name: 'shieldAleo', wallet: (window as any).shieldAleo },
+    { name: 'leoWallet', wallet: (window as any).leoWallet },
+    { name: 'leo', wallet: (window as any).leo },
+  ];
+  const methods = ['transactionStatus', 'getTransactionStatus'];
+  let bestEffort: WalletTransactionStatusResult | null = null;
+
+  for (const candidate of walletCandidates) {
+    if (!candidate.wallet) continue;
+
+    for (const method of methods) {
+      if (typeof candidate.wallet?.[method] !== 'function') continue;
+
+      try {
+        const result = await withTimeout(
+          Promise.resolve(candidate.wallet[method](txId)),
+          5000,
+          `${candidate.name}.${method} timed out`,
+        );
+        const parsed = parseWalletTransactionStatus(result, txId, `${candidate.name}.${method}`);
+
+        if (!parsed) continue;
+        if (parsed.status === 'accepted' || parsed.status === 'rejected') {
+          return parsed;
+        }
+        if (!bestEffort) {
+          bestEffort = parsed;
+        }
+      } catch (err) {
+        devLog(`[WalletTx] ${candidate.name}.${method} failed for ${txId.slice(0, 20)}...`, err);
+      }
+    }
+  }
+
+  return bestEffort;
 }
 
 /**
@@ -360,13 +536,13 @@ export class PuzzleWalletAdapter {
         publicBalance = await fetchPublicBalance(this.account.address);
       }
 
-      return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
+      return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
     } catch (err) {
       devWarn('Puzzle Wallet: getBalance failed:', err);
       if (this.account?.address) {
         try {
           const publicBalance = await fetchPublicBalance(this.account.address);
-          return { public: publicBalance, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n };
+          return { public: publicBalance, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
         } catch {
           devWarn('Puzzle Wallet: fetchPublicBalance also failed');
         }
@@ -811,7 +987,7 @@ export class LeoWalletAdapter {
       devWarn('Leo Wallet: ⚠️ Private records are encrypted and may not be accessible via SDK');
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1296,7 +1472,7 @@ export class FoxWalletAdapter {
       // Private records might require decrypt permission
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1484,7 +1660,7 @@ export class SoterWalletAdapter {
       // Private records might require decrypt permission
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -1795,7 +1971,7 @@ export class ShieldWalletAdapter {
       }
     }
 
-    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n };
+    return { public: publicBalance, private: privateBalance, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n };
   }
 
   async requestTransaction(request: TransactionRequest): Promise<string> {
@@ -2170,6 +2346,8 @@ export class WalletManager {
         private: 5000000000n,  // 5,000 credits
         usdcxPublic: 5000000000n, // 5,000 USDCX demo
         usdcxPrivate: 1000000000n, // 1,000 USDCX private demo
+        usadPublic: 5000000000n,
+        usadPrivate: 1000000000n,
       };
     }
 
