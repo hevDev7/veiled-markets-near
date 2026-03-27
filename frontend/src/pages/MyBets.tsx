@@ -33,7 +33,7 @@ import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
-import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
+import { calculateAllPrices, calculateSellTokensOut, type AMMReserves } from '@/lib/amm'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'history' | 'watchlist'
@@ -88,6 +88,17 @@ function getOutcomeCurrentPrice(market: Market | undefined, outcomeIdx: number):
   return prices[outcomeIdx - 1] ?? null
 }
 
+function getMarketReserves(market: Market | undefined): AMMReserves | null {
+  if (!market) return null
+  return {
+    reserve_1: market.yesReserve ?? 0n,
+    reserve_2: market.noReserve ?? 0n,
+    reserve_3: market.reserve3 ?? 0n,
+    reserve_4: market.reserve4 ?? 0n,
+    num_outcomes: market.numOutcomes || 2,
+  }
+}
+
 function formatShareQuantity(quantity: bigint): string {
   const value = Number(quantity) / 1_000_000
   return value.toLocaleString(undefined, {
@@ -103,7 +114,12 @@ function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
   const avgPrice = sharesRaw > 0 ? amountRaw / sharesRaw : 0
   const outcomeIdx = outcomeToIndex(bet.outcome)
   const currentPrice = getOutcomeCurrentPrice(market, outcomeIdx) ?? avgPrice
-  const currentValue = sharesRaw * currentPrice
+  const reserves = getMarketReserves(market)
+  const quotedValueMicro = reserves ? calculateSellTokensOut(reserves, outcomeIdx, shares) : 0n
+  const currentValue = quotedValueMicro > 0n
+    ? Number(quotedValueMicro) / 1_000_000
+    : sharesRaw * currentPrice
+  const exitPrice = sharesRaw > 0 ? currentValue / sharesRaw : currentPrice
   const pnlAmount = currentValue - amountRaw
   const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
 
@@ -113,6 +129,7 @@ function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
     amountRaw,
     avgPrice,
     currentPrice,
+    exitPrice,
     currentValue,
     pnlAmount,
     pnlPct,
@@ -401,7 +418,10 @@ export function MyBets() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {(() => {
               const activeBets = userBets.filter(b => b.status === 'active' && b.type !== 'sell')
-              const portfolioVal = activeBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
+              const portfolioVal = activeBets.reduce((sum, b) => {
+                const market = getMarketInfo(b.marketId)
+                return sum + getOpenPositionMetrics(b, market).currentValue
+              }, 0)
               const wonBets = userBets.filter(b => b.status === 'won')
               const totalWon = wonBets.reduce((sum, b) => sum + Number(b.sharesReceived || b.amount), 0) / 1_000_000
               const totalStaked = wonBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
@@ -597,7 +617,7 @@ export function MyBets() {
                         const {
                           shares,
                           avgPrice,
-                          currentPrice,
+                          exitPrice,
                           currentValue,
                           pnlAmount,
                           pnlPct,
@@ -621,7 +641,7 @@ export function MyBets() {
                                 {formatPurchaseTime(bet.placedAt)}
                               </p>
                               <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
-                                Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; {currentPrice.toFixed(3)} {tokenSymbol}
+                                Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; Exit {exitPrice.toFixed(3)} {tokenSymbol}
                               </p>
                             </td>
                             {/* SIDE */}
