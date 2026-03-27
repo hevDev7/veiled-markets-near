@@ -52,7 +52,15 @@ let marketIdsInitPromise: Promise<void> | null = null;
 async function ensureMarketIdsInitialized(): Promise<void> {
     if (marketIdsInitialized) return;
     if (marketIdsInitPromise) return marketIdsInitPromise;
-    marketIdsInitPromise = initializeMarketIds().then(() => {
+    // Add a 15-second timeout so the dashboard never hangs indefinitely
+    // waiting for market ID initialization (e.g. slow Supabase/indexer).
+    marketIdsInitPromise = Promise.race([
+        initializeMarketIds(),
+        new Promise<void>((resolve) => setTimeout(() => {
+            devWarn('[Markets] Market ID initialization timed out after 15s, proceeding with available IDs');
+            resolve();
+        }, 15_000)),
+    ]).then(() => {
         marketIdsInitialized = true;
     });
     return marketIdsInitPromise;
