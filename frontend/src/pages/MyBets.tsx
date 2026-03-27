@@ -35,13 +35,13 @@ import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
-type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'watchlist'
+type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'history' | 'watchlist'
 
 const TABS: { key: BetFilter; label: string }[] = [
   { key: 'accepted', label: 'Open Positions' },
   { key: 'unredeemed', label: 'Unredeemed' },
   { key: 'settled', label: 'Resolved' },
-  { key: 'all', label: 'History' },
+  { key: 'history', label: 'History' },
   { key: 'watchlist', label: 'Watchlist' },
 ]
 
@@ -96,6 +96,8 @@ export function MyBets() {
     b.status === 'won' || b.status === 'lost' || b.status === 'refunded'
     || (b.type === 'sell' && b.status === 'active')
   )
+  // History: all confirmed bets (no pending), chronological record
+  const historyBets = userBets.filter(b => b.status !== 'pending')
 
   // Tab counts
   const tabCounts: Record<BetFilter, number> = {
@@ -103,6 +105,7 @@ export function MyBets() {
     accepted: acceptedBets.length,
     unredeemed: unredeemedBets.length,
     settled: settledBets.length,
+    history: historyBets.length,
     watchlist: 0,
   }
 
@@ -112,6 +115,7 @@ export function MyBets() {
     : filter === 'accepted' ? acceptedBets
     : filter === 'unredeemed' ? unredeemedBets
     : filter === 'settled' ? settledBets
+    : filter === 'history' ? historyBets
     : []
 
   // ─── Performance chart data ───
@@ -279,6 +283,10 @@ export function MyBets() {
       title: 'No resolved bets',
       subtitle: "Resolved bets appear here after markets are resolved.",
     },
+    history: {
+      title: 'No transaction history',
+      subtitle: "All confirmed transactions will appear here.",
+    },
     watchlist: {
       title: 'No saved markets',
       subtitle: "Bookmark markets to track them here.",
@@ -390,7 +398,7 @@ export function MyBets() {
                         fontSize: '12px',
                         color: '#fff',
                       }}
-                      formatter={(value: number) => [`${value >= 0 ? '+' : ''}${value.toFixed(2)} ALEO`, 'P&L']}
+                      formatter={(value?: number) => [`${(value ?? 0) >= 0 ? '+' : ''}${(value ?? 0).toFixed(2)} ALEO`, 'P&L']}
                     />
                     <Line
                       type="monotone"
