@@ -96,8 +96,11 @@ export function MyBets() {
     b.status === 'won' || b.status === 'lost' || b.status === 'refunded'
     || (b.type === 'sell' && b.status === 'active')
   )
-  // History: all confirmed bets (no pending), chronological record
-  const historyBets = userBets.filter(b => b.status !== 'pending')
+  // History: only completed/settled bets (won, lost, refunded, sold)
+  const historyBets = userBets.filter(b =>
+    b.status === 'won' || b.status === 'lost' || b.status === 'refunded'
+    || (b.type === 'sell')
+  )
 
   // Tab counts
   const tabCounts: Record<BetFilter, number> = {
