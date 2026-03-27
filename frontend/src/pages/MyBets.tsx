@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Bet, outcomeToIndex, outcomeToString } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Bet, type Market, outcomeToIndex, outcomeToString } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
@@ -33,6 +33,7 @@ import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { EmptyState } from '@/components/EmptyState'
 import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
+import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'history' | 'watchlist'
@@ -69,6 +70,53 @@ function formatPurchaseTime(timestamp: number): string {
   })
 
   return `Bought on ${dateLabel} at ${timeLabel}`
+}
+
+function getOutcomeCurrentPrice(market: Market | undefined, outcomeIdx: number): number | null {
+  if (!market) return null
+  if (outcomeIdx === 1) return market.yesPrice
+  if (outcomeIdx === 2) return market.noPrice
+
+  const reserves: AMMReserves = {
+    reserve_1: market.yesReserve ?? 0n,
+    reserve_2: market.noReserve ?? 0n,
+    reserve_3: market.reserve3 ?? 0n,
+    reserve_4: market.reserve4 ?? 0n,
+    num_outcomes: market.numOutcomes || 2,
+  }
+  const prices = calculateAllPrices(reserves)
+  return prices[outcomeIdx - 1] ?? null
+}
+
+function formatShareQuantity(quantity: bigint): string {
+  const value = Number(quantity) / 1_000_000
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: value >= 100 || Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 4,
+  })
+}
+
+function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
+  const shares = bet.sharesReceived || bet.amount
+  const sharesRaw = Number(shares) / 1_000_000
+  const amountRaw = Number(bet.amount) / 1_000_000
+  const avgPrice = sharesRaw > 0 ? amountRaw / sharesRaw : 0
+  const outcomeIdx = outcomeToIndex(bet.outcome)
+  const currentPrice = getOutcomeCurrentPrice(market, outcomeIdx) ?? avgPrice
+  const currentValue = sharesRaw * currentPrice
+  const pnlAmount = currentValue - amountRaw
+  const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
+
+  return {
+    shares,
+    sharesRaw,
+    amountRaw,
+    avgPrice,
+    currentPrice,
+    currentValue,
+    pnlAmount,
+    pnlPct,
+  }
 }
 
 export function MyBets() {
@@ -546,19 +594,14 @@ export function MyBets() {
                         const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
                         const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
                         const isPending = bet.status === 'pending'
-
-                        // Shares
-                        const shares = bet.sharesReceived || bet.amount
-                        // Value (current value = shares for active bets since payout is 1:1 if winning)
-                        const valueRaw = Number(shares) / 1_000_000
-                        // Avg price = amount / shares
-                        const amountRaw = Number(bet.amount) / 1_000_000
-                        const sharesRaw = Number(shares) / 1_000_000
-                        const avgPrice = sharesRaw > 0 ? amountRaw / sharesRaw : 0
-                        // P&L = (current value - cost) — for active, approximate current value = shares * current implied price
-                        // Since we don't have live prices, use a simple heuristic: value - cost
-                        const pnlAmount = valueRaw - amountRaw
-                        const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
+                        const {
+                          shares,
+                          avgPrice,
+                          currentPrice,
+                          currentValue,
+                          pnlAmount,
+                          pnlPct,
+                        } = getOpenPositionMetrics(bet, market)
 
                         return (
                           <motion.tr
@@ -578,7 +621,7 @@ export function MyBets() {
                                 {formatPurchaseTime(bet.placedAt)}
                               </p>
                               <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
-                                Avg. ${avgPrice.toFixed(2)} &rarr; ${(avgPrice * (1 + pnlPct / 100)).toFixed(2)}
+                                Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; {currentPrice.toFixed(3)} {tokenSymbol}
                               </p>
                             </td>
                             {/* SIDE */}
@@ -598,13 +641,16 @@ export function MyBets() {
                             {/* SHARES */}
                             <td className="px-4 py-4 text-center">
                               <span className="text-sm font-heading font-semibold text-white tabular-nums">
-                                {Math.floor(sharesRaw).toLocaleString()}
+                                {formatShareQuantity(shares)}
                               </span>
                             </td>
                             {/* VALUE */}
                             <td className="px-4 py-4 text-center">
                               <span className="text-sm font-heading font-semibold text-white tabular-nums">
-                                {formatCredits(shares)} {tokenSymbol}
+                                {currentValue.toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 4,
+                                })} {tokenSymbol}
                               </span>
                             </td>
                             {/* P&L */}
@@ -649,11 +695,12 @@ export function MyBets() {
                     const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
                     const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
                     const isPending = bet.status === 'pending'
-                    const shares = bet.sharesReceived || bet.amount
-                    const valueRaw = Number(shares) / 1_000_000
-                    const amountRaw = Number(bet.amount) / 1_000_000
-                    const pnlAmount = valueRaw - amountRaw
-                    const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
+                    const {
+                      shares,
+                      currentValue,
+                      pnlAmount,
+                      pnlPct,
+                    } = getOpenPositionMetrics(bet, market)
 
                     return (
                       <motion.div
@@ -684,11 +731,16 @@ export function MyBets() {
                         <div className="grid grid-cols-3 gap-3">
                           <div>
                             <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Shares</p>
-                            <p className="text-sm font-heading font-semibold text-white tabular-nums">{Math.floor(Number(shares) / 1_000_000).toLocaleString()}</p>
+                            <p className="text-sm font-heading font-semibold text-white tabular-nums">{formatShareQuantity(shares)}</p>
                           </div>
                           <div>
                             <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Value</p>
-                            <p className="text-sm font-heading font-semibold text-white tabular-nums">{formatCredits(shares)} {tokenSymbol}</p>
+                            <p className="text-sm font-heading font-semibold text-white tabular-nums">
+                              {currentValue.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 4,
+                              })} {tokenSymbol}
+                            </p>
                           </div>
                           <div className="text-right">
                             <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">P&L</p>
