@@ -39,56 +39,42 @@ function RotatingWords({ words, interval = 3000 }: { words: string[]; interval?:
   )
 }
 
-// ── Hero Featured Market Card ──
-function HeroFeaturedCard() {
-  const { markets, fetchMarkets } = useRealMarketsStore()
+const HERO_SLIDE_INTERVAL_MS = 7000
 
-  useEffect(() => {
-    if (markets.length === 0) fetchMarkets()
-  }, [markets.length, fetchMarkets])
+const heroDeckVariants = {
+  enter: { opacity: 0, x: 28, scale: 0.985 } as const,
+  center: {
+    opacity: 1,
+    x: 0,
+    scale: 1,
+    transition: { duration: 0.45, ease: [0.16, 1, 0.3, 1] },
+  } as const,
+  exit: {
+    opacity: 0,
+    x: -28,
+    scale: 0.99,
+    transition: { duration: 0.3, ease: [0.4, 0, 0.2, 1] },
+  } as const,
+}
 
-  // Pick the hottest market by volume
-  const featured = useMemo(() => {
-    const hot = markets.filter(m => m.status === 1 && (m.tags?.includes('Hot') || m.tags?.includes('Featured')))
-    const sorted = hot.length > 0 ? hot : markets.filter(m => m.status === 1)
-    return sorted.sort((a, b) => Number(b.totalVolume - a.totalVolume))[0] ?? null
-  }, [markets])
-
-  const timeRemaining = useLiveCountdown(featured?.deadlineTimestamp, featured?.timeRemaining)
-
-  if (!featured) {
-    return (
-      <div className="rounded-2xl p-6 lg:p-8 animate-pulse">
-        <div className="h-4 bg-surface-700 rounded w-1/4 mb-6" />
-        <div className="h-6 bg-surface-700 rounded w-3/4 mb-6" />
-        <div className="h-8 bg-surface-700 rounded w-1/3 mb-6" />
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="h-12 bg-surface-800 rounded-xl" />
-          <div className="h-12 bg-surface-800 rounded-xl" />
-        </div>
-        <div className="flex gap-4"><div className="h-3 bg-surface-800 rounded w-16" /><div className="h-3 bg-surface-800 rounded w-16" /></div>
-      </div>
-    )
-  }
-
-  const catColor = getCategoryColor(featured.category)
-  const thumbUrl = getMarketThumbnail(featured.question, featured.category, featured.thumbnailUrl)
+function HeroFeaturedCard({ market }: { market: Market }) {
+  const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
+  const catColor = getCategoryColor(market.category)
+  const thumbUrl = getMarketThumbnail(market.question, market.category, market.thumbnailUrl)
   const useContain = isContainThumbnail(thumbUrl)
 
   return (
-    <div className="relative rounded-2xl overflow-hidden">
-      {/* Subtle accent glow */}
+    <div className="landing-market-card relative rounded-2xl overflow-hidden">
       <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-brand-400/[0.03] to-transparent rounded-full blur-3xl" />
 
       <div className="relative p-6 lg:p-8">
-        {/* Top row: category + LIVE badge */}
         <div className="flex items-start justify-between mb-5">
           <div className="flex items-center gap-2.5">
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${catColor.text}`}
               style={{ background: 'rgba(255,255,255,0.03)' }}>
-              {getCategoryEmoji(featured.category)} {getCategoryName(featured.category)}
+              {getCategoryEmoji(market.category)} {getCategoryName(market.category)}
             </span>
-            {(featured.tags?.includes('Hot') || featured.tags?.includes('Trending') || featured.tags?.includes('Featured')) && (
+            {(market.tags?.includes('Hot') || market.tags?.includes('Trending') || market.tags?.includes('Featured')) && (
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-brand-400 bg-brand-500/8">
                 <Zap className="w-3 h-3" />
                 Hot
@@ -101,50 +87,45 @@ function HeroFeaturedCard() {
           </div>
         </div>
 
-        {/* Question with thumbnail */}
         <div className="flex gap-3 mb-6">
           <div className={`w-11 h-11 rounded-xl overflow-hidden shrink-0 bg-surface-800 ${useContain ? 'p-1.5 flex items-center justify-center' : ''}`}>
             <img src={thumbUrl} alt="" className={`w-full h-full ${useContain ? 'object-contain' : 'object-cover'}`} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
           </div>
           <h3 className="font-display text-xl lg:text-2xl font-bold text-white leading-snug">
-            {featured.question}
+            {market.question}
           </h3>
         </div>
 
-        {/* Probability */}
         <div className="flex items-baseline gap-2 mb-4">
-          <span className="text-3xl font-display font-bold tabular-nums" style={{ color: featured.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
-            {formatPercentage(featured.yesPercentage)}
+          <span className="text-3xl font-display font-bold tabular-nums" style={{ color: market.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
+            {formatPercentage(market.yesPercentage)}
           </span>
           <span className="text-sm text-surface-400">probability</span>
         </div>
 
-        {/* Progress bar */}
         <div className="w-full h-1.5 rounded-full bg-surface-700/40 overflow-hidden mb-6">
-          <div className="h-full rounded-full bg-yes-500 transition-all duration-700" style={{ width: `${featured.yesPercentage}%` }} />
+          <div className="h-full rounded-full bg-yes-500 transition-all duration-700" style={{ width: `${market.yesPercentage}%` }} />
         </div>
 
-        {/* Yes / No prices */}
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-yes-500/[0.04]">
             <span className="text-xs font-medium text-surface-300">Yes</span>
-            <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(featured.yesPercentage)}</span>
+            <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(market.yesPercentage)}</span>
           </div>
           <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-no-500/[0.04]">
             <span className="text-xs font-medium text-surface-300">No</span>
-            <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(featured.noPercentage)}</span>
+            <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(market.noPercentage)}</span>
           </div>
         </div>
 
-        {/* Stats row */}
         <div className="flex items-center gap-4 pt-5 text-surface-500">
           <div className="flex items-center gap-1.5 text-surface-500">
             <BarChart3 className="w-3.5 h-3.5" />
-            <span className="text-xs tabular-nums">{formatCredits(featured.totalVolume, 0)} {featured.tokenType ?? 'ALEO'}</span>
+            <span className="text-xs tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}</span>
           </div>
           <div className="flex items-center gap-1.5 text-surface-500">
             <Users className="w-3.5 h-3.5" />
-            <span className="text-xs tabular-nums">{featured.totalBets}</span>
+            <span className="text-xs tabular-nums">{market.totalBets}</span>
           </div>
           <div className="ml-auto flex items-center gap-1.5 text-surface-500">
             <Clock className="w-3.5 h-3.5" />
@@ -156,44 +137,11 @@ function HeroFeaturedCard() {
   )
 }
 
-// ── Hero Compact Cards (two bottom cards) ──
-function HeroCompactCards() {
-  const { markets } = useRealMarketsStore()
-
-  const compactMarkets = useMemo(() => {
-    const active = markets.filter(m => m.status === 1)
-    const sorted = active.sort((a, b) => Number(b.totalVolume - a.totalVolume))
-    // Skip the first one (used by featured), take next 2
-    return sorted.slice(1, 3)
-  }, [markets])
-
-  if (compactMarkets.length === 0) {
-    return (
-      <div className="grid grid-cols-2 gap-3">
-        {[0, 1].map(i => (
-          <div key={i} className="rounded-xl p-4 animate-pulse">
-            <div className="h-4 bg-surface-700 rounded w-3/4 mb-3" />
-            <div className="h-3 bg-surface-800 rounded w-1/2" />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      {compactMarkets.map((market) => (
-        <HeroCompactCard key={market.id} market={market} />
-      ))}
-    </div>
-  )
-}
-
 function HeroCompactCard({ market }: { market: Market }) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
 
   return (
-    <div className="rounded-xl p-4 transition-all duration-300 hover:bg-white/[0.02]">
+    <div className="landing-market-card rounded-xl p-4 transition-all duration-300">
       <p className="text-sm font-semibold text-white line-clamp-1 mb-3">
         {market.question}
       </p>
@@ -209,6 +157,153 @@ function HeroCompactCard({ market }: { market: Market }) {
         <span className="text-lg font-display font-bold tabular-nums" style={{ color: market.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
           {formatPercentage(market.yesPercentage)}
         </span>
+      </div>
+    </div>
+  )
+}
+
+function HeroCompactCards({ markets }: { markets: Market[] }) {
+  const compactMarkets = markets.slice(0, 2)
+  const placeholderCount = Math.max(0, 2 - compactMarkets.length)
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {compactMarkets.map((market) => (
+        <HeroCompactCard key={market.id} market={market} />
+      ))}
+
+      {Array.from({ length: placeholderCount }, (_, index) => (
+        <div key={`hero-placeholder-${index}`} className="landing-market-card rounded-xl p-4 opacity-60">
+          <p className="text-sm font-semibold text-surface-300">
+            More markets coming soon
+          </p>
+          <p className="mt-2 text-xs leading-6 text-surface-500">
+            This spot will fill automatically as more trending markets appear.
+          </p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function HeroTrendingSlider() {
+  const { markets, fetchMarkets, isLoading } = useRealMarketsStore()
+  const [currentSlide, setCurrentSlide] = useState(0)
+
+  useEffect(() => {
+    if (markets.length === 0) void fetchMarkets()
+  }, [markets.length, fetchMarkets])
+
+  const heroMarkets = useMemo(() => {
+    const active = markets.filter(m => m.status === 1 && m.timeRemaining !== 'Ended')
+    const tagged = active
+      .filter(m => m.tags?.includes('Hot') || m.tags?.includes('Trending') || m.tags?.includes('Featured'))
+      .sort((a, b) => Number(b.totalVolume - a.totalVolume))
+    const untagged = active
+      .filter(m => !m.tags?.includes('Hot') && !m.tags?.includes('Trending') && !m.tags?.includes('Featured'))
+      .sort((a, b) => Number(b.totalVolume - a.totalVolume))
+
+    return [...tagged, ...untagged].slice(0, 6)
+  }, [markets])
+
+  useEffect(() => {
+    if (heroMarkets.length === 0) {
+      setCurrentSlide(0)
+      return
+    }
+
+    if (currentSlide >= heroMarkets.length) {
+      setCurrentSlide(0)
+    }
+  }, [currentSlide, heroMarkets.length])
+
+  useEffect(() => {
+    if (heroMarkets.length <= 1) return
+
+    const interval = window.setInterval(() => {
+      setCurrentSlide(prev => (prev + 1) % heroMarkets.length)
+    }, HERO_SLIDE_INTERVAL_MS)
+
+    return () => window.clearInterval(interval)
+  }, [heroMarkets.length])
+
+  const visibleMarkets = useMemo(() => {
+    if (heroMarkets.length === 0) return []
+    const count = Math.min(heroMarkets.length, 3)
+    return Array.from({ length: count }, (_, offset) => heroMarkets[(currentSlide + offset) % heroMarkets.length])
+  }, [currentSlide, heroMarkets])
+
+  const featuredMarket = visibleMarkets[0] ?? null
+  const compactMarkets = visibleMarkets.slice(1)
+
+  if (isLoading && heroMarkets.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="landing-market-card rounded-2xl p-6 lg:p-8 animate-pulse">
+          <div className="h-4 bg-surface-700 rounded w-1/4 mb-6" />
+          <div className="h-6 bg-surface-700 rounded w-3/4 mb-6" />
+          <div className="h-8 bg-surface-700 rounded w-1/3 mb-6" />
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="h-12 bg-surface-800 rounded-xl" />
+            <div className="h-12 bg-surface-800 rounded-xl" />
+          </div>
+          <div className="flex gap-4"><div className="h-3 bg-surface-800 rounded w-16" /><div className="h-3 bg-surface-800 rounded w-16" /></div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {[0, 1].map((item) => (
+            <div key={item} className="landing-market-card rounded-xl p-4 animate-pulse">
+              <div className="h-4 bg-surface-700 rounded w-3/4 mb-3" />
+              <div className="h-3 bg-surface-800 rounded w-1/2" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (heroMarkets.length === 0) {
+    return (
+      <div className="landing-market-card rounded-2xl p-8 text-left">
+        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-brand-300/70">
+          Hero Spotlight
+        </p>
+        <h3 className="mt-3 font-display text-2xl font-bold text-white">
+          Trending markets will appear here
+        </h3>
+        <p className="mt-3 max-w-xl text-sm leading-7 text-surface-400">
+          Once live markets have enough activity, the landing hero will rotate through the three strongest signals automatically.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <AnimatePresence initial={false} mode="wait">
+        <motion.div
+          key={visibleMarkets.map(m => m.id).join('-')}
+          variants={heroDeckVariants}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          className="space-y-4"
+        >
+          {featuredMarket && <HeroFeaturedCard market={featuredMarket} />}
+          <HeroCompactCards markets={compactMarkets} />
+        </motion.div>
+      </AnimatePresence>
+
+      <div className="flex items-center justify-center gap-2">
+        {heroMarkets.map((market, index) => (
+          <button
+            key={market.id}
+            type="button"
+            onClick={() => setCurrentSlide(index)}
+            className={`h-1.5 rounded-full transition-all duration-300 ${index === currentSlide ? 'w-8 bg-brand-400' : 'w-2 bg-white/[0.18] hover:bg-white/[0.28]'}`}
+            aria-label={`Go to hero market ${index + 1}`}
+          />
+        ))}
       </div>
     </div>
   )
@@ -400,10 +495,7 @@ export function Landing() {
                 <div className="absolute -inset-4 bg-gradient-to-br from-brand-400/[0.03] via-transparent to-transparent rounded-3xl blur-3xl" />
 
                 <div className="relative space-y-4">
-                  {/* Featured Market Card */}
-                  <HeroFeaturedCard />
-                  {/* Compact cards grid */}
-                  <HeroCompactCards />
+                  <HeroTrendingSlider />
                 </div>
               </div>
             </motion.div>

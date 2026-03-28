@@ -44,8 +44,8 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
       transition={{ delay: index * 0.08, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
       onClick={() => navigate('/dashboard')}
       className={cn(
-        "group relative overflow-hidden rounded-2xl cursor-pointer",
-        "transition-all duration-300 border border-white/[0.04] hover:border-white/[0.08] hover:bg-white/[0.02]",
+        "landing-market-card group relative overflow-hidden rounded-2xl cursor-pointer",
+        "transition-all duration-300",
         isExpired && "opacity-60",
       )}
     >
@@ -202,7 +202,7 @@ export function TrendingMarkets() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[...Array(6)].map((_, i) => (
-              <div key={i} className="rounded-2xl p-6 animate-pulse">
+              <div key={i} className="landing-market-card rounded-2xl p-6 animate-pulse">
                 <div className="h-4 bg-surface-700 rounded w-1/4 mb-4" />
                 <div className="h-6 bg-surface-700 rounded w-3/4 mb-4" />
                 <div className="h-2 bg-surface-700 rounded w-full mb-4" />
