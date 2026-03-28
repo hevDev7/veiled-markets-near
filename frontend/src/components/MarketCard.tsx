@@ -104,7 +104,7 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
 
         {/* Description snippet */}
         {market.description && (
-          <p className="text-xs text-surface-500 line-clamp-2 leading-relaxed -mt-1 mb-3">
+          <p className="text-xs text-surface-300 line-clamp-2 leading-relaxed -mt-1 mb-3">
             {market.description}
           </p>
         )}

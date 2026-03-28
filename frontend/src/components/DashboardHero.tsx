@@ -1,11 +1,10 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft,
   ChevronRight,
   Activity,
   Trophy,
-  Zap,
   Plus,
   Clock,
   TrendingUp,
@@ -14,49 +13,49 @@ import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryEmoji, getCategoryName } from '@/lib/utils'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
+import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 
-// Category-themed images from Unsplash (free, no attribution required for hotlinking)
-const CATEGORY_IMAGES: Record<number, string> = {
-  1: 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=600&h=400&fit=crop&q=80', // Politics — Capitol
-  2: 'https://images.unsplash.com/photo-1461896836934-bd45ba8c0e78?w=600&h=400&fit=crop&q=80', // Sports — Stadium
-  3: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=600&h=400&fit=crop&q=80', // Crypto — Bitcoin
-  4: 'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=600&h=400&fit=crop&q=80', // Culture — Festival
-  5: 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=600&h=400&fit=crop&q=80', // AI & Tech — AI chip
-  6: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=600&h=400&fit=crop&q=80', // Macro — Charts
-  7: 'https://images.unsplash.com/photo-1507413245164-6160d8298b31?w=600&h=400&fit=crop&q=80', // Science — Lab
-  8: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=600&h=400&fit=crop&q=80', // Climate — Nature
-  99: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&h=400&fit=crop&q=80', // Other — Globe
-}
-
-// Gradient fallbacks per category (if image fails)
 const CATEGORY_GRADIENTS: Record<number, string> = {
-  1: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.08) 100%)',
-  2: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.08) 100%)',
-  3: 'linear-gradient(135deg, rgba(247, 147, 26, 0.15) 0%, rgba(201, 168, 76, 0.08) 100%)',
-  4: 'linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(244, 63, 94, 0.08) 100%)',
-  5: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(59, 130, 246, 0.08) 100%)',
-  6: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(6, 182, 212, 0.08) 100%)',
-  7: 'linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%)',
-  8: 'linear-gradient(135deg, rgba(20, 184, 166, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%)',
-  99: 'linear-gradient(135deg, rgba(201, 168, 76, 0.1) 0%, rgba(0, 220, 130, 0.05) 100%)',
+  1: 'linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.06) 100%)',
+  2: 'linear-gradient(135deg, rgba(16, 185, 129, 0.16) 0%, rgba(6, 182, 212, 0.06) 100%)',
+  3: 'linear-gradient(135deg, rgba(247, 147, 26, 0.18) 0%, rgba(201, 168, 76, 0.08) 100%)',
+  4: 'linear-gradient(135deg, rgba(236, 72, 153, 0.16) 0%, rgba(244, 63, 94, 0.06) 100%)',
+  5: 'linear-gradient(135deg, rgba(139, 92, 246, 0.16) 0%, rgba(59, 130, 246, 0.06) 100%)',
+  6: 'linear-gradient(135deg, rgba(59, 130, 246, 0.16) 0%, rgba(6, 182, 212, 0.06) 100%)',
+  7: 'linear-gradient(135deg, rgba(6, 182, 212, 0.16) 0%, rgba(16, 185, 129, 0.06) 100%)',
+  8: 'linear-gradient(135deg, rgba(20, 184, 166, 0.16) 0%, rgba(16, 185, 129, 0.06) 100%)',
+  99: 'linear-gradient(135deg, rgba(201, 168, 76, 0.14) 0%, rgba(0, 220, 130, 0.05) 100%)',
 }
 
 const OUTCOME_COLORS = [
-  { text: 'text-yes-400', bg: 'bg-yes-400', border: 'border-yes-400/20' },
-  { text: 'text-no-400', bg: 'bg-no-400', border: 'border-no-400/20' },
-  { text: 'text-purple-400', bg: 'bg-purple-400', border: 'border-purple-400/20' },
-  { text: 'text-yellow-400', bg: 'bg-yellow-400', border: 'border-yellow-400/20' },
+  { text: 'text-yes-400', dot: 'bg-yes-400', bar: 'bg-yes-500', tint: 'bg-yes-500/8', border: 'border-yes-500/18' },
+  { text: 'text-no-400', dot: 'bg-no-400', bar: 'bg-no-500', tint: 'bg-no-500/8', border: 'border-no-500/18' },
+  { text: 'text-purple-400', dot: 'bg-purple-400', bar: 'bg-purple-500', tint: 'bg-purple-500/8', border: 'border-purple-500/18' },
+  { text: 'text-yellow-400', dot: 'bg-yellow-400', bar: 'bg-yellow-500', tint: 'bg-yellow-500/8', border: 'border-yellow-500/18' },
 ]
 
-const SLIDE_DURATION_MS = 8000
+const SLIDE_DURATION_MS = 9000
 const AUTO_PLAY_RESUME_MS = 10000
 const IMAGE_REVEAL_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1]
-const IMAGE_REVEAL_DURATION = 2.1
-const IMAGE_DIM_FADE_DURATION = 1.75
-const SLIDE_FADE_DURATION = 1.2
+const IMAGE_REVEAL_DURATION = 0.85
+const IMAGE_DIM_FADE_DURATION = 0.65
+const SLIDE_FADE_DURATION = 0.75
 
-// ── Slide Card ──
-function MarketSlide({ market, onClick }: { market: Market; onClick: () => void }) {
+type OutcomeDatum = {
+  index: number
+  label: string
+  pct: number
+}
+
+function MarketSlide({
+  market,
+  onClick,
+  controls,
+}: {
+  market: Market
+  onClick: () => void
+  controls?: ReactNode
+}) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const numOutcomes = market.numOutcomes ?? 2
   const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
@@ -73,191 +72,283 @@ function MarketSlide({ market, onClick }: { market: Market; onClick: () => void 
     return calculateAllPrices(reserves)
   }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
 
-  const outcomeData = useMemo(() => {
+  const outcomeData = useMemo<OutcomeDatum[]>(() => {
     if (isBinary) {
       return [
-        { label: outcomeLabels[0], pct: market.yesPercentage },
-        { label: outcomeLabels[1], pct: market.noPercentage },
+        { index: 0, label: outcomeLabels[0], pct: market.yesPercentage },
+        { index: 1, label: outcomeLabels[1], pct: market.noPercentage },
       ]
     }
-    return outcomeLabels.map((label, i) => ({ label, pct: (prices[i] ?? 0) * 100 }))
+
+    return outcomeLabels.map((label, i) => ({
+      index: i,
+      label,
+      pct: (prices[i] ?? 0) * 100,
+    }))
   }, [isBinary, outcomeLabels, market.yesPercentage, market.noPercentage, prices])
 
+  const sortedOutcomes = useMemo(
+    () => [...outcomeData].sort((a, b) => b.pct - a.pct),
+    [outcomeData]
+  )
+
+  const leadingOutcome = sortedOutcomes[0] ?? outcomeData[0]
+  const leadingOutcomeColor = OUTCOME_COLORS[leadingOutcome?.index ?? 0] || OUTCOME_COLORS[0]
+  const leadingOutcomeWidth = Math.max(8, Math.min(leadingOutcome?.pct ?? 0, 100))
+
+  const heroImageUrl = market.thumbnailUrl || null
+  const thumbUrl = getMarketThumbnail(market.question, market.category, market.thumbnailUrl)
+  const useContainThumb = isContainThumbnail(thumbUrl)
+
   return (
-    <div className="h-full flex flex-col p-6">
-      {/* Top: Category + Title in same row */}
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex items-center gap-2 flex-shrink-0 pt-1">
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider text-yellow-300 bg-yellow-500/10 border border-yellow-500/20">
-            Trending
-          </span>
-          <span className="text-xs">{getCategoryEmoji(market.category)}</span>
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider text-surface-300 bg-white/[0.04] border border-white/[0.06]">
-            {getCategoryName(market.category)}
-          </span>
+    <div className="h-full flex flex-col p-4 lg:p-5">
+      <div className="mb-3 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-brand-400/20 bg-brand-400/8 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-brand-300">
+              Trending Market
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-3 py-1 text-xs font-medium text-surface-300">
+              <span>{getCategoryEmoji(market.category)}</span>
+              <span>{getCategoryName(market.category)}</span>
+            </span>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-surface-950/55 px-3 py-1.5 text-xs text-surface-400 backdrop-blur-md">
+            <Clock className="h-3.5 w-3.5" />
+            <span className="tabular-nums font-medium">{timeRemaining}</span>
+          </div>
         </div>
-        <h3 onClick={onClick}
-          className="text-sm lg:text-base font-semibold text-white hover:text-brand-300 transition-colors leading-snug line-clamp-2 cursor-pointer flex-1">
-          {market.question}
-        </h3>
-        <div className="flex items-center gap-1.5 text-xs text-surface-400 flex-shrink-0 pt-1.5">
-          <Clock className="w-3.5 h-3.5" />
-          <span className="tabular-nums font-medium">{timeRemaining}</span>
+
+        <div className="max-w-4xl">
+          <button onClick={onClick} className="text-left">
+            <h3 className="font-display text-[1.08rem] font-bold leading-[1.18] text-white transition-colors hover:text-brand-300 text-balance lg:text-[1.38rem]">
+              {market.question}
+            </h3>
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-xs text-surface-500">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-3 py-1.5">
+            <TrendingUp className="h-3.5 w-3.5" />
+            <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-3 py-1.5">
+            <span className="tabular-nums">{market.totalBets}</span>
+            <span>bets</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-3 py-1.5">
+            <span className="tabular-nums">{numOutcomes}</span>
+            <span>{numOutcomes === 1 ? 'outcome' : 'outcomes'}</span>
+          </span>
         </div>
       </div>
 
-      {market.description && (
-        <p className="text-xs text-surface-500 line-clamp-1 mb-4">{market.description}</p>
-      )}
-      {!market.description && <div className="mb-4" />}
+      <div className="relative flex-1 min-h-[188px] overflow-hidden rounded-[26px] border border-white/[0.06] bg-surface-900/75 lg:min-h-[204px]">
+        <div
+          className="absolute inset-0"
+          style={{ background: CATEGORY_GRADIENTS[market.category] || CATEGORY_GRADIENTS[99] }}
+        />
 
-      {/* Full-width image with outcomes overlaid on the left */}
-      <div className="flex-1 min-h-[220px] min-w-0 relative rounded-xl overflow-hidden">
-        <motion.img
-          key={`image-${market.id}`}
-          src={CATEGORY_IMAGES[market.category] || CATEGORY_IMAGES[99]}
-          alt={getCategoryName(market.category)}
-          className="absolute inset-0 w-full h-full object-cover"
-          initial={{
-            opacity: 0.78,
-            scale: 1.03,
-            filter: 'blur(12px) brightness(0.74) saturate(0.9)',
-          }}
-          animate={{
-            opacity: 1,
-            scale: 1,
-            filter: 'blur(0px) brightness(1) saturate(1)',
-          }}
-          transition={{
-            duration: IMAGE_REVEAL_DURATION,
-            ease: IMAGE_REVEAL_EASE,
-            opacity: { duration: 1.45, ease: IMAGE_REVEAL_EASE },
-            scale: { duration: IMAGE_REVEAL_DURATION, ease: IMAGE_REVEAL_EASE },
-            filter: { duration: IMAGE_REVEAL_DURATION, ease: IMAGE_REVEAL_EASE },
-          }}
-          loading="eager"
-          draggable={false}
-          onError={(e) => {
-            // Hide image on error, gradient fallback shows through
-            (e.target as HTMLImageElement).style.display = 'none'
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.08),transparent_32%),linear-gradient(180deg,rgba(8,9,12,0.02),rgba(8,9,12,0.22))]" />
+        <div className="absolute right-[-12%] top-[-10%] h-48 w-48 rounded-full bg-brand-400/10 blur-3xl" />
+        <div className="absolute bottom-[-18%] left-[-6%] h-44 w-44 rounded-full bg-yes-400/8 blur-3xl" />
+        <div
+          className="absolute inset-0 opacity-[0.035]"
+          style={{
+            backgroundImage: 'linear-gradient(rgba(255,255,255,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.8) 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
           }}
         />
-        {/* Gradient overlay for readability */}
+
+        {heroImageUrl && (
+          <motion.img
+            key={`image-${market.id}`}
+            src={heroImageUrl}
+            alt={market.question}
+            className="absolute inset-0 h-full w-full object-cover"
+            initial={{
+              opacity: 0.62,
+              scale: 1.015,
+              filter: 'brightness(0.86) saturate(0.94)',
+            }}
+            animate={{
+              opacity: 0.92,
+              scale: 1,
+              filter: 'brightness(1) saturate(1)',
+            }}
+            transition={{
+              duration: IMAGE_REVEAL_DURATION,
+              ease: IMAGE_REVEAL_EASE,
+            }}
+            loading="eager"
+            draggable={false}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        )}
+
         <motion.div
           aria-hidden="true"
-          className="absolute inset-0 bg-gradient-to-t from-surface-950/80 via-surface-950/30 to-transparent"
-          initial={{ opacity: 0.82 }}
+          className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,9,12,0.12),rgba(8,9,12,0.5)_70%,rgba(8,9,12,0.74)_100%)]"
+          initial={{ opacity: 0.72 }}
           animate={{ opacity: 1 }}
           transition={{ duration: IMAGE_REVEAL_DURATION, ease: IMAGE_REVEAL_EASE }}
         />
         <motion.div
           aria-hidden="true"
-          className="absolute inset-0 bg-surface-950/40"
-          initial={{ opacity: 0.24 }}
+          className="absolute inset-0 bg-surface-950/28"
+          initial={{ opacity: 0.18 }}
           animate={{ opacity: 0 }}
           transition={{ duration: IMAGE_DIM_FADE_DURATION, ease: IMAGE_REVEAL_EASE }}
         />
-        {/* Category gradient fallback */}
-        <div
-          className="absolute inset-0 -z-10"
-          style={{ background: CATEGORY_GRADIENTS[market.category] || CATEGORY_GRADIENTS[99] }}
-        />
-        {/* Outcome pills over image */}
-        <div className="absolute top-3 left-3 z-[2] flex w-[min(240px,calc(100%-24px))] flex-col gap-2">
-          {outcomeData.map((item, i) => {
-            const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
-            return (
-              <div key={i} className={cn(
-                'flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border backdrop-blur-md transition-colors',
-                'bg-surface-950/52 shadow-[0_10px_30px_rgba(0,0,0,0.2)]',
-                colors.border
-              )}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={cn('w-2.5 h-2.5 rounded-full shrink-0', colors.bg)} />
-                  <span className="text-xs text-white/88 truncate">{item.label}</span>
-                </div>
-                <span className={cn('text-sm font-bold tabular-nums shrink-0', colors.text)}>
-                  {formatPercentage(item.pct)}
-                </span>
-              </div>
-            )
-          })}
+
+        <div className="absolute left-3 top-3 flex items-center gap-2.5 rounded-2xl border border-white/[0.08] bg-surface-950/52 px-2.5 py-2 shadow-[0_14px_40px_rgba(0,0,0,0.22)] backdrop-blur-md">
+          <div className={cn(
+            'h-9 w-9 overflow-hidden rounded-xl border border-white/[0.06] bg-surface-900/90',
+            useContainThumb && 'flex items-center justify-center p-2'
+          )}>
+            <img
+              src={thumbUrl}
+              alt=""
+              className={cn('h-full w-full', useContainThumb ? 'object-contain' : 'object-cover')}
+              loading="lazy"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none'
+              }}
+            />
+          </div>
+
+          <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-surface-500">
+              Market Focus
+            </p>
+            <p className="mt-0.5 text-xs font-semibold text-white">
+              {getCategoryName(market.category)}
+            </p>
+          </div>
         </div>
-        {/* Category label overlay */}
-        <div className="absolute bottom-3 left-3 flex items-center gap-2">
-          <span className="text-2xl">{getCategoryEmoji(market.category)}</span>
-          <span className="text-xs font-semibold text-white/80">{getCategoryName(market.category)}</span>
+
+        <div className="absolute inset-x-3 bottom-3 lg:inset-x-auto lg:left-3 lg:max-w-[280px]">
+          <div className="rounded-[22px] border border-white/[0.08] bg-surface-950/58 p-3 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-md">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-surface-500">
+                  Leading Outcome
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-white">
+                  {leadingOutcome?.label}
+                </p>
+              </div>
+
+              <span className={cn('shrink-0 text-xl font-display font-bold tabular-nums', leadingOutcomeColor.text)}>
+                {formatPercentage(leadingOutcome?.pct ?? 0)}
+              </span>
+            </div>
+
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+              <div
+                className={cn('h-full rounded-full transition-[width] duration-500', leadingOutcomeColor.bar)}
+                style={{ width: `${leadingOutcomeWidth}%` }}
+              />
+            </div>
+
+            <p className="mt-2.5 text-xs leading-6 text-surface-400">
+              Current market consensus is leaning toward this outcome.
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Bottom stats */}
-      <div onClick={onClick}
-        className="flex items-center gap-4 text-xs text-surface-400 pt-3 mt-1 border-t border-white/[0.04] cursor-pointer">
-        <div className="flex items-center gap-1.5">
-          <TrendingUp className="w-3.5 h-3.5" />
-          <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} vol</span>
+      {controls && (
+        <div className="mt-2.5 flex justify-center">
+          {controls}
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="tabular-nums">{market.totalBets} bets</span>
-        </div>
-        <div className="ml-auto text-brand-400 font-semibold hover:text-brand-300 transition-colors flex items-center gap-1">
-          Trade <ChevronRight className="w-3.5 h-3.5" />
-        </div>
-      </div>
+      )}
     </div>
   )
 }
 
-// ── Stat Row ──
-function StatRow({ icon, label, value, color }: {
-  icon: React.ReactNode; label: string; value: string; color: string
+function KpiCard({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  color: string
 }) {
   return (
-    <div className="flex items-center justify-between py-3">
-      <div className="flex items-center gap-2.5">
-        <div className={cn('', color)}>{icon}</div>
-        <span className="text-sm text-surface-400">{label}</span>
+    <div className="rounded-2xl border border-white/[0.05] bg-white/[0.03] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.05] bg-surface-900/80', color)}>
+          {icon}
+        </div>
+        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-surface-500">
+          {label}
+        </p>
       </div>
-      <span className={cn('text-sm font-bold tabular-nums', color)}>{value}</span>
+
+      <p className={cn('mt-4 text-2xl font-display font-bold tabular-nums', color)}>
+        {value}
+      </p>
     </div>
   )
 }
 
-// ── Slide animation — gentle fade while image handles the blur-to-clear reveal ──
+function StatRow({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  color: string
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div className={cn('shrink-0', color)}>{icon}</div>
+        <span className="truncate text-sm text-surface-400">{label}</span>
+      </div>
+
+      <span className={cn('shrink-0 text-sm font-semibold tabular-nums', color)}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
 const slideVariants = {
-  enter: () => ({
-    opacity: 0.9,
-    scale: 1,
-    zIndex: 2,
-    transition: {
-      duration: 0,
-    },
-  }),
+  enter: {
+    opacity: 0.76,
+    scale: 0.995,
+  },
   center: {
     opacity: 1,
     scale: 1,
-    zIndex: 2,
     transition: {
       duration: SLIDE_FADE_DURATION,
       ease: IMAGE_REVEAL_EASE,
-      opacity: { duration: 1.05, ease: IMAGE_REVEAL_EASE },
+      opacity: { duration: SLIDE_FADE_DURATION, ease: IMAGE_REVEAL_EASE },
       scale: { duration: SLIDE_FADE_DURATION, ease: IMAGE_REVEAL_EASE },
     },
   },
   exit: {
-    opacity: 0.72,
-    scale: 1.004,
-    zIndex: 1,
+    opacity: 0.7,
+    scale: 1.003,
     transition: {
-      duration: 0.9,
+      duration: 0.55,
       ease: [0.4, 0, 0.2, 1],
-      opacity: { duration: 0.78, ease: [0.4, 0, 0.2, 1] },
-      scale: { duration: 0.9, ease: [0.4, 0, 0.2, 1] },
     },
   },
 }
 
-// ── Main Hero ──
 interface ActivityItem { id: string; message: string; time: number; marketId: string }
 
 interface DashboardHeroProps {
@@ -278,8 +369,6 @@ export function DashboardHero({
     const active = markets.filter(m => m.status === 1 && m.timeRemaining !== 'Ended')
     if (active.length === 0) return []
 
-    // Score each market for "trending" ranking
-    // Factors: volume (40%), bets (30%), recency/deadline proximity (30%)
     const maxVolume = Math.max(...active.map(m => Number(m.totalVolume)), 1)
     const maxBets = Math.max(...active.map(m => m.totalBets), 1)
     const now = Date.now()
@@ -287,10 +376,9 @@ export function DashboardHero({
     const scored = active.map(m => {
       const volumeScore = Number(m.totalVolume) / maxVolume
       const betsScore = m.totalBets / maxBets
-      // Markets ending sooner get higher recency score (more urgent = more trending)
       const msLeft = (m.deadlineTimestamp || now + 86400000) - now
       const daysLeft = Math.max(msLeft / 86400000, 0.1)
-      const recencyScore = Math.min(1, 7 / daysLeft) // peaks when < 7 days left
+      const recencyScore = Math.min(1, 7 / daysLeft)
       const score = volumeScore * 0.4 + betsScore * 0.3 + recencyScore * 0.3
       return { market: m, score }
     })
@@ -300,22 +388,65 @@ export function DashboardHero({
       .slice(0, 6)
       .map(s => s.market)
   }, [markets])
+
   const slideCount = activeMarkets.length
+
+  const activeMarketCount = useMemo(
+    () => markets.filter(m => m.status === 1 && m.timeRemaining !== 'Ended').length,
+    [markets]
+  )
+
+  const totalBets = useMemo(
+    () => markets.reduce((sum, m) => sum + m.totalBets, 0),
+    [markets]
+  )
+
+  const aleoVolume = useMemo(
+    () => markets.filter(m => !m.tokenType || m.tokenType === 'ALEO').reduce((sum, m) => sum + m.totalVolume, 0n),
+    [markets]
+  )
+
+  const usdcxVolume = useMemo(
+    () => markets.filter(m => m.tokenType === 'USDCX').reduce((sum, m) => sum + m.totalVolume, 0n),
+    [markets]
+  )
+
+  const usadVolume = useMemo(
+    () => markets.filter(m => m.tokenType === 'USAD').reduce((sum, m) => sum + m.totalVolume, 0n),
+    [markets]
+  )
+
+  const recentActivity = useMemo(
+    () => activityFeed.slice(0, 5),
+    [activityFeed]
+  )
+
+  const activityTickerItems = useMemo(
+    () => recentActivity.length > 1 ? [...recentActivity, ...recentActivity] : recentActivity,
+    [recentActivity]
+  )
+
+  const activityItemHeight = 44
+  const activityTotalHeight = recentActivity.length * activityItemHeight
+  const activityVisibleHeight = Math.min(activityItemHeight * 3, activityTotalHeight)
 
   useEffect(() => {
     if (slideCount === 0) {
       setCurrentSlide(0)
       return
     }
+
     if (currentSlide >= slideCount) {
       setCurrentSlide(0)
     }
   }, [currentSlide, slideCount])
 
   useEffect(() => {
-    const categories = [...new Set(activeMarkets.map(m => m.category))]
-    categories.forEach(category => {
-      const src = CATEGORY_IMAGES[category] || CATEGORY_IMAGES[99]
+    const heroImages = activeMarkets
+      .map(m => m.thumbnailUrl)
+      .filter((src): src is string => Boolean(src))
+
+    heroImages.forEach(src => {
       const image = new Image()
       image.decoding = 'async'
       image.src = src
@@ -324,9 +455,11 @@ export function DashboardHero({
 
   useEffect(() => {
     if (!isAutoPlaying || slideCount <= 1) return
+
     const iv = setInterval(() => {
       setCurrentSlide(prev => (prev + 1) % slideCount)
     }, SLIDE_DURATION_MS)
+
     return () => clearInterval(iv)
   }, [isAutoPlaying, slideCount])
 
@@ -338,41 +471,126 @@ export function DashboardHero({
     }
   ), [])
 
-  // Pause autoplay on manual interaction, resume after a short idle period.
   const pauseAutoPlay = useCallback(() => {
     setIsAutoPlaying(false)
+
     if (resumeTimeoutRef.current) {
       clearTimeout(resumeTimeoutRef.current)
     }
+
     resumeTimeoutRef.current = setTimeout(() => {
       setIsAutoPlaying(true)
       resumeTimeoutRef.current = null
     }, AUTO_PLAY_RESUME_MS)
   }, [])
 
-  const goNext = useCallback(() => { pauseAutoPlay(); setCurrentSlide(p => (p + 1) % slideCount) }, [slideCount, pauseAutoPlay])
-  const goPrev = useCallback(() => { pauseAutoPlay(); setCurrentSlide(p => (p - 1 + slideCount) % slideCount) }, [slideCount, pauseAutoPlay])
-  const goTo = useCallback((i: number) => { pauseAutoPlay(); setCurrentSlide(i) }, [pauseAutoPlay])
+  const goNext = useCallback(() => {
+    if (slideCount <= 1) return
+    pauseAutoPlay()
+    setCurrentSlide(prev => (prev + 1) % slideCount)
+  }, [slideCount, pauseAutoPlay])
+
+  const goPrev = useCallback(() => {
+    if (slideCount <= 1) return
+    pauseAutoPlay()
+    setCurrentSlide(prev => (prev - 1 + slideCount) % slideCount)
+  }, [slideCount, pauseAutoPlay])
+
+  const goTo = useCallback((index: number) => {
+    pauseAutoPlay()
+    setCurrentSlide(index)
+  }, [pauseAutoPlay])
+
+  const sliderControls = slideCount > 1 ? (
+    <div className="flex w-fit items-center gap-2 rounded-full border border-white/[0.06] bg-surface-950/62 px-2.5 py-2 backdrop-blur-md shadow-[0_14px_36px_rgba(0,0,0,0.28)]">
+      <button
+        onClick={goPrev}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-surface-400 transition-all duration-200 hover:bg-white/[0.06] hover:text-white"
+        aria-label="Previous"
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+
+      <div className="flex items-center gap-1.5 px-1">
+        {activeMarkets.map((_, index) => (
+          <button
+            key={index}
+            onClick={() => goTo(index)}
+            className={cn(
+              'relative overflow-hidden rounded-full transition-all duration-300',
+              index === currentSlide ? 'h-1.5 w-8 bg-white/[0.10]' : 'h-1.5 w-1.5 bg-white/[0.18] hover:bg-white/[0.28]'
+            )}
+            aria-label={`Go to market ${index + 1}`}
+          >
+            {index === currentSlide && isAutoPlaying && (
+              <motion.div
+                key={`progress-${currentSlide}`}
+                className="absolute inset-y-0 left-0 rounded-full bg-brand-400"
+                initial={{ width: '0%' }}
+                animate={{ width: '100%' }}
+                transition={{ duration: SLIDE_DURATION_MS / 1000, ease: 'linear' }}
+              />
+            )}
+            {index === currentSlide && !isAutoPlaying && (
+              <div className="absolute inset-0 rounded-full bg-brand-400" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={goNext}
+        className="flex h-8 w-8 items-center justify-center rounded-full text-surface-400 transition-all duration-200 hover:bg-white/[0.06] hover:text-white"
+        aria-label="Next"
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </div>
+  ) : null
 
   return (
-    <div className="grid lg:grid-cols-[1fr_320px] gap-4 mb-6">
-      {/* Left: Market Slider */}
-      <div className="relative rounded-2xl overflow-hidden min-h-[480px] border border-white/[0.04]">
+    <div className="mx-auto mb-6 max-w-[1360px] grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="glass-card relative min-h-[448px] overflow-hidden border border-white/[0.05] lg:min-h-[430px]">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(201,168,76,0.06),transparent_42%),radial-gradient(circle_at_bottom_left,rgba(0,220,130,0.05),transparent_30%)]" />
+          <div
+            className="absolute inset-0 opacity-[0.02]"
+            style={{
+              backgroundImage: 'linear-gradient(rgba(255,255,255,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.8) 1px, transparent 1px)',
+              backgroundSize: '48px 48px',
+            }}
+          />
+        </div>
+
         {activeMarkets.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center p-8">
-            <div className="w-14 h-14 rounded-2xl bg-brand-400/[0.06] border border-brand-400/[0.1] flex items-center justify-center mb-4">
-              <TrendingUp className="w-7 h-7 text-brand-400" />
+          <div className="relative flex h-full flex-col items-center justify-center p-10 text-center">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl border border-brand-400/14 bg-brand-400/[0.08]">
+              <TrendingUp className="h-8 w-8 text-brand-400" />
             </div>
-            <h3 className="text-lg font-display font-bold text-white mb-2">No Trending Markets</h3>
-            <p className="text-sm text-surface-400 mb-4">Create a market and start trading to appear here</p>
-            <button onClick={onCreateMarket} className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all"
-              style={{ background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)', color: '#08090c', boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25)' }}>
-              <Plus className="w-4 h-4" /> Create Market
+
+            <h3 className="font-display text-2xl font-bold text-white">
+              No Trending Markets
+            </h3>
+            <p className="mt-3 max-w-md text-sm leading-7 text-surface-400">
+              Create a market and start trading to give this dashboard a stronger signal.
+            </p>
+
+            <button
+              onClick={onCreateMarket}
+              className="mt-6 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all active:scale-[0.96]"
+              style={{
+                background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
+                color: '#08090c',
+                boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25)',
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Create Market
             </button>
           </div>
         ) : (
           <>
-            <AnimatePresence initial={false} mode="sync">
+            <AnimatePresence initial={false} mode="wait">
               <motion.div
                 key={activeMarkets[currentSlide]?.id ?? currentSlide}
                 variants={slideVariants}
@@ -380,127 +598,134 @@ export function DashboardHero({
                 animate="center"
                 exit="exit"
                 className="absolute inset-0"
-                style={{ willChange: 'transform, opacity', transformOrigin: 'center center' }}
+                style={{ willChange: 'transform, opacity' }}
               >
-                <motion.div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 z-[1]"
-                  initial={{ opacity: 0.03 }}
-                  animate={{ opacity: 0 }}
-                  exit={{ opacity: 0.02 }}
-                  transition={{ duration: 1.0, ease: IMAGE_REVEAL_EASE }}
-                  style={{ background: 'linear-gradient(180deg, rgba(9, 12, 18, 0.03) 0%, rgba(9, 12, 18, 0.06) 100%)' }}
+                <MarketSlide
+                  market={activeMarkets[currentSlide]}
+                  onClick={() => onMarketClick(activeMarkets[currentSlide])}
+                  controls={sliderControls}
                 />
-                <MarketSlide market={activeMarkets[currentSlide]} onClick={() => onMarketClick(activeMarkets[currentSlide])} />
               </motion.div>
             </AnimatePresence>
-
-            {slideCount > 1 && (
-              <>
-                <button onClick={goPrev} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-surface-950/60 border border-white/[0.06] text-surface-400 hover:text-white hover:bg-surface-950/80 hover:border-white/[0.12] hover:scale-110 active:scale-95 transition-all duration-200 backdrop-blur-md z-10" aria-label="Previous">
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button onClick={goNext} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-surface-950/60 border border-white/[0.06] text-surface-400 hover:text-white hover:bg-surface-950/80 hover:border-white/[0.12] hover:scale-110 active:scale-95 transition-all duration-200 backdrop-blur-md z-10" aria-label="Next">
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 z-10">
-                  {activeMarkets.map((_, i) => (
-                    <button key={i} onClick={() => goTo(i)}
-                      className={cn(
-                        'relative rounded-full transition-all duration-500 overflow-hidden',
-                        i === currentSlide ? 'w-8 h-1.5 bg-white/[0.1]' : 'w-1.5 h-1.5 bg-white/[0.1] hover:bg-white/[0.25]'
-                      )}
-                      aria-label={`Go to market ${i + 1}`}
-                    >
-                      {i === currentSlide && isAutoPlaying && (
-                        <motion.div
-                          className="absolute inset-y-0 left-0 bg-brand-400 rounded-full"
-                          initial={{ width: '0%' }}
-                          animate={{ width: '100%' }}
-                          transition={{ duration: SLIDE_DURATION_MS / 1000, ease: 'linear' }}
-                          key={`progress-${currentSlide}`}
-                        />
-                      )}
-                      {i === currentSlide && !isAutoPlaying && (
-                        <div className="absolute inset-0 bg-brand-400 rounded-full" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-            <div className="hidden">
-              <Zap className="w-3 h-3" /> Featured
-            </div>
           </>
         )}
       </div>
 
-      {/* Right: Platform Stats Panel */}
-      <div className="rounded-2xl p-5 flex flex-col border border-white/[0.04]">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-white">Platform Stats</h2>
-          <div className="flex items-center gap-1.5">
-            <button onClick={onCreateMarket}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs active:scale-[0.96] transition-all"
-              style={{ background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)', color: '#08090c', boxShadow: '0 2px 8px rgba(201, 168, 76, 0.2)' }}>
-              <Plus className="w-3.5 h-3.5" /> New Market
-            </button>
+      <div className="glass-card flex flex-col rounded-2xl border border-white/[0.05] p-3.5 lg:p-4">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-surface-500">
+              Market Pulse
+            </p>
+          </div>
+
+          <button
+            onClick={onCreateMarket}
+            className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-all active:scale-[0.96]"
+            style={{
+              background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
+              color: '#08090c',
+              boxShadow: '0 2px 8px rgba(201, 168, 76, 0.2)',
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Market
+          </button>
+        </div>
+
+        <div className="mb-3 grid grid-cols-2 gap-3">
+          <KpiCard
+            icon={<Activity className="h-4 w-4" />}
+            label="Active Markets"
+            value={activeMarketCount.toLocaleString()}
+            color="text-yes-400"
+          />
+          <KpiCard
+            icon={<Trophy className="h-4 w-4" />}
+            label="Total Bets"
+            value={totalBets.toLocaleString()}
+            color="text-brand-300"
+          />
+        </div>
+
+        <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-surface-500">
+            Liquidity by Token
+          </p>
+
+          <div className="divide-y divide-white/[0.04]">
+            <StatRow
+              icon={<img src="/aleo-logo.png" alt="ALEO" className="h-4 w-4 rounded-full object-contain" />}
+              label="ALEO Volume"
+              value={`${formatCredits(aleoVolume)} ALEO`}
+              color="text-brand-400"
+            />
+            <StatRow
+              icon={<img src="/usdcx-logo.png" alt="USDCX" className="h-4 w-4 rounded-full object-contain" />}
+              label="USDCX Volume"
+              value={`${formatCredits(usdcxVolume)} USDCX`}
+              color="text-blue-400"
+            />
+            <StatRow
+              icon={<img src="/usad-logo.svg" alt="USAD" className="h-4 w-4 rounded-full object-contain" />}
+              label="USAD Volume"
+              value={`${formatCredits(usadVolume)} USAD`}
+              color="text-purple-400"
+            />
           </div>
         </div>
 
-        <div className="flex-1 divide-y divide-white/[0.04]">
-          <StatRow icon={<img src="/aleo-logo.png" alt="ALEO" className="w-4 h-4 rounded-full object-contain" />} label="Volume (ALEO)" value={formatCredits(markets.filter(m => !m.tokenType || m.tokenType === 'ALEO').reduce((s, m) => s + m.totalVolume, 0n)) + ' ALEO'} color="text-brand-400" />
-          <StatRow icon={<img src="/usdcx-logo.png" alt="USDCX" className="w-4 h-4 rounded-full object-contain" />} label="Volume (USDCX)" value={formatCredits(markets.filter(m => m.tokenType === 'USDCX').reduce((s, m) => s + m.totalVolume, 0n)) + ' USDCX'} color="text-blue-400" />
-          <StatRow icon={<img src="/usad-logo.svg" alt="USAD" className="w-4 h-4 rounded-full object-contain" />} label="Volume (USAD)" value={formatCredits(markets.filter(m => m.tokenType === 'USAD').reduce((s, m) => s + m.totalVolume, 0n)) + ' USAD'} color="text-purple-400" />
-          <StatRow icon={<Activity className="w-4 h-4" />} label="Active Markets" value={String(markets.filter(m => m.status === 1 && m.timeRemaining !== 'Ended').length)} color="text-yes-400" />
-          <StatRow icon={<Trophy className="w-4 h-4" />} label="Total Bets" value={String(markets.reduce((sum, m) => sum + m.totalBets, 0))} color="text-brand-300" />
-        </div>
+        <div className="mt-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Activity className="h-4 w-4 text-brand-400" />
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-surface-500">
+              Recent Activity
+            </p>
+          </div>
 
-        {/* Recent Activity — auto-scrolling ticker */}
-        {activityFeed.length > 0 && (() => {
-          const itemHeight = 36
-          const doubled = [...activityFeed, ...activityFeed]
-          const totalHeight = activityFeed.length * itemHeight
-          const visibleHeight = Math.min(itemHeight * 4, totalHeight)
-          return (
-            <div className="mt-3 pt-3 border-t border-white/[0.04]">
-              <div className="flex items-center gap-2 mb-2.5">
-                <Zap className="w-3.5 h-3.5 text-brand-400" />
-                <span className="text-xs font-semibold text-white">Recent Activity</span>
-              </div>
+          {recentActivity.length > 0 ? (
+            <div
+              className="relative overflow-hidden rounded-xl border border-white/[0.04] bg-surface-950/36"
+              style={{ height: activityVisibleHeight }}
+            >
               <div
-                className="relative overflow-hidden rounded-xl"
-                style={{ height: visibleHeight }}
+                className={recentActivity.length > 1 ? 'animate-ticker-up' : undefined}
+                style={{
+                  '--ticker-distance': `-${activityTotalHeight}px`,
+                  animationDuration: `${recentActivity.length * 4}s`,
+                } as CSSProperties}
               >
-                <div
-                  className="animate-ticker-up"
-                  style={{
-                    '--ticker-distance': `-${totalHeight}px`,
-                    animationDuration: `${activityFeed.length * 4}s`,
-                  } as React.CSSProperties}
-                >
-                  {doubled.map((item, i) => (
-                    <div
-                      key={`${item.id}-${i}`}
-                      onClick={() => { const m = markets.find(mk => mk.id === item.marketId); if (m) onMarketClick(m) }}
-                      className="flex items-center gap-2.5 px-2.5 w-full hover:bg-white/[0.03] cursor-pointer transition-colors"
-                      style={{ height: itemHeight }}
-                    >
-                      <div className="w-1.5 h-1.5 rounded-full bg-brand-400 flex-shrink-0" />
-                      <p className="text-[11px] text-surface-400 flex-1 truncate">{item.message}</p>
-                      <ChevronRight className="w-3 h-3 text-surface-600 flex-shrink-0" />
-                    </div>
-                  ))}
-                </div>
+                {activityTickerItems.map((item, index) => (
+                  <button
+                    key={`${item.id}-${index}`}
+                    onClick={() => {
+                      const market = markets.find(entry => entry.id === item.marketId)
+                      if (market) onMarketClick(market)
+                    }}
+                    className="flex w-full items-center gap-3 px-3 text-left transition-colors hover:bg-white/[0.03]"
+                    style={{ height: activityItemHeight }}
+                  >
+                    <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400" />
+                    <p className="flex-1 truncate text-sm text-surface-400">
+                      {item.message}
+                    </p>
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-surface-600" />
+                  </button>
+                ))}
               </div>
             </div>
-          )
-        })()}
+          ) : (
+            <div className="rounded-xl border border-dashed border-white/[0.06] px-3 py-4 text-sm text-surface-500">
+              Activity will appear here once markets start moving.
+            </div>
+          )}
+        </div>
 
-        <div className="mt-3 pt-3 border-t border-white/[0.04] flex items-center justify-center gap-2 text-xs text-surface-500">
-          <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
-          <span>Live on Aleo Testnet</span>
+        <div className="mt-auto pt-3">
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.05] bg-white/[0.02] px-4 py-3 text-xs text-surface-500">
+            <div className="h-1.5 w-1.5 rounded-full bg-yes-400 animate-pulse" />
+            <span>Live on Aleo Testnet</span>
+          </div>
         </div>
       </div>
     </div>
