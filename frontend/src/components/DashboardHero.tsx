@@ -123,7 +123,7 @@ function MarketSlide({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 flex-1 lg:max-w-[70%]">
             <button onClick={onClick} className="text-left">
-              <h3 className="font-display text-[1.08rem] font-bold leading-[1.18] text-white transition-colors hover:text-brand-300 text-balance lg:text-[1.38rem]">
+              <h3 className="font-display text-[1rem] font-bold leading-[1.2] text-white transition-colors hover:text-brand-300 text-balance lg:text-[1.28rem]">
                 {market.question}
               </h3>
             </button>
