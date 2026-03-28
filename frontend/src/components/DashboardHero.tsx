@@ -120,27 +120,29 @@ function MarketSlide({
           </div>
         </div>
 
-        <div className="max-w-4xl">
-          <button onClick={onClick} className="text-left">
-            <h3 className="font-display text-[1.08rem] font-bold leading-[1.18] text-white transition-colors hover:text-brand-300 text-balance lg:text-[1.38rem]">
-              {market.question}
-            </h3>
-          </button>
-        </div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1 lg:max-w-[70%]">
+            <button onClick={onClick} className="text-left">
+              <h3 className="font-display text-[1.08rem] font-bold leading-[1.18] text-white transition-colors hover:text-brand-300 text-balance lg:text-[1.38rem]">
+                {market.question}
+              </h3>
+            </button>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-xs text-surface-500">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-3 py-1.5">
-            <TrendingUp className="h-3.5 w-3.5" />
-            <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}</span>
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-3 py-1.5">
-            <span className="tabular-nums">{market.totalBets}</span>
-            <span>bets</span>
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-3 py-1.5">
-            <span className="tabular-nums">{numOutcomes}</span>
-            <span>{numOutcomes === 1 ? 'outcome' : 'outcomes'}</span>
-          </span>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-surface-500 lg:max-w-[30%] lg:justify-end lg:pl-4">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
+              <TrendingUp className="h-3.5 w-3.5" />
+              <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
+              <span className="tabular-nums">{market.totalBets}</span>
+              <span>bets</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
+              <span className="tabular-nums">{numOutcomes}</span>
+              <span>{numOutcomes === 1 ? 'outcome' : 'outcomes'}</span>
+            </span>
+          </div>
         </div>
       </div>
 
