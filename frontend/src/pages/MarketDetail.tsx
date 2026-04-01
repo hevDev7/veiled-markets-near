@@ -1344,9 +1344,9 @@ export function MarketDetail() {
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Contract</span>
-                            <a href={`https://testnet.explorer.provable.com/program/${CONTRACT_INFO.programId}`} target="_blank" rel="noopener noreferrer"
+                            <a href={`https://testnet.explorer.provable.com/program/${getProgramIdForToken(tokenType)}`} target="_blank" rel="noopener noreferrer"
                               className="text-brand-400 hover:text-brand-300 flex items-center gap-1 text-xs">
-                              {CONTRACT_INFO.programId} <ExternalLink className="w-3 h-3" />
+                              {getProgramIdForToken(tokenType)} <ExternalLink className="w-3 h-3" />
                             </a>
                           </div>
                         </div>
@@ -2169,9 +2169,9 @@ export function MarketDetail() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Contract</span>
-                    <a href={`https://testnet.explorer.provable.com/program/${CONTRACT_INFO.programId}`} target="_blank" rel="noopener noreferrer"
+                    <a href={`https://testnet.explorer.provable.com/program/${getProgramIdForToken(tokenType)}`} target="_blank" rel="noopener noreferrer"
                       className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
-                      {CONTRACT_INFO.programId.slice(0, 12)}... <ExternalLink className="w-3 h-3" />
+                      {getProgramIdForToken(tokenType).slice(0, 20)}... <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
                 </div>
