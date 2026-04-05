@@ -1,19 +1,25 @@
-import { LayoutDashboard, TrendingUp, Plus, Vote, Settings } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, Plus, Vote, Ticket } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useWalletStore } from '@/lib/store'
 
-const items = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Markets' },
-  { href: '/portfolio', icon: TrendingUp, label: 'Portfolio' },
-  { href: '/create', icon: Plus, label: 'Create' },
-  { href: '/governance', icon: Vote, label: 'Govern' },
+const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
+
+const allItems = [
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Markets', adminOnly: false },
+  { href: '/portfolio', icon: TrendingUp, label: 'Portfolio', adminOnly: false },
+  { href: '/my-parlays', icon: Ticket, label: 'Parlays', adminOnly: true },
+  { href: '/create', icon: Plus, label: 'Create', adminOnly: false },
+  { href: '/governance', icon: Vote, label: 'Govern', adminOnly: false },
 ]
 
 export function MobileNav() {
   const location = useLocation()
   const { wallet } = useWalletStore()
   if (!wallet.connected) return null
+
+  const isAdmin = wallet.address === ADMIN_ADDRESS
+  const items = allItems.filter(item => !item.adminOnly || isAdmin)
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-surface-950/90 backdrop-blur-xl border-t border-white/[0.04]">

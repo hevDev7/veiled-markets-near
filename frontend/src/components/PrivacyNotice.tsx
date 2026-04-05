@@ -74,7 +74,7 @@ export function PrivacyNotice({
                             </li>
                             <li className="flex items-start gap-2">
                                 <Lock className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                                <span>Your position (YES/NO) is <strong>hidden</strong> - only you can decrypt it</span>
+                                <span>Your selected outcome and position are <strong>hidden</strong> - only you can decrypt them</span>
                             </li>
                             <li className="flex items-start gap-2">
                                 <Shield className="w-3 h-3 mt-0.5 flex-shrink-0" />
@@ -91,7 +91,7 @@ export function PrivacyNotice({
                                 <p className="font-semibold">What's Private:</p>
                                 <ul className="space-y-1 text-xs opacity-90 ml-4">
                                     <li>• Bet amount (fully encrypted)</li>
-                                    <li>• Bet position (YES/NO hidden)</li>
+                                    <li>• Selected outcome and resulting share position</li>
                                     <li>• Winning claims (payout amounts private)</li>
                                     <li>• Your identity (not linked to bets)</li>
                                 </ul>
@@ -101,7 +101,7 @@ export function PrivacyNotice({
                                     <li>• Market question and details</li>
                                     <li>• Total pool size (aggregate only)</li>
                                     <li>• Market resolution outcome</li>
-                                    <li>• Pool distribution (YES/NO totals)</li>
+                                    <li>• Aggregate pool distribution across active outcomes</li>
                                 </ul>
 
                                 <p className="font-semibold mt-3">Privacy Best Practices:</p>

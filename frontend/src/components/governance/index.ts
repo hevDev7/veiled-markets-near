@@ -11,3 +11,5 @@ export { DelegateModal } from './DelegateModal';
 export { GovernanceStats } from './GovernanceStats';
 export { RewardClaimPanel } from './RewardClaimPanel';
 export { ResolverPanel } from './ResolverPanel';
+export { EscalationPanel } from './EscalationPanel';
+export { ActorDetailDrawer } from './ActorDetailDrawer';

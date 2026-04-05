@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   ArrowLeft,
   Activity,
@@ -18,7 +18,6 @@ import {
   Copy,
   Check,
   Droplets,
-  ShieldAlert,
   Shield,
   Coins,
   ShoppingCart,
@@ -26,12 +25,14 @@ import {
   Wallet,
   RefreshCw,
   ChevronDown,
+  Ticket,
 } from 'lucide-react'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useWalletStore, useBetsStore, type Market, CONTRACT_INFO, outcomeToString } from '@/lib/store'
+import { useWalletStore, useBetsStore, type Market, outcomeToString } from '@/lib/store'
 import { config } from '@/lib/config'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
+import { useMarketGovernanceConfig } from '@/hooks/useMarketGovernanceConfig'
 import { useRealMarketsStore } from '@/lib/market-store'
 import {
   buildBuySharesInputs,
@@ -41,6 +42,8 @@ import {
   getMarketResolution,
   getMarketFees,
   getMarketDispute,
+  getMarketGovernanceConfig,
+  getProgramIdForMarket,
   getProgramIdForToken,
   diagnoseTransaction,
   MARKET_STATUS,
@@ -48,6 +51,7 @@ import {
   type MarketFeesData,
   type DisputeDataResult,
 } from '@/lib/aleo-client'
+import { useParlayStore } from '@/lib/parlay-store'
 import { OddsChart } from '@/components/OddsChart'
 import { CryptoPriceChart } from '@/components/CryptoPriceChart'
 // fetchCreditsRecord dynamically imported where needed for buy_shares_private
@@ -72,7 +76,8 @@ import { LiquidityPanel } from '@/components/LiquidityPanel'
 // DisputePanel removed in v33 — challenge integrated in ResolvePanel
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
-import { cn, formatCredits, getTokenSymbol, sanitizeUrl, safeHostname, isValidAleoAddress } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getTokenSymbol, isValidAleoAddress } from '@/lib/utils'
+import { getLeadingOutcome, getOutcomeSummaryForBet } from '@/lib/market-outcomes'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { fetchBetCountByMarket } from '@/lib/supabase'
@@ -146,30 +151,6 @@ function MarketStatusBadgeWrapper({ status }: { status: number }) {
   return <StatusBadge variant={variant} size="md" />
 }
 
-const DESC_LIMIT = 150
-
-function ExpandableDescription({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const needsTruncation = text.length > DESC_LIMIT
-
-  return (
-    <div className="mb-6">
-      <p className="text-surface-400">
-        {expanded || !needsTruncation ? text : `${text.slice(0, DESC_LIMIT)}...`}
-      </p>
-      {needsTruncation && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-brand-400 hover:text-brand-300 text-sm mt-1 flex items-center gap-1 transition-colors"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-          <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', expanded && 'rotate-180')} />
-        </button>
-      )}
-    </div>
-  )
-}
-
 // ── Hero Description with Read More ──
 function HeroDescription({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -204,20 +185,18 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
 
   // Build ticker items — show leading outcome label + price
   const items = useMemo(() => {
-    const list: Array<{ id: string; text: string; token: string; leadLabel: string; leadPrice: number; direction: 'yes' | 'no' }> = []
+    const list: Array<{ id: string; text: string; token: string; leadLabel: string; leadPercentage: number; styles: { dot: string; text: string } }> = []
     for (const m of otherMarkets) {
-      const yesPrice = (m.yesPercentage ?? 50) / 100
-      const noPrice = (m.noPercentage ?? 50) / 100
-      const isYesLeading = yesPrice >= noPrice
-      const labels = m.outcomeLabels ?? ['Yes', 'No']
+      const leadingOutcome = getLeadingOutcome(m)
+      if (!leadingOutcome) continue
       const label = m.question.length > 50 ? m.question.slice(0, 50) + '...' : m.question
       list.push({
         id: m.id,
         text: label,
         token: m.tokenType ?? 'ALEO',
-        leadLabel: isYesLeading ? labels[0] : labels[1],
-        leadPrice: isYesLeading ? yesPrice : noPrice,
-        direction: isYesLeading ? 'yes' : 'no',
+        leadLabel: leadingOutcome.label,
+        leadPercentage: leadingOutcome.percentage,
+        styles: leadingOutcome.styles,
       })
     }
     return list
@@ -250,22 +229,13 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
               className="flex items-center gap-3 w-full px-3 text-left hover:bg-white/[0.03] transition-colors"
               style={{ height: itemHeight }}
             >
-              <span className={cn(
-                'w-1.5 h-1.5 rounded-full shrink-0',
-                item.direction === 'yes' ? 'bg-yes-400' : 'bg-no-400'
-              )} />
+              <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', item.styles.dot)} />
               <span className="flex-1 text-xs text-surface-300 truncate">{item.text}</span>
-              <span className={cn(
-                'text-[11px] font-semibold shrink-0',
-                item.direction === 'yes' ? 'text-yes-400' : 'text-no-400'
-              )}>
+              <span className={cn('text-[11px] font-semibold shrink-0', item.styles.text)}>
                 {item.leadLabel}
               </span>
-              <span className={cn(
-                'text-xs font-bold tabular-nums shrink-0',
-                item.direction === 'yes' ? 'text-yes-400' : 'text-no-400'
-              )}>
-                ${item.leadPrice.toFixed(2)}
+              <span className={cn('text-xs font-bold tabular-nums shrink-0', item.styles.text)}>
+                {formatPercentage(item.leadPercentage)}
               </span>
             </button>
           ))}
@@ -330,6 +300,7 @@ export function MarketDetail() {
   // Ref for mobile scroll-to-trading
   const tradingPanelRef = useRef<HTMLDivElement>(null)
   const tabPanelRef = useRef<HTMLDivElement>(null)
+  const isWalletConnected = wallet.connected && Boolean(wallet.address)
 
   // Close tab panels when clicking outside
   useEffect(() => {
@@ -400,12 +371,10 @@ export function MarketDetail() {
     if (!market?.id) return
     const fetchExtras = async () => {
       try {
-        const tokenType = market.tokenType || 'ALEO'
-        const pid = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
         const [res, feesData, disputeData] = await Promise.all([
-          getMarketResolution(market.id, pid),
-          getMarketFees(market.id, pid),
-          getMarketDispute(market.id, pid),
+          getMarketResolution(market.id, getProgramIdForMarket((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD', market.programId)),
+          getMarketFees(market.id, getProgramIdForMarket((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD', market.programId)),
+          getMarketDispute(market.id, getProgramIdForMarket((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD', market.programId)),
         ])
         if (res) setResolution(res)
         if (feesData) setFees(feesData)
@@ -415,7 +384,7 @@ export function MarketDetail() {
       }
     }
     fetchExtras()
-  }, [market?.id])
+  }, [market?.id, market?.tokenType, market?.programId])
 
   // Live expiry check
   useEffect(() => {
@@ -439,6 +408,12 @@ export function MarketDetail() {
   }, [market?.id, market?.deadline, market?.status])
 
   const isExpired = market ? (liveExpired || market.timeRemaining === 'Ended' || market.status !== 1) : false
+  const tokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const marketProgramId = market ? getProgramIdForMarket(tokenType, market.programId) : getProgramIdForToken(tokenType)
+  const governanceConfig = useMarketGovernanceConfig(tokenType)
+  const totalFeePercent = Number(
+    governanceConfig.protocolFeeBps + governanceConfig.creatorFeeBps + governanceConfig.lpFeeBps
+  ) / 100
 
   // Live countdown with seconds
   const liveTimeRemaining = useLiveCountdown(market?.deadlineTimestamp, market?.timeRemaining)
@@ -465,16 +440,21 @@ export function MarketDetail() {
     const num = parseFloat(buyAmount) || 0
     return BigInt(Math.floor(num * 1_000_000))
   }, [buyAmount])
+  const buyMeetsMinTrade = buyAmountMicro >= governanceConfig.minTradeAmount
 
   const tradePreview = useMemo(() => {
     if (!reserves || !selectedOutcome || buyAmountMicro <= 0n) {
       return null
     }
 
-    const sharesOut = calculateBuySharesOut(reserves, selectedOutcome, buyAmountMicro)
+    if (governanceConfig.pauseState || !buyMeetsMinTrade) {
+      return null
+    }
+
+    const sharesOut = calculateBuySharesOut(reserves, selectedOutcome, buyAmountMicro, governanceConfig)
     const minShares = calculateMinSharesOut(sharesOut, slippage)
-    const priceImpact = calculateBuyPriceImpact(reserves, selectedOutcome, buyAmountMicro)
-    const feeBreakdown = calculateFees(buyAmountMicro)
+    const priceImpact = calculateBuyPriceImpact(reserves, selectedOutcome, buyAmountMicro, governanceConfig)
+    const feeBreakdown = calculateFees(buyAmountMicro, governanceConfig)
 
     // Potential payout: winning shares redeem 1:1 (use minShares — matches on-chain record quantity)
     const potentialPayout = Number(minShares) / 1_000_000
@@ -486,7 +466,7 @@ export function MarketDetail() {
       fees: feeBreakdown,
       potentialPayout,
     }
-  }, [reserves, selectedOutcome, buyAmountMicro, slippage])
+  }, [reserves, selectedOutcome, buyAmountMicro, slippage, governanceConfig, buyMeetsMinTrade])
 
   // ---- Sell computed values ----
   const parsedShareRecord = useMemo(() => {
@@ -504,22 +484,24 @@ export function MarketDetail() {
 
   const sellMaxTokens = useMemo(() => {
     if (!reserves || !parsedShareRecord || parsedShareRecord.quantity <= 0n) return 0n
-    return calculateMaxTokensDesired(reserves, parsedShareRecord.outcome, parsedShareRecord.quantity)
-  }, [reserves, parsedShareRecord])
+    return calculateMaxTokensDesired(reserves, parsedShareRecord.outcome, parsedShareRecord.quantity, governanceConfig)
+  }, [reserves, parsedShareRecord, governanceConfig])
 
   const sellTokensMicro = useMemo(() => {
     const num = parseFloat(sellTokensDesired) || 0
     return BigInt(Math.floor(num * 1_000_000))
   }, [sellTokensDesired])
+  const sellMeetsMinTrade = sellTokensMicro >= governanceConfig.minTradeAmount
 
   const sellPreview = useMemo(() => {
     if (!reserves || !parsedShareRecord || sellTokensMicro <= 0n) return null
-    const sharesNeeded = calculateSellSharesNeeded(reserves, parsedShareRecord.outcome, sellTokensMicro)
+    if (governanceConfig.pauseState || !sellMeetsMinTrade) return null
+    const sharesNeeded = calculateSellSharesNeeded(reserves, parsedShareRecord.outcome, sellTokensMicro, governanceConfig)
     if (sharesNeeded <= 0n) return null
     const maxSharesUsed = (sharesNeeded * BigInt(Math.floor((100 + sellSlippage) * 100))) / 10000n
-    const netTokens = calculateSellNetTokens(sellTokensMicro)
-    const fees = calculateFees(sellTokensMicro)
-    const priceImpact = calculateSellPriceImpact(reserves, parsedShareRecord.outcome, sellTokensMicro)
+    const netTokens = calculateSellNetTokens(sellTokensMicro, governanceConfig)
+    const fees = calculateFees(sellTokensMicro, governanceConfig)
+    const priceImpact = calculateSellPriceImpact(reserves, parsedShareRecord.outcome, sellTokensMicro, governanceConfig)
     return {
       sharesNeeded,
       maxSharesUsed,
@@ -528,7 +510,7 @@ export function MarketDetail() {
       priceImpact,
       exceedsBalance: maxSharesUsed > parsedShareRecord.quantity,
     }
-  }, [reserves, parsedShareRecord, sellTokensMicro, sellSlippage])
+  }, [reserves, parsedShareRecord, sellTokensMicro, sellSlippage, governanceConfig, sellMeetsMinTrade])
 
   // Sell handler
   const handleSellShares = async () => {
@@ -538,22 +520,39 @@ export function MarketDetail() {
     setSellError(null)
 
     try {
+      if (!wallet.address) {
+        throw new Error('Connect your wallet before selling shares.')
+      }
+
       if (sellPreview.exceedsBalance) {
         throw new Error(
           `Need ${formatCredits(sellPreview.maxSharesUsed)} shares (with ${sellSlippage}% slippage) but only have ${formatCredits(parsedShareRecord.quantity)}.`
         )
       }
 
+      if (governanceConfig.pauseState) {
+        throw new Error('Trading is currently paused by governance.')
+      }
+
+      if (!sellMeetsMinTrade) {
+        throw new Error(
+          `Minimum trade amount is ${(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} ${tokenSymbol}.`
+        )
+      }
+
       const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
-      const { functionName, inputs, programId: sellProgramId } = buildSellSharesInputs(
+      const sellProgramId = getProgramIdForToken(tokenType)
+      const feeConfig = await getMarketGovernanceConfig(sellProgramId)
+      const { functionName, inputs, programId } = buildSellSharesInputs(
         sellShareRecord,
         sellTokensMicro,
         sellPreview.maxSharesUsed,
         tokenType,
+        feeConfig,
       )
 
       const result = await executeTransaction({
-        program: sellProgramId,
+        program: programId,
         function: functionName,
         inputs,
         fee: 1.5,
@@ -616,6 +615,11 @@ export function MarketDetail() {
   }
 
   const handleFetchRecords = async () => {
+    if (!isWalletConnected) {
+      setFetchRecordError('Connect your wallet to load private share positions for this market.')
+      return
+    }
+
     setIsFetchingRecords(true)
     setFetchRecordError(null)
     try {
@@ -638,12 +642,10 @@ export function MarketDetail() {
 
   // Auto-fetch share records when switching to sell tab
   useEffect(() => {
-    if (tradeMode === 'sell' && walletShareRecords.length === 0 && !isFetchingRecords && market) {
+    if (tradeMode === 'sell' && isWalletConnected && walletShareRecords.length === 0 && !isFetchingRecords && market) {
       handleFetchRecords()
     }
-  }, [tradeMode, market?.id])
-
-  if (!wallet.connected) return null
+  }, [tradeMode, market?.id, isWalletConnected])
 
   if (!market) {
     // Still loading markets — show skeleton instead of "Not Found"
@@ -725,9 +727,7 @@ export function MarketDetail() {
     )
   }
 
-  const tokenSymbol = getTokenSymbol(market.tokenType)
-  const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
-  const isUsdcx = tokenType === 'USDCX'
+  const tokenSymbol = getTokenSymbol(tokenType)
   const isStablecoin = tokenType === 'USDCX' || tokenType === 'USAD'
   const numOutcomes = market.numOutcomes ?? 2
   const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
@@ -738,10 +738,19 @@ export function MarketDetail() {
 
     setStep('processing')
     setError(null)
+    let releaseSelectedRecord: (() => void) | null = null
 
     try {
+      if (!wallet.address) {
+        throw new Error('Connect your wallet before placing a trade.')
+      }
+
       if (!market.id.endsWith('field')) {
         throw new Error('This market cannot accept trades yet. The market ID must be in blockchain field format.')
+      }
+
+      if (governanceConfig.pauseState) {
+        throw new Error('Trading is currently paused by governance.')
       }
 
       // Pre-flight: Verify market deadline
@@ -762,8 +771,10 @@ export function MarketDetail() {
       }
 
       // Pre-flight: Minimum trade amount
-      if (buyAmountMicro < 1000n) {
-        throw new Error('Minimum trade amount is 0.001 tokens (1000 microcredits).')
+      if (!buyMeetsMinTrade) {
+        throw new Error(
+          `Minimum trade amount is ${(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} ${tokenSymbol}.`
+        )
       }
 
       // Pre-flight: Balance verification
@@ -784,7 +795,6 @@ export function MarketDetail() {
       // Build inputs
       let functionName: string
       let inputs: string[]
-      let releaseSelectedRecord: (() => void) | null = null
 
       {
         // expectedShares = minShares (conservative) so record quantity <= actual shares_out
@@ -948,7 +958,13 @@ export function MarketDetail() {
   const quickAmounts = [1, 5, 10, 25, 50, 100]
 
   // Determine which panels to show based on market status
-  const showResolve = isExpired || market.status === MARKET_STATUS.CLOSED || market.status === MARKET_STATUS.PENDING_RESOLUTION || market.status === MARKET_STATUS.RESOLVED
+  const showResolve = market.status !== MARKET_STATUS.CANCELLED && (
+    isExpired
+    || market.status === MARKET_STATUS.CLOSED
+    || market.status === MARKET_STATUS.PENDING_RESOLUTION
+    || market.status === MARKET_STATUS.PENDING_FINALIZATION
+    || market.status === MARKET_STATUS.RESOLVED
+  )
   // v33: showDispute removed — challenge is in ResolvePanel
   const showCreatorFees = market.status === MARKET_STATUS.RESOLVED && fees && wallet.address === market.creator
   const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired
@@ -961,12 +977,10 @@ export function MarketDetail() {
     try {
       // Refresh markets to get updated status (e.g. ACTIVE → CLOSED)
       await fetchMarkets()
-      const tt = market.tokenType || 'ALEO'
-      const programId = getProgramIdForToken(tt as 'ALEO' | 'USDCX' | 'USAD')
       const [res, feesData, disputeData] = await Promise.all([
-        getMarketResolution(market.id, programId),
-        getMarketFees(market.id, programId),
-        getMarketDispute(market.id, programId),
+        getMarketResolution(market.id, marketProgramId),
+        getMarketFees(market.id, marketProgramId),
+        getMarketDispute(market.id, marketProgramId),
       ])
       if (res) setResolution(res)
       if (feesData) setFees(feesData)
@@ -1231,26 +1245,33 @@ export function MarketDetail() {
                               <>
                                 <p className="text-2xs font-heading font-semibold text-surface-400 uppercase tracking-wider">Your Trades</p>
                                 {marketBets.map((bet, i) => {
-                                  const isYes = bet.outcome === 'yes' || bet.outcome === 'outcome_1'
-                                  const label = outcomeLabels[(bet.outcome === 'yes' ? 0 : bet.outcome === 'no' ? 1 : parseInt(bet.outcome.replace('outcome_', '')) - 1)] || bet.outcome.toUpperCase()
+                                  const outcomeSummary = getOutcomeSummaryForBet(market, bet.outcome)
+                                  const label = outcomeSummary?.label || bet.outcome.toUpperCase()
                                   const isSell = bet.type === 'sell'
                                   const amount = Number(bet.amount) / 1_000_000
                                   const shares = bet.sharesReceived ? Number(bet.sharesReceived) / 1_000_000 : amount
+                                  const badgeText = isSell ? 'S' : String(outcomeSummary?.outcome ?? '?')
+                                  const outcomeColor = outcomeSummary?.styles
 
                                   return (
                                     <motion.div key={bet.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
                                       className="flex items-center gap-4 px-4 py-3 rounded-xl bg-white/[0.01] hover:bg-white/[0.02] transition-colors duration-200">
-                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-                                        isSell ? 'bg-purple-500/10 text-purple-400' : isYes ? 'bg-yes-400/10 text-yes-400' : 'bg-no-400/10 text-no-400'
-                                      }`}>
-                                        {isSell ? 'S' : isYes ? 'Y' : 'N'}
+                                      <div className={cn(
+                                        'w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold',
+                                        isSell
+                                          ? 'bg-purple-500/10 text-purple-400'
+                                          : outcomeColor
+                                            ? `${outcomeColor.bg} ${outcomeColor.text}`
+                                            : 'bg-white/[0.06] text-surface-300'
+                                      )}>
+                                        {badgeText}
                                       </div>
                                       <div className="flex-1 min-w-0">
                                         <p className="text-sm text-white">
                                           <span className="text-surface-400">You</span>
                                           {isSell ? ' sold ' : ' bought '}
-                                          <span className={isYes ? 'text-yes-400 font-semibold' : 'text-no-400 font-semibold'}>
-                                            {shares.toFixed(1)} {label.toUpperCase()}
+                                          <span className={cn('font-semibold', outcomeColor?.text || 'text-white')}>
+                                            {shares.toFixed(1)} {label}
                                           </span>
                                         </p>
                                         <p className="text-xs text-surface-500">{getTimeAgo(bet.placedAt)}</p>
@@ -1340,13 +1361,13 @@ export function MarketDetail() {
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Trading Fees</span>
-                            <span className="text-white font-medium">2%</span>
+                            <span className="text-white font-medium">{totalFeePercent.toFixed(2)}%</span>
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Contract</span>
-                            <a href={`https://testnet.explorer.provable.com/program/${getProgramIdForToken(tokenType)}`} target="_blank" rel="noopener noreferrer"
+                            <a href={`https://testnet.explorer.provable.com/program/${marketProgramId}`} target="_blank" rel="noopener noreferrer"
                               className="text-brand-400 hover:text-brand-300 flex items-center gap-1 text-xs">
-                              {getProgramIdForToken(tokenType)} <ExternalLink className="w-3 h-3" />
+                              {marketProgramId} <ExternalLink className="w-3 h-3" />
                             </a>
                           </div>
                         </div>
@@ -1482,6 +1503,12 @@ export function MarketDetail() {
                   <h2 className="text-lg font-semibold text-white mb-4">
                     {isExpired ? 'Market Expired' : 'Buy Shares'}
                   </h2>
+                )}
+
+                {!isWalletConnected && step === 'select' && (
+                  <div className="mb-4 rounded-xl border border-brand-500/20 bg-brand-500/8 px-4 py-3 text-sm text-brand-100">
+                    You are viewing this market in read-only mode. Connect a wallet to trade, resolve, or inspect private positions from this page.
+                  </div>
                 )}
 
                 {/* Expired State */}
@@ -1662,7 +1689,7 @@ export function MarketDetail() {
                         </div>
 
                         <div className="mt-2 space-y-1">
-                          {wallet.balance.public === 0n && (
+                          {isWalletConnected && wallet.balance.public === 0n && (
                             <div className="flex items-start gap-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 mb-1">
                               <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
                               <p className="text-xs text-yellow-300 leading-relaxed">
@@ -1670,18 +1697,45 @@ export function MarketDetail() {
                               </p>
                             </div>
                           )}
-                          <p className="text-xs text-surface-500">
-                            {isStablecoin
-                              ? `${tokenType} Balance: ${formatCredits(tokenType === 'USDCX' ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate : wallet.balance.usadPublic + wallet.balance.usadPrivate)} ${tokenType}`
-                              : <>Public Balance: {formatCredits(wallet.balance.public)} ALEO</>
-                            }
-                          </p>
+                          {isWalletConnected ? (
+                            <p className="text-xs text-surface-500">
+                              {isStablecoin
+                                ? `${tokenType} Balance: ${formatCredits(tokenType === 'USDCX' ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate : wallet.balance.usadPublic + wallet.balance.usadPrivate)} ${tokenType}`
+                                : <>Public Balance: {formatCredits(wallet.balance.public)} ALEO</>
+                              }
+                            </p>
+                          ) : (
+                            <p className="text-xs text-surface-500">
+                              Connect a wallet to see your available balance and submit an encrypted trade.
+                            </p>
+                          )}
                           <Tooltip content="Gas fee paid to Aleo network validators for processing your transaction" side="bottom">
                             <p className="text-xs text-surface-600 cursor-help w-fit">
                               Transaction fee: 1.5 ALEO (from public balance)
                             </p>
                           </Tooltip>
+                          <p className="text-xs text-surface-500">
+                            Minimum trade: {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol}
+                          </p>
                         </div>
+
+                        {governanceConfig.pauseState && (
+                          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                            <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-xs text-yellow-300 leading-relaxed">
+                              Trading is currently paused by governance. Buy previews and submissions are temporarily disabled.
+                            </p>
+                          </div>
+                        )}
+
+                        {!governanceConfig.pauseState && buyAmountMicro > 0n && !buyMeetsMinTrade && (
+                          <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                            <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                            <p className="text-xs text-yellow-300 leading-relaxed">
+                              Enter at least {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol} to trade under the active governance config.
+                            </p>
+                          </div>
+                        )}
                       </motion.div>
                     )}
 
@@ -1714,7 +1768,7 @@ export function MarketDetail() {
                           </span>
                         </div>
                         <div className="flex justify-between mb-2">
-                          <span className="text-surface-400 text-sm">Trading Fee (2%)</span>
+                          <span className="text-surface-400 text-sm">Trading Fee ({totalFeePercent.toFixed(2)}%)</span>
                           <span className="text-surface-300 font-medium text-sm">
                             {formatCredits(tradePreview.fees.totalFees)} {tokenSymbol}
                           </span>
@@ -1738,21 +1792,32 @@ export function MarketDetail() {
                     {/* Buy Shares Button */}
                     <button
                       onClick={handleBuyShares}
-                      disabled={!selectedOutcome || buyAmountMicro <= 0n}
+                      disabled={!isWalletConnected || !selectedOutcome || buyAmountMicro <= 0n || governanceConfig.pauseState || !buyMeetsMinTrade}
                       className={cn(
                         "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
-                        selectedOutcome && buyAmountMicro > 0n
+                        isWalletConnected && selectedOutcome && buyAmountMicro > 0n && !governanceConfig.pauseState && buyMeetsMinTrade
                           ? "bg-brand-400 hover:bg-brand-300 text-white active:scale-[0.98]"
                           : "bg-white/[0.04] text-surface-500 cursor-not-allowed"
                       )}
                     >
                       <ShoppingCart className="w-5 h-5" />
-                      {selectedOutcome && buyAmountMicro > 0n ? (
+                      {!isWalletConnected ? (
+                        'Connect Wallet to Trade'
+                      ) : governanceConfig.pauseState ? (
+                        'Trading Paused'
+                      ) : selectedOutcome && buyAmountMicro > 0n && !buyMeetsMinTrade ? (
+                        `Minimum ${(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} ${tokenSymbol}`
+                      ) : selectedOutcome && buyAmountMicro > 0n ? (
                         `Buy ${outcomeLabels[selectedOutcome - 1]} Shares`
                       ) : (
                         'Select Outcome & Amount'
                       )}
                     </button>
+
+                    {/* Add to Parlay Button */}
+                    {selectedOutcome && market && market.status === 1 && (
+                      <ParlayButton market={market} selectedOutcome={selectedOutcome} outcomeLabels={outcomeLabels} />
+                    )}
 
                     {/* Privacy Notice */}
                     <p className="text-xs text-surface-500 text-center mt-4">
@@ -1775,7 +1840,7 @@ export function MarketDetail() {
                             {(walletShareRecords.length > 0 || isFetchingRecords) && (
                               <button
                                 onClick={handleFetchRecords}
-                                disabled={isFetchingRecords}
+                                disabled={!isWalletConnected || isFetchingRecords}
                                 className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300 disabled:text-surface-600 transition-colors"
                               >
                                 {isFetchingRecords ? (
@@ -1852,14 +1917,15 @@ export function MarketDetail() {
                           {!isFetchingRecords && walletShareRecords.length === 0 && !fetchRecordError && (
                             <button
                               onClick={handleFetchRecords}
+                              disabled={!isWalletConnected}
                               className="w-full py-6 rounded-xl bg-white/[0.02] border border-dashed border-white/[0.06] hover:border-brand-400/[0.2] transition-all text-center group"
                             >
                               <Wallet className="w-8 h-8 text-surface-500 group-hover:text-brand-400 mx-auto mb-2 transition-colors" />
                               <p className="text-sm text-surface-400 group-hover:text-surface-300 transition-colors">
-                                Click to load your share positions
+                                {isWalletConnected ? 'Click to load your share positions' : 'Connect your wallet to load share positions'}
                               </p>
                               <p className="text-xs text-surface-600 mt-1">
-                                Fetches OutcomeShare records from your wallet
+                                {isWalletConnected ? 'Fetches OutcomeShare records from your wallet' : 'Selling requires private OutcomeShare records from your wallet'}
                               </p>
                             </button>
                           )}
@@ -1972,6 +2038,28 @@ export function MarketDetail() {
                                 ))}
                               </div>
                             </div>
+
+                            <p className="text-xs text-surface-500 mt-3">
+                              Minimum trade: {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol}
+                            </p>
+
+                            {governanceConfig.pauseState && (
+                              <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                                <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-yellow-300 leading-relaxed">
+                                  Trading is currently paused by governance. Selling is temporarily unavailable.
+                                </p>
+                              </div>
+                            )}
+
+                            {!governanceConfig.pauseState && sellTokensMicro > 0n && !sellMeetsMinTrade && (
+                              <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                                <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-xs text-yellow-300 leading-relaxed">
+                                  Enter at least {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol} to sell under the active governance config.
+                                </p>
+                              </div>
+                            )}
                           </motion.div>
                         )}
 
@@ -1995,7 +2083,7 @@ export function MarketDetail() {
                               </span>
                             </div>
                             <div className="flex justify-between text-sm">
-                              <span className="text-surface-400">Trading Fee (2%)</span>
+                              <span className="text-surface-400">Trading Fee ({totalFeePercent.toFixed(2)}%)</span>
                               <span className="text-surface-300">
                                 {formatCredits(sellPreview.fees.totalFees)} {tokenSymbol}
                               </span>
@@ -2035,18 +2123,24 @@ export function MarketDetail() {
                         {/* Sell Button */}
                         <button
                           onClick={handleSellShares}
-                          disabled={!parsedShareRecord || sellTokensMicro <= 0n || sellPreview?.exceedsBalance}
+                          disabled={!isWalletConnected || !parsedShareRecord || sellTokensMicro <= 0n || sellPreview?.exceedsBalance || governanceConfig.pauseState || !sellMeetsMinTrade}
                           className={cn(
                             "w-full py-4 rounded-xl font-bold text-lg transition-all flex items-center justify-center gap-2",
-                            parsedShareRecord && sellTokensMicro > 0n && !sellPreview?.exceedsBalance
+                            isWalletConnected && parsedShareRecord && sellTokensMicro > 0n && !sellPreview?.exceedsBalance && !governanceConfig.pauseState && sellMeetsMinTrade
                               ? "bg-no-500 hover:bg-no-400 text-white"
                               : "bg-white/[0.04] text-surface-500 cursor-not-allowed"
                           )}
                         >
                           <TrendingDown className="w-5 h-5" />
-                          {parsedShareRecord && sellTokensMicro > 0n
-                            ? `Sell for ${sellTokensDesired} ${tokenSymbol}`
-                            : 'Select Position & Enter Amount'}
+                          {!isWalletConnected
+                            ? 'Connect Wallet to Sell'
+                            : governanceConfig.pauseState
+                            ? 'Trading Paused'
+                            : parsedShareRecord && sellTokensMicro > 0n && !sellMeetsMinTrade
+                              ? `Minimum ${(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} ${tokenSymbol}`
+                              : parsedShareRecord && sellTokensMicro > 0n
+                                ? `Sell for ${sellTokensDesired} ${tokenSymbol}`
+                                : 'Select Position & Enter Amount'}
                         </button>
 
                         <p className="text-xs text-surface-500 text-center">
@@ -2165,13 +2259,13 @@ export function MarketDetail() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Fees</span>
-                    <span className="text-xs text-white">2%</span>
+                    <span className="text-xs text-white">{totalFeePercent.toFixed(2)}%</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Contract</span>
-                    <a href={`https://testnet.explorer.provable.com/program/${getProgramIdForToken(tokenType)}`} target="_blank" rel="noopener noreferrer"
+                    <a href={`https://testnet.explorer.provable.com/program/${marketProgramId}`} target="_blank" rel="noopener noreferrer"
                       className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
-                      {getProgramIdForToken(tokenType).slice(0, 20)}... <ExternalLink className="w-3 h-3" />
+                      {marketProgramId.slice(0, 20)}... <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
                 </div>
@@ -2226,5 +2320,43 @@ export function MarketDetail() {
         </div>
       )}
     </div>
+  )
+}
+
+// ============================================================================
+// Parlay Button — Add selected outcome to parlay slip
+// ============================================================================
+
+function ParlayButton({ market, selectedOutcome, outcomeLabels }: {
+  market: Market
+  selectedOutcome: number
+  outcomeLabels: string[]
+}) {
+  const { addLeg, getLegForMarket, removeLeg } = useParlayStore()
+  const existingLeg = getLegForMarket(market.id)
+  const isAdded = existingLeg?.outcome === selectedOutcome
+  const isSwitchingOutcome = existingLeg && existingLeg.outcome !== selectedOutcome
+  const label = outcomeLabels[selectedOutcome - 1] ?? `Outcome ${selectedOutcome}`
+
+  return (
+    <button
+      onClick={() => {
+        if (isAdded) {
+          removeLeg(market.id)
+        } else {
+          addLeg(market, selectedOutcome)
+        }
+      }}
+      className={`w-full mt-2 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
+        isAdded
+          ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30'
+          : isSwitchingOutcome
+            ? 'bg-brand-500/12 text-brand-300 border border-brand-500/20 hover:bg-brand-500/18 hover:border-brand-500/28'
+          : 'bg-white/[0.04] text-surface-400 border border-white/[0.06] hover:bg-brand-500/10 hover:text-brand-400 hover:border-brand-500/20'
+      }`}
+    >
+      <Ticket className="w-4 h-4" />
+      {isAdded ? `Remove "${label}" from Parlay` : isSwitchingOutcome ? `Switch Parlay to "${label}"` : `Add "${label}" to Parlay`}
+    </button>
   )
 }

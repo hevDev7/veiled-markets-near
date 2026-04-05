@@ -1,12 +1,12 @@
-import { Clock, Users, TrendingUp, Shield } from 'lucide-react'
+import { Clock, Ticket, Users, TrendingUp, Shield } from 'lucide-react'
 import { useMemo, useRef } from 'react'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryStrip, getCategoryColor } from '@/lib/utils'
 
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
-import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 
 function MarketThumb({ url, question, size = 'md' }: { url: string; question: string; size?: 'sm' | 'md' | 'lg' }) {
   const useContain = isContainThumbnail(url)
@@ -16,7 +16,7 @@ function MarketThumb({ url, question, size = 'md' }: { url: string; question: st
       <div className={cn(sizeClass, 'overflow-hidden shrink-0 bg-surface-800', useContain && 'p-1.5 flex items-center justify-center')}>
         <img src={url} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
       </div>
-      <h3 className="text-base font-semibold text-white line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">
+      <h3 className="text-sm md:text-[15px] font-semibold text-white line-clamp-3 group-hover:text-brand-300 transition-colors leading-snug">
         {question}
       </h3>
     </div>
@@ -35,26 +35,25 @@ interface MarketCardProps {
   market: Market
   index: number
   onClick: () => void
+  parlayMode?: boolean
+  selectedParlayOutcome?: number | null
+  onQuickAddParlay?: (market: Market, outcome: number) => void
 }
 
-export function MarketCard({ market, index, onClick }: MarketCardProps) {
+export function MarketCard({
+  market,
+  index,
+  onClick,
+  parlayMode = false,
+  selectedParlayOutcome = null,
+  onQuickAddParlay,
+}: MarketCardProps) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const isExpired = timeRemaining === 'Ended' || market.status !== 1
   const statusVariant = getStatusVariant(market.status, isExpired)
 
   const numOutcomes = market.numOutcomes ?? 2
-  const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
-
-  const prices = useMemo(() => {
-    const reserves: AMMReserves = {
-      reserve_1: market.yesReserve ?? 0n,
-      reserve_2: market.noReserve ?? 0n,
-      reserve_3: market.reserve3 ?? 0n,
-      reserve_4: market.reserve4 ?? 0n,
-      num_outcomes: numOutcomes,
-    }
-    return calculateAllPrices(reserves)
-  }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
+  const outcomeSummaries = useMemo(() => getMarketOutcomeSummaries(market), [market])
 
   const isBinary = numOutcomes === 2
   const categoryColor = getCategoryColor(market.category)
@@ -69,13 +68,23 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
   return (
     <div
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onClick()
+        }
+      }}
+      role="button"
+      tabIndex={0}
       style={shouldAnimate ? { animationDelay: `${index * 60}ms` } : undefined}
       className={cn(
         "market-card group relative overflow-hidden",
         shouldAnimate && "animate-fade-in-up",
         getCategoryStrip(market.category),
         isExpired && "opacity-60",
-        isHot && "pulse-glow"
+        isHot && "pulse-glow",
+        parlayMode && selectedParlayOutcome && "border-brand-500/35 shadow-[0_16px_40px_rgba(201,168,76,0.12)]"
       )}
     >
       {/* Subtle category glow on hover */}
@@ -109,40 +118,99 @@ export function MarketCard({ market, index, onClick }: MarketCardProps) {
           </p>
         )}
 
-        {/* Odds Display */}
-        <div className="mb-4">
-          {isBinary ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-yes-500/5">
-                <span className="text-sm text-yes-400 font-medium">{outcomeLabels[0]}</span>
-                <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(market.yesPercentage)}</span>
+        {!parlayMode && (
+          <div className="mb-4">
+            {isBinary ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-yes-500/5">
+                  <span className="text-sm text-yes-400 font-medium">{outcomeSummaries[0]?.label || 'Yes'}</span>
+                  <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(outcomeSummaries[0]?.percentage ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-no-500/5">
+                  <span className="text-sm text-no-400 font-medium">{outcomeSummaries[1]?.label || 'No'}</span>
+                  <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(outcomeSummaries[1]?.percentage ?? 0)}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-no-500/5">
-                <span className="text-sm text-no-400 font-medium">{outcomeLabels[1]}</span>
-                <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(market.noPercentage)}</span>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {outcomeSummaries.map((outcome, i) => {
+                    const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
+                    return (
+                      <div key={i} className={cn(
+                        'flex items-center gap-2 px-2.5 py-2 rounded-lg',
+                        colors.bg
+                      )}>
+                        <span className={cn('text-xs truncate font-medium', colors.text)}>{outcome.label}</span>
+                        <span className={cn('text-sm font-bold ml-auto tabular-nums', colors.text)}>{formatPercentage(outcome.percentage)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {parlayMode && (
+          <div className="mb-4 rounded-2xl border border-brand-500/15 bg-brand-500/[0.04] p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-300/90 whitespace-nowrap">
+                <Ticket className="h-3 w-3 flex-shrink-0" />
+                <span className="truncate">Parlay Quick Add</span>
               </div>
+              {selectedParlayOutcome ? (
+                <span className="rounded-full border border-brand-500/20 bg-brand-500/10 px-2 py-1 text-[10px] font-semibold text-brand-300">
+                  Leg selected
+                </span>
+              ) : (
+                <span className="text-[10px] text-surface-500">Tap an outcome</span>
+              )}
             </div>
-          ) : (
-            <>
-              {/* Multi-outcome chips with colored borders + tinted background */}
-              <div className="grid grid-cols-2 gap-1.5">
-                {outcomeLabels.map((label, i) => {
-                  const pct = (prices[i] ?? 0) * 100
-                  const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
-                  return (
-                    <div key={i} className={cn(
-                      'flex items-center gap-2 px-2.5 py-2 rounded-lg',
-                      colors.bg
-                    )}>
-                      <span className={cn('text-xs truncate font-medium', colors.text)}>{label}</span>
-                      <span className={cn('text-sm font-bold ml-auto tabular-nums', colors.text)}>{formatPercentage(pct)}</span>
+            <div className={cn('grid gap-2', isBinary ? 'grid-cols-1' : 'grid-cols-2')}>
+              {outcomeSummaries.map((outcome) => {
+                const isSelected = selectedParlayOutcome === outcome.outcome
+
+                return (
+                  <button
+                    key={outcome.outcome}
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onQuickAddParlay?.(market, outcome.outcome)
+                    }}
+                    disabled={isExpired}
+                    className={cn(
+                      'rounded-xl border px-3 py-2 text-left transition-all duration-200 w-full',
+                      outcome.styles.bg,
+                      outcome.styles.border,
+                      isExpired && 'cursor-not-allowed opacity-50',
+                      !isExpired && 'hover:border-brand-400/35 hover:bg-white/[0.05]',
+                      isSelected && 'border-brand-400/35 bg-brand-500/10 shadow-[0_0_0_1px_rgba(201,168,76,0.12)]'
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={cn('truncate text-xs font-semibold', outcome.styles.text)}>
+                        {outcome.label}
+                      </span>
+                      <span className={cn('text-sm font-bold tabular-nums', outcome.styles.text)}>
+                        {outcome.payout.toFixed(2)}x
+                      </span>
                     </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </div>
+                    <p className="mt-1 text-[11px] text-surface-500">
+                      {isSelected ? 'Tap again to remove' : `${formatPercentage(outcome.percentage)} implied`}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+            {isExpired && (
+              <p className="mt-2 text-[11px] text-surface-500">
+                Closed markets stay view-only here. Open detail to review resolution state.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Stats — compact inline */}
         <div className="flex items-center gap-4 pt-3 mt-auto border-t border-white/[0.03] text-xs text-surface-500">

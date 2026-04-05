@@ -23,7 +23,7 @@ Veiled Markets is a prediction market protocol on Aleo where users trade outcome
 **Key Features:**
 - **Fully Private Trading** — All buy/sell/redeem use private records. Buy inputs (market, outcome, amount, shares) are ZK-encrypted on-chain
 - **Tri-Token Support** — Markets in **ALEO** (native), **USDCX**, or **USAD** stablecoins — all with private transfers
-- **Multi-Outcome Markets** — Support 2, 3, or 4 outcome markets (Yes/No, Multi-choice)
+- **Multi-Outcome Markets** — Support 2-, 3-, and 4-outcome markets with custom labels and full frontend trading flows
 - **FPMM AMM** — Constant product invariant with per-trade fees (0.5% protocol + 0.5% creator + 1% LP = 2% total)
 - **Multi-Voter Quorum Resolution** — Minimum 3 independent voters with ALEO bond, dispute window, slashing for wrong voters
 - **Dispute Mechanism** — Challenge voter majority with 3× bond. Disputer's outcome overrides if successful
@@ -212,6 +212,32 @@ npm run dev
 ```
 
 **Wallet:** Install [Shield Wallet](https://shieldwallet.io/), switch to Testnet, get credits from [Aleo Faucet](https://faucet.aleo.org).
+
+## Governance Test Modes
+
+Veiled Markets ships with five governance test entrypoints:
+
+```bash
+pnpm test:governance:logic
+pnpm test:governance:smoke
+pnpm test:governance
+pnpm test:governance:cold
+pnpm test:governance:global
+```
+
+- `pnpm test:governance:logic` runs the fast standalone logic suite with no external Leo dependencies.
+- `pnpm test:governance:smoke` runs the logic suite plus a real `contracts-governance` compile, and is the recommended fast developer check.
+- `pnpm test:governance` runs the full governance package against a patched cached Leo home under `/tmp`, so local tests do not mutate `~/.aleo`.
+- `pnpm test:governance:cold` rebuilds that patched cache from scratch before running the full package.
+- `pnpm test:governance:global` is a raw diagnostic mode for debugging the user's real Leo registry.
+
+If the full governance package takes a long time to boot its temporary ledger, use:
+
+```bash
+LEO_TEST_TIMEOUT=180 pnpm test:governance
+```
+
+More detail lives in [docs/governance-testing.md](/docs/governance-testing.md).
 
 ### Environment Variables
 

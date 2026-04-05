@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, APIDocs, BrandKit, BugBounty } from './pages'
+import { MyParlays } from './pages/MyParlays'
 import { useWalletStore } from './lib/store'
 import { initializeMarketIds } from './lib/aleo-client'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { MobileNav } from './components/MobileNav'
+import { ParlaySlip } from './components/ParlaySlip'
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -73,6 +75,16 @@ function App() {
           }
         />
 
+        {/* My Parlays Page */}
+        <Route
+          path="/my-parlays"
+          element={
+            <ProtectedRoute>
+              <MyParlays />
+            </ProtectedRoute>
+          }
+        />
+
         {/* History Page */}
         <Route
           path="/history"
@@ -86,11 +98,7 @@ function App() {
         {/* Market Detail Page */}
         <Route
           path="/market/:marketId"
-          element={
-            <ProtectedRoute>
-              <MarketDetail />
-            </ProtectedRoute>
-          }
+          element={<MarketDetail />}
         />
 
         {/* Settings Page */}
@@ -137,6 +145,9 @@ function App() {
         {/* Catch all - redirect to landing */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {/* Parlay Slip — floating overlay */}
+      <ParlaySlip />
 
       {/* Mobile bottom navigation — hidden on md+ */}
       <MobileNav />

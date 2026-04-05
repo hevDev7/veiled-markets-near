@@ -6,8 +6,8 @@ import { useRealMarketsStore } from '@/lib/market-store'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor } from '@/lib/utils'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
-import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 
 // ── Single Trending Card (landing-specific, self-contained) ──
 function TrendingCard({ market, index }: { market: Market; index: number }) {
@@ -16,18 +16,7 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
   const isExpired = timeRemaining === 'Ended' || market.status !== 1
 
   const numOutcomes = market.numOutcomes ?? 2
-  const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
-
-  const prices = useMemo(() => {
-    const reserves: AMMReserves = {
-      reserve_1: market.yesReserve ?? 0n,
-      reserve_2: market.noReserve ?? 0n,
-      reserve_3: market.reserve3 ?? 0n,
-      reserve_4: market.reserve4 ?? 0n,
-      num_outcomes: numOutcomes,
-    }
-    return calculateAllPrices(reserves)
-  }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
+  const outcomeSummaries = useMemo(() => getMarketOutcomeSummaries(market), [market])
 
   const isBinary = numOutcomes === 2
   const categoryColor = getCategoryColor(market.category)
@@ -105,25 +94,18 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
           {isBinary ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-yes-500/5">
-                <span className="text-sm text-yes-400 font-medium">{outcomeLabels[0]}</span>
-                <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(market.yesPercentage)}</span>
+                <span className="text-sm text-yes-400 font-medium">{outcomeSummaries[0]?.label || 'Yes'}</span>
+                <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(outcomeSummaries[0]?.percentage ?? 0)}</span>
               </div>
               <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-no-500/5">
-                <span className="text-sm text-no-400 font-medium">{outcomeLabels[1]}</span>
-                <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(market.noPercentage)}</span>
+                <span className="text-sm text-no-400 font-medium">{outcomeSummaries[1]?.label || 'No'}</span>
+                <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(outcomeSummaries[1]?.percentage ?? 0)}</span>
               </div>
             </div>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-1.5">
-                {outcomeLabels.map((label, i) => {
-                  const pct = (prices[i] ?? 0) * 100
-                  const OUTCOME_DOT_COLORS = [
-                    'bg-yes-500', 'bg-no-500', 'bg-purple-500', 'bg-yellow-500'
-                  ]
-                  const OUTCOME_BORDER_COLORS = [
-                    'border-yes-500/20', 'border-no-500/20', 'border-purple-500/20', 'border-yellow-500/20'
-                  ]
+                {outcomeSummaries.map((outcome, i) => {
                   const OUTCOME_BG_COLORS = [
                     'bg-yes-500/5', 'bg-no-500/5', 'bg-purple-500/5', 'bg-yellow-500/5'
                   ]
@@ -135,8 +117,8 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
                       'flex items-center gap-2 px-2.5 py-2 rounded-lg',
                       OUTCOME_BG_COLORS[i] || OUTCOME_BG_COLORS[0]
                     )}>
-                      <span className={cn('text-xs truncate font-medium', OUTCOME_TEXT_COLORS[i] || OUTCOME_TEXT_COLORS[0])}>{label}</span>
-                      <span className={cn('text-sm font-bold ml-auto tabular-nums', OUTCOME_TEXT_COLORS[i] || OUTCOME_TEXT_COLORS[0])}>{formatPercentage(pct)}</span>
+                      <span className={cn('text-xs truncate font-medium', OUTCOME_TEXT_COLORS[i] || OUTCOME_TEXT_COLORS[0])}>{outcome.label}</span>
+                      <span className={cn('text-sm font-bold ml-auto tabular-nums', OUTCOME_TEXT_COLORS[i] || OUTCOME_TEXT_COLORS[0])}>{formatPercentage(outcome.percentage)}</span>
                     </div>
                   )
                 })}

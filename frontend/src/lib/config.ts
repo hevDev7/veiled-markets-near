@@ -35,6 +35,7 @@ export interface AppConfig {
   usdcxMarketProgramId: string;
   usadProgramId: string;
   governanceProgramId: string;
+  parlayProgramId: string;
   // Legacy program IDs for querying old markets
   legacyProgramIds: string[];
   legacyUsadProgramIds: string[];
@@ -118,6 +119,7 @@ function loadConfig(): AppConfig {
     usdcxMarketProgramId: getEnv('VITE_USDCX_MARKET_PROGRAM_ID', 'veiled_markets_usdcx_v5.aleo'),
     usadProgramId: getEnv('VITE_USAD_PROGRAM_ID', 'veiled_markets_usad_v12.aleo'),
     governanceProgramId: getEnv('VITE_GOVERNANCE_PROGRAM_ID', 'veiled_governance_v4.aleo'),
+    parlayProgramId: getEnv('VITE_PARLAY_PROGRAM_ID', 'veiled_parlay_v3.aleo'),
     // Legacy programs — markets created on older versions still live there
     legacyProgramIds: [],
     legacyUsadProgramIds: [],

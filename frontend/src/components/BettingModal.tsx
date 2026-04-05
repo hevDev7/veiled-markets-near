@@ -1,12 +1,13 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Shield, TrendingUp, Check, Loader2, AlertCircle } from 'lucide-react'
-import { useState } from 'react'
-import { type Market, useWalletStore, useBetsStore } from '@/lib/store'
+import { useMemo, useState } from 'react'
+import { type Market, useWalletStore, useBetsStore, outcomeToString } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getTokenSymbol } from '@/lib/utils'
 import { TransactionLink } from './TransactionLink'
 import { buildBuySharesInputs, getMarket, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
+import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 import { devWarn } from '../lib/logger'
 
 interface BettingModalProps {
@@ -15,15 +16,57 @@ interface BettingModalProps {
   onClose: () => void
 }
 
-type BetOutcome = 'yes' | 'no' | null
 type BetStep = 'select' | 'amount' | 'confirm' | 'success'
+
+const OUTCOME_CARD_COLORS = [
+  {
+    border: 'border-yes-500',
+    borderSoft: 'border-yes-500/20',
+    borderMuted: 'hover:border-yes-500/50',
+    bg: 'bg-yes-500/10',
+    bgMuted: 'hover:bg-yes-500/5',
+    glow: 'shadow-glow-yes',
+    text: 'text-yes-400',
+    soft: 'bg-yes-500/20',
+  },
+  {
+    border: 'border-no-500',
+    borderSoft: 'border-no-500/20',
+    borderMuted: 'hover:border-no-500/50',
+    bg: 'bg-no-500/10',
+    bgMuted: 'hover:bg-no-500/5',
+    glow: 'shadow-glow-no',
+    text: 'text-no-400',
+    soft: 'bg-no-500/20',
+  },
+  {
+    border: 'border-purple-500',
+    borderSoft: 'border-purple-500/20',
+    borderMuted: 'hover:border-purple-500/50',
+    bg: 'bg-purple-500/10',
+    bgMuted: 'hover:bg-purple-500/5',
+    glow: 'shadow-[0_0_20px_rgba(168,85,247,0.25)]',
+    text: 'text-purple-400',
+    soft: 'bg-purple-500/20',
+  },
+  {
+    border: 'border-yellow-500',
+    borderSoft: 'border-yellow-500/20',
+    borderMuted: 'hover:border-yellow-500/50',
+    bg: 'bg-yellow-500/10',
+    bgMuted: 'hover:bg-yellow-500/5',
+    glow: 'shadow-[0_0_20px_rgba(234,179,8,0.25)]',
+    text: 'text-yellow-400',
+    soft: 'bg-yellow-500/20',
+  },
+] as const
 
 export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const { wallet } = useWalletStore()
   const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
-  const [selectedOutcome, setSelectedOutcome] = useState<BetOutcome>(null)
+  const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
   const [betAmount, setBetAmount] = useState('')
   const [step, setStep] = useState<BetStep>('select')
   const [isPlacing, setIsPlacing] = useState(false)
@@ -31,11 +74,21 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [privacyMode, setPrivacyMode] = useState<'private' | 'public' | null>(null)
 
+  const outcomeSummaries = useMemo(() => (market ? getMarketOutcomeSummaries(market) : []), [market])
+  const selectedOutcomeSummary = selectedOutcome ? outcomeSummaries[selectedOutcome - 1] : null
+  const selectedOutcomeColors = OUTCOME_CARD_COLORS[selectedOutcomeSummary?.index ?? 0] || OUTCOME_CARD_COLORS[0]
+  const outcomeGridClass = outcomeSummaries.length <= 2
+    ? 'grid-cols-2'
+    : outcomeSummaries.length === 3
+      ? 'grid-cols-3'
+      : 'grid-cols-2'
+
   const handlePlaceBet = async () => {
     if (!market || !selectedOutcome || !betAmount) return
 
     setIsPlacing(true)
     setError(null)
+    let releaseSelectedRecord: (() => void) | null = null
 
     try {
       if (!market.id.endsWith('field')) {
@@ -64,11 +117,10 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         devWarn('Pre-validation skipped (network error):', validationErr)
       }
 
-      const outcomeNum = selectedOutcome === 'yes' ? 1 : 2
+      const outcomeNum = selectedOutcome
       let functionName = ''
       let inputs: string[] = []
       const feeInMicro = 1_500_000n
-      let releaseSelectedRecord: (() => void) | null = null
 
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
         if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
@@ -156,13 +208,11 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           id: submittedTxId,
           marketId: market.id,
           amount: amountMicro,
-          outcome: selectedOutcome,
+          outcome: outcomeToString(selectedOutcome),
           placedAt: Date.now(),
           status: 'pending',
           marketQuestion: market.question,
-          lockedMultiplier: selectedOutcome === 'yes'
-            ? market.potentialYesPayout
-            : market.potentialNoPayout,
+          lockedMultiplier: selectedOutcomeSummary?.payout,
           tokenType: market.tokenType || 'ALEO',
         })
 
@@ -200,8 +250,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     onClose()
   }
 
-  const potentialPayout = selectedOutcome && betAmount
-    ? parseFloat(betAmount) * (selectedOutcome === 'yes' ? market?.potentialYesPayout || 0 : market?.potentialNoPayout || 0)
+  const potentialPayout = selectedOutcomeSummary && betAmount
+    ? parseFloat(betAmount) * selectedOutcomeSummary.payout
     : 0
 
   const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
@@ -286,52 +336,37 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         {isExpired ? 'Market odds at close:' : 'Choose your prediction'}
                       </p>
 
-                      <div className="grid grid-cols-2 gap-4 mb-6">
-                        <button
-                          onClick={() => setSelectedOutcome('yes')}
-                          className={cn(
-                            'relative p-5 rounded-xl border-2 transition-all duration-200',
-                            selectedOutcome === 'yes'
-                              ? 'border-yes-500 bg-yes-500/10 shadow-glow-yes'
-                              : 'border-surface-700 hover:border-yes-500/50 hover:bg-yes-500/5'
-                          )}
-                        >
-                          {selectedOutcome === 'yes' && (
-                            <div className="absolute top-2 right-2">
-                              <Check className="w-5 h-5 text-yes-400" />
-                            </div>
-                          )}
-                          <div className="text-3xl font-bold text-yes-400 mb-1">
-                            {formatPercentage(market.yesPercentage)}
-                          </div>
-                          <div className="text-lg font-semibold text-white mb-2">Yes</div>
-                          <div className="text-sm text-surface-400">
-                            Payout: <span className="text-yes-400 font-medium">{market.potentialYesPayout.toFixed(2)}x</span>
-                          </div>
-                        </button>
+                      <div className={cn('grid gap-4 mb-6', outcomeGridClass)}>
+                        {outcomeSummaries.map((outcome, index) => {
+                          const colors = OUTCOME_CARD_COLORS[index] || OUTCOME_CARD_COLORS[0]
+                          const isSelected = selectedOutcome === outcome.outcome
 
-                        <button
-                          onClick={() => setSelectedOutcome('no')}
-                          className={cn(
-                            'relative p-5 rounded-xl border-2 transition-all duration-200',
-                            selectedOutcome === 'no'
-                              ? 'border-no-500 bg-no-500/10 shadow-glow-no'
-                              : 'border-surface-700 hover:border-no-500/50 hover:bg-no-500/5'
-                          )}
-                        >
-                          {selectedOutcome === 'no' && (
-                            <div className="absolute top-2 right-2">
-                              <Check className="w-5 h-5 text-no-400" />
-                            </div>
-                          )}
-                          <div className="text-3xl font-bold text-no-400 mb-1">
-                            {formatPercentage(market.noPercentage)}
-                          </div>
-                          <div className="text-lg font-semibold text-white mb-2">No</div>
-                          <div className="text-sm text-surface-400">
-                            Payout: <span className="text-no-400 font-medium">{market.potentialNoPayout.toFixed(2)}x</span>
-                          </div>
-                        </button>
+                          return (
+                            <button
+                              key={outcome.outcome}
+                              onClick={() => setSelectedOutcome(outcome.outcome)}
+                              className={cn(
+                                'relative p-5 rounded-xl border-2 transition-all duration-200',
+                                isSelected
+                                  ? cn(colors.border, colors.bg, colors.glow)
+                                  : cn('border-surface-700', colors.borderMuted, colors.bgMuted)
+                              )}
+                            >
+                              {isSelected && (
+                                <div className="absolute top-2 right-2">
+                                  <Check className={cn('w-5 h-5', colors.text)} />
+                                </div>
+                              )}
+                              <div className={cn('text-3xl font-bold mb-1', colors.text)}>
+                                {formatPercentage(outcome.percentage)}
+                              </div>
+                              <div className="text-lg font-semibold text-white mb-2">{outcome.label}</div>
+                              <div className="text-sm text-surface-400">
+                                Payout: <span className={cn('font-medium', colors.text)}>{outcome.payout.toFixed(2)}x</span>
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
 
                       <button
@@ -356,28 +391,22 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                     >
                       <div className={cn(
                         'flex items-center gap-3 p-4 rounded-xl mb-6',
-                        selectedOutcome === 'yes'
-                          ? 'bg-yes-500/10 border border-yes-500/20'
-                          : 'bg-no-500/10 border border-no-500/20'
+                        selectedOutcomeColors.bg,
+                        selectedOutcomeColors.borderSoft
                       )}>
                         <div className={cn(
                           'w-10 h-10 rounded-full flex items-center justify-center',
-                          selectedOutcome === 'yes' ? 'bg-yes-500/20' : 'bg-no-500/20'
+                          selectedOutcomeColors.soft
                         )}>
                           <TrendingUp className={cn(
                             'w-5 h-5',
-                            selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400'
+                            selectedOutcomeColors.text
                           )} />
                         </div>
                         <div>
                           <p className="text-sm text-surface-400">Your prediction</p>
-                          <p className={cn(
-                            'font-semibold',
-                            selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400'
-                          )}>
-                            {selectedOutcome === 'yes' ? 'Yes' : 'No'} @ {formatPercentage(
-                              selectedOutcome === 'yes' ? market.yesPercentage : market.noPercentage
-                            )}
+                          <p className={cn('font-semibold', selectedOutcomeColors.text)}>
+                            {selectedOutcomeSummary?.label || `Outcome ${selectedOutcome}`} @ {formatPercentage(selectedOutcomeSummary?.percentage ?? 0)}
                           </p>
                         </div>
                       </div>
@@ -435,10 +464,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           </div>
                           <div className="flex justify-between items-center mt-2">
                             <span className="text-surface-500 text-sm">Profit if you win</span>
-                            <span className={cn(
-                              'font-medium',
-                              selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400'
-                            )}>
+                            <span className={cn('font-medium', selectedOutcomeColors.text)}>
                               +{(potentialPayout - parseFloat(betAmount)).toFixed(2)} {tokenSymbol}
                             </span>
                           </div>
@@ -542,15 +568,11 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         transition={{ type: 'spring', delay: 0.2 }}
                         className={cn(
                           'w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center',
-                          selectedOutcome === 'yes'
-                            ? 'bg-yes-500/20 shadow-glow-yes'
-                            : 'bg-no-500/20 shadow-glow-no'
+                          selectedOutcomeColors.soft,
+                          selectedOutcomeColors.glow
                         )}
                       >
-                        <Check className={cn(
-                          'w-10 h-10',
-                          selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400'
-                        )} />
+                        <Check className={cn('w-10 h-10', selectedOutcomeColors.text)} />
                       </motion.div>
 
                       <h3 className="text-2xl font-bold text-white mb-2">
@@ -567,11 +589,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         </div>
                         <div className="flex justify-between mb-2">
                           <span className="text-surface-400">Position</span>
-                          <span className={cn(
-                            'font-medium',
-                            selectedOutcome === 'yes' ? 'text-yes-400' : 'text-no-400'
-                          )}>
-                            {selectedOutcome === 'yes' ? 'Yes' : 'No'}
+                          <span className={cn('font-medium', selectedOutcomeColors.text)}>
+                            {selectedOutcomeSummary?.label || `Outcome ${selectedOutcome ?? 1}`}
                           </span>
                         </div>
                         <div className="flex justify-between">

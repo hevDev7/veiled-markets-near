@@ -100,6 +100,10 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
   for (let i = 1; i <= numOutcomes; i++) {
     outcomeLabels[i] = market.outcomeLabels?.[i - 1] || `Outcome ${i}`
   }
+  const getOutcomeLabel = (outcomeNum?: number | null): string => {
+    if (!outcomeNum || outcomeNum < 1) return 'Pending'
+    return outcomeLabels[outcomeNum] || `Outcome ${outcomeNum}`
+  }
 
   const handleDispute = async () => {
     if (proposedOutcome === null) return
@@ -157,7 +161,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
           <div>
             <h3 className="text-lg font-semibold text-white">Resolution Finalized</h3>
             <p className="text-sm text-surface-400">
-              Winning outcome: {outcomeLabels[resolution.winning_outcome] || `Outcome ${resolution.winning_outcome}`}
+              Winning outcome: {getOutcomeLabel(resolution.winning_outcome)}
             </p>
           </div>
         </div>
@@ -180,7 +184,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
           <div className="flex-1">
             <h3 className="text-lg font-semibold text-white">Challenge Resolution</h3>
             <p className="text-sm text-surface-400">
-              Current ruling: {outcomeLabels[resolution.winning_outcome] || `Outcome ${resolution.winning_outcome}`}
+              Current ruling: {getOutcomeLabel(resolution.winning_outcome)}. Successful disputes escalate this market into the override lane.
             </p>
           </div>
         </div>
@@ -277,7 +281,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                   </div>
                   <p className="text-xs text-surface-500 mt-2">
                     The bond is returned if your dispute is successful. If the original
-                    resolution stands, the bond is forfeit.
+                    ruling stands, the bond is forfeited and the market continues toward final confirmation.
                   </p>
                 </div>
 
@@ -287,9 +291,9 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                   <div>
                     <p className="text-sm font-medium text-yellow-300">Important</p>
                     <p className="text-xs text-surface-400 mt-1">
-                      Filing a dispute triggers a review process. Your{' '}
+                      Filing a dispute triggers the resolver escalation process. Your{' '}
                       {formatCredits(MIN_DISPUTE_BOND)} ALEO bond will be locked.
-                      Only file a dispute if you believe the resolution is incorrect.
+                      Only file a dispute if you believe the current ruling is incorrect and should advance to the next review lane.
                     </p>
                   </div>
                 </div>

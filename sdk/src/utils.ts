@@ -6,21 +6,56 @@
 
 import {
   MarketStatus,
-  Outcome,
-  PROTOCOL_FEE_BPS,
-  CREATOR_FEE_BPS,
-  LP_FEE_BPS,
-  TOTAL_FEE_BPS,
-  FEE_DENOMINATOR,
 } from './types';
+import {
+  calculateContractAllPrices,
+  calculateContractLPSharesOut,
+  calculateContractLPTokensOut,
+  calculateContractOutcomePrice,
+  calculateContractSellTokensOut,
+  calculateContractTradeFees,
+  quoteContractBuy,
+  type ContractMathReserves,
+} from './contract-math';
 
 // ============================================================================
 // AMM PRICE CALCULATIONS
 // ============================================================================
 
+function toContractReserves(
+  reserve1: bigint,
+  reserve2: bigint,
+  reserve3: bigint,
+  reserve4: bigint,
+  numOutcomes: number,
+): ContractMathReserves {
+  return {
+    reserve1,
+    reserve2,
+    reserve3,
+    reserve4,
+    numOutcomes,
+  };
+}
+
+function getOutcomeReserve(reserves: ContractMathReserves, outcome: number): bigint {
+  switch (outcome) {
+    case 1:
+      return reserves.reserve1;
+    case 2:
+      return reserves.reserve2;
+    case 3:
+      return reserves.reserve3 ?? 0n;
+    case 4:
+      return reserves.reserve4 ?? 0n;
+    default:
+      return 0n;
+  }
+}
+
 /**
  * Calculate price of a specific outcome (0-1 range)
- * price_i = reserve_i / total_reserves
+ * Delegates to the contract parity layer.
  */
 export function calculateOutcomePrice(
   reserve1: bigint,
@@ -30,13 +65,10 @@ export function calculateOutcomePrice(
   numOutcomes: number,
   outcome: number,
 ): number {
-  const reserves = [reserve1, reserve2, reserve3, reserve4];
-  let total = 0n;
-  for (let i = 0; i < numOutcomes; i++) {
-    total += reserves[i];
-  }
-  if (total === 0n) return 1 / numOutcomes;
-  return Number(reserves[outcome - 1]) / Number(total);
+  return calculateContractOutcomePrice(
+    toContractReserves(reserve1, reserve2, reserve3, reserve4, numOutcomes),
+    outcome,
+  );
 }
 
 /**
@@ -49,19 +81,9 @@ export function calculateAllPrices(
   reserve4: bigint,
   numOutcomes: number,
 ): number[] {
-  const reserves = [reserve1, reserve2, reserve3, reserve4];
-  let total = 0n;
-  for (let i = 0; i < numOutcomes; i++) {
-    total += reserves[i];
-  }
-  if (total === 0n) {
-    return Array(numOutcomes).fill(1 / numOutcomes);
-  }
-  const prices: number[] = [];
-  for (let i = 0; i < numOutcomes; i++) {
-    prices.push(Number(reserves[i]) / Number(total));
-  }
-  return prices;
+  return calculateContractAllPrices(
+    toContractReserves(reserve1, reserve2, reserve3, reserve4, numOutcomes),
+  );
 }
 
 /**
@@ -75,18 +97,12 @@ export function calculateTradeFees(amountIn: bigint): {
   amountAfterFees: bigint;
   amountToPool: bigint;
 } {
-  const protocolFee = (amountIn * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-  const creatorFee = (amountIn * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-  const lpFee = (amountIn * LP_FEE_BPS) / FEE_DENOMINATOR;
-  const totalFees = protocolFee + creatorFee + lpFee;
-  const amountAfterFees = amountIn - totalFees;
-  const amountToPool = amountAfterFees + lpFee; // LP fee stays in pool
-  return { protocolFee, creatorFee, lpFee, totalFees, amountAfterFees, amountToPool };
+  return calculateContractTradeFees(amountIn);
 }
 
 /**
  * Calculate shares out for buying outcome i
- * Matches contract: shares_out = (amount_to_pool * reserve_i) / (total + amount_to_pool)
+ * Delegates to the contract parity layer.
  */
 export function calculateBuySharesOut(
   reserve1: bigint,
@@ -97,20 +113,14 @@ export function calculateBuySharesOut(
   outcome: number,
   amountIn: bigint,
 ): bigint {
-  const { amountToPool } = calculateTradeFees(amountIn);
-  const reserves = [reserve1, reserve2, reserve3, reserve4];
-  let total = 0n;
-  for (let i = 0; i < numOutcomes; i++) {
-    total += reserves[i];
-  }
-  const reserveI = reserves[outcome - 1];
-  if (total === 0n || reserveI === 0n) return 0n;
-  return (amountToPool * reserveI) / (total + amountToPool);
+  const reserves = toContractReserves(reserve1, reserve2, reserve3, reserve4, numOutcomes);
+  if (amountIn <= 0n || getOutcomeReserve(reserves, outcome) === 0n) return 0n;
+  return quoteContractBuy(reserves, outcome, amountIn).sharesOut;
 }
 
 /**
  * Calculate tokens out for selling shares
- * Matches contract: tokens_out = (total * shares_to_sell) / (reserve_i + shares_to_sell)
+ * Delegates to the contract parity layer.
  */
 export function calculateSellTokensOut(
   reserve1: bigint,
@@ -121,16 +131,9 @@ export function calculateSellTokensOut(
   outcome: number,
   sharesToSell: bigint,
 ): bigint {
-  const reserves = [reserve1, reserve2, reserve3, reserve4];
-  let total = 0n;
-  for (let i = 0; i < numOutcomes; i++) {
-    total += reserves[i];
-  }
-  const reserveI = reserves[outcome - 1];
-  if (total === 0n || reserveI === 0n) return 0n;
-  const grossOut = (total * sharesToSell) / (reserveI + sharesToSell);
-  const fees = (grossOut * TOTAL_FEE_BPS) / FEE_DENOMINATOR;
-  return grossOut - fees;
+  const reserves = toContractReserves(reserve1, reserve2, reserve3, reserve4, numOutcomes);
+  if (sharesToSell <= 0n || getOutcomeReserve(reserves, outcome) === 0n) return 0n;
+  return calculateContractSellTokensOut(reserves, outcome, sharesToSell);
 }
 
 /**
@@ -141,8 +144,7 @@ export function calculateLPSharesOut(
   totalLPShares: bigint,
   totalLiquidity: bigint,
 ): bigint {
-  if (totalLiquidity === 0n) return amount;
-  return (amount * totalLPShares) / totalLiquidity;
+  return calculateContractLPSharesOut(amount, totalLPShares, totalLiquidity);
 }
 
 /**
@@ -153,8 +155,7 @@ export function calculateLPTokensOut(
   totalLPShares: bigint,
   totalLiquidity: bigint,
 ): bigint {
-  if (totalLPShares === 0n) return 0n;
-  return (sharesToRemove * totalLiquidity) / totalLPShares;
+  return calculateContractLPTokensOut(sharesToRemove, totalLPShares, totalLiquidity);
 }
 
 // ============================================================================

@@ -107,7 +107,7 @@ export function TermsOfService() {
               <li>Treasury fund management via 3-of-N multisig.</li>
               <li>Protocol parameter updates.</li>
               <li>Emergency pause capabilities.</li>
-              <li>ALEO native staking governance (Coming Soon).</li>
+              <li>ALEO-native on-chain governance workflows available through the testnet app.</li>
             </ul>
             <p className="mt-3 text-surface-400">
               Governance proposals require staking ALEO tokens and are subject to quorum thresholds, voting periods, and timelock delays. By using the Protocol, you acknowledge that governance decisions may affect your positions and experience.

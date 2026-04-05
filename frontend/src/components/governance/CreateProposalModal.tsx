@@ -25,6 +25,7 @@ interface CreateProposalModalProps {
 
 export interface ProposalFormData {
   proposalType: ProposalType;
+  proposalTypeName: string;
   title: string;
   description: string;
   target: string;
@@ -62,7 +63,15 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
     if (!hasEnoughStake) { setError('Insufficient ALEO balance for stake'); return; }
 
     try {
-      await onSubmit({ proposalType, title, description, target, payload1, payload2 });
+      await onSubmit({
+        proposalType,
+        proposalTypeName: PROPOSAL_TYPE_LABELS[proposalType],
+        title,
+        description,
+        target,
+        payload1,
+        payload2,
+      });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create proposal');

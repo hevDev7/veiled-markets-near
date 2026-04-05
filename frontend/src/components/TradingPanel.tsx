@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { TrendingUp, TrendingDown, AlertCircle, Info } from 'lucide-react'
+import { AlertCircle, Info, TrendingUp } from 'lucide-react'
 import { type Market } from '@/lib/store'
 import {
     calculateBuySharesOut,
@@ -13,18 +13,27 @@ import {
     estimateTradeFees,
     type AMMReserves,
 } from '@/lib/amm'
-import { cn, formatCredits } from '@/lib/utils'
+import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
+import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 
 interface TradingPanelProps {
     market: Market
-    onTrade: (type: 'buy' | 'sell', shareType: 'yes' | 'no', amount: bigint) => void
+    onTrade: (type: 'buy' | 'sell', outcome: number, amount: bigint) => void
 }
 
 export function TradingPanel({ market, onTrade }: TradingPanelProps) {
     const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy')
-    const [shareType, setShareType] = useState<'yes' | 'no'>('yes')
+    const [selectedOutcome, setSelectedOutcome] = useState(1)
     const [amount, setAmount] = useState('')
     const [slippageTolerance, setSlippageTolerance] = useState(1) // 1%
+    const outcomeSummaries = useMemo(() => getMarketOutcomeSummaries(market), [market])
+    const activeOutcome = outcomeSummaries.find((outcome) => outcome.outcome === selectedOutcome) ?? outcomeSummaries[0] ?? null
+    const tokenSymbol = getTokenSymbol(market.tokenType)
+    const outcomeGridClass = outcomeSummaries.length <= 2
+        ? 'grid-cols-2'
+        : outcomeSummaries.length === 3
+            ? 'grid-cols-1 sm:grid-cols-3'
+            : 'grid-cols-2'
 
     const amountBigInt = useMemo(() => {
         try {
@@ -44,9 +53,9 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
     }), [market])
 
     const tradeDetails = useMemo(() => {
-        if (amountBigInt === 0n) return null
+        if (amountBigInt === 0n || !activeOutcome) return null
 
-        const outcome = shareType === 'yes' ? 1 : 2
+        const outcome = activeOutcome.outcome
 
         if (tradeType === 'buy') {
             const sharesOut = calculateBuySharesOut(reserves, outcome, amountBigInt)
@@ -81,11 +90,11 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                 total: netCredits
             }
         }
-    }, [reserves, tradeType, shareType, amountBigInt, slippageTolerance])
+    }, [activeOutcome, reserves, tradeType, amountBigInt, slippageTolerance])
 
     const handleTrade = () => {
-        if (!tradeDetails || amountBigInt === 0n) return
-        onTrade(tradeType, shareType, amountBigInt)
+        if (!tradeDetails || amountBigInt === 0n || !activeOutcome) return
+        onTrade(tradeType, activeOutcome.outcome, amountBigInt)
         setAmount('')
     }
 
@@ -117,55 +126,44 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                 </button>
             </div>
 
-            {/* Share Type Selector */}
-            <div className="grid grid-cols-2 gap-3">
-                <button
-                    onClick={() => setShareType('yes')}
-                    className={cn(
-                        'p-4 rounded-xl border-2 transition-all',
-                        shareType === 'yes'
-                            ? 'border-yes-500 bg-yes-500/10'
-                            : 'border-surface-700 hover:border-surface-600'
-                    )}
-                >
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-white">YES</span>
-                        <TrendingUp className="w-4 h-4 text-yes-400" />
-                    </div>
-                    <div className="text-2xl font-bold text-yes-400">
-                        {formatSharePrice(market.yesPrice)}
-                    </div>
-                    <div className="text-xs text-surface-400 mt-1">
-                        {(market.yesPrice * 100).toFixed(1)}% probability
-                    </div>
-                </button>
+            {/* Outcome Selector */}
+            <div className={cn('grid gap-3', outcomeGridClass)}>
+                {outcomeSummaries.map((outcome) => {
+                    const isSelected = outcome.outcome === (activeOutcome?.outcome ?? 1)
 
-                <button
-                    onClick={() => setShareType('no')}
-                    className={cn(
-                        'p-4 rounded-xl border-2 transition-all',
-                        shareType === 'no'
-                            ? 'border-no-500 bg-no-500/10'
-                            : 'border-surface-700 hover:border-surface-600'
-                    )}
-                >
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-white">NO</span>
-                        <TrendingDown className="w-4 h-4 text-no-400" />
-                    </div>
-                    <div className="text-2xl font-bold text-no-400">
-                        {formatSharePrice(market.noPrice)}
-                    </div>
-                    <div className="text-xs text-surface-400 mt-1">
-                        {(market.noPrice * 100).toFixed(1)}% probability
-                    </div>
-                </button>
+                    return (
+                        <button
+                            key={outcome.outcome}
+                            onClick={() => setSelectedOutcome(outcome.outcome)}
+                            className={cn(
+                                'p-4 rounded-xl border-2 transition-all text-left',
+                                isSelected
+                                    ? cn(outcome.styles.border, outcome.styles.bg)
+                                    : 'border-surface-700 hover:border-surface-600'
+                            )}
+                        >
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="font-medium text-white">{outcome.label}</span>
+                                <TrendingUp className={cn('w-4 h-4', outcome.styles.text)} />
+                            </div>
+                            <div className={cn('text-2xl font-bold', outcome.styles.text)}>
+                                {formatSharePrice(outcome.probability)}
+                            </div>
+                            <div className="text-xs text-surface-400 mt-1">
+                                {outcome.percentage.toFixed(1)}% probability
+                            </div>
+                        </button>
+                    )
+                })}
             </div>
 
             {/* Amount Input */}
             <div>
                 <label className="block text-sm font-medium text-surface-300 mb-2">
-                    {tradeType === 'buy' ? 'Amount to Spend' : 'Shares to Sell'}
+                    {tradeType === 'buy'
+                        ? `Amount to Spend (${tokenSymbol})`
+                        : `Shares to Sell (${activeOutcome?.label ?? 'selected outcome'})`
+                    }
                 </label>
                 <div className="relative">
                     <input
@@ -178,7 +176,7 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                         min="0"
                     />
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400 text-sm">
-                        {tradeType === 'buy' ? 'ALEO' : 'shares'}
+                        {tradeType === 'buy' ? tokenSymbol : 'shares'}
                     </div>
                 </div>
             </div>
@@ -197,7 +195,7 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                         <span className="text-white font-medium">
                             {tradeType === 'buy'
                                 ? `${(Number(tradeDetails.sharesOut) / 1_000_000).toFixed(2)} shares`
-                                : `${formatCredits(tradeDetails.creditsOut || 0n)} ALEO`
+                                : `${formatCredits(tradeDetails.creditsOut || 0n)} ${tokenSymbol}`
                             }
                         </span>
                     </div>
@@ -222,14 +220,14 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
                     <div className="flex justify-between">
                         <span className="text-surface-400">Fees (2%)</span>
                         <span className="text-surface-300">
-                            {formatCredits(tradeDetails.fees)} ALEO
+                            {formatCredits(tradeDetails.fees)} {tokenSymbol}
                         </span>
                     </div>
 
                     <div className="pt-2 border-t border-surface-700 flex justify-between">
                         <span className="text-white font-medium">Total</span>
                         <span className="text-white font-bold">
-                            {formatCredits(tradeDetails.total)} ALEO
+                            {formatCredits(tradeDetails.total)} {tokenSymbol}
                         </span>
                     </div>
 
@@ -271,16 +269,16 @@ export function TradingPanel({ market, onTrade }: TradingPanelProps) {
             {/* Trade Button */}
             <button
                 onClick={handleTrade}
-                disabled={!tradeDetails || amountBigInt === 0n}
+                disabled={!tradeDetails || amountBigInt === 0n || !activeOutcome}
                 className={cn(
                     'w-full py-3 rounded-lg font-medium transition-all',
                     tradeType === 'buy'
                         ? 'bg-yes-500 hover:bg-yes-600 text-white'
                         : 'bg-no-500 hover:bg-no-600 text-white',
-                    (!tradeDetails || amountBigInt === 0n) && 'opacity-50 cursor-not-allowed'
+                    (!tradeDetails || amountBigInt === 0n || !activeOutcome) && 'opacity-50 cursor-not-allowed'
                 )}
             >
-                {tradeType === 'buy' ? 'Buy' : 'Sell'} {shareType.toUpperCase()} Shares
+                {tradeType === 'buy' ? 'Buy' : 'Sell'} {activeOutcome?.label ?? 'Selected'} Shares
             </button>
         </div>
     )

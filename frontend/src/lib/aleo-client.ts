@@ -14,6 +14,10 @@ import {
   type MarketRegistryEntry,
 } from './supabase';
 import { devLog, devWarn } from './logger'
+import {
+  calculateAllPrices as calculateAMMAllPrices,
+  type AMMReserves,
+} from './amm'
 
 // Contract constants (matching main.leo v31)
 export const MARKET_STATUS = {
@@ -59,6 +63,28 @@ export const FEES = {
   FEE_DENOMINATOR: 10000n,
 };
 
+export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
+export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
+export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
+
+export interface MarketGovernanceConfig {
+  protocolFeeBps: bigint;
+  creatorFeeBps: bigint;
+  lpFeeBps: bigint;
+  minTradeAmount: bigint;
+  minLiquidity: bigint;
+  pauseState: boolean;
+}
+
+export const DEFAULT_MARKET_GOVERNANCE_CONFIG: MarketGovernanceConfig = {
+  protocolFeeBps: FEES.PROTOCOL_FEE_BPS,
+  creatorFeeBps: FEES.CREATOR_FEE_BPS,
+  lpFeeBps: FEES.LP_FEE_BPS,
+  minTradeAmount: MIN_TRADE_AMOUNT,
+  minLiquidity: MIN_LIQUIDITY,
+  pauseState: false,
+};
+
 export const CHALLENGE_WINDOW_BLOCKS = 2880n; // ~12 hours
 
 const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx', 'create_market_usad']);
@@ -73,6 +99,13 @@ export function getProgramIdForToken(tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALE
   return config.programId;
 }
 
+export function getProgramIdForMarket(
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  explicitProgramId?: string | null,
+): string {
+  return explicitProgramId || getProgramIdForToken(tokenType);
+}
+
 /**
  * Get the stablecoin program ID for a given token type.
  */
@@ -84,10 +117,6 @@ export function getStablecoinProgramId(tokenType: 'USDCX' | 'USAD'): string {
 function isCreateMarketFunction(functionName: unknown): boolean {
   return typeof functionName === 'string' && CREATE_MARKET_FUNCTIONS.has(functionName);
 }
-
-export const MIN_TRADE_AMOUNT = 1000n;       // 0.001 tokens
-export const MIN_DISPUTE_BOND = 1000000n;    // 1 token
-export const MIN_LIQUIDITY = 10000n;         // 0.01 tokens
 
 // Types matching the contract structures (v30)
 export interface MarketData {
@@ -839,6 +868,34 @@ export async function getMappingValue<T>(
   }
 }
 
+export async function getMarketGovernanceConfig(programId?: string): Promise<MarketGovernanceConfig> {
+  const pid = programId || PROGRAM_ID;
+  const [
+    protocolFeeBps,
+    creatorFeeBps,
+    lpFeeBps,
+    minTradeAmount,
+    minLiquidity,
+    pauseState,
+  ] = await Promise.all([
+    getMappingValue<bigint>('governance_values', '1field', pid),
+    getMappingValue<bigint>('governance_values', '2field', pid),
+    getMappingValue<bigint>('governance_values', '3field', pid),
+    getMappingValue<bigint>('governance_values', '4field', pid),
+    getMappingValue<bigint>('governance_values', '5field', pid),
+    getMappingValue<bigint>('governance_values', '6field', pid),
+  ]);
+
+  return {
+    protocolFeeBps: protocolFeeBps ?? DEFAULT_MARKET_GOVERNANCE_CONFIG.protocolFeeBps,
+    creatorFeeBps: creatorFeeBps ?? DEFAULT_MARKET_GOVERNANCE_CONFIG.creatorFeeBps,
+    lpFeeBps: lpFeeBps ?? DEFAULT_MARKET_GOVERNANCE_CONFIG.lpFeeBps,
+    minTradeAmount: minTradeAmount ?? DEFAULT_MARKET_GOVERNANCE_CONFIG.minTradeAmount,
+    minLiquidity: minLiquidity ?? DEFAULT_MARKET_GOVERNANCE_CONFIG.minLiquidity,
+    pauseState: (pauseState ?? 0n) > 0n,
+  };
+}
+
 /**
  * Fetch market data by ID
  */
@@ -959,8 +1016,8 @@ export async function getMarketResolution(marketId: string, programId?: string):
 /**
  * Fetch market fees data (v12 - per-market fee tracking)
  */
-export async function getMarketFees(marketId: string): Promise<MarketFeesData | null> {
-  const data = await getMappingValue<Record<string, string>>('market_fees', marketId);
+export async function getMarketFees(marketId: string, programId?: string): Promise<MarketFeesData | null> {
+  const data = await getMappingValue<Record<string, string>>('market_fees', marketId, programId);
   if (!data) return null;
 
   return {
@@ -973,8 +1030,8 @@ export async function getMarketFees(marketId: string): Promise<MarketFeesData | 
 /**
  * Fetch dispute data for a market
  */
-export async function getMarketDispute(marketId: string): Promise<DisputeDataResult | null> {
-  const data = await getMappingValue<Record<string, string>>('market_disputes', marketId);
+export async function getMarketDispute(marketId: string, programId?: string): Promise<DisputeDataResult | null> {
+  const data = await getMappingValue<Record<string, string>>('market_disputes', marketId, programId);
   if (!data) return null;
 
   return {
@@ -1022,7 +1079,7 @@ function generateRandomNonce(): string {
 
 /**
  * Build inputs for create_market transaction (v30)
- * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
+ * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, creator_owner, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
 export function buildCreateMarketInputs(
@@ -1032,6 +1089,7 @@ export function buildCreateMarketInputs(
   deadline: bigint,
   resolutionDeadline: bigint,
   resolverAddress: string,
+  creatorAddress: string,
   tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
   initialLiquidity: bigint,
 ): { functionName: string; inputs: string[]; programId: string } {
@@ -1042,6 +1100,7 @@ export function buildCreateMarketInputs(
     `${deadline}u64`,
     `${resolutionDeadline}u64`,
     resolverAddress,
+    creatorAddress,
     `${initialLiquidity}u128`,
   ];
 
@@ -1213,11 +1272,19 @@ export function buildSellSharesInputs(
   tokensDesired: bigint,
   maxSharesUsed: bigint,
   tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  feeConfig: Pick<MarketGovernanceConfig, 'protocolFeeBps' | 'creatorFeeBps' | 'lpFeeBps'> = {
+    protocolFeeBps: FEES.PROTOCOL_FEE_BPS,
+    creatorFeeBps: FEES.CREATOR_FEE_BPS,
+    lpFeeBps: FEES.LP_FEE_BPS,
+  },
 ): { functionName: string; inputs: string[]; programId: string } {
   const inputs = [
     sharesRecord,
     `${tokensDesired}u128`,
     `${maxSharesUsed}u128`,
+    `${feeConfig.protocolFeeBps}u128`,
+    `${feeConfig.creatorFeeBps}u128`,
+    `${feeConfig.lpFeeBps}u128`,
   ];
 
   const functionName = tokenType === 'USAD' ? 'sell_shares_usad'
@@ -1233,7 +1300,7 @@ export function buildSellSharesInputs(
 
 /**
  * Build inputs for add_liquidity (v30 LP provision)
- * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce)
+ * add_liquidity(market_id, amount, expected_lp_shares, lp_nonce[, lp_owner])
  * Frontend pre-computes expected_lp_shares. LPToken record gets this value.
  */
 export function buildAddLiquidityInputs(
@@ -1241,6 +1308,7 @@ export function buildAddLiquidityInputs(
   amount: bigint,
   expectedLpShares: bigint,
   tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  lpOwner?: string,
 ): { functionName: string; inputs: string[]; programId: string } {
   const lpNonce = generateRandomNonce();
 
@@ -1250,6 +1318,13 @@ export function buildAddLiquidityInputs(
     `${expectedLpShares}u128`,
     lpNonce,
   ];
+
+  if (tokenType === 'USDCX' || tokenType === 'USAD') {
+    if (!lpOwner) {
+      throw new Error(`LP owner address is required for ${tokenType} add_liquidity inputs.`);
+    }
+    inputs.push(lpOwner);
+  }
 
   const functionName = tokenType === 'USAD' ? 'add_liquidity_usad'
     : tokenType === 'USDCX' ? 'add_liquidity_usdcx'
@@ -1310,39 +1385,23 @@ export function buildPlaceBetPrivateInputs(
   return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, 'ALEO', creditsRecord);
 }
 
+function toAMMReserves(pool: AMMPoolData): AMMReserves {
+  const numOutcomes = pool.reserve_4 > 0n ? 4 : pool.reserve_3 > 0n ? 3 : 2;
+  return {
+    reserve_1: pool.reserve_1,
+    reserve_2: pool.reserve_2,
+    reserve_3: pool.reserve_3,
+    reserve_4: pool.reserve_4,
+    num_outcomes: numOutcomes,
+  };
+}
+
 /**
- * Calculate outcome price from AMM pool (v30 FPMM)
- * For FPMM: price_i = product(r_j for j!=i) / sum_of_products
- * Binary simplification: price_i = r_other / (r1 + r2)
+ * Legacy percentage helper backed by the AMM parity layer.
  */
 export function calculateOutcomePrice(pool: AMMPoolData, outcome: number): number {
-  const reserves = [pool.reserve_1, pool.reserve_2, pool.reserve_3, pool.reserve_4];
-  // Determine active reserves (non-zero or first 2 for binary)
-  const numOutcomes = pool.reserve_3 > 0n ? (pool.reserve_4 > 0n ? 4 : 3) : 2;
-  const active = reserves.slice(0, numOutcomes);
-  const total = active.reduce((a, b) => a + b, 0n);
-  if (total === 0n) return 50;
-
-  if (numOutcomes === 2) {
-    // Binary: price_i = r_other / total
-    const idx = outcome - 1;
-    const otherIdx = idx === 0 ? 1 : 0;
-    return Number((active[otherIdx] * 10000n) / total) / 100;
-  }
-
-  // N-outcome: price_i = product(r_j, j!=i) / sum(product(r_j, j!=k) for each k)
-  const products: bigint[] = [];
-  for (let k = 0; k < numOutcomes; k++) {
-    let prod = 1n;
-    for (let j = 0; j < numOutcomes; j++) {
-      if (j !== k) prod = prod * active[j];
-    }
-    products.push(prod);
-  }
-  const sumProducts = products.reduce((a, b) => a + b, 0n);
-  if (sumProducts === 0n) return 100 / numOutcomes;
-  const idx = outcome - 1;
-  return Number((products[idx] * 10000n) / sumProducts) / 100;
+  const prices = calculateAMMAllPrices(toAMMReserves(pool));
+  return (prices[outcome - 1] ?? 0) * 100;
 }
 
 // Legacy aliases
@@ -1357,14 +1416,15 @@ export function calculatePotentialPayout(
   yesPool: bigint,
   noPool: bigint
 ): number {
-  // In v12 AMM model, winning shares redeem 1:1.
-  // This legacy function returns a rough multiplier.
-  const totalPool = yesPool + noPool;
-  const winningPool = betOnYes ? yesPool : noPool;
-  if (winningPool === 0n) return 0;
-  const grossMultiplier = Number(totalPool * 10000n / winningPool) / 10000;
-  const feeMultiplier = Number(FEES.FEE_DENOMINATOR - FEES.TOTAL_FEE_BPS) / Number(FEES.FEE_DENOMINATOR);
-  return grossMultiplier * feeMultiplier;
+  const prices = calculateAMMAllPrices({
+    reserve_1: yesPool,
+    reserve_2: noPool,
+    reserve_3: 0n,
+    reserve_4: 0n,
+    num_outcomes: 2,
+  });
+  const price = prices[betOnYes ? 0 : 1] ?? 0;
+  return price > 0 ? 1 / price : 0;
 }
 
 /**
@@ -1420,7 +1480,7 @@ export function buildSubmitOutcomeInputs(
 export function buildChallengeOutcomeInputs(
   marketId: string,
   proposedOutcome: number,
-  bondAmount: bigint,
+  _bondAmount: bigint,
   bondNonce: string,
 ): string[] {
   // v34: order is market_id, outcome, nonce — credits_in and bond_amount appended by caller
@@ -2386,10 +2446,13 @@ async function loadMarketIdsFromSupabase(): Promise<string[]> {
             }).catch(() => {});
 
             if (supabase) {
-              await supabase.from('market_registry')
-                .delete()
-                .eq('market_id', entry.market_id)
-                .catch(() => {});
+              try {
+                await supabase.from('market_registry')
+                  .delete()
+                  .eq('market_id', entry.market_id);
+              } catch {
+                // Ignore cleanup failures for stale pending entries.
+              }
             }
           } catch (e) {
             const ref = entry.transaction_id || entry.question_hash || entry.market_id;
@@ -2595,6 +2658,7 @@ export async function fetchAllMarkets(): Promise<Array<{
   pool: MarketPoolData;
   resolution?: MarketResolutionData;
   marketCredits?: bigint;
+  programId?: string;
 }>> {
   devLog('fetchAllMarkets: Fetching known markets...');
 
@@ -2618,7 +2682,7 @@ export async function fetchMarketById(marketId: string) {
     ]);
 
     // Fallback: try USAD programs and legacy program versions in parallel
-    let usedProgramId: string | undefined;
+    let usedProgramId: string | undefined = market && pool ? PROGRAM_ID : undefined;
     if (!market || !pool) {
       const fallbackPids = [
         config.usdcxMarketProgramId,
@@ -2670,6 +2734,7 @@ export async function fetchMarketById(marketId: string) {
       pool,
       resolution: resolution || undefined,
       marketCredits,
+      programId: usedProgramId || PROGRAM_ID,
     };
   } catch (error) {
     console.error(`Failed to fetch market ${marketId}:`, error);

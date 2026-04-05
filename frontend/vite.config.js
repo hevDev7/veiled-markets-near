@@ -8,6 +8,7 @@ export default defineConfig({
     resolve: {
         alias: {
             '@': '/src',
+            '@sdk': resolve(__dirname, '../sdk/src'),
             // Stub out core-js CJS polyfill imported by @provablehq/sdk - not needed in modern browsers
             'core-js/proposals/json-parse-with-source.js': resolve(__dirname, 'src/lib/empty-module.js'),
         },

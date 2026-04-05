@@ -16,6 +16,7 @@ import {
   X,
   Vote,
   Bell,
+  Ticket,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
@@ -23,23 +24,29 @@ import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { cn, shortenAddress, formatCredits } from '@/lib/utils'
 
-const navItems = [
-  { name: 'Markets', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Portfolio', href: '/portfolio', icon: TrendingUp },
-  { name: 'Create', href: '/create', icon: Plus },
-  { name: 'Govern', href: '/governance', icon: Vote },
+const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
+
+const baseNavItems = [
+  { name: 'Markets', href: '/dashboard', icon: LayoutDashboard, adminOnly: false },
+  { name: 'Portfolio', href: '/portfolio', icon: TrendingUp, adminOnly: false },
+  { name: 'Parlays', href: '/my-parlays', icon: Ticket, adminOnly: true },
+  { name: 'Create', href: '/create', icon: Plus, adminOnly: false },
+  { name: 'Govern', href: '/governance', icon: Vote, adminOnly: false },
 ]
 
 export function DashboardHeader() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { wallet, refreshBalance } = useWalletStore()
+  const { wallet, refreshBalance, balanceStatus, balanceError, lastBalanceRefreshAt } = useWalletStore()
   const { disconnect: providerDisconnect } = useWallet()
   const [showDropdown, setShowDropdown] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
   const [copied, setCopied] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+
+  const isAdmin = wallet.address === ADMIN_ADDRESS
+  const navItems = baseNavItems.filter(item => !item.adminOnly || isAdmin)
 
   useEffect(() => setShowMobileMenu(false), [location.pathname])
 
@@ -58,6 +65,37 @@ export function DashboardHeader() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showDropdown])
+
+  useEffect(() => {
+    if (!wallet.connected || !wallet.address || !showDropdown) return
+    setRefreshing(true)
+    void refreshBalance().finally(() => setRefreshing(false))
+  }, [wallet.connected, wallet.address, showDropdown, refreshBalance])
+
+  useEffect(() => {
+    if (!wallet.connected || !wallet.address) return
+
+    let lastTriggeredAt = 0
+    const maybeRefresh = () => {
+      const now = Date.now()
+      if (now - lastTriggeredAt < 15_000) return
+      lastTriggeredAt = now
+      void refreshBalance()
+    }
+
+    const onFocus = () => maybeRefresh()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') maybeRefresh()
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [wallet.connected, wallet.address, refreshBalance])
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -79,6 +117,18 @@ export function DashboardHeader() {
   }
 
   const totalBalance = wallet.balance.public + wallet.balance.private
+  const isRefreshingBalance = refreshing || balanceStatus === 'refreshing'
+  const showPartialBalanceHint = balanceStatus === 'partial' && !!balanceError
+  const balanceUpdatedLabel = (() => {
+    if (!lastBalanceRefreshAt) return 'Balance not synced yet'
+    const secondsAgo = Math.max(0, Math.floor((Date.now() - lastBalanceRefreshAt) / 1000))
+    if (secondsAgo < 10) return 'Updated just now'
+    if (secondsAgo < 60) return `Updated ${secondsAgo}s ago`
+    const minutesAgo = Math.floor(secondsAgo / 60)
+    if (minutesAgo < 60) return `Updated ${minutesAgo}m ago`
+    const hoursAgo = Math.floor(minutesAgo / 60)
+    return `Updated ${hoursAgo}h ago`
+  })()
 
   return (
     <>
@@ -187,7 +237,7 @@ export function DashboardHeader() {
                   </span>
                   <div className="h-4 w-px bg-white/[0.06]" />
                   <span className="text-xs text-surface-400 tabular-nums">
-                    {formatCredits(totalBalance, 1)} <img src="/aleo-logo.png" alt="ALEO" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" />
+                    {formatCredits(totalBalance, 1)} ALEO
                   </span>
                   <ChevronDown className={cn(
                     'w-3.5 h-3.5 text-surface-500 transition-transform duration-200',
@@ -257,14 +307,27 @@ export function DashboardHeader() {
                         border: '1px solid rgba(201, 168, 76, 0.08)',
                       }}>
                       <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs text-surface-400 font-medium">Total Balance</p>
-                        <button onClick={handleRefreshBalance} disabled={refreshing} className="p-1 rounded-md hover:bg-white/[0.04] transition-colors">
-                          <RefreshCw className={cn('w-3.5 h-3.5 text-surface-500', refreshing && 'animate-spin')} />
+                        <div>
+                          <p className="text-xs text-surface-400 font-medium">Total ALEO Balance</p>
+                          <p className="text-[10px] text-surface-500 mt-0.5">{balanceUpdatedLabel}</p>
+                        </div>
+                        <button onClick={handleRefreshBalance} disabled={isRefreshingBalance} className="p-1 rounded-md hover:bg-white/[0.04] transition-colors disabled:opacity-50">
+                          <RefreshCw className={cn('w-3.5 h-3.5 text-surface-500', isRefreshingBalance && 'animate-spin')} />
                         </button>
                       </div>
                       <p className="text-2xl font-display font-bold text-white mb-3 tabular-nums">
                         {formatCredits(totalBalance)} <img src="/aleo-logo.png" alt="ALEO" className="w-4 h-4 rounded-full inline-block ml-1" />
                       </p>
+                      {showPartialBalanceHint && (
+                        <p className="text-[10px] text-surface-400 mb-3 leading-relaxed">
+                          {balanceError}
+                        </p>
+                      )}
+                      {balanceStatus === 'error' && balanceError && (
+                        <p className="text-[10px] text-no-400 mb-3 leading-relaxed">
+                          {balanceError}
+                        </p>
+                      )}
                       <div className="pt-3 space-y-1.5 border-t border-white/[0.04]">
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">Public</p>
@@ -277,7 +340,7 @@ export function DashboardHeader() {
                           </div>
                         ) : wallet.walletType === 'shield' ? (
                           <p className="text-2xs text-surface-500 mt-1.5 leading-relaxed">
-                            Private balance detection not yet supported by Shield Wallet.
+                            Private ALEO balance has not been detected from Shield yet. Try refresh after Shield finishes syncing records.
                           </p>
                         ) : null}
                         <div className="flex justify-between items-center">

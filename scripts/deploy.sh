@@ -36,7 +36,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-CONTRACTS_DIR="contracts"
+CONTRACTS_DIR="${ALEO_CONTRACTS_DIR:-contracts}"
 DEFAULT_NETWORK="${ALEO_NETWORK:-testnet}"
 NETWORK="${DEFAULT_NETWORK}"
 PRIORITY_FEE="${ALEO_PRIORITY_FEE:-1000000}"
@@ -44,31 +44,13 @@ DRY_RUN=false
 WAIT_FOR_CONFIRMATION="${ALEO_WAIT_FOR_CONFIRMATION:-false}"
 DEPLOY_TIMEOUT="${ALEO_DEPLOY_TIMEOUT:-120}"
 
-# Program configuration
-PROGRAM_MANIFEST="$PROJECT_ROOT/${CONTRACTS_DIR}/program.json"
-PROGRAM_FROM_MANIFEST=""
-if [ -f "$PROGRAM_MANIFEST" ]; then
-    PROGRAM_FROM_MANIFEST="$(sed -n 's/.*"program"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PROGRAM_MANIFEST" | head -n 1)"
-fi
-
-if [ -n "$PROGRAM_FROM_MANIFEST" ]; then
-    PROGRAM_NAME_DEFAULT="${PROGRAM_FROM_MANIFEST%.aleo}"
-else
-    PROGRAM_NAME_DEFAULT="veiled_markets_v32"
-fi
-
-PROGRAM_NAME="${ALEO_PROGRAM_NAME:-$PROGRAM_NAME_DEFAULT}"
-PROGRAM_NAME="${PROGRAM_NAME%.aleo}"
-
-if [ -n "$PROGRAM_FROM_MANIFEST" ] && [ "${PROGRAM_NAME}.aleo" != "$PROGRAM_FROM_MANIFEST" ]; then
-    echo -e "${YELLOW}Warning: ALEO_PROGRAM_NAME (${PROGRAM_NAME}.aleo) does not match contracts/program.json (${PROGRAM_FROM_MANIFEST}).${NC}"
-    echo -e "${YELLOW}Using program from contracts/program.json for deployment safety.${NC}"
-    PROGRAM_NAME="${PROGRAM_FROM_MANIFEST%.aleo}"
-fi
-
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --contracts-dir)
+            CONTRACTS_DIR="${2%/}"
+            shift 2
+            ;;
         --network)
             NETWORK="$2"
             shift 2
@@ -89,6 +71,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
+            echo "  --contracts-dir <dir>  Contract directory relative to project root (default: contracts)"
             echo "  --network <network>   Network to deploy to (testnet/mainnet)"
             echo "  --dry-run             Build only, don't deploy"
             echo "  --wait                Wait for transaction confirmation"
@@ -102,6 +85,28 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Program configuration
+PROGRAM_MANIFEST="$PROJECT_ROOT/${CONTRACTS_DIR}/program.json"
+PROGRAM_FROM_MANIFEST=""
+if [ -f "$PROGRAM_MANIFEST" ]; then
+    PROGRAM_FROM_MANIFEST="$(sed -n 's/.*"program"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PROGRAM_MANIFEST" | head -n 1)"
+fi
+
+if [ -n "$PROGRAM_FROM_MANIFEST" ]; then
+    PROGRAM_NAME_DEFAULT="${PROGRAM_FROM_MANIFEST%.aleo}"
+else
+    PROGRAM_NAME_DEFAULT="veiled_markets_v32"
+fi
+
+PROGRAM_NAME="${ALEO_PROGRAM_NAME:-$PROGRAM_NAME_DEFAULT}"
+PROGRAM_NAME="${PROGRAM_NAME%.aleo}"
+
+if [ -n "$PROGRAM_FROM_MANIFEST" ] && [ "${PROGRAM_NAME}.aleo" != "$PROGRAM_FROM_MANIFEST" ]; then
+    echo -e "${YELLOW}Warning: ALEO_PROGRAM_NAME (${PROGRAM_NAME}.aleo) does not match ${CONTRACTS_DIR}/program.json (${PROGRAM_FROM_MANIFEST}).${NC}"
+    echo -e "${YELLOW}Using program from ${CONTRACTS_DIR}/program.json for deployment safety.${NC}"
+    PROGRAM_NAME="${PROGRAM_FROM_MANIFEST%.aleo}"
+fi
 
 # Banner
 echo -e "${BLUE}"
@@ -142,6 +147,7 @@ if [ "$DRY_RUN" = false ]; then
 fi
 
 echo -e "  ${GREEN}✓ Target network: ${NETWORK}${NC}"
+echo -e "  ${GREEN}✓ Contracts directory: ${CONTRACTS_DIR}${NC}"
 echo ""
 
 # Navigate to contracts directory
@@ -185,17 +191,17 @@ else
     case $NETWORK in
         testnet)
             NETWORK_ID=1
-            ENDPOINT_DEFAULT="https://api.explorer.provable.com"
+            ENDPOINT_DEFAULT="https://api.explorer.provable.com/v1"
             EXPLORER="https://testnet.explorer.provable.com"
             ;;
         mainnet)
             NETWORK_ID=0
-            ENDPOINT_DEFAULT="https://api.explorer.provable.com"
+            ENDPOINT_DEFAULT="https://api.explorer.provable.com/v1"
             EXPLORER="https://explorer.provable.com"
             ;;
         canary)
             NETWORK_ID=2
-            ENDPOINT_DEFAULT="https://api.explorer.provable.com"
+            ENDPOINT_DEFAULT="https://api.explorer.provable.com/v1"
             EXPLORER="https://canary.explorer.provable.com"
             ;;
         *)
@@ -210,17 +216,19 @@ else
         ENDPOINT="${ENDPOINT%/testnet}"
         ENDPOINT="${ENDPOINT%/mainnet}"
         ENDPOINT="${ENDPOINT%/canary}"
-        ENDPOINT="${ENDPOINT%/v1}"
-        ENDPOINT="${ENDPOINT%/v2}"
     else
         ENDPOINT="$ENDPOINT_DEFAULT"
+    fi
+
+    if [[ "$ENDPOINT" != */v1 && "$ENDPOINT" != */v2 ]]; then
+        ENDPOINT="${ENDPOINT%/}/v1"
     fi
 
     # Resolve broadcast endpoint
     if [ -n "$ALEO_BROADCAST_URL" ]; then
         BROADCAST_URL="${ALEO_BROADCAST_URL%/}"
     else
-        BROADCAST_URL="${ENDPOINT}/v1/${NETWORK}/transaction/broadcast"
+        BROADCAST_URL="${ENDPOINT}/${NETWORK}/transaction/broadcast"
     fi
 
     echo -e "  ${BLUE}Endpoint base: ${ENDPOINT}${NC}"

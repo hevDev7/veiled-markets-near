@@ -3,10 +3,32 @@
   "version": "4.0.0",
   "description": "Full governance + resolver + slashing system for Veiled Markets — staking, proposals, voting, delegation, resolver registry, multi-resolver panels, slashing, tier upgrades, committee management, and reward distribution using native ALEO credits",
   "license": "MIT",
+  "leo": "3.5.0",
   "dependencies": [
     {
       "name": "credits.aleo",
-      "location": "network"
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "veiled_markets_v35.aleo",
+      "location": "local",
+      "path": "../contracts",
+      "edition": null
+    },
+    {
+      "name": "veiled_markets_usdcx_v5.aleo",
+      "location": "local",
+      "path": "../contracts-usdcx",
+      "edition": null
+    },
+    {
+      "name": "veiled_markets_usad_v12.aleo",
+      "location": "local",
+      "path": "../contracts-usad",
+      "edition": null
     }
-  ]
+  ],
+  "dev_dependencies": null
 }

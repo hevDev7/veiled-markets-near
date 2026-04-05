@@ -1,13 +1,13 @@
-import { Clock, TrendingUp, Shield, ChevronRight, Flame } from 'lucide-react'
+import { Clock, TrendingUp, Shield, ChevronRight, Flame, Ticket } from 'lucide-react'
 import { useMemo } from 'react'
 import { useLiveCountdown as useGlobalCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
-import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryStrip, getCategoryColor } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryStrip, getCategoryColor } from '@/lib/utils'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
-import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
+import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 
 const OUTCOME_COLORS = [
   { text: 'text-yes-400', bar: 'bg-yes-500', bg: 'bg-yes-500/10', border: 'border-yes-500/20' },
@@ -20,44 +20,50 @@ interface MarketRowProps {
     market: Market
     index: number
     onClick: () => void
+    parlayMode?: boolean
+    selectedParlayOutcome?: number | null
+    onQuickAddParlay?: (market: Market, outcome: number) => void
 }
 
-export function MarketRow({ market, index, onClick }: MarketRowProps) {
+export function MarketRow({
+    market,
+    index,
+    onClick,
+    parlayMode = false,
+    selectedParlayOutcome = null,
+    onQuickAddParlay,
+}: MarketRowProps) {
     const timeRemaining = useGlobalCountdown(market.deadlineTimestamp, market.timeRemaining).toUpperCase()
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
     const statusVariant = getStatusVariant(market.status, isExpired)
 
     const numOutcomes = market.numOutcomes ?? 2
-    const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
-
-    const prices = useMemo(() => {
-        const reserves: AMMReserves = {
-            reserve_1: market.yesReserve ?? 0n,
-            reserve_2: market.noReserve ?? 0n,
-            reserve_3: market.reserve3 ?? 0n,
-            reserve_4: market.reserve4 ?? 0n,
-            num_outcomes: numOutcomes,
-        }
-        return calculateAllPrices(reserves)
-    }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
+    const outcomeSummaries = useMemo(() => getMarketOutcomeSummaries(market), [market])
 
     const isBinary = numOutcomes === 2
     const categoryColor = getCategoryColor(market.category)
     const isHot = market.tags?.includes('Hot') || market.tags?.includes('Trending') || market.tags?.includes('Featured')
 
     // Find leading outcome
-    const leadingIdx = useMemo(() => {
-        let maxIdx = 0
-        for (let i = 1; i < prices.length; i++) {
-            if ((prices[i] ?? 0) > (prices[maxIdx] ?? 0)) maxIdx = i
-        }
-        return maxIdx
-    }, [prices])
-    const leadingPct = (prices[leadingIdx] ?? 0) * 100
+    const leadingOutcome = useMemo(() => {
+        if (outcomeSummaries.length === 0) return null
+        return outcomeSummaries.reduce((leading, outcome) => (
+            outcome.percentage > leading.percentage ? outcome : leading
+        ))
+    }, [outcomeSummaries])
 
     return (
         <div
             onClick={onClick}
+            onKeyDown={(event) => {
+                if (event.target !== event.currentTarget) return
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onClick()
+                }
+            }}
+            role="button"
+            tabIndex={0}
             style={{ animationDelay: `${index * 50}ms` }}
             className={cn(
                 "group relative overflow-hidden rounded-xl cursor-pointer",
@@ -68,7 +74,8 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                 "p-4",
                 getCategoryStrip(market.category),
                 isExpired && "opacity-55",
-                isHot && "border-gold-500/15 hover:border-gold-500/30"
+                isHot && "border-gold-500/15 hover:border-gold-500/30",
+                parlayMode && selectedParlayOutcome && "border-brand-500/25 shadow-[0_16px_48px_rgba(201,168,76,0.08)]"
             )}
         >
             {/* Hover glow */}
@@ -133,56 +140,56 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
                         </p>
                     )}
 
-                    {/* Odds Bar */}
-                    <div className="max-w-md">
-                        {isBinary ? (
-                            <>
-                                <div className="flex justify-between text-xs mb-1.5">
-                                    <span className="text-yes-400 font-semibold flex items-center gap-1.5">
-                                        <span className="w-2 h-2 rounded-full bg-yes-500 shadow-[0_0_4px_rgba(16,185,129,0.4)]" />
-                                        {outcomeLabels[0]} <span className="tabular-nums font-bold">{formatPercentage(market.yesPercentage)}</span>
-                                    </span>
-                                    <span className="text-no-400 font-semibold flex items-center gap-1.5">
-                                        <span className="tabular-nums font-bold">{formatPercentage(market.noPercentage)}</span> {outcomeLabels[1]}
-                                        <span className="w-2 h-2 rounded-full bg-no-500 shadow-[0_0_4px_rgba(244,63,94,0.4)]" />
-                                    </span>
-                                </div>
-                                <div className="h-2 rounded-full overflow-hidden bg-surface-800">
-                                    <div
-                                        className="h-full transition-all duration-700 ease-out"
-                                        style={{
-                                            width: `${market.yesPercentage}%`,
-                                            background: 'linear-gradient(90deg, #059669, #34d399, #6ee7b7)',
-                                        }}
-                                    />
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div className="flex items-center gap-2 text-xs mb-1.5">
-                                    <span className={cn('font-bold flex items-center gap-1.5', OUTCOME_COLORS[leadingIdx]?.text || 'text-yes-400')}>
-                                        <span className={cn('w-2 h-2 rounded-full', OUTCOME_COLORS[leadingIdx]?.bar || 'bg-yes-500')} />
-                                        {outcomeLabels[leadingIdx]} <span className="tabular-nums">{formatPercentage(leadingPct)}</span>
-                                    </span>
-                                    <span className="text-surface-600">|</span>
-                                    <span className="text-surface-400">{numOutcomes} outcomes</span>
-                                </div>
-                                <div className="h-2 rounded-full overflow-hidden bg-surface-800 flex">
-                                    {outcomeLabels.map((_, i) => {
-                                        const pct = (prices[i] ?? 0) * 100
-                                        const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
-                                        return (
-                                            <div
-                                                key={i}
-                                                className={cn('h-full transition-all duration-700 ease-out', colors.bar)}
-                                                style={{ width: `${pct}%` }}
-                                            />
-                                        )
-                                    })}
-                                </div>
-                            </>
-                        )}
-                    </div>
+                    {!parlayMode && (
+                        <div className="max-w-md">
+                            {isBinary ? (
+                                <>
+                                    <div className="flex justify-between text-xs mb-1.5">
+                                        <span className="text-yes-400 font-semibold flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-yes-500 shadow-[0_0_4px_rgba(16,185,129,0.4)]" />
+                                            {outcomeSummaries[0]?.label || 'Yes'} <span className="tabular-nums font-bold">{formatPercentage(outcomeSummaries[0]?.percentage ?? 0)}</span>
+                                        </span>
+                                        <span className="text-no-400 font-semibold flex items-center gap-1.5">
+                                            <span className="tabular-nums font-bold">{formatPercentage(outcomeSummaries[1]?.percentage ?? 0)}</span> {outcomeSummaries[1]?.label || 'No'}
+                                            <span className="w-2 h-2 rounded-full bg-no-500 shadow-[0_0_4px_rgba(244,63,94,0.4)]" />
+                                        </span>
+                                    </div>
+                                    <div className="h-2 rounded-full overflow-hidden bg-surface-800">
+                                        <div
+                                            className="h-full transition-all duration-700 ease-out"
+                                            style={{
+                                                width: `${outcomeSummaries[0]?.percentage ?? 0}%`,
+                                                background: 'linear-gradient(90deg, #059669, #34d399, #6ee7b7)',
+                                            }}
+                                        />
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="flex items-center gap-2 text-xs mb-1.5">
+                                        <span className={cn('font-bold flex items-center gap-1.5', OUTCOME_COLORS[leadingOutcome?.index ?? 0]?.text || 'text-yes-400')}>
+                                            <span className={cn('w-2 h-2 rounded-full', OUTCOME_COLORS[leadingOutcome?.index ?? 0]?.bar || 'bg-yes-500')} />
+                                            {leadingOutcome?.label || 'Lead'} <span className="tabular-nums">{formatPercentage(leadingOutcome?.percentage ?? 0)}</span>
+                                        </span>
+                                        <span className="text-surface-600">|</span>
+                                        <span className="text-surface-400">{numOutcomes} outcomes</span>
+                                    </div>
+                                    <div className="h-2 rounded-full overflow-hidden bg-surface-800 flex">
+                                        {outcomeSummaries.map((outcome, i) => {
+                                            const colors = OUTCOME_COLORS[i] || OUTCOME_COLORS[0]
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    className={cn('h-full transition-all duration-700 ease-out', colors.bar)}
+                                                    style={{ width: `${outcome.percentage}%` }}
+                                                />
+                                            )
+                                        })}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Middle: Stats */}
@@ -231,37 +238,98 @@ export function MarketRow({ market, index, onClick }: MarketRowProps) {
 
                 {/* Right: Payouts & Arrow */}
                 <div className="flex items-center gap-3">
-                    <div className="hidden lg:flex items-center gap-2">
-                        {isBinary ? (
-                            <>
-                                <div className="px-3 py-1.5 rounded-lg bg-yes-500/8 border border-yes-500/15">
-                                    <span className="text-xs font-bold text-yes-400 tabular-nums">
-                                        {outcomeLabels[0]} {market.potentialYesPayout.toFixed(2)}x
-                                    </span>
-                                </div>
-                                <div className="px-3 py-1.5 rounded-lg bg-no-500/8 border border-no-500/15">
-                                    <span className="text-xs font-bold text-no-400 tabular-nums">
-                                        {outcomeLabels[1]} {market.potentialNoPayout.toFixed(2)}x
-                                    </span>
-                                </div>
-                            </>
-                        ) : (() => {
-                            const leadPrice = prices[leadingIdx] ?? (1 / numOutcomes)
-                            const leadPayout = leadPrice > 0 ? 1 / leadPrice : 2.0
-                            const colors = OUTCOME_COLORS[leadingIdx] || OUTCOME_COLORS[0]
-                            return (
-                                <div className={cn('px-3 py-1.5 rounded-lg', colors.bg, 'border', colors.border)}>
-                                    <span className={cn('text-xs font-bold tabular-nums', colors.text)}>
-                                        Top {leadPayout.toFixed(2)}x
-                                    </span>
-                                </div>
-                            )
-                        })()}
-                    </div>
+                    {!parlayMode && (
+                        <div className="hidden lg:flex items-center gap-2">
+                            {isBinary ? (
+                                <>
+                                    <div className="px-3 py-1.5 rounded-lg bg-yes-500/8 border border-yes-500/15">
+                                        <span className="text-xs font-bold text-yes-400 tabular-nums">
+                                            {outcomeSummaries[0]?.label || 'Yes'} {(outcomeSummaries[0]?.payout ?? 0).toFixed(2)}x
+                                        </span>
+                                    </div>
+                                    <div className="px-3 py-1.5 rounded-lg bg-no-500/8 border border-no-500/15">
+                                        <span className="text-xs font-bold text-no-400 tabular-nums">
+                                            {outcomeSummaries[1]?.label || 'No'} {(outcomeSummaries[1]?.payout ?? 0).toFixed(2)}x
+                                        </span>
+                                    </div>
+                                </>
+                            ) : (() => {
+                                const leadPayout = leadingOutcome?.payout ?? 0
+                                const colors = OUTCOME_COLORS[leadingOutcome?.index ?? 0] || OUTCOME_COLORS[0]
+                                return (
+                                    <div className={cn('px-3 py-1.5 rounded-lg', colors.bg, 'border', colors.border)}>
+                                        <span className={cn('text-xs font-bold tabular-nums', colors.text)}>
+                                            Top {leadPayout.toFixed(2)}x
+                                        </span>
+                                    </div>
+                                )
+                            })()}
+                        </div>
+                    )}
 
                     <ChevronRight className="w-5 h-5 text-surface-600 group-hover:text-brand-400 group-hover:translate-x-1 transition-all duration-200" />
                 </div>
             </div>
+
+            {parlayMode && (
+                <div className="mt-4 rounded-xl border border-brand-500/12 bg-brand-500/[0.03] p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-300/90">
+                            <Ticket className="h-3.5 w-3.5" />
+                            Parlay Quick Add
+                        </div>
+                        {selectedParlayOutcome ? (
+                            <span className="rounded-full border border-brand-500/15 bg-brand-500/10 px-2 py-1 text-[10px] font-semibold text-brand-300">
+                                Current leg selected
+                            </span>
+                        ) : (
+                            <span className="text-[10px] text-surface-500">Choose an outcome</span>
+                        )}
+                    </div>
+                    <div className={cn('gap-2', isBinary ? 'grid grid-cols-1' : 'flex flex-wrap')}>
+                        {outcomeSummaries.map((outcome) => {
+                            const isSelected = selectedParlayOutcome === outcome.outcome
+                            return (
+                                <button
+                                    key={outcome.outcome}
+                                    type="button"
+                                    onClick={(event) => {
+                                        event.stopPropagation()
+                                        onQuickAddParlay?.(market, outcome.outcome)
+                                    }}
+                                    disabled={isExpired}
+                                    className={cn(
+                                        'rounded-xl border px-3 py-2 text-left transition-all duration-200',
+                                        isBinary ? 'w-full' : 'min-w-[126px]',
+                                        outcome.styles.bg,
+                                        outcome.styles.border,
+                                        !isExpired && 'hover:border-brand-400/30 hover:bg-white/[0.04]',
+                                        isExpired && 'cursor-not-allowed opacity-50',
+                                        isSelected && 'border-brand-400/35 bg-brand-500/10 shadow-[0_0_0_1px_rgba(201,168,76,0.12)]'
+                                    )}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className={cn('truncate text-xs font-semibold', outcome.styles.text)}>
+                                            {outcome.label}
+                                        </span>
+                                        <span className={cn('text-xs font-bold tabular-nums', outcome.styles.text)}>
+                                            {outcome.payout.toFixed(2)}x
+                                        </span>
+                                    </div>
+                                    <p className="mt-1 text-[10px] text-surface-500">
+                                        {isSelected ? 'Tap again to remove' : `${formatPercentage(outcome.percentage)} implied`}
+                                    </p>
+                                </button>
+                            )
+                        })}
+                    </div>
+                    {isExpired && (
+                        <p className="mt-2 text-[10px] text-surface-500">
+                            This market is closed and cannot be added to a new parlay slip.
+                        </p>
+                    )}
+                </div>
+            )}
 
             {/* Mobile Stats */}
             <div className="md:hidden mt-3 pt-3 border-t border-surface-700/20">

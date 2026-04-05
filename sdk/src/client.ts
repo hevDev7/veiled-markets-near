@@ -33,11 +33,10 @@ import {
 } from './types';
 
 import {
-  calculateOutcomePrice,
-  calculateAllPrices,
   hashToField,
   formatTimeRemaining,
 } from './utils';
+import { calculateContractAllPrices } from './contract-math';
 
 /**
  * Default configuration for testnet
@@ -156,13 +155,13 @@ export class VeiledMarketsClient {
     fees?: MarketFees,
   ): MarketWithStats {
     const numOutcomes = market.numOutcomes || 2;
-    const prices = calculateAllPrices(
-      pool.reserve1,
-      pool.reserve2,
-      pool.reserve3,
-      pool.reserve4,
+    const prices = calculateContractAllPrices({
+      reserve1: pool.reserve1,
+      reserve2: pool.reserve2,
+      reserve3: pool.reserve3,
+      reserve4: pool.reserve4,
       numOutcomes,
-    );
+    });
 
     // In FPMM AMM, winning shares redeem 1:1, so payout = 1/price
     const potentialPayouts = prices.map(p => p > 0 ? 1 / p : 0);

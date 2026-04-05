@@ -48,6 +48,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         config.usdcxMarketProgramId,
         config.usadProgramId,
         config.governanceProgramId,
+        config.parlayProgramId,
         'credits.aleo',
         config.usdcxProgramId,
         'test_usad_stablecoin.aleo',

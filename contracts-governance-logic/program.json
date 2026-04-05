@@ -1,0 +1,9 @@
+{
+  "program": "governance_logic_tests.aleo",
+  "version": "0.1.0",
+  "description": "Standalone governance logic tests for offline Leo execution",
+  "license": "MIT",
+  "leo": "3.5.0",
+  "dependencies": null,
+  "dev_dependencies": null
+}

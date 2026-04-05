@@ -213,6 +213,49 @@ export interface ResolutionEscalation {
   status: 'pending' | 'committee' | 'community' | 'resolved' | 'cancelled';
 }
 
+export type GovernanceEscalationStage =
+  | 'voting'
+  | 'dispute_window'
+  | 'disputed'
+  | 'committee'
+  | 'community'
+  | 'resolved'
+  | 'cancelled';
+
+export interface GovernanceEscalationMarket {
+  marketId: string;
+  question: string;
+  tokenType: 'ALEO' | 'USDCX' | 'USAD';
+  programId?: string;
+  resolverAddress?: string;
+  marketStatus: number;
+  stage: GovernanceEscalationStage;
+  outcomeLabels: string[];
+  currentOutcome?: number;
+  disputeOutcome?: number;
+  committeeOutcome?: number;
+  totalVoters: number;
+  totalBonded: bigint;
+  challengeDeadline?: bigint;
+  disputer?: string;
+  disputeBond?: bigint;
+  communityProposalId?: string;
+  communityProposalStatus?: ProposalStatus;
+  committeeDecisionFinalized?: boolean;
+}
+
+export const GOVERNANCE_PROPOSAL_LANES = {
+  ALL: 'all',
+  DISPUTE: 'dispute',
+  RESOLVER: 'resolver',
+  CONTROLS: 'controls',
+  TREASURY: 'treasury',
+} as const;
+
+export type GovernanceProposalLane = (typeof GOVERNANCE_PROPOSAL_LANES)[keyof typeof GOVERNANCE_PROPOSAL_LANES];
+
+export type GovernanceActorRole = 'resolver' | 'guardian';
+
 // --- Governance Stats ---
 export interface GovernanceStats {
   totalSupply: bigint;           // Total ALEO held by governance program
@@ -226,6 +269,14 @@ export interface GovernanceStats {
   totalVeilDistributedLP: bigint;      // ALEO distributed to LPs
   totalVeilDistributedTrading: bigint; // ALEO distributed to traders
   totalResolvers: number;              // Active resolver count
+  pauseState: boolean;
+  protocolFeeBps: bigint;
+  creatorFeeBps: bigint;
+  lpFeeBps: bigint;
+  minTradeAmount: bigint;
+  minLiquidity: bigint;
+  guardianThreshold: number;
+  guardianAddresses: string[];
 }
 
 // --- Constants (v2: pure ALEO governance) ---

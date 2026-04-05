@@ -7,8 +7,9 @@ import { cn, formatCredits, getCategoryName, getCategoryEmoji, getTokenSymbol } 
 import { TransactionLink } from './TransactionLink'
 import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { fetchCreditsRecord } from '@/lib/credits-record'
-import { calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
+import { calculateAllPrices, calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
 import { devWarn } from '../lib/logger'
+import { useMarketGovernanceConfig } from '@/hooks/useMarketGovernanceConfig'
 
 interface BuySharesModalProps {
   market: Market | null
@@ -45,7 +46,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
   const outcomeLabels = market?.outcomeLabels || OUTCOME_LABELS_DEFAULT.slice(0, numOutcomes)
   const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'ALEO'
   const marketTokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
-  const isUsdcx = marketTokenType === 'USDCX'
+  const governanceConfig = useMarketGovernanceConfig(marketTokenType)
   const isStablecoin = marketTokenType === 'USDCX' || marketTokenType === 'USAD'
   const stablecoinTotalBalance = marketTokenType === 'USDCX'
     ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
@@ -54,6 +55,15 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
     ? wallet.balance.usdcxPrivate
     : wallet.balance.usadPrivate
   const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
+  const amountMicro = useMemo(() => {
+    const parsed = parseFloat(amount)
+    if (!Number.isFinite(parsed) || parsed <= 0) return 0n
+    return BigInt(Math.floor(parsed * 1_000_000))
+  }, [amount])
+  const meetsMinTrade = amountMicro >= governanceConfig.minTradeAmount
+  const totalFeePercent = Number(
+    governanceConfig.protocolFeeBps + governanceConfig.creatorFeeBps + governanceConfig.lpFeeBps
+  ) / 100
 
   // AMM reserves from market data
   const ammReserves: AMMReserves | null = useMemo(() => {
@@ -69,14 +79,12 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
   // Calculate shares out and price impact
   const tradePreview = useMemo(() => {
-    if (!selectedOutcome || !amount || !ammReserves) return null
-    const amountMicro = BigInt(Math.floor(parseFloat(amount) * 1_000_000))
-    if (amountMicro <= 0n) return null
+    if (!selectedOutcome || !ammReserves || amountMicro <= 0n || governanceConfig.pauseState || !meetsMinTrade) return null
 
-    const sharesOut = calculateBuySharesOut(ammReserves, selectedOutcome, amountMicro)
+    const sharesOut = calculateBuySharesOut(ammReserves, selectedOutcome, amountMicro, governanceConfig)
     const minShares = calculateMinSharesOut(sharesOut, slippageTolerance)
-    const priceImpact = calculateBuyPriceImpact(ammReserves, selectedOutcome, amountMicro)
-    const fees = calculateFees(amountMicro)
+    const priceImpact = calculateBuyPriceImpact(ammReserves, selectedOutcome, amountMicro, governanceConfig)
+    const fees = calculateFees(amountMicro, governanceConfig)
 
     return {
       sharesOut,
@@ -86,36 +94,37 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
       // Winning shares redeem 1:1 (use minShares — matches on-chain record quantity)
       potentialPayout: Number(minShares) / 1_000_000,
     }
-  }, [selectedOutcome, amount, ammReserves, slippageTolerance])
+  }, [selectedOutcome, ammReserves, amountMicro, governanceConfig, meetsMinTrade, slippageTolerance])
 
   // Get outcome prices
   const outcomePrices = useMemo(() => {
-    if (!market) return []
-    const prices: number[] = []
-    const total = (market.yesReserve || 0n) + (market.noReserve || 0n) + (market.reserve3 || 0n) + (market.reserve4 || 0n)
-    if (total === 0n) return Array(numOutcomes).fill(1 / numOutcomes)
-
-    const reserves = [market.yesReserve || 0n, market.noReserve || 0n, market.reserve3 || 0n, market.reserve4 || 0n]
-    for (let i = 0; i < numOutcomes; i++) {
-      prices.push(Number(reserves[i]) / Number(total))
-    }
-    return prices
-  }, [market, numOutcomes])
+    if (!ammReserves) return []
+    return calculateAllPrices(ammReserves)
+  }, [ammReserves])
 
   const handleBuyShares = async () => {
     if (!market || !selectedOutcome || !amount) return
 
     setIsPlacing(true)
     setError(null)
+    let releaseSelectedRecord: (() => void) | null = null
 
     try {
       if (!market.id.endsWith('field')) {
         throw new Error('This is a demo market. Use markets created via "Create Market" to trade.')
       }
 
-      const amountMicro = BigInt(Math.floor(parseFloat(amount) * 1_000_000))
       const minSharesOut = tradePreview?.minShares || 0n
       const feeInMicro = 1_500_000n
+
+      if (governanceConfig.pauseState) {
+        throw new Error('Trading is currently paused by governance.')
+      }
+      if (amountMicro < governanceConfig.minTradeAmount) {
+        throw new Error(
+          `Minimum trade amount is ${(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} ${tokenSymbol}.`
+        )
+      }
 
       // Pre-validate market status, deadline, AND token type
       try {
@@ -159,7 +168,6 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
       let functionName: string
       let inputs: string[]
-      let releaseSelectedRecord: (() => void) | null = null
 
       // expected_shares goes into the OutcomeShare record's quantity field.
       // Set to minSharesOut (conservative) so record quantity <= actual shares_out.
@@ -359,6 +367,15 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                         </div>
                       )}
 
+                      {governanceConfig.pauseState && (
+                        <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20 mb-4">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
+                            <p className="text-sm text-yellow-300 font-medium">Trading is currently paused by governance.</p>
+                          </div>
+                        </div>
+                      )}
+
                       <p className="text-surface-400 text-sm mb-4">Select an outcome to buy shares</p>
 
                       {/* Multi-outcome selector */}
@@ -470,6 +487,9 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                                 Max
                               </button>
                             </div>
+                            <p className="text-xs text-surface-500 mt-2">
+                              Minimum trade: {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol}
+                            </p>
                           </div>
 
                           {/* Trade preview */}
@@ -498,7 +518,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                                 </span>
                               </div>
                               <div className="flex justify-between text-sm">
-                                <span className="text-surface-400">Fees (2%)</span>
+                                <span className="text-surface-400">Fees ({totalFeePercent.toFixed(2)}%)</span>
                                 <span className="text-surface-300">
                                   {(Number(tradePreview.fees.totalFees) / 1_000_000).toFixed(4)} {tokenSymbol}
                                 </span>
@@ -553,12 +573,21 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                             </div>
                           )}
 
+                          {!governanceConfig.pauseState && amountMicro > 0n && !meetsMinTrade && (
+                            <div className="flex items-start gap-2 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 mb-4">
+                              <AlertCircle className="w-4 h-4 text-yellow-400 mt-0.5" />
+                              <p className="text-xs text-yellow-300">
+                                Increase the order to at least {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol}.
+                              </p>
+                            </div>
+                          )}
+
                           <button
                             onClick={handleBuyShares}
-                            disabled={!amount || parseFloat(amount) <= 0 || isPlacing}
+                            disabled={!amount || parseFloat(amount) <= 0 || isPlacing || governanceConfig.pauseState || !meetsMinTrade}
                             className={cn(
                               'w-full flex items-center justify-center gap-2 btn-primary',
-                              (!amount || parseFloat(amount) <= 0) && 'opacity-50 cursor-not-allowed'
+                              (!amount || parseFloat(amount) <= 0 || governanceConfig.pauseState || !meetsMinTrade) && 'opacity-50 cursor-not-allowed'
                             )}
                           >
                             {isPlacing ? (

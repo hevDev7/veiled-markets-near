@@ -1,8 +1,8 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowRight, ArrowLeft, AlertCircle, CheckCircle2, Lightbulb,
-  Plus, Calendar, Hash, FileText, Shield, Coins, Clock, ExternalLink,
-  Check, Loader2, Info, AlertTriangle, X, DollarSign, Globe, Layers, Tag,
+  Shield, Coins, ExternalLink,
+  Check, Loader2, AlertTriangle, DollarSign,
   Upload, Link, Image,
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
@@ -12,15 +12,15 @@ import { config } from '@/lib/config'
 import { cn, formatCredits, sanitizeUrl } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
-  hashToField, getCurrentBlockHeight, CONTRACT_INFO, getTransactionUrl,
+  hashToField, getCurrentBlockHeight, getTransactionUrl,
   getMappingValue,
   registerQuestionText, registerOutcomeLabels, registerMarketTransaction, setMarketThumbnailUrl,
   waitForMarketCreation, savePendingMarket, updatePendingMarketTxId,
 } from '@/lib/aleo-client'
 import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
-import { uploadMarketMetadata, uploadImageToIPFS, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
+import { uploadMarketMetadata, uploadImageToIPFS, isPinataAvailable } from '@/lib/ipfs'
 import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
-import { devLog, devWarn } from '@/lib/logger'
+import { devWarn } from '@/lib/logger'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 
@@ -62,7 +62,6 @@ const initialFormData: MarketFormData = {
   thumbnailUrl: '',
 }
 
-const CREATE_MARKET_PROGRAM_ID = CONTRACT_INFO.programId
 const DRAFT_KEY = 'veiled_create_market_draft'
 function saveDraft(data: MarketFormData) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)) } catch {} }
 function loadDraft(): MarketFormData | null { try { const raw = localStorage.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null } catch { return null } }
@@ -76,7 +75,9 @@ function getCreateMarketBalanceError(
     public: bigint
     private: bigint
     usdcxPublic: bigint
+    usdcxPrivate: bigint
     usadPublic: bigint
+    usadPrivate: bigint
   },
 ): string | null {
   const feeMicro = 1_500_000n
@@ -361,6 +362,7 @@ export function CreateMarketPage() {
         `${Number(formData.numOutcomes)}u8`,
         `${deadlineBlockHeight.toString()}u64`,
         `${resolutionBlockHeight.toString()}u64`,
+        wallet.address!,
         wallet.address!,
         `${liquidityMicro}u128`,
       ]

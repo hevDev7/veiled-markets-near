@@ -9,9 +9,15 @@ import { useGovernanceStore } from '../../lib/governance-store';
 
 interface RewardClaimPanelProps {
   onClaimReward: (epochId: number, rewardType: 'lp' | 'trading', amount: bigint) => Promise<void>;
+  onClaimAllRewards?: () => Promise<void>;
+  isClaimingAll?: boolean;
 }
 
-export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
+export function RewardClaimPanel({
+  onClaimReward,
+  onClaimAllRewards,
+  isClaimingAll = false,
+}: RewardClaimPanelProps) {
   const { unclaimedRewards, totalClaimable, isLoading } = useGovernanceStore();
 
   const lpRewards = unclaimedRewards.filter(r => r.rewardType === 'lp');
@@ -84,11 +90,22 @@ export function RewardClaimPanel({ onClaimReward }: RewardClaimPanelProps) {
           </div>
 
           {/* Claim All Button */}
-          <button
-            className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-medium text-sm transition-colors"
-          >
-            Claim All — {formatVeil(totalClaimable)} ALEO
-          </button>
+          {onClaimAllRewards && (
+            <button
+              onClick={() => void onClaimAllRewards()}
+              disabled={isClaimingAll}
+              className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:bg-surface-700 disabled:text-surface-500 text-white rounded-xl font-medium text-sm transition-colors"
+            >
+              {isClaimingAll ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Claiming rewards...
+                </span>
+              ) : (
+                `Claim All — ${formatVeil(totalClaimable)} ALEO`
+              )}
+            </button>
+          )}
         </div>
       )}
     </div>

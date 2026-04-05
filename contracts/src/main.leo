@@ -76,6 +76,13 @@ program veiled_markets_v35.aleo {
     // v31: Governance program address for cross-program authorization
     // Update this after deploying veiled_governance_v4.aleo
     const GOVERNANCE_PROGRAM: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
+    const CONFIG_NOOP: field = 0field;
+    const CONFIG_PROTOCOL_FEE_BPS: field = 1field;
+    const CONFIG_CREATOR_FEE_BPS: field = 2field;
+    const CONFIG_LP_FEE_BPS: field = 3field;
+    const CONFIG_MIN_TRADE_AMOUNT: field = 4field;
+    const CONFIG_MIN_LIQUIDITY: field = 5field;
+    const CONFIG_PAUSE_STATE: field = 6field;
 
     // ========================================================================
     // RECORDS
@@ -261,6 +268,7 @@ program veiled_markets_v35.aleo {
     mapping bond_claimed: field => bool;                   // hash(BondClaimKey) => claimed
     mapping voter_rewards: address => u128;                // Accumulated voter rewards (microcredits)
     mapping dispute_bonds: field => u128;                  // market_id => dispute bond amount
+    mapping governance_values: field => u128;              // governance-controlled fee/limit/pause overrides
 
     // ========================================================================
     // CONSTRUCTOR
@@ -268,6 +276,54 @@ program veiled_markets_v35.aleo {
 
     @noupgrade
     async constructor() {
+    }
+
+    // ========================================================================
+    // 0. GOVERNANCE CONFIG — On-chain parameter updates from governance
+    // ========================================================================
+
+    async transition set_governance_value(public config_key: field, public value: u128) -> Future {
+        return set_governance_value_fin(config_key, value, self.caller);
+    }
+
+    async function set_governance_value_fin(config_key: field, value: u128, caller: address) {
+        assert(caller == GOVERNANCE_PROGRAM);
+
+        let is_known_key: bool =
+            config_key == CONFIG_NOOP ||
+            config_key == CONFIG_PROTOCOL_FEE_BPS ||
+            config_key == CONFIG_CREATOR_FEE_BPS ||
+            config_key == CONFIG_LP_FEE_BPS ||
+            config_key == CONFIG_MIN_TRADE_AMOUNT ||
+            config_key == CONFIG_MIN_LIQUIDITY ||
+            config_key == CONFIG_PAUSE_STATE;
+        assert(is_known_key);
+
+        if (config_key == CONFIG_NOOP) {
+            return;
+        }
+
+        let protocol_fee_bps: u128 = config_key == CONFIG_PROTOCOL_FEE_BPS
+            ? value
+            : governance_values.get_or_use(CONFIG_PROTOCOL_FEE_BPS, PROTOCOL_FEE_BPS);
+        let creator_fee_bps: u128 = config_key == CONFIG_CREATOR_FEE_BPS
+            ? value
+            : governance_values.get_or_use(CONFIG_CREATOR_FEE_BPS, CREATOR_FEE_BPS);
+        let lp_fee_bps: u128 = config_key == CONFIG_LP_FEE_BPS
+            ? value
+            : governance_values.get_or_use(CONFIG_LP_FEE_BPS, LP_FEE_BPS);
+
+        if (config_key == CONFIG_PROTOCOL_FEE_BPS || config_key == CONFIG_CREATOR_FEE_BPS || config_key == CONFIG_LP_FEE_BPS) {
+            assert(protocol_fee_bps + creator_fee_bps + lp_fee_bps < FEE_DENOMINATOR);
+        }
+        if (config_key == CONFIG_MIN_TRADE_AMOUNT || config_key == CONFIG_MIN_LIQUIDITY) {
+            assert(value > 0u128);
+        }
+        if (config_key == CONFIG_PAUSE_STATE) {
+            assert(value <= 1u128);
+        }
+
+        governance_values.set(config_key, value);
     }
 
     // ########################################################################
@@ -285,6 +341,7 @@ program veiled_markets_v35.aleo {
         public deadline: u64,
         public resolution_deadline: u64,
         public resolver: address,
+        public creator_owner: address,
         private initial_liquidity: u128,
     ) -> (field, LPToken, Future) {
         assert(num_outcomes >= 2u8 && num_outcomes <= 4u8);
@@ -292,7 +349,7 @@ program veiled_markets_v35.aleo {
 
         let market_id: field = BHP256::hash_to_field(
             MarketSeed {
-                creator: self.caller,
+                creator: creator_owner,
                 question_hash: question_hash,
                 deadline: deadline,
                 nonce: resolution_deadline,
@@ -301,12 +358,12 @@ program veiled_markets_v35.aleo {
 
         let lp_nonce: field = BHP256::hash_to_field(LPClaimKey {
             market_id: market_id,
-            claimer: self.caller,
+            claimer: creator_owner,
             lp_nonce: 0field,
         });
 
         let lp_token: LPToken = LPToken {
-            owner: self.caller,
+            owner: creator_owner,
             market_id: market_id,
             lp_shares: initial_liquidity,
             lp_nonce: lp_nonce,
@@ -322,7 +379,7 @@ program veiled_markets_v35.aleo {
         return (market_id, lp_token, create_market_finalize(
             transfer_future,
             market_id,
-            self.caller,
+            creator_owner,
             question_hash,
             category,
             num_outcomes,
@@ -356,6 +413,10 @@ program veiled_markets_v35.aleo {
         // resolver field in Market struct is now advisory (suggested resolver), not enforced
 
         let current_height: u64 = block.height as u64;
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let min_liquidity: u128 = governance_values.get_or_use(CONFIG_MIN_LIQUIDITY, MIN_LIQUIDITY);
+        assert(initial_liquidity >= min_liquidity);
         assert(deadline > current_height);
         assert(resolution_deadline > deadline);
 
@@ -423,7 +484,7 @@ program veiled_markets_v35.aleo {
         assert(amount_in >= MIN_TRADE_AMOUNT);
 
         let share: OutcomeShare = OutcomeShare {
-            owner: self.caller,
+            owner: credits_in.owner,
             market_id: market_id,
             outcome: outcome,
             quantity: expected_shares,
@@ -461,11 +522,18 @@ program veiled_markets_v35.aleo {
         assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
+        let min_trade_amount: u128 = governance_values.get_or_use(CONFIG_MIN_TRADE_AMOUNT, MIN_TRADE_AMOUNT);
+        assert(amount_in >= min_trade_amount);
         assert(current_height <= market.deadline);
 
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let protocol_fee_bps: u128 = governance_values.get_or_use(CONFIG_PROTOCOL_FEE_BPS, PROTOCOL_FEE_BPS);
+        let creator_fee_bps: u128 = governance_values.get_or_use(CONFIG_CREATOR_FEE_BPS, CREATOR_FEE_BPS);
+
         // Fees
-        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (amount_in * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let protocol_fee: u128 = (amount_in * protocol_fee_bps) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (amount_in * creator_fee_bps) / FEE_DENOMINATOR;
         let amount_to_pool: u128 = amount_in - protocol_fee - creator_fee;
 
         let fees: MarketFees = market_fees.get(market_id);
@@ -542,17 +610,22 @@ program veiled_markets_v35.aleo {
         private shares: OutcomeShare,
         private tokens_desired: u128,
         private max_shares_used: u128,
+        public protocol_fee_bps: u128,
+        public creator_fee_bps: u128,
+        public lp_fee_bps: u128,
     ) -> (OutcomeShare, credits.aleo/credits, Future) {
         assert(shares.owner == self.caller);
         assert(shares.token_type == TOKEN_ALEO);
         assert(tokens_desired >= MIN_TRADE_AMOUNT);
         assert(max_shares_used > 0u128);
         assert(max_shares_used <= shares.quantity);
+        assert(protocol_fee_bps + creator_fee_bps + lp_fee_bps < FEE_DENOMINATOR);
 
-        // Compute fees (constants, no mapping needed)
-        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        // Payouts are computed in transition scope, then the finalize step verifies
+        // the provided fee snapshot still matches governance-controlled values.
+        let protocol_fee: u128 = (tokens_desired * protocol_fee_bps) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * creator_fee_bps) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * lp_fee_bps) / FEE_DENOMINATOR;
         let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
 
         // Transfer net tokens to seller as private credits record
@@ -561,7 +634,7 @@ program veiled_markets_v35.aleo {
             credits.aleo/transfer_public_to_private(self.caller, net_u64);
 
         let remainder: OutcomeShare = OutcomeShare {
-            owner: self.caller,
+            owner: shares.owner,
             market_id: shares.market_id,
             outcome: shares.outcome,
             quantity: shares.quantity - max_shares_used,
@@ -571,7 +644,8 @@ program veiled_markets_v35.aleo {
 
         return (remainder, payout_record, sell_shares_finalize(
             transfer_future, shares.market_id, shares.outcome,
-            tokens_desired, max_shares_used, TOKEN_ALEO
+            tokens_desired, max_shares_used, TOKEN_ALEO,
+            protocol_fee_bps, creator_fee_bps, lp_fee_bps
         ));
     }
 
@@ -582,6 +656,9 @@ program veiled_markets_v35.aleo {
         tokens_desired: u128,
         max_shares_used: u128,
         token_type: u8,
+        protocol_fee_bps: u128,
+        creator_fee_bps: u128,
+        lp_fee_bps: u128,
     ) {
         transfer_future.await();
 
@@ -591,12 +668,22 @@ program veiled_markets_v35.aleo {
         assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let min_trade_amount: u128 = governance_values.get_or_use(CONFIG_MIN_TRADE_AMOUNT, MIN_TRADE_AMOUNT);
+        assert(tokens_desired >= min_trade_amount);
         assert(current_height <= market.deadline);
 
-        // Recompute fees
-        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let configured_protocol_fee_bps: u128 = governance_values.get_or_use(CONFIG_PROTOCOL_FEE_BPS, PROTOCOL_FEE_BPS);
+        let configured_creator_fee_bps: u128 = governance_values.get_or_use(CONFIG_CREATOR_FEE_BPS, CREATOR_FEE_BPS);
+        let configured_lp_fee_bps: u128 = governance_values.get_or_use(CONFIG_LP_FEE_BPS, LP_FEE_BPS);
+        assert(protocol_fee_bps == configured_protocol_fee_bps);
+        assert(creator_fee_bps == configured_creator_fee_bps);
+        assert(lp_fee_bps == configured_lp_fee_bps);
+
+        let protocol_fee: u128 = (tokens_desired * protocol_fee_bps) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * creator_fee_bps) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * lp_fee_bps) / FEE_DENOMINATOR;
         let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
         let pool_tokens_out: u128 = tokens_desired - lp_fee;
 
@@ -700,7 +787,7 @@ program veiled_markets_v35.aleo {
         assert(amount >= MIN_LIQUIDITY);
 
         let lp_token: LPToken = LPToken {
-            owner: self.caller,
+            owner: credits_in.owner,
             market_id: market_id,
             lp_shares: expected_lp_shares,
             lp_nonce: lp_nonce,
@@ -730,6 +817,10 @@ program veiled_markets_v35.aleo {
         assert(market.token_type == token_type);
 
         let current_height: u64 = block.height as u64;
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let min_liquidity: u128 = governance_values.get_or_use(CONFIG_MIN_LIQUIDITY, MIN_LIQUIDITY);
+        assert(amount >= min_liquidity);
         assert(current_height <= market.deadline);
 
         let pool: AMMPool = amm_pools.get(market_id);
@@ -832,10 +923,17 @@ program veiled_markets_v35.aleo {
         assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
+        let min_trade_amount: u128 = governance_values.get_or_use(CONFIG_MIN_TRADE_AMOUNT, MIN_TRADE_AMOUNT);
+        assert(amount_in >= min_trade_amount);
         assert(current_height <= market.deadline);
 
-        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (amount_in * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let protocol_fee_bps: u128 = governance_values.get_or_use(CONFIG_PROTOCOL_FEE_BPS, PROTOCOL_FEE_BPS);
+        let creator_fee_bps: u128 = governance_values.get_or_use(CONFIG_CREATOR_FEE_BPS, CREATOR_FEE_BPS);
+
+        let protocol_fee: u128 = (amount_in * protocol_fee_bps) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (amount_in * creator_fee_bps) / FEE_DENOMINATOR;
         let amount_to_pool: u128 = amount_in - protocol_fee - creator_fee;
 
         let fees: MarketFees = market_fees.get(market_id);
@@ -904,16 +1002,20 @@ program veiled_markets_v35.aleo {
         private shares: OutcomeShare,
         private tokens_desired: u128,
         private max_shares_used: u128,
+        public protocol_fee_bps: u128,
+        public creator_fee_bps: u128,
+        public lp_fee_bps: u128,
     ) -> (OutcomeShare, Future) {
         assert(shares.owner == self.caller);
         assert(shares.token_type == TOKEN_USAD);
         assert(tokens_desired >= MIN_TRADE_AMOUNT);
         assert(max_shares_used > 0u128);
         assert(max_shares_used <= shares.quantity);
+        assert(protocol_fee_bps + creator_fee_bps + lp_fee_bps < FEE_DENOMINATOR);
 
-        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let protocol_fee: u128 = (tokens_desired * protocol_fee_bps) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * creator_fee_bps) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * lp_fee_bps) / FEE_DENOMINATOR;
         let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
 
         let transfer_future: Future = test_usad_stablecoin.aleo/transfer_public(self.caller, net_tokens);
@@ -929,7 +1031,8 @@ program veiled_markets_v35.aleo {
 
         return (remainder, sell_shares_usad_fin(
             transfer_future, shares.market_id, shares.outcome,
-            tokens_desired, max_shares_used
+            tokens_desired, max_shares_used,
+            protocol_fee_bps, creator_fee_bps, lp_fee_bps
         ));
     }
 
@@ -939,6 +1042,9 @@ program veiled_markets_v35.aleo {
         outcome: u8,
         tokens_desired: u128,
         max_shares_used: u128,
+        protocol_fee_bps: u128,
+        creator_fee_bps: u128,
+        lp_fee_bps: u128,
     ) {
         transfer_future.await();
 
@@ -948,11 +1054,22 @@ program veiled_markets_v35.aleo {
         assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let min_trade_amount: u128 = governance_values.get_or_use(CONFIG_MIN_TRADE_AMOUNT, MIN_TRADE_AMOUNT);
+        assert(tokens_desired >= min_trade_amount);
         assert(current_height <= market.deadline);
 
-        let protocol_fee: u128 = (tokens_desired * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let creator_fee: u128 = (tokens_desired * CREATOR_FEE_BPS) / FEE_DENOMINATOR;
-        let lp_fee: u128 = (tokens_desired * LP_FEE_BPS) / FEE_DENOMINATOR;
+        let configured_protocol_fee_bps: u128 = governance_values.get_or_use(CONFIG_PROTOCOL_FEE_BPS, PROTOCOL_FEE_BPS);
+        let configured_creator_fee_bps: u128 = governance_values.get_or_use(CONFIG_CREATOR_FEE_BPS, CREATOR_FEE_BPS);
+        let configured_lp_fee_bps: u128 = governance_values.get_or_use(CONFIG_LP_FEE_BPS, LP_FEE_BPS);
+        assert(protocol_fee_bps == configured_protocol_fee_bps);
+        assert(creator_fee_bps == configured_creator_fee_bps);
+        assert(lp_fee_bps == configured_lp_fee_bps);
+
+        let protocol_fee: u128 = (tokens_desired * protocol_fee_bps) / FEE_DENOMINATOR;
+        let creator_fee: u128 = (tokens_desired * creator_fee_bps) / FEE_DENOMINATOR;
+        let lp_fee: u128 = (tokens_desired * lp_fee_bps) / FEE_DENOMINATOR;
         let net_tokens: u128 = tokens_desired - protocol_fee - creator_fee - lp_fee;
         let pool_tokens_out: u128 = tokens_desired - lp_fee;
 
@@ -1078,6 +1195,10 @@ program veiled_markets_v35.aleo {
         assert(market.token_type == TOKEN_USAD);
 
         let current_height: u64 = block.height as u64;
+        let paused: u128 = governance_values.get_or_use(CONFIG_PAUSE_STATE, 0u128);
+        assert(paused == 0u128);
+        let min_liquidity: u128 = governance_values.get_or_use(CONFIG_MIN_LIQUIDITY, MIN_LIQUIDITY);
+        assert(amount >= min_liquidity);
         assert(current_height <= market.deadline);
 
         let pool: AMMPool = amm_pools.get(market_id);
@@ -1165,7 +1286,7 @@ program veiled_markets_v35.aleo {
         private credits_in: credits.aleo/credits,
     ) -> (VoterBondReceipt, credits.aleo/credits, Future) {
         let receipt: VoterBondReceipt = VoterBondReceipt {
-            owner: self.caller,
+            owner: credits_in.owner,
             market_id: market_id,
             voted_outcome: outcome,
             bond_amount: MIN_VOTE_BOND,
@@ -1177,7 +1298,7 @@ program veiled_markets_v35.aleo {
             credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
 
         return (receipt, change, vote_outcome_fin(
-            transfer_future, market_id, outcome, self.caller
+            transfer_future, market_id, outcome, credits_in.owner
         ));
     }
 
@@ -1421,7 +1542,7 @@ program veiled_markets_v35.aleo {
         assert(dispute_bond >= MIN_VOTE_BOND);
 
         let receipt: DisputeBondReceipt = DisputeBondReceipt {
-            owner: self.caller,
+            owner: credits_in.owner,
             market_id: market_id,
             proposed_outcome: proposed_outcome,
             bond_amount: dispute_bond,
@@ -1433,7 +1554,7 @@ program veiled_markets_v35.aleo {
             credits.aleo/transfer_private_to_public(credits_in, self.address, bond_u64);
 
         return (receipt, change, dispute_resolution_fin(
-            transfer_future, market_id, proposed_outcome, dispute_bond, self.caller
+            transfer_future, market_id, proposed_outcome, dispute_bond, credits_in.owner
         ));
     }
 
@@ -1750,7 +1871,7 @@ program veiled_markets_v35.aleo {
         });
 
         let refund: RefundClaim = RefundClaim {
-            owner: self.caller,
+            owner: shares.owner,
             market_id: shares.market_id,
             amount: shares.quantity,
             claim_nonce: shares.share_nonce,
@@ -1813,7 +1934,7 @@ program veiled_markets_v35.aleo {
         });
 
         let refund: RefundClaim = RefundClaim {
-            owner: self.caller,
+            owner: lp_token.owner,
             market_id: lp_token.market_id,
             amount: min_tokens_out,
             claim_nonce: lp_token.lp_nonce,

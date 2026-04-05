@@ -119,6 +119,9 @@ export function WalletBridge() {
           encryptionKey: null, // Reset on each (re)connect or account switch
         },
         error: null,
+        balanceStatus: isAccountSwitch ? 'idle' : useWalletStore.getState().balanceStatus,
+        balanceError: null,
+        lastBalanceRefreshAt: isAccountSwitch ? null : useWalletStore.getState().lastBalanceRefreshAt,
       })
 
       // Init on first connection OR account switch
@@ -154,6 +157,9 @@ export function WalletBridge() {
           encryptionKey: null,
         },
         error: null,
+        balanceStatus: 'idle',
+        balanceError: null,
+        lastBalanceRefreshAt: null,
       })
       prevConnected.current = false
       prevAddress.current = null
@@ -198,6 +204,9 @@ export function WalletBridge() {
               balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n },
               encryptionKey: null,
             },
+            balanceStatus: 'idle',
+            balanceError: null,
+            lastBalanceRefreshAt: null,
           })
           initForAddress(currentAddress)
         }
@@ -227,6 +236,9 @@ export function WalletBridge() {
             balance: { public: 0n, private: 0n, usdcxPublic: 0n, usdcxPrivate: 0n, usadPublic: 0n, usadPrivate: 0n },
             encryptionKey: null,
           },
+          balanceStatus: 'idle',
+          balanceError: null,
+          lastBalanceRefreshAt: null,
         })
         initForAddress(newAddr)
       }

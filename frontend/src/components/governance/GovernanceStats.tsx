@@ -1,123 +1,90 @@
 // ============================================================================
-// VEILED GOVERNANCE — GovernanceStats Component
+// VEILED GOVERNANCE — GovernanceStats (Compact Sidebar)
 // ============================================================================
 
-import { motion } from 'framer-motion';
-import {
-  BarChart3, Coins, Vote, CheckCircle, XCircle, Shield, TrendingUp,
-} from 'lucide-react';
 import { formatVeilCompact } from '../../lib/governance-client';
 import { useGovernanceStore } from '../../lib/governance-store';
+import { PROPOSAL_STATUS } from '../../lib/governance-types';
+import { shortenAddress } from '../../lib/utils';
 
 export function GovernanceStats() {
-  const { stats } = useGovernanceStore();
-
-  const statItems = [
-    {
-      label: 'Total ALEO Staked',
-      value: formatVeilCompact(stats.totalStakedInVotes),
-      sub: 'ALEO locked in governance',
-      icon: Coins,
-      color: 'text-brand-400',
-    },
-    {
-      label: 'Active Voters',
-      value: String(stats.totalProposals > 0 ? stats.proposalsPassed + stats.proposalsRejected + stats.proposalsExecuted : 0),
-      sub: 'Proposals with votes',
-      icon: Vote,
-      color: 'text-purple-400',
-    },
-    {
-      label: 'Total Proposals',
-      value: String(stats.totalProposals),
-      sub: `${stats.proposalsPassed} passed · ${stats.proposalsExecuted} executed`,
-      icon: BarChart3,
-      color: 'text-blue-400',
-    },
-    {
-      label: 'Resolvers',
-      value: String(stats.totalResolvers || 0),
-      sub: 'Active market resolvers',
-      icon: Shield,
-      color: 'text-emerald-400',
-    },
-  ];
+  const { stats, proposals } = useGovernanceStore();
+  const active = proposals.filter((p) => p.status === PROPOSAL_STATUS.ACTIVE).length;
 
   return (
-    <div className="space-y-4">
-      <h2 className="text-lg font-bold text-white flex items-center gap-2">
-        <BarChart3 className="w-5 h-5 text-brand-400" />
-        Governance Statistics
-      </h2>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-3">
-        {statItems.map((item, i) => {
-          const Icon = item.icon;
-          return (
-            <motion.div
-              key={item.label}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4 min-w-0 overflow-hidden"
-            >
-              <div className={`flex items-center gap-1.5 text-xs ${item.color} mb-2`}>
-                <Icon className="w-3.5 h-3.5 shrink-0" />
-                {item.label}
-              </div>
-              <div className="text-lg font-bold text-white truncate">{item.value}</div>
-              <div className="text-[10px] text-surface-500 mt-0.5 truncate">{item.sub}</div>
-            </motion.div>
-          );
-        })}
-      </div>
-
-      {/* Proposal Outcomes */}
-      <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-surface-300 mb-3">Proposal Outcomes</h3>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          <div className="flex items-center gap-1 text-emerald-400">
-            <CheckCircle className="w-3.5 h-3.5" />
-            {stats.proposalsPassed} Passed
-          </div>
-          <div className="flex items-center gap-1 text-red-400">
-            <XCircle className="w-3.5 h-3.5" />
-            {stats.proposalsRejected} Rejected
-          </div>
-          <div className="flex items-center gap-1 text-blue-400">
-            <CheckCircle className="w-3.5 h-3.5" />
-            {stats.proposalsExecuted} Executed
-          </div>
-          <div className="flex items-center gap-1 text-purple-400">
-            <Shield className="w-3.5 h-3.5" />
-            {stats.proposalsVetoed} Vetoed
-          </div>
+    <div className="rounded-xl border border-white/[0.06] bg-surface-900/50 p-4 space-y-4 text-xs">
+      {/* Key metrics — single row */}
+      <div className="grid grid-cols-4 gap-2 text-center">
+        <div>
+          <div className="text-lg font-semibold text-white">{formatVeilCompact(stats.totalStakedInVotes)}</div>
+          <div className="text-surface-500">Staked</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-white">{active}</div>
+          <div className="text-surface-500">Active</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-white">{stats.totalProposals}</div>
+          <div className="text-surface-500">Proposals</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold text-white">{stats.totalResolvers || 0}</div>
+          <div className="text-surface-500">Resolvers</div>
         </div>
       </div>
 
-      {/* Governance Info */}
-      <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-surface-300 mb-3">Governance Model</h3>
-        <div className="space-y-2 text-xs text-surface-400">
-          <div className="flex justify-between">
-            <span>Staking Token</span>
-            <span className="text-white font-medium">ALEO (native)</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Min Proposal Stake</span>
-            <span className="text-white font-medium">10 ALEO</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Resolver Stake</span>
-            <span className="text-white font-medium">50 ALEO</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Voting Period</span>
-            <span className="text-white font-medium">~7 days</span>
-          </div>
+      <hr className="border-white/[0.06]" />
+
+      {/* Outcomes — inline */}
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-surface-400">
+        <span><span className="text-emerald-400 font-medium">{stats.proposalsPassed}</span> passed</span>
+        <span><span className="text-blue-400 font-medium">{stats.proposalsExecuted}</span> executed</span>
+        <span><span className="text-red-400 font-medium">{stats.proposalsRejected}</span> rejected</span>
+        <span><span className="text-purple-400 font-medium">{stats.proposalsVetoed}</span> vetoed</span>
+      </div>
+
+      <hr className="border-white/[0.06]" />
+
+      {/* Model params — compact list */}
+      <div className="space-y-1.5 text-surface-400">
+        <div className="flex justify-between">
+          <span>Voting period</span>
+          <span className="text-surface-300">~7 days</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Min proposal stake</span>
+          <span className="text-surface-300">10 ALEO</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Guardian threshold</span>
+          <span className="text-surface-300">
+            {stats.guardianThreshold > 0 ? `${stats.guardianThreshold} of ${stats.guardianAddresses.length}` : '...'}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Market state</span>
+          <span className={stats.pauseState ? 'text-red-400' : 'text-emerald-400'}>
+            {stats.pauseState ? 'Paused' : 'Active'}
+          </span>
         </div>
       </div>
+
+      {/* Guardians — inline pills */}
+      {stats.guardianAddresses.length > 0 && (
+        <>
+          <hr className="border-white/[0.06]" />
+          <div>
+            <div className="text-surface-500 mb-1.5">Guardians</div>
+            <div className="flex flex-wrap gap-1">
+              {stats.guardianAddresses.map((addr) => (
+                <span key={addr} className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-surface-400">
+                  {shortenAddress(addr, 4)}
+                </span>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

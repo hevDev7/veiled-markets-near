@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Download, Copy, Check } from 'lucide-react'
+import { ArrowLeft, Copy, Check } from 'lucide-react'
 import { useState } from 'react'
 import { Footer } from '../components/Footer'
 

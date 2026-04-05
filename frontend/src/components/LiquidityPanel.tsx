@@ -3,6 +3,7 @@ import { Droplets, Plus, Minus, Loader2, AlertCircle, Check, RefreshCw, Edit3, I
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
+import { useMarketGovernanceConfig } from '@/hooks/useMarketGovernanceConfig'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import {
   buildAddLiquidityInputs,
@@ -14,7 +15,7 @@ import {
   getProgramIdForToken,
   WINNER_CLAIM_PRIORITY_BLOCKS,
 } from '@/lib/aleo-client'
-import { calculateLPSharesOut } from '@/lib/amm'
+import { calculateAddLiquidityQuote, type AMMReserves } from '@/lib/amm'
 import { fetchLPTokenRecords, type ParsedLPToken } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
 
@@ -27,6 +28,8 @@ type LiquidityTab = 'add' | 'withdraw'
 export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const { wallet } = useWalletStore()
   const { executeTransaction } = useAleoTransaction()
+  const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const governanceConfig = useMarketGovernanceConfig(tokenType)
 
   const isResolved = market.status === MARKET_STATUS.RESOLVED
   const isCancelled = market.status === MARKET_STATUS.CANCELLED
@@ -58,7 +61,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     try {
       // Timeout after 8s — requestRecords can hang if wallet has no records for this program
       const records = await Promise.race([
-        fetchLPTokenRecords(getProgramIdForToken((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'), market.id),
+        fetchLPTokenRecords(getProgramIdForToken(tokenType), market.id),
         new Promise<ParsedLPToken[]>((resolve) => setTimeout(() => resolve([]), 8_000)),
       ])
       lpFetchedRef.current = true
@@ -77,7 +80,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     } finally {
       setIsFetchingLP(false)
     }
-  }, [wallet.connected, market.id])
+  }, [wallet.connected, market.id, tokenType])
 
   // Auto-fetch LP tokens once when switching to remove/withdraw tab
   useEffect(() => {
@@ -118,12 +121,20 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   }, [isResolved, market.id])
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
+  const lpFeePercent = Number(governanceConfig.lpFeeBps) / 100
 
   // v20: Use total reserves (sum of AMM reserves) for LP calculations
   const totalReserves = (market.yesReserve ?? 0n) + (market.noReserve ?? 0n)
     + (market.reserve3 ?? 0n) + (market.reserve4 ?? 0n)
   const totalLiquidity = market.totalLiquidity ?? totalReserves
   const totalLPShares = market.totalLPShares ?? totalReserves
+  const ammReserves = useMemo<AMMReserves>(() => ({
+    reserve_1: market.yesReserve ?? 0n,
+    reserve_2: market.noReserve ?? 0n,
+    reserve_3: market.reserve3 ?? 0n,
+    reserve_4: market.reserve4 ?? 0n,
+    num_outcomes: market.numOutcomes ?? 2,
+  }), [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, market.numOutcomes])
 
   // For resolved/cancelled markets, show actual remaining collateral (after winner claims)
   const displayLiquidity = (isResolved || isCancelled) && market.remainingCredits !== undefined
@@ -133,6 +144,12 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const amountMicro = amount
     ? BigInt(Math.floor(parseFloat(amount) * 1_000_000))
     : 0n
+  const meetsMinLiquidity = amountMicro >= governanceConfig.minLiquidity
+  const addLiquidityBalance = tokenType === 'USDCX'
+    ? wallet.balance.usdcxPublic
+    : tokenType === 'USAD'
+      ? wallet.balance.usadPublic
+      : wallet.balance.public
 
   const winnerClaimUnlockBlock = useMemo(() => {
     if (!isResolved || market.challengeDeadline === undefined) return null
@@ -148,10 +165,10 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     : null
 
   // Calculate LP shares for adding
-  const lpSharesOut = useMemo(() => {
-    if (amountMicro <= 0n) return 0n
-    return calculateLPSharesOut(amountMicro, totalLPShares, totalReserves)
-  }, [amountMicro, totalLPShares, totalReserves])
+  const addLiquidityPreview = useMemo(() => {
+    if (amountMicro <= 0n || governanceConfig.pauseState || !meetsMinLiquidity) return 0n
+    return calculateAddLiquidityQuote(ammReserves, totalLPShares, amountMicro)?.mintedLPShares ?? 0n
+  }, [amountMicro, ammReserves, governanceConfig.pauseState, meetsMinLiquidity, totalLPShares])
 
   const handleAddLiquidity = async () => {
     if (!amount || amountMicro <= 0n) return
@@ -160,17 +177,28 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     setError(null)
 
     try {
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      if (governanceConfig.pauseState) {
+        throw new Error('Liquidity actions are currently paused by governance.')
+      }
+      if (!meetsMinLiquidity) {
+        throw new Error(
+          `Minimum liquidity is ${(Number(governanceConfig.minLiquidity) / 1_000_000).toFixed(6)} ${tokenSymbol}.`
+        )
+      }
+      if (!wallet.address) {
+        throw new Error('Wallet address is unavailable. Please reconnect your wallet and try again.')
+      }
       // CRITICAL: expected_lp_shares is stored in the LP Token record output.
       // If 0, the LP Token will have 0 shares — useless for LP withdrawal.
       // Apply 1% slippage buffer to the frontend estimate.
-      const slippageBuffer = lpSharesOut * 1n / 100n
-      const expectedLpShares = lpSharesOut > slippageBuffer ? lpSharesOut - slippageBuffer : 1n
+      const slippageBuffer = addLiquidityPreview * 1n / 100n
+      const expectedLpShares = addLiquidityPreview > slippageBuffer ? addLiquidityPreview - slippageBuffer : 1n
       const { functionName, inputs } = buildAddLiquidityInputs(
         market.id,
         amountMicro,
         expectedLpShares,
         tokenType,
+        wallet.address,
       )
 
       const result = await executeTransaction({
@@ -436,18 +464,12 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                   </div>
                   <div className="flex justify-between text-sm mt-2">
                     <span className="text-surface-500">
-                      Balance: {formatCredits(
-                        market.tokenType === 'USDCX'
-                          ? wallet.balance.usdcxPublic
-                          : wallet.balance.public
-                      )} {tokenSymbol}
+                      Balance: {formatCredits(addLiquidityBalance)} {tokenSymbol}
                     </span>
                     <button
                       onClick={() => {
-                        const bal = market.tokenType === 'USDCX'
-                          ? wallet.balance.usdcxPublic
-                          : wallet.balance.public
-                        const usable = bal > 700_000n ? bal - 700_000n : 0n
+                        const gasBuffer = tokenType === 'ALEO' ? 700_000n : 0n
+                        const usable = addLiquidityBalance > gasBuffer ? addLiquidityBalance - gasBuffer : 0n
                         setAmount((Number(usable) / 1_000_000).toString())
                       }}
                       className="text-brand-400 hover:text-brand-300"
@@ -455,6 +477,9 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                       Max
                     </button>
                   </div>
+                  <p className="text-xs text-surface-500 mt-2">
+                    Minimum liquidity: {(Number(governanceConfig.minLiquidity) / 1_000_000).toFixed(6)} {tokenSymbol}
+                  </p>
                 </div>
 
                 {/* LP Shares Preview */}
@@ -463,7 +488,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                     <div className="flex justify-between items-center">
                       <span className="text-surface-400 text-sm">LP Shares You Receive</span>
                       <span className="text-white font-semibold">
-                        {formatCredits(lpSharesOut)}
+                    {formatCredits(addLiquidityPreview)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center mt-2">
@@ -478,26 +503,54 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                   </div>
                 )}
 
+                {governanceConfig.pauseState && (
+                  <div className="flex items-start gap-2.5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-yellow-300 leading-relaxed">
+                      Liquidity changes are currently paused by governance. Adding new liquidity is temporarily unavailable.
+                    </p>
+                  </div>
+                )}
+
+                {!governanceConfig.pauseState && amountMicro > 0n && !meetsMinLiquidity && (
+                  <div className="flex items-start gap-2.5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-yellow-300 leading-relaxed">
+                      Enter at least {(Number(governanceConfig.minLiquidity) / 1_000_000).toFixed(6)} {tokenSymbol} to add liquidity under the active governance config.
+                    </p>
+                  </div>
+                )}
+
                 {/* Info */}
                 <div className="p-3 rounded-lg bg-brand-500/5 border border-brand-500/20">
                   <p className="text-xs text-surface-400">
-                    Adding liquidity earns you 1% of all trades in this market, proportional to your share.
+                    Adding liquidity earns you {lpFeePercent.toFixed(2)}% of each trade routed to LPs, proportional to your share.
                     Liquidity is split evenly across all outcomes.
                   </p>
                 </div>
 
                 <button
                   onClick={handleAddLiquidity}
-                  disabled={!amount || parseFloat(amount) <= 0 || isSubmitting || !!isMarketEnded}
+                  disabled={!amount || parseFloat(amount) <= 0 || isSubmitting || !!isMarketEnded || governanceConfig.pauseState || !meetsMinLiquidity}
                   className={cn(
                     'w-full flex items-center justify-center gap-2 btn-primary',
-                    (!amount || parseFloat(amount) <= 0 || !!isMarketEnded) && 'opacity-50 cursor-not-allowed'
+                    (!amount || parseFloat(amount) <= 0 || !!isMarketEnded || governanceConfig.pauseState || !meetsMinLiquidity) && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
                       <span>Confirm in Wallet...</span>
+                    </>
+                  ) : governanceConfig.pauseState ? (
+                    <>
+                      <Plus className="w-5 h-5" />
+                      <span>Liquidity Paused</span>
+                    </>
+                  ) : amountMicro > 0n && !meetsMinLiquidity ? (
+                    <>
+                      <Plus className="w-5 h-5" />
+                      <span>Minimum {(Number(governanceConfig.minLiquidity) / 1_000_000).toFixed(6)} {tokenSymbol}</span>
                     </>
                   ) : (
                     <>

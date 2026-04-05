@@ -73,12 +73,64 @@ export {
   calculateMinSharesOut,
 } from './utils';
 
+export {
+  calculateContractOutcomePrice,
+  calculateContractAllPrices,
+  calculateContractTradeFees,
+  quoteContractBuy,
+  quoteContractSell,
+  quoteContractAddLiquidity,
+  calculateContractMaxTokensDesired,
+  calculateContractSellTokensOut,
+  calculateContractLPSharesOut,
+  calculateContractLPTokensOut,
+  calculateContractResolutionReward,
+  calculateContractMinDisputeBond,
+  calculateContractWinnerClaimUnlock,
+} from './contract-math';
+
+export type {
+  ContractMathReserves,
+  ContractFeeConfig,
+  ContractTradeFees,
+  ContractBuyQuote,
+  ContractSellQuote,
+  ContractLiquidityQuote,
+} from './contract-math';
+
 // Utilities - Legacy
 export {
   calculateYesProbability,
   calculateNoProbability,
   calculatePotentialPayout,
 } from './utils';
+
+// Parlay
+export { ParlayClient, createParlayClient, PARLAY_PROGRAM_ID } from './parlay-client';
+export type { ParlayClientConfig, ParlayTransactionInputs } from './parlay-client';
+
+export {
+  ParlayStatus,
+  PARLAY_FEE_BPS,
+  PARLAY_ODDS_PRECISION,
+  PARLAY_MIN_LEGS,
+  PARLAY_MAX_LEGS,
+  PARLAY_MIN_STAKE,
+  PARLAY_DISPUTE_WINDOW_BLOCKS,
+  PROGRAM_ALEO,
+  PROGRAM_USDCX,
+  PROGRAM_USAD,
+  priceToOddsBps,
+  oddsBpsToDisplay,
+  calculateCombinedOddsBps,
+  calculateParlayQuote,
+  validateParlayLegs,
+  validateParlayStake,
+  getMarketProgram,
+  formatParlayOdds,
+  formatParlayPayout,
+} from './parlay';
+export type { ParlayLeg, ParlayQuote, ParlayData } from './parlay';
 
 // Utilities - Formatting & Validation
 export {

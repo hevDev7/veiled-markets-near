@@ -2,13 +2,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
     Search, TrendingUp, Clock, Flame, Activity, Bitcoin,
     DollarSign, Cpu, Vote, Loader2, Gavel, LayoutGrid, List, Film, FlaskConical,
-    Bookmark, ChevronRight, Bell, X, Trophy, SlidersHorizontal, Globe,
+    Bookmark, ChevronRight, Bell, X, Trophy, SlidersHorizontal, Globe, Ticket,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Market, outcomeToIndex } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
+import { useParlayStore } from '@/lib/parlay-store'
 import { MarketRow } from '@/components/MarketRow'
 import { MarketCard } from '@/components/MarketCard'
 import { DashboardHeader } from '@/components/DashboardHeader'
@@ -16,6 +17,7 @@ import { Footer } from '@/components/Footer'
 import { EmptyState } from '@/components/EmptyState'
 import { DashboardHero } from '@/components/DashboardHero'
 import { cn, formatCredits, getCategoryEmoji } from '@/lib/utils'
+import { getLeadingOutcome, getMarketOutcomeLabels } from '@/lib/market-outcomes'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
 import { devWarn } from '../lib/logger'
 
@@ -58,7 +60,8 @@ export function Dashboard() {
     const navigate = useNavigate()
     const { wallet } = useWalletStore()
     const { markets, isLoading, isRefreshing, fetchMarkets, addMarket } = useRealMarketsStore()
-    const { userBets, pendingBets, fetchUserBets, syncBetStatuses } = useBetsStore()
+    const { userBets, fetchUserBets, syncBetStatuses } = useBetsStore()
+    const { slipLegs, addLeg, removeLeg, getLegForMarket } = useParlayStore()
     const { setVisible: setModalVisible } = useWalletModal()
 
     useEffect(() => { setModalVisible(false) }, [setModalVisible])
@@ -77,6 +80,13 @@ export function Dashboard() {
     const [showNotifications, setShowNotifications] = useState(false)
     const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
     const [showFilters, setShowFilters] = useState(false)
+    const [parlayMode, setParlayMode] = useState(false)
+
+    useEffect(() => {
+        if (slipLegs.length > 0) {
+            setParlayMode(true)
+        }
+    }, [slipLegs.length])
 
     useEffect(() => {
         if (!showFilters) return
@@ -147,6 +157,15 @@ export function Dashboard() {
     }, [markets])
 
     const handleMarketClick = useCallback((market: Market) => navigate(`/market/${market.id}`), [navigate])
+    const handleQuickAddParlay = useCallback((market: Market, outcome: number) => {
+        const existingLeg = getLegForMarket(market.id)
+        if (existingLeg?.outcome === outcome) {
+            removeLeg(market.id)
+            return
+        }
+
+        addLeg(market, outcome)
+    }, [addLeg, getLegForMarket, removeLeg])
     const bookmarkedIds = useMemo(() => getBookmarks(), [markets])
     const bookmarkedMarkets = useMemo(() => bookmarkedIds.map(id => markets.find(m => m.id === id)).filter(Boolean) as Market[], [bookmarkedIds, markets])
     const categoryCounts = useMemo(() => {
@@ -304,8 +323,9 @@ export function Dashboard() {
                                                 <div className="flex items-center gap-2 mt-0.5">
                                                     {(() => {
                                                         const idx = outcomeToIndex(bet.outcome)
-                                                        const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
-                                                        const label = market?.outcomeLabels?.[idx - 1]?.toUpperCase() || defaultLabels[idx - 1] || bet.outcome.toUpperCase()
+                                                        const label = market
+                                                            ? (getMarketOutcomeLabels(market)[idx - 1] || bet.outcome)
+                                                            : bet.outcome
                                                         const colorMap = ['bg-yes-400/15 text-yes-400', 'bg-no-400/15 text-no-400', 'bg-purple-400/15 text-purple-400', 'bg-yellow-400/15 text-yellow-400']
                                                         return <span className={cn('text-[10px] font-mono font-bold px-1.5 py-0.5 rounded', colorMap[idx - 1] || colorMap[0])}>{label}</span>
                                                     })()}
@@ -341,16 +361,21 @@ export function Dashboard() {
                                 <h3 className="text-sm font-semibold text-white">Watchlist ({bookmarkedMarkets.length})</h3>
                             </div>
                             <div className="flex gap-2 overflow-x-auto pb-1">
-                                {bookmarkedMarkets.slice(0, 4).map(market => (
+                                {bookmarkedMarkets.slice(0, 4).map(market => {
+                                    const leadingOutcome = getLeadingOutcome(market)
+                                    return (
                                     <button key={market.id} onClick={() => handleMarketClick(market)}
                                         className="flex-shrink-0 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/[0.04] hover:border-brand-400/20 transition-colors text-left max-w-[200px]">
                                         <p className="text-xs text-white font-medium truncate">{market.question}</p>
                                         <div className="flex items-center gap-2 mt-1">
-                                            <span className="text-[10px] font-mono text-yes-400">{market.yesPercentage.toFixed(0)}%</span>
+                                            <span className={cn('text-[10px] font-mono', leadingOutcome?.styles.text || 'text-surface-300')}>
+                                                {leadingOutcome ? `${leadingOutcome.label} ${leadingOutcome.percentage.toFixed(0)}%` : 'No lead'}
+                                            </span>
                                             <span className="text-[10px] text-surface-500">{formatCredits(market.totalVolume, 0)} vol</span>
                                         </div>
                                     </button>
-                                ))}
+                                    )
+                                })}
                             </div>
                         </motion.div>
                     )}
@@ -371,6 +396,24 @@ export function Dashboard() {
                             <button data-filters onClick={() => setShowFilters(!showFilters)}
                                 className={cn('btn-secondary gap-2 px-5 py-2.5 text-sm whitespace-nowrap flex items-center', showFilters && 'border-brand-400/30 text-brand-400')}>
                                 <SlidersHorizontal className="w-4 h-4 flex-shrink-0" /> Filters
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setParlayMode(value => !value)}
+                                className={cn(
+                                    'gap-2 px-5 py-2.5 text-sm whitespace-nowrap flex items-center rounded-xl border transition-all duration-200',
+                                    parlayMode
+                                        ? 'border-brand-400/30 bg-brand-500/[0.12] text-brand-300 shadow-[0_10px_30px_rgba(201,168,76,0.12)]'
+                                        : 'border-white/[0.06] bg-white/[0.02] text-surface-300 hover:border-brand-400/20 hover:text-white'
+                                )}
+                            >
+                                <Ticket className="w-4 h-4 flex-shrink-0" />
+                                {parlayMode ? 'Parlay Mode On' : 'Parlay Mode'}
+                                {slipLegs.length > 0 && (
+                                    <span className="rounded-full border border-brand-400/15 bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-200">
+                                        {slipLegs.length}
+                                    </span>
+                                )}
                             </button>
                             <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                                 <button onClick={() => setViewMode('grid')}
@@ -407,8 +450,8 @@ export function Dashboard() {
                                             <div className="flex flex-wrap gap-2">
                                                 {[
                                                     { id: 'all' as const, label: 'All Types' },
-                                                    { id: 'binary' as const, label: 'Binary' },
-                                                    { id: 'multi' as const, label: 'Multi-Outcome' },
+                                                    { id: 'binary' as const, label: '2-Way' },
+                                                    { id: 'multi' as const, label: '3-4 Outcome' },
                                                     { id: 'scalar' as const, label: 'Scalar' },
                                                     { id: 'conditional' as const, label: 'Conditional' },
                                                 ].map((type) => (
@@ -442,6 +485,31 @@ export function Dashboard() {
                             )}
                         </AnimatePresence>
 
+                        {parlayMode && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="rounded-2xl border border-brand-500/12 bg-gradient-to-r from-brand-500/[0.07] via-white/[0.01] to-emerald-500/[0.05] px-4 py-3"
+                            >
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="text-sm font-semibold text-white">Build a parlay without leaving the dashboard</p>
+                                        <p className="text-xs text-surface-400">
+                                            Click any outcome chip to add it to your slip. Click the same chip again to remove it, or choose a different outcome to replace that leg.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 text-xs text-surface-300">
+                                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                                            {slipLegs.length} leg{slipLegs.length === 1 ? '' : 's'} in slip
+                                        </span>
+                                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                                            Card click still opens analysis
+                                        </span>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+
                         {/* Category pills + Live indicator */}
                         <div className="flex items-center gap-2">
                             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none flex-1">
@@ -469,7 +537,7 @@ export function Dashboard() {
 
                     {/* Markets */}
                     {isLoading ? (
-                        <div className={viewMode === 'grid' ? 'grid md:grid-cols-2 xl:grid-cols-3 gap-5' : 'space-y-3'}>
+                        <div className={viewMode === 'grid' ? 'grid md:grid-cols-2 xl:grid-cols-4 gap-4' : 'space-y-3'}>
                             {[...Array(6)].map((_, i) => (
                                 <div key={i} className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
                                     <div className="flex items-center gap-3 mb-3"><div className="skeleton w-8 h-8 rounded-full" /><div className="skeleton h-3 w-20 rounded" /></div>
@@ -489,15 +557,31 @@ export function Dashboard() {
                                 : { label: 'Create Market', onClick: () => navigate('/create') }}
                         />
                     ) : viewMode === 'grid' ? (
-                        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
+                        <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
                             {paginatedMarkets.map((market, index) => (
-                                <MarketCard key={market.id} market={market} index={index} onClick={() => handleMarketClick(market)} />
+                                <MarketCard
+                                    key={market.id}
+                                    market={market}
+                                    index={index}
+                                    onClick={() => handleMarketClick(market)}
+                                    parlayMode={parlayMode}
+                                    selectedParlayOutcome={getLegForMarket(market.id)?.outcome ?? null}
+                                    onQuickAddParlay={handleQuickAddParlay}
+                                />
                             ))}
                         </div>
                     ) : (
                         <div className="space-y-3">
                             {paginatedMarkets.map((market, index) => (
-                                <MarketRow key={market.id} market={market} index={index} onClick={() => handleMarketClick(market)} />
+                                <MarketRow
+                                    key={market.id}
+                                    market={market}
+                                    index={index}
+                                    onClick={() => handleMarketClick(market)}
+                                    parlayMode={parlayMode}
+                                    selectedParlayOutcome={getLegForMarket(market.id)?.outcome ?? null}
+                                    onQuickAddParlay={handleQuickAddParlay}
+                                />
                             ))}
                         </div>
                     )}

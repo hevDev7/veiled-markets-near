@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { Clock, CheckCircle, XCircle, Shield, AlertTriangle, Timer } from 'lucide-react';
 import { formatVeil, formatBlocksRemaining } from '../../lib/governance-client';
 import { useGovernanceStore } from '../../lib/governance-store';
+import { describeProposalIntent } from '../../lib/governance-display';
 import {
   PROPOSAL_STATUS,
   PROPOSAL_STATUS_LABELS,
@@ -16,9 +17,11 @@ interface ProposalCardProps {
   proposal: GovernanceProposal;
   onClick?: () => void;
   index?: number;
+  priorityBadge?: string;
+  contextNote?: string;
 }
 
-export function ProposalCard({ proposal, onClick, index = 0 }: ProposalCardProps) {
+export function ProposalCard({ proposal, onClick, index = 0, priorityBadge, contextNote }: ProposalCardProps) {
   const { currentBlockHeight } = useGovernanceStore();
 
   const blocksRemaining = proposal.votingDeadline > currentBlockHeight
@@ -31,6 +34,7 @@ export function ProposalCard({ proposal, onClick, index = 0 }: ProposalCardProps
 
   return (
     <motion.div
+      id={`proposal-${proposal.proposalId}`}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
@@ -45,6 +49,11 @@ export function ProposalCard({ proposal, onClick, index = 0 }: ProposalCardProps
               #{proposal.proposalId.slice(0, 8)}
             </span>
             <StatusBadge status={proposal.status} />
+            {priorityBadge && (
+              <span className="inline-flex items-center rounded-full border border-brand-500/30 bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-brand-200">
+                {priorityBadge}
+              </span>
+            )}
           </div>
           <h3 className="text-white font-semibold text-sm leading-tight line-clamp-2 group-hover:text-brand-300 transition-colors">
             {proposal.title || `${proposal.proposalTypeName}: ${proposal.proposalId.slice(0, 16)}...`}
@@ -54,6 +63,16 @@ export function ProposalCard({ proposal, onClick, index = 0 }: ProposalCardProps
           {proposal.proposalTypeName}
         </span>
       </div>
+
+      <p className="mb-3 text-xs text-surface-400 line-clamp-2">
+        {proposal.description || describeProposalIntent(proposal)}
+      </p>
+
+      {contextNote && (
+        <div className="mb-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-surface-300">
+          {contextNote}
+        </div>
+      )}
 
       {/* Vote Progress Bar */}
       <div className="mb-3">
@@ -118,15 +137,10 @@ export function ProposalCard({ proposal, onClick, index = 0 }: ProposalCardProps
           </div>
         )}
 
-        {proposal.status === PROPOSAL_STATUS.ACTIVE && (
-          <div className="flex gap-2">
-            <button className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-lg hover:bg-emerald-500/30 transition-colors text-xs font-medium">
-              Vote For
-            </button>
-            <button className="px-3 py-1 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors text-xs font-medium">
-              Against
-            </button>
-          </div>
+        {onClick && (
+          <span className="text-brand-300 group-hover:text-brand-200 transition-colors font-medium">
+            Open details
+          </span>
         )}
       </div>
     </motion.div>

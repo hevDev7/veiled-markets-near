@@ -9,11 +9,20 @@ import { Coins, Vote, Gift, ArrowRight, Loader2, Lock, Unlock } from 'lucide-rea
 import { formatVeil } from '../../lib/governance-client';
 import { useGovernanceStore } from '../../lib/governance-store';
 import { useWalletStore } from '../../lib/store';
-import { formatCredits } from '../../lib/utils';
+import { formatCredits, shortenAddress } from '../../lib/utils';
 
-export function GovernanceHeader() {
+interface GovernanceHeaderProps {
+  onClaimAll?: () => Promise<void>;
+  onOpenDelegate?: () => void;
+  isClaimingAll?: boolean;
+}
+
+export function GovernanceHeader({
+  onClaimAll,
+  onOpenDelegate,
+  isClaimingAll = false,
+}: GovernanceHeaderProps) {
   const {
-    veilBalance,
     votingPower,
     totalClaimable,
     isLoading,
@@ -55,16 +64,16 @@ export function GovernanceHeader() {
         >
           <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
             <Lock className="w-4 h-4 text-yellow-400" />
-            Staked
+            Protocol Locked
           </div>
           {isLoading ? (
             <Loader2 className="w-5 h-5 animate-spin text-surface-500" />
           ) : (
             <>
               <div className="text-2xl font-bold text-yellow-400">
-                {formatVeil(votingPower)}
+                {formatVeil(stats.totalStakedInVotes)}
               </div>
-              <div className="text-xs text-surface-500 mt-1">ALEO locked in governance</div>
+              <div className="text-xs text-surface-500 mt-1">ALEO currently locked in tracked proposals</div>
             </>
           )}
         </motion.div>
@@ -88,6 +97,14 @@ export function GovernanceHeader() {
                 {formatVeil(votingPower)}
               </div>
               <div className="text-xs text-surface-500 mt-1">ALEO (incl. delegated)</div>
+              {onOpenDelegate && (
+                <button
+                  onClick={onOpenDelegate}
+                  className="mt-2 flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                >
+                  Delegate votes <ArrowRight className="w-3 h-3" />
+                </button>
+              )}
             </>
           )}
         </motion.div>
@@ -111,8 +128,13 @@ export function GovernanceHeader() {
                 {formatVeil(totalClaimable)}
               </div>
               <div className="text-xs text-surface-500 mt-1">ALEO to claim</div>
-              {totalClaimable > 0n && (
-                <button className="mt-2 flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors">
+              {totalClaimable > 0n && onClaimAll && (
+                <button
+                  onClick={() => void onClaimAll()}
+                  disabled={isClaimingAll}
+                  className="mt-2 flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
+                >
+                  {isClaimingAll ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
                   Claim All <ArrowRight className="w-3 h-3" />
                 </button>
               )}
@@ -120,6 +142,73 @@ export function GovernanceHeader() {
           )}
         </motion.div>
       </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.28 }}
+        className="bg-surface-900/40 border border-surface-700/30 rounded-xl p-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-surface-300">Live Market Controls</h3>
+            <p className="text-xs text-surface-500 mt-1">
+              Current on-chain settings pushed by governance into the market contracts.
+            </p>
+          </div>
+          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+            stats.pauseState ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'
+          }`}>
+            {stats.pauseState ? 'Markets Paused' : 'Markets Active'}
+          </span>
+        </div>
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+          <div className="rounded-lg bg-white/[0.02] p-3">
+            <div className="text-surface-500">Protocol Fee</div>
+            <div className="mt-1 text-white font-medium">{(Number(stats.protocolFeeBps) / 100).toFixed(2)}%</div>
+          </div>
+          <div className="rounded-lg bg-white/[0.02] p-3">
+            <div className="text-surface-500">Creator Fee</div>
+            <div className="mt-1 text-white font-medium">{(Number(stats.creatorFeeBps) / 100).toFixed(2)}%</div>
+          </div>
+          <div className="rounded-lg bg-white/[0.02] p-3">
+            <div className="text-surface-500">LP Fee</div>
+            <div className="mt-1 text-white font-medium">{(Number(stats.lpFeeBps) / 100).toFixed(2)}%</div>
+          </div>
+          <div className="rounded-lg bg-white/[0.02] p-3">
+            <div className="text-surface-500">Min Trade</div>
+            <div className="mt-1 text-white font-medium">{formatCredits(stats.minTradeAmount, 4)} ALEO</div>
+          </div>
+          <div className="rounded-lg bg-white/[0.02] p-3">
+            <div className="text-surface-500">Min Liquidity</div>
+            <div className="mt-1 text-white font-medium">{formatCredits(stats.minLiquidity, 4)} ALEO</div>
+          </div>
+        </div>
+        <div className="mt-4 rounded-lg bg-white/[0.02] p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-xs text-surface-500">Guardian Committee</div>
+              <div className="mt-1 text-sm text-white font-medium">
+                {stats.guardianThreshold > 0
+                  ? `${stats.guardianThreshold} of ${stats.guardianAddresses.length || 3} approvals required`
+                  : 'Loading guardian configuration...'}
+              </div>
+            </div>
+            {stats.guardianAddresses.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {stats.guardianAddresses.map((address) => (
+                  <span
+                    key={address}
+                    className="rounded-full border border-white/[0.08] bg-surface-950/70 px-2.5 py-1 font-mono text-[11px] text-surface-300"
+                  >
+                    {shortenAddress(address, 4)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
 
       {/* How Staking Works */}
       <motion.div

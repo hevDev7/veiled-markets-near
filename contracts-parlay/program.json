@@ -1,0 +1,28 @@
+{
+  "program": "veiled_parlay_v3.aleo",
+  "version": "3.0.0",
+  "description": "Privacy-preserving parlay betting for Veiled Markets — multi-leg parlays across any market (ALEO/USDCX/USAD), optimistic resolution with dispute window, pool-based payouts with risk management",
+  "license": "MIT",
+  "leo": "4.0.0",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "test_usdcx_stablecoin.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "test_usad_stablecoin.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}

@@ -37,9 +37,9 @@ describe('AMM Price Calculations', () => {
       expect(price).toBeCloseTo(0.5);
     });
 
-    it('should return higher price for higher reserve', () => {
+    it('should use the binary FPMM parity price', () => {
       const price = calculateOutcomePrice(7500n, 2500n, 0n, 0n, 2, 1);
-      expect(price).toBeCloseTo(0.75);
+      expect(price).toBeCloseTo(0.25);
     });
 
     it('should handle 4-outcome markets', () => {
@@ -58,13 +58,17 @@ describe('AMM Price Calculations', () => {
       const prices = calculateAllPrices(3000n, 7000n, 0n, 0n, 2);
       expect(prices.length).toBe(2);
       expect(prices[0] + prices[1]).toBeCloseTo(1.0);
+      expect(prices[0]).toBeCloseTo(0.7);
+      expect(prices[1]).toBeCloseTo(0.3);
     });
 
     it('should handle 3-outcome markets', () => {
       const prices = calculateAllPrices(3000n, 3000n, 4000n, 0n, 3);
       expect(prices.length).toBe(3);
       expect(prices[0] + prices[1] + prices[2]).toBeCloseTo(1.0);
-      expect(prices[2]).toBeCloseTo(0.4);
+      expect(prices[0]).toBeCloseTo(0.363636, 5);
+      expect(prices[1]).toBeCloseTo(0.363636, 5);
+      expect(prices[2]).toBeCloseTo(0.272727, 5);
     });
 
     it('should handle 4-outcome markets', () => {
@@ -99,13 +103,13 @@ describe('AMM Trading Calculations', () => {
     it('should calculate shares out for binary market', () => {
       const shares = calculateBuySharesOut(5000n, 5000n, 0n, 0n, 2, 1, 1000n);
       expect(shares).toBeGreaterThan(0n);
-      expect(shares).toBeLessThan(1000n);
+      expect(shares).toBe(1817n);
     });
 
-    it('should give more shares for underpriced outcome', () => {
-      const sharesUnderpriced = calculateBuySharesOut(2500n, 7500n, 0n, 0n, 2, 1, 1000n);
-      const sharesOverpriced = calculateBuySharesOut(2500n, 7500n, 0n, 0n, 2, 2, 1000n);
-      expect(sharesUnderpriced).toBeLessThan(sharesOverpriced);
+    it('should give more shares for the lower-priced outcome', () => {
+      const sharesOverpriced = calculateBuySharesOut(2500n, 7500n, 0n, 0n, 2, 1, 1000n);
+      const sharesUnderpriced = calculateBuySharesOut(2500n, 7500n, 0n, 0n, 2, 2, 1000n);
+      expect(sharesUnderpriced).toBeGreaterThan(sharesOverpriced);
     });
 
     it('should return 0 for empty reserves', () => {
@@ -229,14 +233,14 @@ describe('Payout Calculations', () => {
 describe('Time Formatting', () => {
   describe('formatTimeRemaining', () => {
     it('should format days correctly', () => {
-      const future = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+      const future = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000);
       const formatted = formatTimeRemaining(future);
       expect(formatted).toContain('5');
       expect(formatted.toLowerCase()).toContain('d');
     });
 
     it('should format hours correctly', () => {
-      const future = new Date(Date.now() + 5 * 60 * 60 * 1000);
+      const future = new Date(Date.now() + 5 * 60 * 60 * 1000 + 60 * 1000);
       const formatted = formatTimeRemaining(future);
       expect(formatted).toContain('5');
       expect(formatted.toLowerCase()).toContain('h');

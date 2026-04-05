@@ -454,6 +454,143 @@ export async function fetchPriceSnapshots(
   }
 }
 
+// ---- Parlay Persistence ----
+
+export interface ParlayRow {
+  id: string
+  address: string
+  num_legs: number
+  legs: string              // JSON-encoded ParlaySlipLeg[]
+  stake: string             // encrypted bigint string
+  potential_payout: string   // encrypted bigint string
+  token_type: string
+  status: string
+  created_at: number
+  resolved_at: number | null
+  tx_id: string | null
+  claimed: boolean
+  on_chain_parlay_id: string | null
+  ticket_nonce: string | null
+  funding_source: string | null
+  updated_at: string
+}
+
+async function parlayToRow(
+  parlay: { id: string; legs: any[]; numLegs: number; stake: bigint; potentialPayout: bigint; tokenType: string; ownerAddress?: string; status: string; createdAt: number; resolvedAt?: number; txId?: string; claimed?: boolean; onChainParlayId?: string; ticketNonce?: string; fundingSource?: string },
+  address: string,
+  encryptionKey: CryptoKey | null,
+): Promise<ParlayRow> {
+  return {
+    id: parlay.id,
+    address,
+    num_legs: parlay.numLegs,
+    legs: JSON.stringify(parlay.legs.map(l => ({
+      marketId: l.marketId,
+      marketQuestion: l.marketQuestion,
+      marketProgram: l.marketProgram,
+      outcome: l.outcome,
+      outcomeLabel: l.outcomeLabel,
+      oddsBps: l.oddsBps.toString(),
+      displayOdds: l.displayOdds,
+      marketTokenType: l.marketTokenType,
+    }))),
+    stake: await enc(parlay.stake.toString(), encryptionKey) ?? parlay.stake.toString(),
+    potential_payout: await enc(parlay.potentialPayout.toString(), encryptionKey) ?? parlay.potentialPayout.toString(),
+    token_type: parlay.tokenType,
+    status: parlay.status,
+    created_at: parlay.createdAt,
+    resolved_at: parlay.resolvedAt ?? null,
+    tx_id: parlay.txId ?? null,
+    claimed: parlay.claimed ?? false,
+    on_chain_parlay_id: parlay.onChainParlayId ?? null,
+    ticket_nonce: parlay.ticketNonce ?? null,
+    funding_source: parlay.fundingSource ?? null,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+async function rowToParlay(row: ParlayRow, encryptionKey: CryptoKey | null): Promise<any | null> {
+  const stakeStr = await dec(row.stake, encryptionKey)
+  const payoutStr = await dec(row.potential_payout, encryptionKey)
+  if (!stakeStr || !payoutStr) return null
+
+  let legs: any[] = []
+  try {
+    const parsed = JSON.parse(row.legs)
+    legs = parsed.map((l: any) => ({
+      ...l,
+      oddsBps: BigInt(l.oddsBps || '0'),
+    }))
+  } catch {
+    return null
+  }
+
+  return {
+    id: row.id,
+    legs,
+    numLegs: row.num_legs,
+    stake: BigInt(stakeStr),
+    potentialPayout: BigInt(payoutStr),
+    tokenType: row.token_type,
+    ownerAddress: row.address,
+    status: row.status,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at ?? undefined,
+    txId: row.tx_id ?? undefined,
+    claimed: row.claimed,
+    onChainParlayId: row.on_chain_parlay_id ?? undefined,
+    ticketNonce: row.ticket_nonce ?? undefined,
+    fundingSource: row.funding_source ?? undefined,
+  }
+}
+
+export async function fetchParlays(address: string, encryptionKey: CryptoKey | null = null): Promise<any[]> {
+  if (!supabase) return []
+  try {
+    const { data, error } = await supabase
+      .from('user_parlays')
+      .select('*')
+      .eq('address', address)
+    if (error) { devWarn('[Supabase] fetchParlays error:', error.message); return [] }
+    const results = await Promise.all((data || []).map(row => rowToParlay(row, encryptionKey)))
+    return results.filter((p): p is any => p !== null)
+  } catch (e) {
+    devWarn('[Supabase] fetchParlays exception:', e)
+    return []
+  }
+}
+
+export async function upsertParlays(
+  parlays: Array<{ id: string; legs: any[]; numLegs: number; stake: bigint; potentialPayout: bigint; tokenType: string; ownerAddress?: string; status: string; createdAt: number; resolvedAt?: number; txId?: string; claimed?: boolean; onChainParlayId?: string; ticketNonce?: string; fundingSource?: string }>,
+  address: string,
+  encryptionKey: CryptoKey | null = null,
+): Promise<void> {
+  if (!supabase || parlays.length === 0) return
+  try {
+    const rows = await Promise.all(parlays.map(p => parlayToRow(p, address, encryptionKey)))
+    const { error } = await supabase
+      .from('user_parlays')
+      .upsert(rows, { onConflict: 'id,address' })
+    if (error) devWarn('[Supabase] upsertParlays error:', error.message)
+  } catch (e) {
+    devWarn('[Supabase] upsertParlays exception:', e)
+  }
+}
+
+export async function removeParlayRecord(parlayId: string, address: string): Promise<void> {
+  if (!supabase) return
+  try {
+    const { error } = await supabase
+      .from('user_parlays')
+      .delete()
+      .eq('id', parlayId)
+      .eq('address', address)
+    if (error) devWarn('[Supabase] removeParlay error:', error.message)
+  } catch (e) {
+    devWarn('[Supabase] removeParlay exception:', e)
+  }
+}
+
 /**
  * Clear all data from Supabase tables (used when switching program versions).
  * Deletes: market_registry, user_bets, pending_bets, commitment_records
@@ -466,7 +603,7 @@ export async function clearAllSupabaseData(): Promise<{ deleted: string[]; error
     return { deleted, errors }
   }
 
-  const tables = ['market_registry', 'user_bets', 'pending_bets', 'commitment_records', 'price_snapshots']
+  const tables = ['market_registry', 'user_bets', 'pending_bets', 'commitment_records', 'price_snapshots', 'user_parlays']
   for (const table of tables) {
     try {
       // Delete all rows (neq '' matches all non-null primary keys)

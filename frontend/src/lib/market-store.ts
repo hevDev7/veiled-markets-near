@@ -12,6 +12,7 @@ import {
     fetchAllMarkets,
     getCurrentBlockHeight,
     fetchMarketById,
+    getProgramIdForMarket,
     initializeMarketIds,
     getQuestionText,
     getOutcomeLabels,
@@ -74,8 +75,10 @@ async function transformMarketData(
     currentBlock: bigint,
     resolution?: MarketResolutionData,
     marketCredits?: bigint,
+    sourceProgramId?: string,
 ): Promise<Market> {
     const numOutcomes = market.num_outcomes || 2
+    const tokenType = (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
 
     // Build AMM reserves for price calculation
     const reserves: AMMReserves = {
@@ -88,14 +91,9 @@ async function transformMarketData(
 
     // Calculate AMM prices for all outcomes
     const prices = calculateAllPrices(reserves)
-    const yesPrice = prices[0] ?? 0.5
-    const noPrice = prices[1] ?? 0.5
-    const yesPercentage = yesPrice * 100
-    const noPercentage = noPrice * 100
-
-    // In v12 AMM, winning shares redeem 1:1, so payout = 1/price
-    const potentialYesPayout = yesPrice > 0 ? 1 / yesPrice : 2.0
-    const potentialNoPayout = noPrice > 0 ? 1 / noPrice : 2.0
+    const outcomePrices = prices.slice(0, numOutcomes)
+    const outcomePercentages = outcomePrices.map(price => price * 100)
+    const outcomePayouts = outcomePrices.map(price => price > 0 ? 1 / price : numOutcomes)
 
     // Calculate time remaining
     const blocksRemaining = Number(market.deadline - currentBlock)
@@ -144,6 +142,7 @@ async function transformMarketData(
         id: market.id,
         question: questionText,
         description: registryDescription || undefined,
+        programId: getProgramIdForMarket(tokenType, sourceProgramId),
         category: market.category,
         numOutcomes,
         outcomeLabels,
@@ -160,10 +159,9 @@ async function transformMarketData(
         totalLPShares: pool.total_lp_shares,
 
         // Prices
-        yesPrice,
-        noPrice,
-        yesPercentage,
-        noPercentage,
+        outcomePrices,
+        outcomePercentages,
+        outcomePayouts,
 
         // Volume & trades
         totalVolume: pool.total_volume,
@@ -172,10 +170,6 @@ async function transformMarketData(
         // Shares issued (legacy - not tracked separately in v12)
         totalYesIssued: pool.reserve_1,
         totalNoIssued: pool.reserve_2,
-
-        // Payouts (1/price for AMM)
-        potentialYesPayout,
-        potentialNoPayout,
 
         // Resolution / dispute
         challengeDeadline: resolution?.challenge_deadline,
@@ -188,7 +182,7 @@ async function transformMarketData(
         resolutionSource: registryResolutionSource || undefined,
         tags: getCategoryTags(market.category),
         transactionId: transactionId || undefined,
-        tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD',
+        tokenType,
         remainingCredits: marketCredits,
         thumbnailUrl: registryThumbnail || undefined,
     }
@@ -241,8 +235,8 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
 
             // Transform to Market format (v12: pass resolution for challenge window)
             const allMarkets: Market[] = await Promise.all(
-                blockchainMarkets.map(({ market, pool, resolution, marketCredits }) =>
-                    transformMarketData(market, pool, currentBlock, resolution, marketCredits)
+                blockchainMarkets.map(({ market, pool, resolution, marketCredits, programId }) =>
+                    transformMarketData(market, pool, currentBlock, resolution, marketCredits, programId)
                 )
             )
 
@@ -334,6 +328,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 currentBlock,
                 marketData.resolution,
                 marketData.marketCredits,
+                marketData.programId,
             )
 
             set((state) => ({
@@ -358,6 +353,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 currentBlock,
                 marketData.resolution,
                 marketData.marketCredits,
+                marketData.programId,
             )
 
             // Record price snapshot for chart

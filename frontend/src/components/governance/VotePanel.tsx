@@ -11,6 +11,7 @@ import {
   Timer, AlertTriangle, Loader2, User,
 } from 'lucide-react';
 import { formatVeil, formatBlocksRemaining, parseVeilInput } from '../../lib/governance-client';
+import { describeProposalIntent, getGovernanceTargetLabel } from '../../lib/governance-display';
 import { useGovernanceStore } from '../../lib/governance-store';
 import {
   PROPOSAL_STATUS,
@@ -22,9 +23,21 @@ interface VotePanelProps {
   proposal: GovernanceProposal;
   onBack: () => void;
   onVote: (proposalId: string, direction: 'for' | 'against', amount: bigint) => Promise<void>;
+  onFinalize?: (proposal: GovernanceProposal) => Promise<void>;
+  onExecute?: (proposal: GovernanceProposal) => Promise<void>;
+  onVeto?: (proposal: GovernanceProposal) => Promise<void>;
+  isActing?: boolean;
 }
 
-export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
+export function VotePanel({
+  proposal,
+  onBack,
+  onVote,
+  onFinalize,
+  onExecute,
+  onVeto,
+  isActing = false,
+}: VotePanelProps) {
   const { veilBalance, currentBlockHeight, isVoting } = useGovernanceStore();
   const [voteAmount, setVoteAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +49,9 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
     ? proposal.timelockUntil - currentBlockHeight
     : 0n;
   const isVotingOpen = proposal.status === PROPOSAL_STATUS.ACTIVE && blocksRemaining > 0n;
+  const canFinalize = proposal.status === PROPOSAL_STATUS.ACTIVE && blocksRemaining === 0n;
+  const canExecute = proposal.status === PROPOSAL_STATUS.PASSED && timelockRemaining === 0n;
+  const canVeto = proposal.status === PROPOSAL_STATUS.PASSED && timelockRemaining > 0n;
 
   const handleVote = async (direction: 'for' | 'against') => {
     setError(null);
@@ -82,6 +98,9 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
               {proposal.title || `${proposal.proposalTypeName} Proposal`}
             </h2>
             <p className="text-sm text-surface-400 mt-1">{proposal.description}</p>
+            <p className="text-xs text-surface-500 mt-2">
+              {describeProposalIntent(proposal)}
+            </p>
           </div>
           <span className="text-xs text-surface-500 bg-surface-800 px-3 py-1 rounded-full">
             {proposal.proposalTypeName}
@@ -92,6 +111,21 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
         <div className="flex items-center gap-2 text-xs text-surface-400 mb-4">
           <User className="w-3.5 h-3.5" />
           Proposed by: <span className="font-mono text-surface-300">{proposal.proposer.slice(0, 20)}...</span>
+        </div>
+
+        <div className="mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-white/[0.02] rounded-xl p-3">
+            <div className="text-[11px] text-surface-500">Target</div>
+            <div className="mt-1 text-sm text-white font-medium break-all">{getGovernanceTargetLabel(proposal.target)}</div>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3">
+            <div className="text-[11px] text-surface-500">Payload 1</div>
+            <div className="mt-1 text-sm text-white font-medium break-all">{proposal.payload1.toString()}</div>
+          </div>
+          <div className="bg-white/[0.02] rounded-xl p-3">
+            <div className="text-[11px] text-surface-500">Payload 2</div>
+            <div className="mt-1 text-sm text-white font-medium break-all">{proposal.payload2}</div>
+          </div>
         </div>
 
         {/* Vote Tally */}
@@ -250,6 +284,50 @@ export function VotePanel({ proposal, onBack, onVote }: VotePanelProps) {
               {error}
             </div>
           )}
+        </div>
+      )}
+
+      {(canFinalize || canExecute || canVeto) && (
+        <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6">
+          <h3 className="text-base font-bold text-white mb-2">Proposal Actions</h3>
+          <p className="text-sm text-surface-400 mb-4">
+            This proposal is no longer in the voting phase. Continue the governance lifecycle with the next available action.
+          </p>
+
+          <div className="flex flex-wrap gap-3">
+            {canFinalize && onFinalize && (
+              <button
+                onClick={() => void onFinalize(proposal)}
+                disabled={isActing}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 rounded-xl font-medium transition-all disabled:opacity-50"
+              >
+                {isActing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Clock className="w-4 h-4" />}
+                Finalize Vote
+              </button>
+            )}
+
+            {canExecute && onExecute && (
+              <button
+                onClick={() => void onExecute(proposal)}
+                disabled={isActing}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 rounded-xl font-medium transition-all disabled:opacity-50"
+              >
+                {isActing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                Execute Proposal
+              </button>
+            )}
+
+            {canVeto && onVeto && (
+              <button
+                onClick={() => void onVeto(proposal)}
+                disabled={isActing}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/30 text-purple-300 rounded-xl font-medium transition-all disabled:opacity-50"
+              >
+                {isActing ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                Guardian Veto
+              </button>
+            )}
+          </div>
         </div>
       )}
     </motion.div>

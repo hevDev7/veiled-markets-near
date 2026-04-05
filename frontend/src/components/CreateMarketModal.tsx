@@ -85,9 +85,6 @@ const initialFormData: MarketFormData = {
   tokenType: 'ALEO',
 }
 
-// Use the centralized config program ID — do NOT hardcode version here
-const CREATE_MARKET_PROGRAM_ID = CONTRACT_INFO.programId
-
 const DRAFT_KEY = 'veiled_create_market_draft'
 
 function saveDraft(data: MarketFormData) {
@@ -112,7 +109,9 @@ function getCreateMarketBalanceError(
     public: bigint
     private: bigint
     usdcxPublic: bigint
+    usdcxPrivate: bigint
     usadPublic: bigint
+    usadPrivate: bigint
   },
 ): string | null {
   const feeMicro = 1_500_000n
@@ -378,7 +377,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       devLog('Resolution block height:', resolutionBlockHeight.toString())
 
       // Build transaction inputs for v19 create_market
-      // create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, initial_liquidity)
+      // create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, creator_owner, initial_liquidity)
       // Token type is determined by function name: create_market (ALEO) vs create_market_usdcx (USDCX)
       const input0 = String(questionHash);
       const input1 = `${Number(formData.category)}u8`;
@@ -386,9 +385,10 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       const input3 = `${deadlineBlockHeight.toString()}u64`;
       const input4 = `${resolutionBlockHeight.toString()}u64`;
       const input5 = wallet.address!; // resolver = creator by default
+      const input6 = wallet.address!;
       const liquidityMicro = BigInt(Math.floor(parseFloat(formData.initialLiquidity || '10') * 1_000_000));
-      const input6 = `${liquidityMicro}u128`;
-      const inputs = [input0, input1, input2, input3, input4, input5, input6]
+      const input7 = `${liquidityMicro}u128`;
+      const inputs = [input0, input1, input2, input3, input4, input5, input6, input7]
       // Route to correct program based on token type
       const createProgramId = formData.tokenType === 'USAD'
         ? config.usadProgramId
@@ -421,8 +421,9 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       devLog('Input 3 (deadline):', input3)
       devLog('Input 4 (resolution):', input4)
       devLog('Input 5 (resolver):', input5)
-      devLog('Input 6 (liquidity):', input6)
-      devLog('Inputs array (7):', inputs)
+      devLog('Input 6 (creator_owner):', input6)
+      devLog('Input 7 (liquidity):', input7)
+      devLog('Inputs array (8):', inputs)
       devLog('Program ID (configured):', CONTRACT_INFO.programId)
       devLog('Program ID (create market):', createProgramId)
       devLog('Network:', CONTRACT_INFO.network)

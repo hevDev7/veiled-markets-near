@@ -7,6 +7,8 @@
 // ============================================================================
 
 import { config } from './config';
+import { walletManager } from './wallet';
+import { getCurrentBlockHeight } from './aleo-client';
 import { devLog, devWarn } from './logger';
 
 // Scanner URL for testnet/mainnet
@@ -14,95 +16,292 @@ const SCANNER_URL = config.network === 'mainnet'
   ? 'https://api.provable.com/scanner/mainnet'
   : 'https://api.provable.com/scanner/testnet';
 
+const SCANNER_STATUS_TTL_MS = 15_000;
+const SCANNER_CACHE_VERSION = 2;
+const SCANNER_STORAGE_PREFIX = `veiled-markets:record-scanner:v${SCANNER_CACHE_VERSION}`;
+const VEILED_PROGRAM_QUERY_START_BLOCK = config.network === 'mainnet' ? 0 : 14_367_415;
+
+const OWNED_RECORD_RESPONSE_FILTER = {
+  commitment: true,
+  owner: true,
+  tag: true,
+  sender: true,
+  spent: true,
+  record_ciphertext: true,
+  block_height: true,
+  block_timestamp: true,
+  output_index: true,
+  record_name: true,
+  function_name: true,
+  program_name: true,
+  transition_id: true,
+  transaction_id: true,
+  transaction_index: true,
+  transition_index: true,
+} as const;
+
+const PROGRAM_QUERY_START_HINTS = new Set<string>([
+  config.programId,
+  config.usdcxMarketProgramId,
+  config.usadProgramId,
+  config.governanceProgramId,
+  config.usdcxProgramId,
+  'test_usad_stablecoin.aleo',
+]);
+
+interface PersistedScannerState {
+  uuid: string;
+  ownerKey: string;
+  network: string;
+  startBlock: number;
+  updatedAt: number;
+  lastReadyAt: number | null;
+}
+
+interface ScannerStatusSnapshot {
+  ready: boolean;
+  progress: number;
+  raw: unknown;
+}
+
+interface ScannerContext {
+  scanner: any;
+  uuid: string;
+  ownerKey: string;
+  status: ScannerStatusSnapshot | null;
+}
+
 // Cache scanner instance + UUID per session
 let scannerInstance: any = null;
 let scannerUuid: string | null = null;
+let scannerOwnerKey: string | null = null;
 let scannerInitPromise: Promise<void> | null = null;
+let scannerStatusCache: { uuid: string; status: ScannerStatusSnapshot; timestamp: number } | null = null;
 
-// ============================================================================
-// Initialization
-// ============================================================================
+function getScannerStorageKey(ownerKey: string): string {
+  return `${SCANNER_STORAGE_PREFIX}:${ownerKey}`;
+}
 
-/**
- * Initialize the record scanner with the user's view key.
- * Caches the scanner and UUID for the session.
- */
-async function initScanner(): Promise<{ scanner: any; uuid: string } | null> {
-  // Already initialized
-  if (scannerInstance && scannerUuid) {
-    return { scanner: scannerInstance, uuid: scannerUuid };
+function getCurrentScannerOwnerKey(): string {
+  const account = walletManager.getAccount();
+  const walletType = walletManager.getWalletType() || 'unknown';
+  const address = account?.address?.toLowerCase() || config.devAddress?.toLowerCase() || 'anonymous';
+  return `${config.network}:${walletType}:${address}`;
+}
+
+function loadPersistedScannerState(ownerKey: string): PersistedScannerState | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(getScannerStorageKey(ownerKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedScannerState;
+    if (!parsed?.uuid || parsed.ownerKey !== ownerKey || parsed.network !== config.network) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistScannerState(state: PersistedScannerState): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(getScannerStorageKey(state.ownerKey), JSON.stringify(state));
+  } catch {
+    // Ignore storage quota / private mode errors.
+  }
+}
+
+function clearPersistedScannerState(ownerKey: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(getScannerStorageKey(ownerKey));
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+}
+
+function normalizeScannerStatus(raw: any): ScannerStatusSnapshot {
+  const progressValue = [raw?.percentage, raw?.progress]
+    .find((value) => typeof value === 'number' && Number.isFinite(value));
+  const progress = typeof progressValue === 'number' ? progressValue : 0;
+  const ready = raw?.synced === true
+    || raw?.ready === true
+    || raw?.status === 'complete'
+    || progress >= 100;
+
+  return {
+    ready,
+    progress,
+    raw,
+  };
+}
+
+function getRecordQueryStart(programId?: string): number | undefined {
+  if (!programId || programId === 'credits.aleo') return undefined;
+  if (PROGRAM_QUERY_START_HINTS.has(programId)) return VEILED_PROGRAM_QUERY_START_BLOCK;
+  return undefined;
+}
+
+async function fetchScannerStatus(scanner: any, uuid: string, force = false): Promise<ScannerStatusSnapshot | null> {
+  if (!uuid) return null;
+  if (
+    !force
+    && scannerStatusCache
+    && scannerStatusCache.uuid === uuid
+    && Date.now() - scannerStatusCache.timestamp < SCANNER_STATUS_TTL_MS
+  ) {
+    return scannerStatusCache.status;
   }
 
-  // Prevent concurrent initialization
+  try {
+    const status = normalizeScannerStatus(await scanner.checkStatus());
+    scannerStatusCache = {
+      uuid,
+      status,
+      timestamp: Date.now(),
+    };
+    return status;
+  } catch (error) {
+    devWarn('[RecordScanner] checkStatus failed:', error);
+    return null;
+  }
+}
+
+async function getScannerViewKey(sdk: any): Promise<any | null> {
+  const { Account } = sdk;
+
+  if (config.devPrivateKey) {
+    try {
+      const account = new Account({ privateKey: config.devPrivateKey });
+      const viewKey = account.viewKey();
+      devLog('[RecordScanner] Using dev account view key');
+      return viewKey;
+    } catch {
+      devWarn('[RecordScanner] Failed to create account from dev private key');
+    }
+  }
+
+  const shieldApi = (window as any).shield;
+  if (shieldApi?.getViewKey) {
+    try {
+      const viewKey = await shieldApi.getViewKey();
+      if (viewKey) {
+        devLog('[RecordScanner] Using Shield wallet view key');
+        return viewKey;
+      }
+    } catch {
+      devWarn('[RecordScanner] Shield getViewKey failed');
+    }
+  }
+
+  return null;
+}
+
+async function computeRegistrationStartBlock(): Promise<number> {
+  try {
+    const latest = Number(await getCurrentBlockHeight());
+    if (Number.isFinite(latest) && latest > 0) {
+      return 0;
+    }
+  } catch {
+    // Fall back to genesis scan if block height lookup fails.
+  }
+  return 0;
+}
+
+async function initScanner(): Promise<ScannerContext | null> {
+  const ownerKey = getCurrentScannerOwnerKey();
+
+  if (scannerInstance && scannerUuid && scannerOwnerKey === ownerKey) {
+    return {
+      scanner: scannerInstance,
+      uuid: scannerUuid,
+      ownerKey,
+      status: await fetchScannerStatus(scannerInstance, scannerUuid),
+    };
+  }
+
   if (scannerInitPromise) {
     await scannerInitPromise;
-    if (scannerInstance && scannerUuid) {
-      return { scanner: scannerInstance, uuid: scannerUuid };
+    if (scannerInstance && scannerUuid && scannerOwnerKey === ownerKey) {
+      return {
+        scanner: scannerInstance,
+        uuid: scannerUuid,
+        ownerKey,
+        status: await fetchScannerStatus(scannerInstance, scannerUuid),
+      };
     }
     return null;
   }
 
   scannerInitPromise = (async () => {
     try {
-      // Dynamic import to avoid loading WASM at startup
       const sdk = await import('@provablehq/sdk');
-      const { RecordScanner, Account } = sdk;
+      const { RecordScanner } = sdk;
 
-      // Get view key — prefer env dev key, fallback to wallet
-      let viewKey: any = null;
+      const scanner = new RecordScanner({ url: SCANNER_URL }) as any;
+      const persisted = loadPersistedScannerState(ownerKey);
 
-      // Method 1: Dev view key from env
-      const devPrivateKey = config.devPrivateKey;
-      if (devPrivateKey) {
+      if (persisted?.uuid) {
         try {
-          const account = new Account({ privateKey: devPrivateKey });
-          viewKey = account.viewKey();
-          devLog('[RecordScanner] Using dev account view key');
-        } catch {
-          devWarn('[RecordScanner] Failed to create account from dev private key');
-        }
-      }
-
-      // Method 2: Shield wallet view key via window.shield
-      if (!viewKey) {
-        const shieldApi = (window as any).shield;
-        if (shieldApi?.getViewKey) {
-          try {
-            const vk = await shieldApi.getViewKey();
-            if (vk) {
-              viewKey = vk;
-              devLog('[RecordScanner] Using Shield wallet view key');
+          await scanner.setUuid(persisted.uuid);
+          const persistedStatus = await fetchScannerStatus(scanner, persisted.uuid, true);
+          if (persistedStatus) {
+            scannerInstance = scanner;
+            scannerUuid = persisted.uuid;
+            scannerOwnerKey = ownerKey;
+            devLog('[RecordScanner] Reused persisted scanner UUID');
+            if (persistedStatus.ready) {
+              persistScannerState({
+                ...persisted,
+                updatedAt: Date.now(),
+                lastReadyAt: Date.now(),
+              });
             }
-          } catch {
-            devWarn('[RecordScanner] Shield getViewKey failed');
+            return;
           }
+        } catch (error) {
+          devWarn('[RecordScanner] Failed to reuse persisted UUID, will try view-key path:', error);
         }
       }
 
+      const viewKey = await getScannerViewKey(sdk);
       if (!viewKey) {
         devWarn('[RecordScanner] No view key available — scanner disabled');
         return;
       }
 
-      // Create scanner
-      const scanner = new RecordScanner({ url: SCANNER_URL });
-
-      // Use encrypted registration (recommended, avoids CORS issues)
-      let uuid: string | undefined;
       try {
-        const regResult = await scanner.registerEncrypted(viewKey, 0);
-        uuid = regResult?.uuid || regResult?.data?.uuid;
-        devLog('[RecordScanner] Encrypted registration successful');
-      } catch (encErr) {
-        devWarn('[RecordScanner] Encrypted registration failed, trying plain:', encErr);
-        // Fallback to plain registration
-        try {
-          const result = await scanner.register(viewKey, 0);
-          uuid = result?.uuid || result?.data?.uuid;
-        } catch (plainErr) {
-          devWarn('[RecordScanner] Plain registration also failed:', plainErr);
+        await scanner.setUuid(viewKey);
+        const derivedUuid = String(scanner.uuid?.toString?.() ?? scanner.uuid ?? '');
+        const existingStatus = derivedUuid
+          ? await fetchScannerStatus(scanner, derivedUuid, true)
+          : null;
+
+        if (derivedUuid && existingStatus) {
+          scannerInstance = scanner;
+          scannerUuid = derivedUuid;
+          scannerOwnerKey = ownerKey;
+          persistScannerState({
+            uuid: derivedUuid,
+            ownerKey,
+            network: config.network,
+            startBlock: 0,
+            updatedAt: Date.now(),
+            lastReadyAt: existingStatus.ready ? Date.now() : null,
+          });
+          devLog('[RecordScanner] Reused view-key derived UUID from existing scanner job');
+          return;
         }
+      } catch (error) {
+        devWarn('[RecordScanner] setUuid(viewKey) probe failed:', error);
       }
+
+      const startBlock = await computeRegistrationStartBlock();
+      const registration = await scanner.register(viewKey, startBlock);
+      const uuid = String(registration?.uuid || scanner.uuid?.toString?.() || scanner.uuid || '');
 
       if (!uuid) {
         devWarn('[RecordScanner] Registration failed — no UUID returned');
@@ -111,7 +310,16 @@ async function initScanner(): Promise<{ scanner: any; uuid: string } | null> {
 
       scannerInstance = scanner;
       scannerUuid = uuid;
-      devLog('[RecordScanner] Initialized successfully, UUID:', uuid);
+      scannerOwnerKey = ownerKey;
+      persistScannerState({
+        uuid,
+        ownerKey,
+        network: config.network,
+        startBlock,
+        updatedAt: Date.now(),
+        lastReadyAt: null,
+      });
+      devLog('[RecordScanner] Registered scanner UUID:', uuid);
     } catch (err) {
       devWarn('[RecordScanner] Init failed:', err);
     }
@@ -120,20 +328,91 @@ async function initScanner(): Promise<{ scanner: any; uuid: string } | null> {
   await scannerInitPromise;
   scannerInitPromise = null;
 
-  if (scannerInstance && scannerUuid) {
-    return { scanner: scannerInstance, uuid: scannerUuid };
+  if (scannerInstance && scannerUuid && scannerOwnerKey === ownerKey) {
+    return {
+      scanner: scannerInstance,
+      uuid: scannerUuid,
+      ownerKey,
+      status: await fetchScannerStatus(scannerInstance, scannerUuid),
+    };
   }
   return null;
 }
 
-/**
- * Reset scanner (call on wallet disconnect)
- */
-export function resetScanner(): void {
-  scannerInstance = null;
-  scannerUuid = null;
-  scannerInitPromise = null;
-  devLog('[RecordScanner] Reset');
+async function ensureScannerReady(ctx: ScannerContext): Promise<ScannerStatusSnapshot | null> {
+  const status = await fetchScannerStatus(ctx.scanner, ctx.uuid, true);
+  if (!status) {
+    devWarn('[RecordScanner] Scanner status unavailable — skipping scanner results');
+    return null;
+  }
+
+  if (!status.ready) {
+    devLog(`[RecordScanner] Scanner still indexing (${status.progress}% complete)`);
+    return status;
+  }
+
+  const persisted = loadPersistedScannerState(ctx.ownerKey);
+  if (persisted) {
+    persistScannerState({
+      ...persisted,
+      updatedAt: Date.now(),
+      lastReadyAt: Date.now(),
+    });
+  }
+
+  return status;
+}
+
+async function validateOwnedRecords(scanner: any, records: any[]): Promise<ScannedRecord[]> {
+  if (!Array.isArray(records) || records.length === 0) return [];
+
+  const serialNumbers = records
+    .map((record) => record?.serial_number ?? record?.serialNumber)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  const tags = records
+    .map((record) => record?.tag)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  let serialNumberState: Record<string, boolean> = {};
+  let tagState: Record<string, boolean> = {};
+
+  if (serialNumbers.length > 0 && typeof scanner.checkSerialNumbers === 'function') {
+    try {
+      serialNumberState = await scanner.checkSerialNumbers(serialNumbers);
+    } catch (error) {
+      devWarn('[RecordScanner] checkSerialNumbers failed:', error);
+    }
+  }
+
+  if (tags.length > 0 && typeof scanner.checkTags === 'function') {
+    try {
+      tagState = await scanner.checkTags(tags);
+    } catch (error) {
+      devWarn('[RecordScanner] checkTags failed:', error);
+    }
+  }
+
+  return records.map((record: any) => {
+    const serialNumber = record?.serial_number ?? record?.serialNumber;
+    const tag = record?.tag;
+    const spent = record?.spent === true
+      || (typeof serialNumber === 'string' && serialNumberState[serialNumber] === true)
+      || (typeof tag === 'string' && tagState[tag] === true);
+
+    return {
+      plaintext: record?.record_plaintext || '',
+      ciphertext: record?.record_ciphertext || '',
+      programName: record?.program_name,
+      recordName: record?.record_name,
+      commitment: record?.commitment,
+      spent,
+      blockHeight: record?.block_height,
+      transactionId: record?.transaction_id,
+      owner: record?.owner,
+      tag: record?.tag,
+      serialNumber,
+    };
+  });
 }
 
 // ============================================================================
@@ -149,6 +428,25 @@ export interface ScannedRecord {
   spent?: boolean;
   blockHeight?: number;
   transactionId?: string;
+  owner?: string;
+  tag?: string;
+  serialNumber?: string;
+}
+
+/**
+ * Reset scanner (call on wallet disconnect or wallet change)
+ */
+export function resetScanner(clearPersisted: boolean = false): void {
+  const ownerKey = scannerOwnerKey || getCurrentScannerOwnerKey();
+  scannerInstance = null;
+  scannerUuid = null;
+  scannerOwnerKey = null;
+  scannerInitPromise = null;
+  scannerStatusCache = null;
+  if (clearPersisted) {
+    clearPersistedScannerState(ownerKey);
+  }
+  devLog('[RecordScanner] Reset');
 }
 
 /**
@@ -161,18 +459,27 @@ export async function findRecords(
   const ctx = await initScanner();
   if (!ctx) return [];
 
+  const status = await ensureScannerReady(ctx);
+  if (!status?.ready) return [];
+
   try {
+    const startHint = getRecordQueryStart(programId);
     const filter: any = {
       uuid: ctx.uuid,
       unspent: true,
       decrypt: true,
+      responseFilter: OWNED_RECORD_RESPONSE_FILTER,
       filter: {
         program: programId,
         ...(recordName ? { record: recordName } : {}),
+        ...(typeof startHint === 'number' ? { start: startHint } : {}),
       },
     };
 
-    devLog(`[RecordScanner] Finding records: ${programId}/${recordName || '*'}`);
+    devLog(
+      `[RecordScanner] Finding records: ${programId}/${recordName || '*'}`
+      + (typeof startHint === 'number' ? ` from block ${startHint}` : ''),
+    );
     const records = await ctx.scanner.findRecords(filter);
 
     if (!Array.isArray(records) || records.length === 0) {
@@ -180,18 +487,9 @@ export async function findRecords(
       return [];
     }
 
-    devLog(`[RecordScanner] Found ${records.length} records for ${programId}`);
-
-    return records.map((r: any) => ({
-      plaintext: r.record_plaintext || '',
-      ciphertext: r.record_ciphertext || '',
-      programName: r.program_name || programId,
-      recordName: r.record_name || recordName,
-      commitment: r.commitment,
-      spent: r.spent,
-      blockHeight: r.block_height,
-      transactionId: r.transaction_id,
-    }));
+    const validated = await validateOwnedRecords(ctx.scanner, records);
+    devLog(`[RecordScanner] Found ${validated.length} validated records for ${programId}`);
+    return validated;
   } catch (err) {
     devWarn(`[RecordScanner] findRecords failed for ${programId}:`, err);
     return [];
@@ -205,17 +503,27 @@ export async function findCreditsRecord(minMicrocredits: number): Promise<string
   const ctx = await initScanner();
   if (!ctx) return null;
 
+  const status = await ensureScannerReady(ctx);
+  if (!status?.ready) return null;
+
   try {
     devLog(`[RecordScanner] Finding credits record >= ${minMicrocredits / 1_000000} ALEO`);
     const record = await ctx.scanner.findCreditsRecord(minMicrocredits, {
       uuid: ctx.uuid,
       unspent: true,
       decrypt: true,
+      responseFilter: OWNED_RECORD_RESPONSE_FILTER,
+      filter: {
+        start: 0,
+        program: 'credits.aleo',
+        record: 'credits',
+      },
     });
 
-    if (record?.record_plaintext) {
-      devLog(`[RecordScanner] Found credits record`);
-      return record.record_plaintext;
+    const [validated] = await validateOwnedRecords(ctx.scanner, record ? [record] : []);
+    if (validated?.plaintext && !validated.spent) {
+      devLog('[RecordScanner] Found validated credits record');
+      return validated.plaintext;
     }
     return null;
   } catch (err) {
@@ -305,7 +613,6 @@ export async function findVoteLocks(): Promise<ScannedRecord[]> {
 export async function findResolverStakeReceipt(): Promise<string | null> {
   const records = await findRecords(config.governanceProgramId, 'ResolverStakeReceipt');
   if (records.length === 0) return null;
-  // Return the first unspent receipt
   const unspent = records.find(r => !r.spent && r.plaintext);
   return unspent?.plaintext || null;
 }
@@ -376,13 +683,11 @@ export async function getScannerStatus(): Promise<{ ready: boolean; progress?: n
   const ctx = await initScanner();
   if (!ctx) return null;
 
-  try {
-    const status = await ctx.scanner.checkStatus();
-    return {
-      ready: status?.status === 'complete' || status?.status === 'ready',
-      progress: status?.progress,
-    };
-  } catch {
-    return null;
-  }
+  const status = await fetchScannerStatus(ctx.scanner, ctx.uuid, true);
+  if (!status) return null;
+
+  return {
+    ready: status.ready,
+    progress: status.progress,
+  };
 }

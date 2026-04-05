@@ -77,7 +77,6 @@ export function OutcomeSelector({
         const colors = OUTCOME_COLORS[outcome] || OUTCOME_COLORS[1]
         const label = outcomeLabels[i] || `Outcome ${outcome}`
         const price = prices[i] ?? (1 / numOutcomes)
-        const percentage = price * 100
 
         return (
           <button

@@ -38,6 +38,7 @@ export interface Market {
   id: string
   question: string
   description?: string
+  programId?: string
   category: number
   numOutcomes: number        // v12: 2, 3, or 4
   outcomeLabels: string[]    // v12: labels for each outcome
@@ -48,27 +49,21 @@ export interface Market {
   // AMM Pool Data (v12 - multi-outcome reserves)
   yesReserve: bigint         // reserve_1
   noReserve: bigint          // reserve_2
-  reserve3: bigint           // reserve_3 (0 if binary)
-  reserve4: bigint           // reserve_4 (0 if binary)
+  reserve3: bigint           // reserve_3 (0 when market has fewer than 3 outcomes)
+  reserve4: bigint           // reserve_4 (0 when market has fewer than 4 outcomes)
   totalLiquidity: bigint     // Total tokens in pool
   totalLPShares: bigint      // LP tokens in circulation
 
-  yesPrice: number           // Outcome 1 price (0-1)
-  noPrice: number            // Outcome 2 price (0-1)
+  outcomePrices?: number[]   // Generic prices for active outcomes (0-1)
+  outcomePercentages?: number[] // Generic percentages for active outcomes (0-100)
+  outcomePayouts?: number[]  // Generic 1/price payout multipliers
 
-  // Legacy fields (for backward compatibility)
-  yesPercentage: number
-  noPercentage: number
   totalVolume: bigint
   totalBets: number
 
   // Issued shares
   totalYesIssued: bigint
   totalNoIssued: bigint
-
-  // Payout calculations
-  potentialYesPayout: number
-  potentialNoPayout: number
 
   // v12: Resolution with challenge window
   challengeDeadline?: bigint
@@ -91,7 +86,7 @@ export interface Market {
 export interface SharePosition {
   id: string
   marketId: string
-  shareType: 'yes' | 'no'
+  outcome: string
   quantity: bigint
   avgPrice: number
   currentValue: number
@@ -162,6 +157,8 @@ export interface WalletState {
   encryptionKey: CryptoKey | null  // wallet-derived AES-256-GCM key for Supabase privacy
 }
 
+export type BalanceStatus = 'idle' | 'refreshing' | 'partial' | 'ready' | 'error'
+
 // ============================================================================
 // Wallet Store
 // ============================================================================
@@ -169,6 +166,9 @@ export interface WalletState {
 interface WalletStore {
   wallet: WalletState
   error: string | null
+  balanceStatus: BalanceStatus
+  lastBalanceRefreshAt: number | null
+  balanceError: string | null
 
   // Actions
   connect: (walletType: WalletType) => Promise<void>
@@ -192,10 +192,63 @@ const initialWalletState: WalletState = {
 
 // Track listener cleanup functions to prevent duplicate listeners on reconnect
 const _listenerCleanups: (() => void)[] = []
+const _activeBalanceRefreshIds = new Map<string, number>()
+const _privateBalanceZeroMisses = new Map<string, { private: number; usdcxPrivate: number; usadPrivate: number }>()
+let _balanceRefreshSequence = 0
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId)
+        reject(error)
+      })
+  })
+}
+
+function getPrivateBalanceMissState(address: string) {
+  const existing = _privateBalanceZeroMisses.get(address)
+  if (existing) return existing
+  const fresh = { private: 0, usdcxPrivate: 0, usadPrivate: 0 }
+  _privateBalanceZeroMisses.set(address, fresh)
+  return fresh
+}
+
+function stabilizeShieldPrivateBalance(
+  address: string,
+  asset: 'private' | 'usdcxPrivate' | 'usadPrivate',
+  detected: bigint,
+  previous: bigint,
+) {
+  const misses = getPrivateBalanceMissState(address)
+
+  if (detected > 0n) {
+    misses[asset] = 0
+    return { value: detected, preserved: false }
+  }
+
+  if (previous > 0n) {
+    misses[asset] += 1
+    if (misses[asset] < 2) {
+      return { value: previous, preserved: true }
+    }
+  }
+
+  misses[asset] = 0
+  return { value: detected, preserved: false }
+}
 
 export const useWalletStore = create<WalletStore>((set, get) => ({
   wallet: initialWalletState,
   error: null,
+  balanceStatus: 'idle',
+  lastBalanceRefreshAt: null,
+  balanceError: null,
 
   connect: async (walletType: WalletType) => {
     set({
@@ -232,6 +285,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         const unsubAccount = walletManager.onAccountChange((newAccount: WalletAccount | null) => {
           if (newAccount) {
             devLog('[Store] Account changed to:', newAccount.address?.slice(0, 12))
+            import('./record-scanner').then(({ resetScanner }) => resetScanner()).catch(() => {})
             set({
               wallet: {
                 ...get().wallet,
@@ -278,20 +332,32 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       set({
         wallet: { ...initialWalletState },
         error: errorMessage,
+        balanceStatus: 'error',
+        lastBalanceRefreshAt: null,
+        balanceError: errorMessage,
       })
       throw new Error(errorMessage)
     }
   },
 
   disconnect: async () => {
+    const disconnectAddress = get().wallet.address
     try {
       await walletManager.disconnect()
     } catch (error) {
       console.error('Disconnect error:', error)
     }
+    import('./record-scanner').then(({ resetScanner }) => resetScanner()).catch(() => {})
+    if (disconnectAddress) {
+      _activeBalanceRefreshIds.delete(disconnectAddress)
+      _privateBalanceZeroMisses.delete(disconnectAddress)
+    }
     set({
       wallet: initialWalletState,
       error: null,
+      balanceStatus: 'idle',
+      lastBalanceRefreshAt: null,
+      balanceError: null,
     })
   },
 
@@ -301,9 +367,64 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       return
     }
 
+    const refreshAddress = wallet.address
+    const currentBalance = wallet.balance
+    const refreshId = ++_balanceRefreshSequence
+    _activeBalanceRefreshIds.set(refreshAddress, refreshId)
+    const applyBalanceUpdate = (
+      balance: WalletBalance,
+      status: BalanceStatus,
+      errorMessage: string | null = null,
+    ) => {
+      const latestWallet = get().wallet
+      if (!latestWallet.connected || latestWallet.address !== refreshAddress) return false
+      if (_activeBalanceRefreshIds.get(refreshAddress) !== refreshId) return false
+
+      set({
+        wallet: {
+          ...latestWallet,
+          balance,
+        },
+        balanceStatus: status,
+        lastBalanceRefreshAt: Date.now(),
+        balanceError: errorMessage,
+      })
+      return true
+    }
+
+    set({
+      balanceStatus: 'refreshing',
+      balanceError: null,
+    })
+
     try {
-      // Fetch public balance directly from Aleo RPC
-      const publicBalance = await fetchPublicBalance(wallet.address)
+      // Public balances are fast and reliable, so publish them immediately.
+      const [publicResult, usdcxPublicResult, usadPublicResult] = await Promise.allSettled([
+        withTimeout(fetchPublicBalance(refreshAddress), 6_000, 'ALEO public balance'),
+        withTimeout(fetchUsdcxPublicBalance(refreshAddress), 6_000, 'USDCX public balance'),
+        withTimeout(fetchUsdcxPublicBalance(refreshAddress, 'test_usad_stablecoin.aleo'), 6_000, 'USAD public balance'),
+      ])
+
+      const publicBalance = publicResult.status === 'fulfilled' ? publicResult.value : currentBalance.public
+      const usdcxPublic = usdcxPublicResult.status === 'fulfilled' ? usdcxPublicResult.value : currentBalance.usdcxPublic
+      const usadPublic = usadPublicResult.status === 'fulfilled' ? usadPublicResult.value : currentBalance.usadPublic
+
+      const publicErrors: string[] = []
+      if (publicResult.status === 'rejected') publicErrors.push('ALEO public balance unavailable')
+      if (usdcxPublicResult.status === 'rejected') publicErrors.push('USDCX public balance unavailable')
+      if (usadPublicResult.status === 'rejected') publicErrors.push('USAD public balance unavailable')
+      const hasPublicErrors = publicErrors.length > 0
+
+      applyBalanceUpdate(
+        {
+          ...currentBalance,
+          public: publicBalance,
+          usdcxPublic,
+          usadPublic,
+        },
+        'partial',
+        publicErrors.length > 0 ? publicErrors.join(' · ') : null,
+      )
 
       // Try to get private balance from credits records
       let privateBalance = 0n
@@ -323,6 +444,58 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         return 0n
       }
 
+      const normalizeRecords = (records: any): any[] => (
+        Array.isArray(records) ? records : ((records as any)?.records || [])
+      )
+
+      const extractRecordText = (record: any, requiredField: 'microcredits' | 'amount'): string | null => {
+        if (!record) return null
+        if (typeof record === 'string') {
+          return record.includes(requiredField) ? record : null
+        }
+        if (typeof record !== 'object') return null
+
+        const directFields = [
+          record.plaintext,
+          record.text,
+          record.content,
+          record.recordPlaintext,
+          record.record_plaintext,
+          record.data,
+          record.record,
+        ]
+
+        for (const field of directFields) {
+          if (field == null) continue
+          const text = String(field)
+          if (text.includes(requiredField)) return text
+        }
+
+        for (const key of Object.keys(record)) {
+          const value = record[key]
+          if (value == null) continue
+          const text = String(value)
+          if (text.includes(requiredField) && text.includes('{')) return text
+        }
+
+        return null
+      }
+
+      const extractRecordCiphertext = (record: any): string | null => {
+        if (!record || typeof record !== 'object') return null
+        const candidates = [
+          record.ciphertext,
+          record.recordCiphertext,
+          record.record_ciphertext,
+        ]
+        for (const candidate of candidates) {
+          if (typeof candidate === 'string' && candidate.length > 0) {
+            return candidate
+          }
+        }
+        return null
+      }
+
       // Helper: check if record is spent
       const isRecordSpent = (record: any): boolean => {
         if (typeof record === 'object' && record !== null) {
@@ -337,9 +510,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       devLog('[Balance] Connected wallet type:', connectedType)
 
       // Helper: extract private balance from records array
-      const sumRecordsBalance = (records: any[], label: string): bigint => {
+      const sumRecordsBalance = (records: any, label: string): bigint => {
         let sum = 0n
-        const recordsArr = Array.isArray(records) ? records : ((records as any)?.records || [])
+        const recordsArr = normalizeRecords(records)
         if (recordsArr.length === 0) {
           devLog(`[Balance] ${label}: 0 records returned`)
           return 0n
@@ -353,13 +526,54 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             continue
           }
           unspentCount++
-          const text = typeof record === 'string'
-            ? record
-            : ((record as any)?.plaintext || (record as any)?.data || JSON.stringify(record))
+          const text = extractRecordText(record, 'microcredits') || JSON.stringify(record)
           const mc = parseMicrocredits(String(text))
           sum += mc
         }
         devLog(`[Balance] ${label}: ${recordsArr.length} records (${unspentCount} unspent, ${spentCount} spent) = ${Number(sum) / 1_000_000} ALEO`)
+        return sum
+      }
+
+      const sumDecryptedCreditsRecords = async (records: any, label: string): Promise<bigint> => {
+        const decryptFn = (window as any).__aleoDecrypt
+        if (typeof decryptFn !== 'function') return 0n
+
+        const recordsArr = normalizeRecords(records)
+        if (recordsArr.length === 0) return 0n
+
+        let sum = 0n
+        let decryptedCount = 0
+
+        for (const record of recordsArr) {
+          if (isRecordSpent(record)) continue
+
+          const plaintext = extractRecordText(record, 'microcredits')
+          if (plaintext) {
+            sum += parseMicrocredits(plaintext)
+            continue
+          }
+
+          const ciphertext = extractRecordCiphertext(record)
+          if (!ciphertext) continue
+
+          try {
+            const decrypted = await withTimeout(
+              Promise.resolve(decryptFn(ciphertext)),
+              3_500,
+              `${label} decrypt`,
+            )
+            const text = String(decrypted)
+            sum += parseMicrocredits(text)
+            decryptedCount++
+          } catch (error: any) {
+            devLog(`[Balance] ${label} decrypt failed:`, error?.message || error)
+          }
+        }
+
+        if (decryptedCount > 0) {
+          devLog(`[Balance] ${label}: decrypted ${decryptedCount} record(s) = ${Number(sum) / 1_000_000} ALEO`)
+        }
+
         return sum
       }
 
@@ -378,7 +592,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             if (typeof shieldObj.requestRecordPlaintexts === 'function') {
               try {
                 devLog('[Balance] ALEO: Shield requestRecordPlaintexts(credits.aleo)...')
-                const result = await shieldObj.requestRecordPlaintexts('credits.aleo')
+                const result = await withTimeout(
+                  Promise.resolve(shieldObj.requestRecordPlaintexts('credits.aleo')),
+                  4_000,
+                  'Shield credits plaintext lookup',
+                )
                 privateBalance = sumRecordsBalance(result, 'ALEO-Shield-plaintexts')
                 if (privateBalance > 0n) break
               } catch (err: any) {
@@ -388,7 +606,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             if (privateBalance === 0n && typeof shieldObj.requestRecords === 'function') {
               try {
                 devLog('[Balance] ALEO: Shield requestRecords(credits.aleo)...')
-                const result = await shieldObj.requestRecords('credits.aleo')
+                const result = await withTimeout(
+                  Promise.resolve(shieldObj.requestRecords('credits.aleo')),
+                  4_000,
+                  'Shield credits record lookup',
+                )
                 privateBalance = sumRecordsBalance(result, 'ALEO-Shield-records')
                 if (privateBalance > 0n) break
               } catch (err: any) {
@@ -399,11 +621,37 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         }
 
         // Adapter API fallback
+        if (privateBalance === 0n && (window as any).__aleoRequestRecordPlaintexts) {
+          try {
+            devLog('[Balance] ALEO: adapter requestRecordPlaintexts(credits.aleo)...')
+            const records = await withTimeout(
+              Promise.resolve((window as any).__aleoRequestRecordPlaintexts('credits.aleo')),
+              4_500,
+              'Wallet adapter credits plaintext lookup',
+            )
+            privateBalance = sumRecordsBalance(records, 'ALEO-adapter-plaintexts')
+          } catch (err: any) {
+            devLog('[Balance] ALEO adapter plaintexts failed:', err?.message || err)
+          }
+        }
+
         if (privateBalance === 0n && (window as any).__aleoRequestRecords) {
           try {
             devLog('[Balance] ALEO: adapter requestRecords(credits.aleo)...')
-            const records = await (window as any).__aleoRequestRecords('credits.aleo', true)
+            const records = await withTimeout(
+              Promise.resolve((window as any).__aleoRequestRecords('credits.aleo', true)),
+              4_500,
+              'Wallet adapter credits lookup',
+            )
             privateBalance = sumRecordsBalance(records, 'ALEO-adapter')
+            if (privateBalance === 0n) {
+              const encryptedRecords = await withTimeout(
+                Promise.resolve((window as any).__aleoRequestRecords('credits.aleo', false)),
+                4_500,
+                'Wallet adapter encrypted credits lookup',
+              )
+              privateBalance = await sumDecryptedCreditsRecords(encryptedRecords, 'ALEO-adapter-decrypt')
+            }
         } catch (err: any) {
           devLog('[Balance] ALEO adapter failed:', err?.message || err)
         }
@@ -413,26 +661,32 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         if (privateBalance === 0n) {
           try {
             devLog('[Balance] ALEO: walletManager.getRecords(credits.aleo)...')
-            const records = await walletManager.getRecords('credits.aleo')
+            const records = await withTimeout(
+              walletManager.getRecords('credits.aleo'),
+              4_500,
+              'walletManager credits lookup',
+            )
             privateBalance = sumRecordsBalance(records, 'ALEO-walletManager')
+            if (privateBalance === 0n) {
+              privateBalance = await sumDecryptedCreditsRecords(records, 'ALEO-walletManager-decrypt')
+            }
           } catch {
             // Non-critical
           }
         }
       }
 
+      let reusedShieldPrivate = false
+      if (connectedType === 'shield') {
+        const stabilizedAleo = stabilizeShieldPrivateBalance(refreshAddress, 'private', privateBalance, currentBalance.private)
+        privateBalance = stabilizedAleo.value
+        reusedShieldPrivate = reusedShieldPrivate || stabilizedAleo.preserved
+      }
+
       if (privateBalance > 0n) {
         devLog(`[Balance] ALEO private total: ${Number(privateBalance) / 1_000_000} ALEO`)
       } else {
         devLog('[Balance] ALEO private: 0 (records not found after 3 attempts)')
-      }
-
-      // Fetch USDCX public balance in parallel (non-blocking)
-      let usdcxPublic = 0n
-      try {
-        usdcxPublic = await fetchUsdcxPublicBalance(wallet.address)
-      } catch {
-        // USDCX balance is non-critical
       }
 
       // Fetch USDCX private balance from Token records (non-blocking)
@@ -500,7 +754,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
               if (typeof shieldObj.requestRecordPlaintexts === 'function') {
                 try {
                   devLog(`[Balance] ${label}: Shield requestRecordPlaintexts(${programId})...`)
-                  const records = await shieldObj.requestRecordPlaintexts(programId)
+                  const records = await withTimeout(
+                    Promise.resolve(shieldObj.requestRecordPlaintexts(programId)),
+                    4_000,
+                    `${label} Shield plaintext lookup`,
+                  )
                   result = sumUsdcxRecords(records, `${label}-Shield-plaintexts`)
                   if (result > 0n) break
                 } catch (err: any) {
@@ -511,7 +769,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
               if (result === 0n && typeof shieldObj.requestRecords === 'function') {
                 try {
                   devLog(`[Balance] ${label}: Shield requestRecords(${programId})...`)
-                  const records = await shieldObj.requestRecords(programId)
+                  const records = await withTimeout(
+                    Promise.resolve(shieldObj.requestRecords(programId)),
+                    4_000,
+                    `${label} Shield record lookup`,
+                  )
                   result = sumUsdcxRecords(records, `${label}-Shield-records`)
                   if (result > 0n) break
                 } catch (err: any) {
@@ -527,7 +789,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
             if (typeof requestRecords === 'function') {
               try {
                 devLog(`[Balance] ${label}: adapter requestRecords(${programId})...`)
-                const records = await requestRecords(programId, true)
+                const records = await withTimeout(
+                  Promise.resolve(requestRecords(programId, true)),
+                  4_500,
+                  `${label} adapter lookup`,
+                )
                 result = sumUsdcxRecords(records, `${label}-adapter`)
                 if (result > 0n) break
               } catch (err: any) {
@@ -540,7 +806,11 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           if (result === 0n) {
             try {
               devLog(`[Balance] ${label}: walletManager.getRecords(${programId})...`)
-              const records = await walletManager.getRecords(programId)
+              const records = await withTimeout(
+                walletManager.getRecords(programId),
+                4_500,
+                `${label} walletManager lookup`,
+              )
               result = sumUsdcxRecords(records, `${label}-walletManager`)
               if (result > 0n) break
             } catch {
@@ -563,24 +833,30 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       // Fetch USDCX and USAD private balances (with retry)
       usdcxPrivate = await fetchPrivateTokenBalance(usdcxProgramId, 'USDCX')
 
-      // Fetch USAD public balance (same pattern as USDCX)
-      let usadPublic = 0n
-      try {
-        usadPublic = await fetchUsdcxPublicBalance(wallet.address, 'test_usad_stablecoin.aleo')
-      } catch {
-        // USAD balance is non-critical
-      }
-
       // Fetch USAD private balance (same helper with retry)
       let usadPrivate = 0n
       const usadProgramId = 'test_usad_stablecoin.aleo'
       usadPrivate = await fetchPrivateTokenBalance(usadProgramId, 'USAD')
 
+      if (connectedType === 'shield') {
+        const stabilizedUsdcx = stabilizeShieldPrivateBalance(refreshAddress, 'usdcxPrivate', usdcxPrivate, currentBalance.usdcxPrivate)
+        usdcxPrivate = stabilizedUsdcx.value
+        reusedShieldPrivate = reusedShieldPrivate || stabilizedUsdcx.preserved
+
+        const stabilizedUsad = stabilizeShieldPrivateBalance(refreshAddress, 'usadPrivate', usadPrivate, currentBalance.usadPrivate)
+        usadPrivate = stabilizedUsad.value
+        reusedShieldPrivate = reusedShieldPrivate || stabilizedUsad.preserved
+      }
+
       // Record Scanner fallback — if wallet methods missed any private balances
       if (privateBalance === 0n || usdcxPrivate === 0n || usadPrivate === 0n) {
         try {
           const { getAllPrivateBalances } = await import('./record-scanner');
-          const scanned = await getAllPrivateBalances();
+          const scanned = await withTimeout(
+            getAllPrivateBalances(),
+            8_000,
+            'Record scanner private balance scan',
+          )
           if (privateBalance === 0n && scanned.aleoPrivate > 0n) {
             privateBalance = scanned.aleoPrivate;
             devLog(`[Balance] Scanner found ALEO private: ${Number(scanned.aleoPrivate) / 1_000_000}`)
@@ -599,6 +875,14 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       }
 
       const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic, usdcxPrivate, usadPublic, usadPrivate }
+      const isPartial = hasPublicErrors || reusedShieldPrivate || (connectedType === 'shield' && privateBalance === 0n)
+      const balanceError = isPartial
+        ? hasPublicErrors
+          ? publicErrors.join(' · ')
+          : reusedShieldPrivate
+            ? 'Using the last successful private balance scan because Shield returned empty records on this refresh.'
+          : 'Showing public balances immediately; private ALEO balance may take longer to detect in Shield.'
+        : null
 
       devLog('[Balance] Final:', {
         public: `${Number(publicBalance) / 1_000_000} ALEO`,
@@ -609,14 +893,17 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         usadPrivate: `${Number(usadPrivate) / 1_000_000} USAD`,
       })
 
-      set({
-        wallet: {
-          ...get().wallet,
-          balance,
-        },
-      })
+      applyBalanceUpdate(balance, isPartial ? 'partial' : 'ready', balanceError)
     } catch (error) {
       console.error('Failed to refresh balance:', error)
+      const latestWallet = get().wallet
+      if (latestWallet.connected && latestWallet.address === refreshAddress && _activeBalanceRefreshIds.get(refreshAddress) === refreshId) {
+        set({
+          balanceStatus: 'error',
+          balanceError: error instanceof Error ? error.message : 'Failed to refresh balance',
+          lastBalanceRefreshAt: Date.now(),
+        })
+      }
     }
   },
 
@@ -687,33 +974,57 @@ interface MarketsStore {
 
 // Categories: 1=Politics, 2=Sports, 3=Crypto, 4=Entertainment, 5=Tech, 6=Economics, 7=Science
 
-// Helper to calculate AMM fields from percentages
-const calculateAMMFields = (yesPercentage: number, totalVolume: bigint) => {
-  const yesPrice = yesPercentage / 100
-  const noPrice = 1 - yesPrice
+type MockOutcomeSpec = {
+  label: string
+  percentage: number
+}
 
-  // Calculate reserves based on constant product formula
-  // For simplicity: yesReserve * noReserve = k
-  // yesPrice = noReserve / (yesReserve + noReserve)
-  const totalLiquidity = Number(totalVolume) * 2 // Approximate total liquidity
-  const yesReserve = BigInt(Math.floor(totalLiquidity * noPrice))
-  const noReserve = BigInt(Math.floor(totalLiquidity * yesPrice))
+// Mock-only helper to seed reserve-looking fields for demo cards.
+// Real market quotes and previews come from the parity helpers in `lib/amm.ts`.
+const seedMockMarketFields = (outcomes: MockOutcomeSpec[], totalVolume: bigint) => {
+  const totalPercentage = outcomes.reduce((sum, outcome) => sum + outcome.percentage, 0)
+  const safeTotal = totalPercentage > 0 ? totalPercentage : outcomes.length
+  const outcomePrices = outcomes.map(outcome => outcome.percentage / safeTotal)
+  const outcomePercentages = outcomePrices.map(price => price * 100)
+  const outcomePayouts = outcomePrices.map(price => price > 0 ? 1 / price : 0)
+
+  // These reserves are only for placeholder UI data and are not treated as
+  // contract-parity quotes. Higher-probability outcomes get smaller reserves
+  // so the cards still feel directionally correct in demo mode.
+  const liquidityBudget = Number(totalVolume) * Math.max(2, outcomes.length)
+  const inverseWeights = outcomePrices.map(price => Math.max(0.05, 1 - price))
+  const inverseTotal = inverseWeights.reduce((sum, weight) => sum + weight, 0)
+  const reserves = inverseWeights.map(weight => BigInt(Math.max(1, Math.floor(liquidityBudget * (weight / inverseTotal)))))
 
   return {
-    yesReserve,
-    noReserve,
-    reserve3: 0n,
-    reserve4: 0n,
-    totalLiquidity: yesReserve + noReserve,
+    yesReserve: reserves[0] ?? 0n,
+    noReserve: reserves[1] ?? 0n,
+    reserve3: reserves[2] ?? 0n,
+    reserve4: reserves[3] ?? 0n,
+    totalLiquidity: reserves.reduce((sum, reserve) => sum + reserve, 0n),
     totalLPShares: 0n,
-    yesPrice,
-    noPrice,
-    numOutcomes: 2,
-    outcomeLabels: ['Yes', 'No'],
-    totalYesIssued: BigInt(Math.floor(Number(totalVolume) * yesPrice)),
-    totalNoIssued: BigInt(Math.floor(Number(totalVolume) * noPrice)),
+    outcomePrices,
+    outcomePercentages,
+    outcomePayouts,
+    numOutcomes: outcomes.length,
+    outcomeLabels: outcomes.map(outcome => outcome.label),
+    totalYesIssued: BigInt(Math.floor(Number(totalVolume) * outcomePrices[0])),
+    totalNoIssued: BigInt(Math.floor(Number(totalVolume) * (outcomePrices[1] ?? 0))),
   }
 }
+
+const seedMockBinaryMarketFields = (
+  outcomeOnePercentage: number,
+  totalVolume: bigint,
+  labels: [string, string] = ['Yes', 'No'],
+) =>
+  seedMockMarketFields(
+    [
+      { label: labels[0], percentage: outcomeOnePercentage },
+      { label: labels[1], percentage: 100 - outcomeOnePercentage },
+    ],
+    totalVolume,
+  )
 
 // ============================================================================
 // MOCK DATA FOR DEMONSTRATION
@@ -732,18 +1043,14 @@ const mockMarkets: Market[] = [
   {
     id: 'market_001',
     question: 'Will Bitcoin reach $150,000 by end of Q1 2026?',
-    description: 'This market resolves YES if the price of Bitcoin (BTC) reaches or exceeds $150,000 USD on any major exchange (Coinbase, Binance, Kraken) before March 31, 2026 11:59 PM UTC.',
+    description: 'Binary market with outcomes Above $150k and Below $150k, based on whether Bitcoin trades at or above $150,000 on a major exchange before March 31, 2026 11:59 PM UTC.',
     category: 3,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 65 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 68 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 62.5,
-    noPercentage: 37.5,
     totalVolume: 2500000000n, // 2500 ALEO
     totalBets: 342,
-    ...calculateAMMFields(62.5, 2500000000n),
-    potentialYesPayout: 1.60,
-    potentialNoPayout: 2.67,
+    ...seedMockBinaryMarketFields(62.5, 2500000000n, ['Above $150k', 'Below $150k']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '65d',
     resolutionSource: 'CoinGecko API',
@@ -752,18 +1059,14 @@ const mockMarkets: Market[] = [
   {
     id: 'market_002',
     question: 'Will Ethereum flip Bitcoin in market cap by 2027?',
-    description: 'Resolves YES if Ethereum market capitalization exceeds Bitcoin market cap at any point before January 1, 2027.',
+    description: 'Binary market with Flippening and No Flippening outcomes, based on whether Ethereum market capitalization exceeds Bitcoin before January 1, 2027.',
     category: 3,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 370 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 18.2,
-    noPercentage: 81.8,
     totalVolume: 1800000000n,
     totalBets: 567,
-    ...calculateAMMFields(18.2, 1800000000n),
-    potentialYesPayout: 5.49,
-    potentialNoPayout: 1.22,
+    ...seedMockBinaryMarketFields(18.2, 1800000000n, ['Flippening', 'No Flippening']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '365d',
     resolutionSource: 'CoinMarketCap',
@@ -771,39 +1074,35 @@ const mockMarkets: Market[] = [
   },
   {
     id: 'market_003',
-    question: 'Will Solana reach $500 before ETH reaches $10,000?',
-    description: 'Race market: Resolves YES if SOL reaches $500 first, NO if ETH reaches $10,000 first. If neither happens by end of 2026, resolves NO.',
+    question: 'Which milestone lands first before end of 2026?',
+    description: 'Race market across three outcomes: SOL reaches $500 first, ETH reaches $10,000 first, or neither milestone is hit before December 31, 2026.',
     category: 3,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 340 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 345 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 45.3,
-    noPercentage: 54.7,
     totalVolume: 980000000n,
     totalBets: 234,
-    ...calculateAMMFields(45.3, 980000000n),
-    potentialYesPayout: 2.21,
-    potentialNoPayout: 1.83,
+    ...seedMockMarketFields([
+      { label: 'SOL hits $500 first', percentage: 37 },
+      { label: 'ETH hits $10k first', percentage: 41 },
+      { label: 'Neither in 2026', percentage: 22 },
+    ], 980000000n),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '340d',
     resolutionSource: 'CoinGecko API',
-    tags: ['Solana', 'Ethereum', 'Race'],
+    tags: ['Solana', 'Ethereum', '3-Way'],
   },
   {
     id: 'market_004',
     question: 'Will Aleo token price exceed $1 by June 2026?',
-    description: 'Resolves YES if ALEO token trades above $1.00 USD on any major exchange before June 30, 2026.',
+    description: 'Binary market with Above $1.00 and At or Below $1.00 outcomes for the ALEO token before June 30, 2026.',
     category: 3,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 155 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 160 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 71.8,
-    noPercentage: 28.2,
     totalVolume: 3200000000n,
     totalBets: 892,
-    ...calculateAMMFields(71.8, 3200000000n),
-    potentialYesPayout: 1.39,
-    potentialNoPayout: 3.55,
+    ...seedMockBinaryMarketFields(71.8, 3200000000n, ['Above $1.00', 'At or Below $1.00']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '155d',
     resolutionSource: 'CoinGecko API',
@@ -812,39 +1111,35 @@ const mockMarkets: Market[] = [
   // === ECONOMICS MARKETS ===
   {
     id: 'market_005',
-    question: 'Will the Fed cut interest rates in February 2026?',
-    description: 'Resolves YES if the Federal Reserve announces a rate cut at the FOMC meeting in February 2026.',
+    question: 'What will the Fed do at the February 2026 meeting?',
+    description: 'Three-way macro market: cut, hold, or hike at the February 2026 FOMC decision.',
     category: 6,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 14 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 16 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 36.3,
-    noPercentage: 63.7,
     totalVolume: 1450000000n,
     totalBets: 423,
-    ...calculateAMMFields(36.3, 1450000000n),
-    potentialYesPayout: 2.75,
-    potentialNoPayout: 1.57,
+    ...seedMockMarketFields([
+      { label: 'Cut', percentage: 28 },
+      { label: 'Hold', percentage: 58 },
+      { label: 'Hike', percentage: 14 },
+    ], 1450000000n),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '14d',
     resolutionSource: 'Federal Reserve',
-    tags: ['Fed', 'Interest Rates', 'Ending Soon'],
+    tags: ['Fed', 'Macro', '3-Way'],
   },
   {
     id: 'market_006',
     question: 'Will US inflation drop below 2% by Q2 2026?',
-    description: 'Resolves YES if the official US CPI year-over-year inflation rate drops below 2.0% in any month of Q2 2026.',
+    description: 'Binary macro market with Below 2% CPI and 2% or Higher CPI outcomes, based on official US CPI year-over-year readings during Q2 2026.',
     category: 6,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 120 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 125 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 42.1,
-    noPercentage: 57.9,
     totalVolume: 890000000n,
     totalBets: 312,
-    ...calculateAMMFields(42.1, 890000000n),
-    potentialYesPayout: 2.38,
-    potentialNoPayout: 1.73,
+    ...seedMockBinaryMarketFields(42.1, 890000000n, ['Below 2% CPI', '2% or Higher']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '120d',
     resolutionSource: 'Bureau of Labor Statistics',
@@ -854,18 +1149,14 @@ const mockMarkets: Market[] = [
   {
     id: 'market_007',
     question: 'Will Apple announce Apple Intelligence 2.0 at WWDC 2026?',
-    description: 'Resolves YES if Apple announces a major update to Apple Intelligence branded as "2.0" or equivalent at WWDC 2026.',
+    description: 'Binary market with Major AI launch and No major AI launch outcomes, based on Apple announcements at WWDC 2026.',
     category: 5,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 135 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 140 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 72.4,
-    noPercentage: 27.6,
     totalVolume: 1230000000n,
     totalBets: 456,
-    ...calculateAMMFields(72.4, 1230000000n),
-    potentialYesPayout: 1.38,
-    potentialNoPayout: 3.62,
+    ...seedMockBinaryMarketFields(72.4, 1230000000n, ['Major AI launch', 'No major AI launch']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '135d',
     resolutionSource: 'Apple Official Announcement',
@@ -873,60 +1164,57 @@ const mockMarkets: Market[] = [
   },
   {
     id: 'market_008',
-    question: 'Will OpenAI release GPT-5 before July 2026?',
-    description: 'Resolves YES if OpenAI publicly releases or announces GPT-5 (or equivalent next-gen model) before July 1, 2026.',
+    question: 'When will OpenAI release GPT-5?',
+    description: 'Three-way timeline market covering a launch before July 2026, a launch in the second half of 2026, or no public release during 2026.',
     category: 5,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 160 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 165 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 58.9,
-    noPercentage: 41.1,
     totalVolume: 2100000000n,
     totalBets: 678,
-    ...calculateAMMFields(58.9, 2100000000n),
-    potentialYesPayout: 1.70,
-    potentialNoPayout: 2.43,
+    ...seedMockMarketFields([
+      { label: 'Before Jul 2026', percentage: 46 },
+      { label: 'H2 2026', percentage: 34 },
+      { label: 'Not in 2026', percentage: 20 },
+    ], 2100000000n),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '160d',
     resolutionSource: 'OpenAI Official',
-    tags: ['OpenAI', 'GPT-5', 'AI'],
+    tags: ['OpenAI', 'GPT-5', '3-Way'],
   },
   // === SPORTS MARKETS ===
   {
     id: 'market_009',
-    question: 'Will Real Madrid win Champions League 2026?',
-    description: 'Resolves YES if Real Madrid CF wins the UEFA Champions League 2025-26 season.',
+    question: 'Who will win the 2025-26 Champions League?',
+    description: 'Four-way winner market across Real Madrid, Arsenal, PSG, or any other club lifting the UEFA Champions League trophy.',
     category: 2,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 120 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 122 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 28.5,
-    noPercentage: 71.5,
     totalVolume: 1560000000n,
     totalBets: 534,
-    ...calculateAMMFields(28.5, 1560000000n),
-    potentialYesPayout: 3.51,
-    potentialNoPayout: 1.40,
+    ...seedMockMarketFields([
+      { label: 'Real Madrid', percentage: 19 },
+      { label: 'Arsenal', percentage: 24 },
+      { label: 'PSG', percentage: 21 },
+      { label: 'Other club', percentage: 36 },
+    ], 1560000000n),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '120d',
     resolutionSource: 'UEFA Official',
-    tags: ['Champions League', 'Real Madrid', 'Football'],
+    tags: ['Champions League', 'Football', '4-Way'],
   },
   {
     id: 'market_010',
     question: 'Will the Super Bowl 2026 have over 110M US viewers?',
-    description: 'Resolves YES if official Nielsen ratings show over 110 million US viewers for Super Bowl LX.',
+    description: 'Binary audience market with Over 110M viewers and 110M or fewer viewers outcomes using official Nielsen ratings for Super Bowl LX.',
     category: 2,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 20 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 25 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 67.2,
-    noPercentage: 32.8,
     totalVolume: 780000000n,
     totalBets: 289,
-    ...calculateAMMFields(67.2, 780000000n),
-    potentialYesPayout: 1.49,
-    potentialNoPayout: 3.05,
+    ...seedMockBinaryMarketFields(67.2, 780000000n, ['Over 110M viewers', '110M or fewer']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '20d',
     resolutionSource: 'Nielsen Ratings',
@@ -936,18 +1224,14 @@ const mockMarkets: Market[] = [
   {
     id: 'market_011',
     question: 'Will a new crypto regulation bill pass US Congress in 2026?',
-    description: 'Resolves YES if any comprehensive cryptocurrency regulation bill is signed into law in the US during 2026.',
+    description: 'Binary policy market with Bill signed and No bill signed outcomes, based on whether a comprehensive US crypto regulation bill becomes law during 2026.',
     category: 1,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 340 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 345 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 45.8,
-    noPercentage: 54.2,
     totalVolume: 920000000n,
     totalBets: 367,
-    ...calculateAMMFields(45.8, 920000000n),
-    potentialYesPayout: 2.18,
-    potentialNoPayout: 1.85,
+    ...seedMockBinaryMarketFields(45.8, 920000000n, ['Bill signed', 'No bill signed']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '340d',
     resolutionSource: 'US Congress Records',
@@ -957,18 +1241,14 @@ const mockMarkets: Market[] = [
   {
     id: 'market_012',
     question: 'Will ETH close above $4,000 this week?',
-    description: 'Resolves YES if Ethereum (ETH) price is above $4,000 at Sunday 11:59 PM UTC.',
+    description: 'Binary weekly market with Above $4k close and Below $4k close outcomes, based on the Ethereum price at Sunday 11:59 PM UTC.',
     category: 3,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 4 * 24 * 60 * 60),
     status: 1,
-    yesPercentage: 52.3,
-    noPercentage: 47.7,
     totalVolume: 650000000n,
     totalBets: 198,
-    ...calculateAMMFields(52.3, 650000000n),
-    potentialYesPayout: 1.91,
-    potentialNoPayout: 2.10,
+    ...seedMockBinaryMarketFields(52.3, 650000000n, ['Above $4k close', 'Below $4k close']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
     timeRemaining: '3d',
     resolutionSource: 'CoinGecko API',
@@ -1308,6 +1588,12 @@ async function syncFromSupabase(
       sbFetchCommitments(address, encryptionKey),
     ])
 
+    const latestWallet = useWalletStore.getState().wallet
+    if (!latestWallet.connected || latestWallet.address !== address) {
+      devWarn(`[Supabase] Ignoring stale bets sync for ${address.slice(0, 12)}...`)
+      return
+    }
+
     if (remoteBets.length > 0) {
       const merged = mergeBets(get().userBets, remoteBets)
       set({ userBets: merged })
@@ -1522,11 +1808,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       // Calculate locked multiplier for display
       const idx = outcomeToIndex(outcome) - 1 // 0-indexed
-      const lockedMultiplier = idx === 0
-        ? market?.potentialYesPayout
-        : idx === 1
-          ? market?.potentialNoPayout
-          : undefined
+      const lockedMultiplier = market?.outcomePayouts?.[idx]
 
       // Add to pending bets with market question and locked odds
       const newBet: Bet = {
@@ -1866,6 +2148,12 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         }))
       ]
 
+      const latestWallet = useWalletStore.getState().wallet
+      if (!latestWallet.connected || latestWallet.address !== address) {
+        devWarn(`[Bets] Ignoring stale fetchUserBets result for ${address.slice(0, 12)}...`)
+        return
+      }
+
       set({
         userBets: mergedBets,
         pendingBets: localPendingBets,
@@ -1883,6 +2171,13 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       console.error('Failed to fetch user bets:', error)
       const localBets = loadBetsFromStorage(address)
       const localPendingBets = loadPendingBetsFromStorage(address)
+
+      const latestWallet = useWalletStore.getState().wallet
+      if (!latestWallet.connected || latestWallet.address !== address) {
+        devWarn(`[Bets] Ignoring stale fetchUserBets fallback for ${address.slice(0, 12)}...`)
+        return
+      }
+
       set({
         userBets: localBets,
         pendingBets: localPendingBets,

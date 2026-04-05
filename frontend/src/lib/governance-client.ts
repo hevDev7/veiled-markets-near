@@ -311,6 +311,57 @@ export async function getCommitteeDecision(marketId: string): Promise<CommitteeD
   };
 }
 
+export interface GovernanceLiveConfig {
+  pauseState: boolean;
+  protocolFeeBps: bigint;
+  creatorFeeBps: bigint;
+  lpFeeBps: bigint;
+  minTradeAmount: bigint;
+  minLiquidity: bigint;
+  guardianThreshold: number;
+  guardianAddresses: string[];
+}
+
+export async function getGovernanceLiveConfig(): Promise<GovernanceLiveConfig> {
+  const [
+    pauseValue,
+    protocolFee,
+    creatorFee,
+    lpFee,
+    minTrade,
+    minLiquidity,
+    guardianConfig,
+  ] = await Promise.all([
+    getGovernanceMappingValue<boolean>('governance_paused', '0u8'),
+    getGovernanceMappingValue<string>('governance_params', '1field'),
+    getGovernanceMappingValue<string>('governance_params', '2field'),
+    getGovernanceMappingValue<string>('governance_params', '3field'),
+    getGovernanceMappingValue<string>('governance_params', '4field'),
+    getGovernanceMappingValue<string>('governance_params', '5field'),
+    getGuardianConfig(),
+  ]);
+
+  const parseBig = (value: unknown, fallback: bigint): bigint => {
+    if (value === null || value === undefined || value === '') return fallback;
+    return BigInt(String(value).replace(/u\d+$/, ''));
+  };
+
+  return {
+    pauseState: Boolean(pauseValue),
+    protocolFeeBps: parseBig(protocolFee, 50n),
+    creatorFeeBps: parseBig(creatorFee, 50n),
+    lpFeeBps: parseBig(lpFee, 100n),
+    minTradeAmount: parseBig(minTrade, 1_000n),
+    minLiquidity: parseBig(minLiquidity, 10_000n),
+    guardianThreshold: Number(String(guardianConfig?.threshold || '0').replace(/u\d+$/, '')),
+    guardianAddresses: [
+      String(guardianConfig?.guardian_1 || ''),
+      String(guardianConfig?.guardian_2 || ''),
+      String(guardianConfig?.guardian_3 || ''),
+    ].filter(Boolean),
+  };
+}
+
 // ============================================================================
 // Transaction Builders
 // ============================================================================
@@ -330,9 +381,9 @@ export function buildCreateProposalInputs(
   return [
     creditsRecord,
     `${proposalType}u8`,
-    target.endsWith('field') ? target : `${target}field`,
+    normalizeFieldInput(target),
     `${payload1}u128`,
-    payload2.endsWith('field') ? payload2 : `${payload2}field`,
+    normalizeFieldInput(payload2),
     `${nonce}u64`,
   ];
 }
@@ -348,7 +399,7 @@ export function buildVoteInputs(
 ): string[] {
   return [
     creditsRecord,
-    proposalId.endsWith('field') ? proposalId : `${proposalId}field`,
+    normalizeFieldInput(proposalId),
     `${amount}u64`,
   ];
 }
@@ -377,6 +428,35 @@ export function buildRegisterResolverInputs(
   creditsRecord: string
 ): string[] {
   return [creditsRecord];
+}
+
+export function buildFinalizeVoteInputs(proposalId: string): string[] {
+  return [normalizeFieldInput(proposalId)];
+}
+
+export function buildExecuteGovernanceInputs(proposal: GovernanceProposal): string[] {
+  return [
+    normalizeFieldInput(proposal.proposalId),
+    `${proposal.proposalType}u8`,
+    normalizeFieldInput(proposal.target),
+    `${proposal.payload1}u128`,
+    normalizeFieldInput(proposal.payload2),
+  ];
+}
+
+export function buildVetoProposalInputs(proposalId: string): string[] {
+  return [normalizeFieldInput(proposalId)];
+}
+
+export function buildUpgradeResolverTierInputs(resolver: string): string[] {
+  return [resolver];
+}
+
+export function buildUnstakeResolverInputs(
+  receiptRecord: string,
+  withdrawAmount: bigint,
+): string[] {
+  return [receiptRecord, `${withdrawAmount}u64`];
 }
 
 // ============================================================================
@@ -451,4 +531,8 @@ export function formatBlocksRemaining(blocks: bigint, secondsPerBlock: number = 
   if (days > 0) return `${days}d ${hours}h ${minutes}m`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+function normalizeFieldInput(value: string): string {
+  return value.endsWith('field') ? value : `${value}field`;
 }

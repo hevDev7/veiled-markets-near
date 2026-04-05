@@ -6,12 +6,16 @@
 
 import { create } from 'zustand';
 import {
+  type GovernanceActorRole,
   type GovernanceProposal,
+  type GovernanceProposalLane,
   type GovernanceStats,
   type ResolverProfile,
   type Delegation,
+  type GovernanceEscalationMarket,
   type UserReward,
   PROPOSAL_STATUS,
+  PROPOSAL_TYPES,
 } from './governance-types';
 
 // ============================================================================
@@ -28,6 +32,10 @@ export interface GovernanceState {
   proposals: GovernanceProposal[];
   selectedProposal: GovernanceProposal | null;
   proposalFilter: 'all' | 'active' | 'passed' | 'executed' | 'rejected';
+  proposalLaneFilter: GovernanceProposalLane;
+  proposalFocusMarketId: string | null;
+  actorFocusAddress: string | null;
+  actorFocusRole: GovernanceActorRole | null;
 
   // Delegation
   delegations: Delegation[];
@@ -38,6 +46,7 @@ export interface GovernanceState {
 
   // Resolver
   resolverProfile: ResolverProfile | null;
+  escalations: GovernanceEscalationMarket[];
 
   // Stats
   stats: GovernanceStats;
@@ -56,9 +65,14 @@ export interface GovernanceState {
   updateProposal: (proposalId: string, updates: Partial<GovernanceProposal>) => void;
   setSelectedProposal: (proposal: GovernanceProposal | null) => void;
   setProposalFilter: (filter: GovernanceState['proposalFilter']) => void;
+  setProposalLaneFilter: (filter: GovernanceProposalLane) => void;
+  setProposalFocusMarketId: (marketId: string | null) => void;
+  setActorFocus: (address: string | null, role: GovernanceActorRole | null) => void;
+  clearProposalContext: () => void;
   setDelegations: (delegations: Delegation[]) => void;
   setUnclaimedRewards: (rewards: UserReward[]) => void;
   setResolverProfile: (profile: ResolverProfile | null) => void;
+  setEscalations: (escalations: GovernanceEscalationMarket[]) => void;
   setStats: (stats: Partial<GovernanceStats>) => void;
   setIsLoading: (loading: boolean) => void;
   setIsVoting: (voting: boolean) => void;
@@ -84,7 +98,77 @@ const defaultStats: GovernanceStats = {
   totalVeilDistributedLP: 0n,
   totalVeilDistributedTrading: 0n,
   totalResolvers: 0,
+  pauseState: false,
+  protocolFeeBps: 50n,
+  creatorFeeBps: 50n,
+  lpFeeBps: 100n,
+  minTradeAmount: 1_000n,
+  minLiquidity: 10_000n,
+  guardianThreshold: 0,
+  guardianAddresses: [],
 };
+
+export function getActorFocusMarketIds(
+  escalations: GovernanceEscalationMarket[],
+  actorAddress: string | null,
+  actorRole: GovernanceActorRole | null,
+): string[] {
+  if (!actorAddress || !actorRole) return [];
+
+  return escalations
+    .filter((item) => {
+      if (actorRole === 'resolver') {
+        return item.resolverAddress === actorAddress;
+      }
+
+      return item.stage === 'committee' || item.stage === 'community' || item.stage === 'cancelled';
+    })
+    .map((item) => item.marketId);
+}
+
+export function escalationMatchesActorFocus(
+  escalation: GovernanceEscalationMarket,
+  actorAddress: string | null,
+  actorRole: GovernanceActorRole | null,
+): boolean {
+  if (!actorAddress || !actorRole) return true;
+
+  if (actorRole === 'resolver') {
+    return escalation.resolverAddress === actorAddress;
+  }
+
+  return escalation.stage === 'committee' || escalation.stage === 'community' || escalation.stage === 'cancelled';
+}
+
+export function proposalMatchesActorFocus(
+  proposal: GovernanceProposal,
+  actorAddress: string | null,
+  actorRole: GovernanceActorRole | null,
+  escalations: GovernanceEscalationMarket[],
+): boolean {
+  if (!actorAddress || !actorRole) return true;
+
+  if (
+    proposal.proposer === actorAddress
+    || proposal.target === actorAddress
+    || proposal.payload2 === actorAddress
+  ) {
+    return true;
+  }
+
+  const actorMarketIds = new Set(getActorFocusMarketIds(escalations, actorAddress, actorRole));
+  if (actorMarketIds.has(proposal.target)) {
+    return true;
+  }
+
+  if (actorRole === 'guardian') {
+    return proposal.proposalType === PROPOSAL_TYPES.FEE_CHANGE
+      || proposal.proposalType === PROPOSAL_TYPES.PARAMETER
+      || proposal.proposalType === PROPOSAL_TYPES.EMERGENCY_PAUSE;
+  }
+
+  return false;
+}
 
 // ============================================================================
 // Store
@@ -98,10 +182,15 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
   proposals: [],
   selectedProposal: null,
   proposalFilter: 'all',
+  proposalLaneFilter: 'all',
+  proposalFocusMarketId: null,
+  actorFocusAddress: null,
+  actorFocusRole: null,
   delegations: [],
   unclaimedRewards: [],
   totalClaimable: 0n,
   resolverProfile: null,
+  escalations: [],
   stats: defaultStats,
   isLoading: false,
   isVoting: false,
@@ -129,6 +218,16 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
 
   setSelectedProposal: (proposal) => set({ selectedProposal: proposal }),
   setProposalFilter: (filter) => set({ proposalFilter: filter }),
+  setProposalLaneFilter: (filter) => set({ proposalLaneFilter: filter }),
+  setProposalFocusMarketId: (marketId) => set({ proposalFocusMarketId: marketId }),
+  setActorFocus: (address, role) => set({ actorFocusAddress: address, actorFocusRole: role }),
+  clearProposalContext: () => set({
+    proposalLaneFilter: 'all',
+    proposalFocusMarketId: null,
+    proposalFilter: 'all',
+    actorFocusAddress: null,
+    actorFocusRole: null,
+  }),
   setDelegations: (delegations) => set({ delegations }),
 
   setUnclaimedRewards: (rewards) => set({
@@ -137,6 +236,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
   }),
 
   setResolverProfile: (profile) => set({ resolverProfile: profile }),
+  setEscalations: (escalations) => set({ escalations }),
 
   setStats: (updates) => set((state) => ({
     stats: { ...state.stats, ...updates },
@@ -148,8 +248,47 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
   setCurrentBlockHeight: (height) => set({ currentBlockHeight: height }),
 
   getFilteredProposals: () => {
-    const { proposals, proposalFilter } = get();
-    if (proposalFilter === 'all') return proposals;
+    const {
+      proposals,
+      proposalFilter,
+      proposalLaneFilter,
+      proposalFocusMarketId,
+      actorFocusAddress,
+      actorFocusRole,
+      escalations,
+    } = get();
+    let filtered = proposals;
+
+    if (proposalLaneFilter !== 'all') {
+      filtered = filtered.filter((proposal) => {
+        switch (proposalLaneFilter) {
+          case 'dispute':
+            return proposal.proposalType === PROPOSAL_TYPES.RESOLVE_DISPUTE;
+          case 'resolver':
+            return proposal.proposalType === PROPOSAL_TYPES.RESOLVER_ELECTION;
+          case 'controls':
+            return proposal.proposalType === PROPOSAL_TYPES.FEE_CHANGE
+              || proposal.proposalType === PROPOSAL_TYPES.PARAMETER
+              || proposal.proposalType === PROPOSAL_TYPES.EMERGENCY_PAUSE;
+          case 'treasury':
+            return proposal.proposalType === PROPOSAL_TYPES.TREASURY;
+          default:
+            return true;
+        }
+      });
+    }
+
+    if (proposalFocusMarketId) {
+      filtered = filtered.filter((proposal) => proposal.target === proposalFocusMarketId);
+    }
+
+    if (actorFocusAddress && actorFocusRole) {
+      filtered = filtered.filter((proposal) =>
+        proposalMatchesActorFocus(proposal, actorFocusAddress, actorFocusRole, escalations)
+      );
+    }
+
+    if (proposalFilter === 'all') return filtered;
     const statusMap: Record<string, number> = {
       active: PROPOSAL_STATUS.ACTIVE,
       passed: PROPOSAL_STATUS.PASSED,
@@ -157,7 +296,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
       rejected: PROPOSAL_STATUS.REJECTED,
     };
     const targetStatus = statusMap[proposalFilter];
-    return proposals.filter((p) => p.status === targetStatus);
+    return filtered.filter((p) => p.status === targetStatus);
   },
 
   reset: () => set({
@@ -167,10 +306,15 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
     proposals: [],
     selectedProposal: null,
     proposalFilter: 'all',
+    proposalLaneFilter: 'all',
+    proposalFocusMarketId: null,
+    actorFocusAddress: null,
+    actorFocusRole: null,
     delegations: [],
     unclaimedRewards: [],
     totalClaimable: 0n,
     resolverProfile: null,
+    escalations: [],
     stats: defaultStats,
     isLoading: false,
     isVoting: false,

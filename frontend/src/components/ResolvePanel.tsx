@@ -18,15 +18,17 @@ import { cn, getTokenSymbol } from '@/lib/utils'
 import { devLog, devWarn } from '@/lib/logger'
 import {
   buildCloseMarketInputs,
+  buildCancelMarketInputs,
   buildSubmitOutcomeInputs as buildVoteOutcomeInputs,
   buildChallengeOutcomeInputs as buildDisputeInputs,
   buildFinalizeOutcomeInputs as buildFinalizeVotesInputs,
   getMarket,
+  getMarketDispute,
   getMarketResolution,
   getCurrentBlockHeight,
   MARKET_STATUS,
   type MarketResolutionData,
-  getProgramIdForToken,
+  getProgramIdForMarket,
 } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
 import { config } from '@/lib/config'
@@ -37,11 +39,12 @@ interface ResolvePanelProps {
   onResolutionChange?: () => void
 }
 
-type ResolveStep = 'close' | 'submit' | 'challenge' | 'finalize' | 'done'
+type ResolveStep = 'close' | 'submit' | 'challenge' | 'finalize' | 'cancel' | 'done'
 
 // v33 constants (must match contract)
 const MIN_RESOLUTION_BOND = 1_000_000n // 1 ALEO
 const BOND_MULTIPLIER = 2n
+const MIN_FINALIZE_VOTERS = 3
 
 interface ParsedVoterBondReceipt {
   plaintext: string
@@ -178,7 +181,7 @@ async function inspectVoterBondReceiptsForMarket(
 }
 
 export function ResolvePanel({ market, resolution, onResolutionChange }: ResolvePanelProps) {
-  const { wallet } = useWalletStore()
+  const { wallet, balanceStatus, refreshBalance } = useWalletStore()
   const { executeTransaction } = useAleoTransaction()
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -191,6 +194,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   const tokenSymbol = getTokenSymbol(market.tokenType)
   const tokenTypeStr: 'ALEO' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
     : market.tokenType === 'USAD' ? 'USAD' : 'ALEO'
+  const marketProgramId = getProgramIdForMarket(tokenTypeStr, market.programId)
   const numOutcomes = market.numOutcomes ?? 2
   const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
 
@@ -213,8 +217,13 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   // Determine current step (v34: Multi-Voter Quorum + Dispute)
   // Status flow: ACTIVE(1) → CLOSED(2) → PENDING_RESOLUTION(5) → PENDING_FINALIZATION(6) → RESOLVED(3)
   const STATUS_PENDING_FINALIZATION = 6
+  const isPastResolutionDeadline = currentBlock > 0n && market.resolutionDeadline > 0n && currentBlock > market.resolutionDeadline
   const currentStep: ResolveStep = useMemo(() => {
     if (market.status === MARKET_STATUS.RESOLVED) return 'done'
+    if (market.status === MARKET_STATUS.CANCELLED) return 'cancel'
+    if (currentBlock > 0n && market.resolutionDeadline > 0n && currentBlock > market.resolutionDeadline) {
+      return 'cancel'
+    }
     if (market.status === STATUS_PENDING_FINALIZATION) {
       // Dispute window — challenge_deadline is set to dispute_deadline when status=6
       // (see getMarketResolution: challengeDeadline = disputeDeadline when PENDING_FINALIZATION)
@@ -232,7 +241,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     }
     if (market.status === MARKET_STATUS.CLOSED) return 'submit'
     return 'close' // ACTIVE but expired
-  }, [market.status, resolution, currentBlock])
+  }, [market.status, market.resolutionDeadline, resolution, currentBlock])
 
   const canFinalize = resolution && currentBlock > resolution.challenge_deadline
 
@@ -268,6 +277,20 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     }
   }, [resolution, currentBlock])
 
+  const needsPrivateAleoBond = currentStep === 'submit' || currentStep === 'challenge'
+  const shieldNeedsPrivateBondSync = wallet.walletType === 'shield'
+    && needsPrivateAleoBond
+    && !wallet.isDemoMode
+    && wallet.balance.private < MIN_RESOLUTION_BOND
+
+  const refreshShieldPrivateBalance = async () => {
+    try {
+      await refreshBalance()
+    } catch {
+      // Refresh failures are surfaced through the shared wallet store state.
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -290,7 +313,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     ;(async () => {
       try {
         const receipt = await inspectVoterBondReceiptsForMarket(
-          getProgramIdForToken(tokenTypeStr),
+          marketProgramId,
           market.id,
           '[BondStatus]',
         )
@@ -341,7 +364,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     market.id,
     market.status,
     resolution,
-    tokenTypeStr,
+    marketProgramId,
     wallet.connected,
     wallet.address,
   ])
@@ -352,6 +375,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     { key: 'submit', label: 'Submit', icon: Gavel },
     { key: 'challenge', label: 'Dispute', icon: Shield },
     { key: 'finalize', label: 'Finalize', icon: CheckCircle2 },
+    { key: 'cancel', label: 'Cancel', icon: AlertCircle },
   ]
 
   const handleCloseMarket = async () => {
@@ -360,7 +384,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     try {
       const inputs = buildCloseMarketInputs(market.id)
       const result = await executeTransaction({
-        program: getProgramIdForToken(tokenTypeStr),
+        program: marketProgramId,
         function: 'close_market',
         inputs,
         fee: 1.5,
@@ -389,8 +413,8 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
       }
 
       const [onChainMarket, onChainResolution, onChainBlock] = await Promise.all([
-        getMarket(market.id, getProgramIdForToken(tokenTypeStr)),
-        getMarketResolution(market.id, getProgramIdForToken(tokenTypeStr)),
+        getMarket(market.id, marketProgramId),
+        getMarketResolution(market.id, marketProgramId),
         getCurrentBlockHeight(),
       ])
 
@@ -441,14 +465,19 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         )
       }
 
+      if (wallet.walletType === 'shield' && wallet.balance.private < MIN_RESOLUTION_BOND) {
+        await refreshShieldPrivateBalance()
+      }
+
       // Need a credits record for bond
       const { fetchCreditsRecord, reserveCreditsRecord } = await import('@/lib/credits-record')
       const bondAmount = Number(MIN_RESOLUTION_BOND)
       const record = await fetchCreditsRecord(bondAmount, wallet.address)
       if (!record) {
         throw new Error(
-          `Need an unspent private Credits record with at least ${bondAmount / 1_000_000} ALEO ` +
-          `for the vote bond. Public ALEO fee is checked separately.`
+          `vote_outcome needs an unspent private Credits record with at least ${bondAmount / 1_000_000} ALEO ` +
+          `for the vote bond. Shield did not return one for this wallet, so the transaction stopped ` +
+          `before the wallet confirmation popup could open. Refresh Shield after record sync or shield ALEO privately, then try again.`
         )
       }
 
@@ -461,7 +490,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
       reservedRecord = record
 
       const result = await executeTransaction({
-        program: getProgramIdForToken(tokenTypeStr),
+        program: marketProgramId,
         function: 'vote_outcome',
         inputs,
         fee: 1.5,
@@ -502,13 +531,18 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         )
       }
 
+      if (wallet.walletType === 'shield' && wallet.balance.private < minChallengeBond) {
+        await refreshShieldPrivateBalance()
+      }
+
       const bondAmount = minChallengeBond
       const { fetchCreditsRecord, reserveCreditsRecord } = await import('@/lib/credits-record')
       const record = await fetchCreditsRecord(Number(bondAmount), wallet.address)
       if (!record) {
         throw new Error(
-          `Need an unspent private Credits record with at least ${Number(bondAmount) / 1_000_000} ALEO ` +
-          `for the dispute bond. Public ALEO fee is checked separately.`
+          `dispute_resolution needs an unspent private Credits record with at least ${Number(bondAmount) / 1_000_000} ALEO ` +
+          `for the dispute bond. Shield did not return one for this wallet, so the transaction stopped ` +
+          `before the wallet confirmation popup could open. Refresh Shield after record sync or shield ALEO privately, then try again.`
         )
       }
 
@@ -523,7 +557,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
       reservedRecord = record
 
       const result = await executeTransaction({
-        program: getProgramIdForToken(tokenTypeStr),
+        program: marketProgramId,
         function: 'dispute_resolution',
         inputs,
         fee: 1.5,
@@ -546,15 +580,104 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     }
   }
 
+  const handleEmergencyCancel = async () => {
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      const publicFeeRequired = 1_500_000n
+      if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
+        throw new Error(
+          `Insufficient public ALEO for transaction fee. cancel_market needs 1.50 public ALEO for gas, ` +
+          `but only ${Number(wallet.balance.public) / 1_000_000} ALEO is public in your wallet.`
+        )
+      }
+
+      const inputs = buildCancelMarketInputs(market.id)
+      const result = await executeTransaction({
+        program: marketProgramId,
+        function: 'cancel_market',
+        inputs,
+        fee: 1.5,
+      })
+      if (result?.transactionId) {
+        setTransactionId(result.transactionId)
+        onResolutionChange?.()
+      } else {
+        throw new Error('No transaction ID returned from wallet')
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel market')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const handleFinalizeOutcome = async () => {
     setIsSubmitting(true)
     setError(null)
     try {
+      const [onChainMarket, onChainResolution, onChainDispute, onChainBlock] = await Promise.all([
+        getMarket(market.id, marketProgramId),
+        getMarketResolution(market.id, marketProgramId),
+        getMarketDispute(market.id, marketProgramId),
+        getCurrentBlockHeight(),
+      ])
+
+      if (!onChainMarket) {
+        throw new Error('Market data could not be loaded from chain. Please refresh and try again.')
+      }
+
       const inputs = buildFinalizeVotesInputs(market.id)
-      // v34: finalize_votes (status 5→6) or confirm_resolution (status 6→3)
-      const fnName = market.status === STATUS_PENDING_FINALIZATION ? 'confirm_resolution' : 'finalize_votes'
+      let fnName: 'finalize_votes' | 'confirm_resolution'
+
+      if (onChainMarket.status === STATUS_PENDING_FINALIZATION) {
+        if (!onChainResolution) {
+          throw new Error('Dispute window data is missing on-chain. Refresh the market and try again.')
+        }
+        if (onChainBlock <= onChainResolution.challenge_deadline) {
+          throw new Error(
+            `Dispute window is still open until block ${onChainResolution.challenge_deadline.toString()}. ` +
+            'confirm_resolution will be rejected until that window ends.'
+          )
+        }
+        fnName = 'confirm_resolution'
+      } else if (onChainMarket.status === MARKET_STATUS.PENDING_RESOLUTION) {
+        if (!onChainResolution) {
+          throw new Error('Voting tally is missing on-chain. Refresh the market and try again.')
+        }
+        if (onChainBlock <= onChainResolution.challenge_deadline) {
+          throw new Error(
+            `Voting window is still open until block ${onChainResolution.challenge_deadline.toString()}. ` +
+            'finalize_votes will be rejected until that window ends.'
+          )
+        }
+        if ((onChainResolution.round || 0) < MIN_FINALIZE_VOTERS) {
+          throw new Error(
+            `finalize_votes requires at least ${MIN_FINALIZE_VOTERS} voters on-chain, ` +
+            `but this market currently has only ${onChainResolution.round || 0}.`
+          )
+        }
+        fnName = 'finalize_votes'
+      } else if (onChainMarket.status === MARKET_STATUS.RESOLVED) {
+        throw new Error('This market is already fully resolved on-chain.')
+      } else if (onChainMarket.status === MARKET_STATUS.CANCELLED) {
+        throw new Error('This market was cancelled on-chain and can no longer be finalized.')
+      } else {
+        throw new Error(
+          `Finalize is not available from market status ${onChainMarket.status}. ` +
+          'Refresh the market state and make sure the market is already in voting or finalization phase.'
+        )
+      }
+
+      if (fnName === 'confirm_resolution' && onChainDispute) {
+        throw new Error(
+          `confirm_resolution will be rejected because a dispute is still recorded on-chain ` +
+          `(outcome ${onChainDispute.proposed_outcome}).`
+        )
+      }
+
       const result = await executeTransaction({
-        program: getProgramIdForToken(tokenTypeStr),
+        program: marketProgramId,
         function: fnName,
         inputs,
         fee: 1.5,
@@ -577,7 +700,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     setIsSubmitting(true)
     setError(null)
     try {
-      const programId = getProgramIdForToken(tokenTypeStr)
+      const programId = marketProgramId
       devLog('[ClaimBond] Program:', programId)
 
       let matchedReceipt: ParsedVoterBondReceipt | null = bondIndicator.receipt
@@ -613,7 +736,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
       ) {
         setBondIndicator({ status: 'slashed', receipt: matchedReceipt })
         throw new Error(
-          `Your recorded vote was outcome ${matchedReceipt.votedOutcome}, but the resolved winner is outcome ${resolution.winning_outcome}. Losing voter bonds are slashed and cannot be claimed.`
+          `Your recorded vote was ${getOutcomeLabel(matchedReceipt.votedOutcome)}, but the resolved winner is ${getOutcomeLabel(resolution.winning_outcome)}. Losing voter bonds are slashed and cannot be claimed.`
         )
       }
 
@@ -656,11 +779,15 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     'bg-purple-500/10 border-purple-500/30 text-purple-400',
     'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
   ]
+  const getOutcomeLabel = (outcomeNum?: number | null): string => {
+    if (!outcomeNum || outcomeNum < 1) return 'Pending'
+    return outcomeLabels[outcomeNum - 1] || `Outcome ${outcomeNum}`
+  }
   const votedOutcomeLabel = bondIndicator.receipt?.votedOutcome
-    ? outcomeLabels[bondIndicator.receipt.votedOutcome - 1] || `Outcome ${bondIndicator.receipt.votedOutcome}`
+    ? getOutcomeLabel(bondIndicator.receipt.votedOutcome)
     : null
   const winningOutcomeLabel = resolution?.winning_outcome
-    ? outcomeLabels[resolution.winning_outcome - 1] || `Outcome ${resolution.winning_outcome}`
+    ? getOutcomeLabel(resolution.winning_outcome)
     : null
   const claimButtonDisabled = isSubmitting
     || !wallet.address
@@ -677,8 +804,8 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             <Gavel className="w-5 h-5 text-brand-400" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Open Resolution</h3>
-            <p className="text-sm text-surface-400">Anyone can resolve with bond</p>
+            <h3 className="text-lg font-semibold text-white">Open Resolution Flow</h3>
+            <p className="text-sm text-surface-400">Close, vote, dispute, finalize, or emergency-cancel based on the current on-chain phase.</p>
           </div>
         </div>
 
@@ -686,7 +813,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         <div className="flex items-center gap-1">
           {steps.map((s, idx) => {
             const StepIcon = s.icon
-            const stepOrder = ['close', 'submit', 'challenge', 'finalize', 'done']
+            const stepOrder = ['close', 'submit', 'challenge', 'finalize', 'cancel', 'done']
             const currentIdx = stepOrder.indexOf(currentStep)
             const stepIdx = stepOrder.indexOf(s.key)
             const isComplete = currentStep === 'done' || stepIdx < currentIdx
@@ -738,7 +865,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
               {resolution && (
                 <p className="text-surface-400 text-sm">
                   Winning outcome: <span className="text-white font-medium">
-                    {outcomeLabels[resolution.winning_outcome - 1] || `Outcome ${resolution.winning_outcome}`}
+                    {getOutcomeLabel(resolution.winning_outcome)}
                   </span>
                 </p>
               )}
@@ -898,6 +1025,30 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             {/* Step 2: Submit Outcome (Open Voting + Bond) */}
             {currentStep === 'submit' && (
               <div className="space-y-4">
+                {shieldNeedsPrivateBondSync && (
+                  <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
+                    <Shield className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-yellow-300">Shield private bond not detected yet</p>
+                      <p className="text-xs text-surface-400 mt-1">
+                        vote_outcome needs a private ALEO bond record. If Shield has not finished syncing `credits.aleo`,
+                        clicking submit will stop before the wallet confirmation popup appears.
+                      </p>
+                      <button
+                        onClick={refreshShieldPrivateBalance}
+                        disabled={balanceStatus === 'refreshing' || isSubmitting}
+                        className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 text-xs font-medium hover:bg-yellow-500/15 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {balanceStatus === 'refreshing' ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Refreshing Shield balance...</span></>
+                        ) : (
+                          <><Clock className="w-3.5 h-3.5" /><span>Refresh Private ALEO</span></>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Show voting status if votes already exist */}
                 {roundInfo && roundInfo.totalBonded > 0n && (
                   <div className="p-4 rounded-xl bg-white/[0.02] space-y-2">
@@ -938,7 +1089,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <p className="text-sm font-medium text-white">Vote Outcome</p>
                     <p className="text-xs text-surface-400 mt-1">
                       Anyone can vote on the winning outcome with a <span className="text-white font-medium">1 ALEO bond</span>.
-                      Minimum 3 voters required. Wrong voters get slashed.
+                      Minimum 3 voters are required before the market can advance. Wrong voters get slashed, and disputed results can still move into committee or community override.
                     </p>
                   </div>
                 </div>
@@ -982,6 +1133,30 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             {/* Step 3: Dispute Window (status 6 = PENDING_FINALIZATION) */}
             {currentStep === 'challenge' && (
               <div className="space-y-4">
+                {shieldNeedsPrivateBondSync && (
+                  <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
+                    <Shield className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-yellow-300">Shield private dispute bond not detected yet</p>
+                      <p className="text-xs text-surface-400 mt-1">
+                        dispute_resolution needs a private ALEO bond record. If Shield has not finished syncing `credits.aleo`,
+                        clicking dispute will stop before the wallet confirmation popup appears.
+                      </p>
+                      <button
+                        onClick={refreshShieldPrivateBalance}
+                        disabled={balanceStatus === 'refreshing' || isSubmitting}
+                        className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 text-xs font-medium hover:bg-yellow-500/15 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {balanceStatus === 'refreshing' ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Refreshing Shield balance...</span></>
+                        ) : (
+                          <><Clock className="w-3.5 h-3.5" /><span>Refresh Private ALEO</span></>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Finalized vote result */}
                 {roundInfo && (
                   <div className="p-4 rounded-xl bg-white/[0.02] space-y-3">
@@ -992,7 +1167,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Winning Outcome</span>
                       <span className="text-yes-400 font-medium">
-                        {outcomeLabels[roundInfo.proposedOutcome - 1] || `Outcome ${roundInfo.proposedOutcome}`}
+                        {getOutcomeLabel(roundInfo.proposedOutcome)}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -1028,8 +1203,23 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                       <p className="text-sm font-medium text-no-300">Disagree? File a Dispute!</p>
                       <p className="text-xs text-surface-400 mt-1">
                         Override the vote result with <span className="text-white font-medium">{Number(BigInt(roundInfo?.totalBonded || 0) * 3n) / 1_000_000} ALEO bond</span> (3× total bonded).
-                        If your outcome is correct, you get your bond back + all voter bonds. If wrong, you lose your entire bond.
+                        If your outcome is correct, you get your bond back + all voter bonds. If wrong, you lose your entire bond. A successful dispute is the hand-off point into the escalation lane.
                       </p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl bg-white/[0.02] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Resolver quorum</div>
+                      <p className="mt-2 text-xs text-surface-400">Open voters produce the provisional outcome and bond pool.</p>
+                    </div>
+                    <div className="rounded-xl bg-white/[0.02] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Bonded dispute</div>
+                      <p className="mt-2 text-xs text-surface-400">A challenger posts 3x bonded value to contest the result during the dispute window.</p>
+                    </div>
+                    <div className="rounded-xl bg-white/[0.02] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Governance override</div>
+                      <p className="mt-2 text-xs text-surface-400">Escalated markets can be handled by the resolver committee or a dispute-resolution proposal.</p>
                     </div>
                   </div>
 
@@ -1072,7 +1262,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                   <div>
                     <p className="text-sm font-medium text-white">Finalize Resolution</p>
                     <p className="text-xs text-surface-400 mt-1">
-                      Challenge window ended. Anyone can finalize. The resolver earns 20% of protocol fees as reward.
+                      Challenge window ended. Anyone can finalize if no active dispute remains on-chain. The resolver earns 20% of protocol fees as reward.
                     </p>
                   </div>
                 </div>
@@ -1082,7 +1272,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Final Outcome</span>
                       <span className="text-yes-400 font-medium">
-                        {outcomeLabels[roundInfo.proposedOutcome - 1] || `Outcome ${roundInfo.proposedOutcome}`}
+                        {getOutcomeLabel(roundInfo.proposedOutcome)}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -1099,6 +1289,46 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 <button onClick={handleFinalizeOutcome} disabled={isSubmitting || !canFinalize}
                   className={cn('w-full flex items-center justify-center gap-2 btn-primary', !canFinalize && 'opacity-50 cursor-not-allowed')}>
                   {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><CheckCircle2 className="w-5 h-5" /><span>Finalize Resolution</span></>}
+                </button>
+              </div>
+            )}
+
+            {/* Resolution window expired */}
+            {currentStep === 'cancel' && market.status !== MARKET_STATUS.CANCELLED && (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
+                  <AlertCircle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-white">Resolution window expired</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      This market is already past its resolution deadline, so `vote_outcome` can no longer be submitted.
+                      The correct on-chain action now is `cancel_market`.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02]">
+                  <Shield className="w-5 h-5 text-brand-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-white">Emergency Cancel</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      Anyone can cancel an unresolved market after the resolution deadline passes. LP refunds and bond claims remain available after cancellation.
+                    </p>
+                  </div>
+                </div>
+
+                {isPastResolutionDeadline && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-brand-500/5 border border-brand-500/20">
+                    <Clock className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-brand-300">
+                      Current block {currentBlock.toString()} is past resolution deadline {market.resolutionDeadline.toString()}.
+                    </p>
+                  </div>
+                )}
+
+                <button onClick={handleEmergencyCancel} disabled={isSubmitting}
+                  className="w-full flex items-center justify-center gap-2 btn-primary">
+                  {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><AlertCircle className="w-5 h-5" /><span>Emergency Cancel Market</span></>}
                 </button>
               </div>
             )}

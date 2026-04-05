@@ -3,7 +3,7 @@ import { Search, TrendingUp, Clock, Flame, Bitcoin, DollarSign, Trophy, Cpu, Vot
 import { useEffect, useState } from 'react'
 import { useMarketsStore, type Market } from '@/lib/store'
 import { MarketCard } from './MarketCard'
-import { BettingModal } from './BettingModal'
+import { BuySharesModal } from './BuySharesModal'
 import { cn } from '@/lib/utils'
 
 const categories = [
@@ -192,7 +192,7 @@ export function MarketsSection() {
       </div>
 
       {/* Betting Modal */}
-      <BettingModal
+      <BuySharesModal
         market={selectedMarket}
         isOpen={isModalOpen}
         onClose={() => {
@@ -203,4 +203,3 @@ export function MarketsSection() {
     </section>
   )
 }
-

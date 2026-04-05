@@ -14,15 +14,15 @@ const steps = [
     number: '02',
     icon: Target,
     title: 'Browse & Choose Markets',
-    description: 'Explore prediction markets across various categories. Each market has a clear question, deadline, and current probability determined by the AMM.',
-    detail: 'Markets support three tokens: ALEO (native), USDCX, and USAD stablecoins.',
+    description: 'Explore prediction markets across various categories. Every market runs with 2, 3, or 4 named outcomes, each with a clear question, deadline, and live probabilities determined by the AMM.',
+    detail: 'Markets support three denominations: ALEO (native), USDCX, and USAD.',
   },
   {
     number: '03',
     icon: Lock,
     title: 'Place Encrypted Bets',
     description: 'Buy outcome shares using the FPMM (Fixed Product Market Maker). Your position is encrypted on-chain using zero-knowledge proofs — no one can see your bet amount or direction.',
-    detail: 'A 2% fee is applied per trade: 0.5% protocol + 0.5% creator + 1.0% LP.',
+    detail: 'Trade fees are enforced on-chain and can be updated by governance without off-chain coordination.',
   },
   {
     number: '04',
@@ -37,10 +37,10 @@ const mechanisms = [
   {
     icon: BarChart3,
     title: 'FPMM (Fixed Product Market Maker)',
-    description: 'Prices are determined algorithmically using the constant product formula. When you buy YES shares, the YES price goes up and NO goes down — reflecting market sentiment in real time.',
+    description: 'Prices are determined algorithmically using the constant product formula. Buying one outcome increases its implied probability while the other outcomes reprice automatically in real time.',
     items: [
-      'Complete-set minting: every buy creates both YES and NO shares',
-      'Price = opposing reserves / total reserves',
+      'Complete-set minting keeps every market collateralized across its active outcomes',
+      'Outcome prices are derived from reserve balances across 2, 3, or 4 outcomes',
       'Slippage increases with larger trades relative to pool size',
     ],
   },
@@ -86,7 +86,7 @@ const mechanisms = [
     items: [
       '3-of-N multisig treasury management',
       'Dispute resolution overrides, fee changes, parameter updates, emergency pause',
-      'ALEO native staking governance (Coming Soon in UI)',
+      'Operational governance flows are available in the app UI for proposals, voting, execution, resolver actions, and rewards',
       'Variable quorum (5%–30%) and timelock (0–72 hours) per proposal type',
     ],
   },

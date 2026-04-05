@@ -18,22 +18,33 @@ import {
   DollarSign,
   BarChart2,
   Shield,
+  Ticket,
   ArrowUpRight,
   ArrowDownRight,
   Star,
   ChevronRight,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Bet, type Market, outcomeToIndex, outcomeToString } from '@/lib/store'
+import { useParlayStore, type ParlayRecord } from '@/lib/parlay-store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
+import { ParlayClaimModal } from '@/components/ParlayClaimModal'
 import { EmptyState } from '@/components/EmptyState'
+import { useRepairParlayExplorerIds } from '@/hooks/useRepairParlayExplorerIds'
 import { cn, formatCredits } from '@/lib/utils'
 import { devWarn } from '../lib/logger'
 import { calculateAllPrices, calculateSellTokensOut, type AMMReserves } from '@/lib/amm'
+import { getMarketOutcomeLabels } from '@/lib/market-outcomes'
+import {
+  describeParlayFundingSource,
+  formatParlayAmount,
+  getParlayTransactionUrl,
+  getShortParlayId,
+} from '@/lib/parlay-helpers'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'history' | 'watchlist'
@@ -53,7 +64,18 @@ const OUTCOME_BADGE_COLORS = [
   { bg: 'bg-purple-500/15', text: 'text-purple-400' },
   { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
 ]
-const DEFAULT_LABELS = ['YES', 'NO', 'OPTION C', 'OPTION D']
+
+function getBetOutcomeLabel(
+  bet: Bet,
+  market?: Partial<Pick<Market, 'numOutcomes' | 'outcomeLabels'>>,
+): string {
+  const outcomeIdx = outcomeToIndex(bet.outcome)
+  const label = market ? getMarketOutcomeLabels({
+    numOutcomes: market.numOutcomes ?? Math.max(market.outcomeLabels?.length || 2, 2),
+    outcomeLabels: market.outcomeLabels ?? [],
+  })[outcomeIdx - 1] : null
+  return label || bet.outcome
+}
 
 function formatPurchaseTime(timestamp: number): string {
   const date = new Date(timestamp)
@@ -74,8 +96,8 @@ function formatPurchaseTime(timestamp: number): string {
 
 function getOutcomeCurrentPrice(market: Market | undefined, outcomeIdx: number): number | null {
   if (!market) return null
-  if (outcomeIdx === 1) return market.yesPrice
-  if (outcomeIdx === 2) return market.noPrice
+  const genericPrice = market.outcomePrices?.[outcomeIdx - 1]
+  if (genericPrice !== undefined) return genericPrice
 
   const reserves: AMMReserves = {
     reserve_1: market.yesReserve ?? 0n,
@@ -105,6 +127,40 @@ function formatShareQuantity(quantity: bigint): string {
     minimumFractionDigits: value >= 100 || Number.isInteger(value) ? 0 : 2,
     maximumFractionDigits: 4,
   })
+}
+
+type PortfolioToken = 'ALEO' | 'USDCX' | 'USAD'
+type PortfolioTokenTotals = Record<PortfolioToken, number>
+
+function createPortfolioTokenTotals(): PortfolioTokenTotals {
+  return {
+    ALEO: 0,
+    USDCX: 0,
+    USAD: 0,
+  }
+}
+
+function normalizePortfolioToken(token?: string): PortfolioToken {
+  if (token === 'USDCX' || token === 'USAD') return token
+  return 'ALEO'
+}
+
+function formatPortfolioTokenSummary(
+  totals: PortfolioTokenTotals,
+  options?: { signed?: boolean; emptyLabel?: string },
+): string {
+  const signed = options?.signed ?? false
+  const entries = (Object.entries(totals) as [PortfolioToken, number][])
+    .filter(([, amount]) => Math.abs(amount) >= 0.000001)
+
+  if (entries.length === 0) return options?.emptyLabel ?? '0'
+
+  return entries
+    .map(([token, amount]) => {
+      const prefix = signed && amount > 0 ? '+' : ''
+      return `${prefix}${amount.toFixed(2)} ${token}`
+    })
+    .join(' · ')
 }
 
 function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
@@ -139,6 +195,7 @@ function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
 export function MyBets() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
+  const { parlays, patchParlay } = useParlayStore()
   const {
     userBets,
     pendingBets,
@@ -154,6 +211,7 @@ export function MyBets() {
   const [filter, setFilter] = useState<BetFilter>('accepted')
   const [claimModalBet, setClaimModalBet] = useState<Bet | null>(null)
   const [claimModalMode, setClaimModalMode] = useState<'winnings' | 'refund'>('winnings')
+  const [claimParlay, setClaimParlay] = useState<ParlayRecord | null>(null)
   const [claimRepairNotice, setClaimRepairNotice] = useState<string | null>(null)
 
   // Import Bet state
@@ -164,6 +222,17 @@ export function MyBets() {
   const [importOutcome, setImportOutcome] = useState<string>('yes')
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState(false)
+
+  useRepairParlayExplorerIds({
+    parlays,
+    patchParlay,
+    walletAddress: wallet.address ?? undefined,
+  })
+
+  const walletParlays = useMemo(
+    () => wallet.address ? parlays.filter((parlay) => parlay.ownerAddress === wallet.address) : [],
+    [parlays, wallet.address],
+  )
 
   // Categorize bets (deduplicate: if a bet ID exists in userBets, skip it from pendingBets)
   const userBetIds = new Set(userBets.map(b => b.id))
@@ -183,14 +252,20 @@ export function MyBets() {
     b.status === 'won' || b.status === 'lost' || b.status === 'refunded'
     || (b.type === 'sell')
   )
+  const activeParlays = walletParlays.filter((parlay) => parlay.status === 'active' || parlay.status === 'pending_dispute')
+  const claimableParlays = walletParlays.filter((parlay) => parlay.status === 'won' && !parlay.claimed)
+  const settledParlays = walletParlays.filter((parlay) =>
+    parlay.status === 'won' || parlay.status === 'lost' || parlay.status === 'cancelled'
+  )
+  const historyParlays = walletParlays
 
   // Tab counts
   const tabCounts: Record<BetFilter, number> = {
-    all: allBets.length,
-    accepted: acceptedBets.length,
-    unredeemed: unredeemedBets.length,
-    settled: settledBets.length,
-    history: historyBets.length,
+    all: allBets.length + historyParlays.length,
+    accepted: acceptedBets.length + activeParlays.length,
+    unredeemed: unredeemedBets.length + claimableParlays.length,
+    settled: settledBets.length + settledParlays.length,
+    history: historyBets.length + historyParlays.length,
     watchlist: 0,
   }
 
@@ -202,6 +277,14 @@ export function MyBets() {
     : filter === 'settled' ? settledBets
     : filter === 'history' ? historyBets
     : []
+  const displayParlays =
+    filter === 'all' ? historyParlays
+    : filter === 'accepted' ? activeParlays
+    : filter === 'unredeemed' ? claimableParlays
+    : filter === 'settled' ? settledParlays
+    : filter === 'history' ? historyParlays
+    : []
+  const hasPortfolioEntries = displayBets.length > 0 || displayParlays.length > 0
 
   // ─── Performance chart data ───
   const performanceData = useMemo(() => {
@@ -364,19 +447,19 @@ export function MyBets() {
     },
     accepted: {
       title: 'No open positions',
-      subtitle: "Active bets appear here after on-chain confirmation (usually 1-3 minutes).",
+      subtitle: "Active market positions and parlays appear here after on-chain confirmation.",
     },
     unredeemed: {
       title: 'No unredeemed bets',
-      subtitle: "When you win a bet, you can claim your winnings here.",
+      subtitle: "Winning positions and parlays that still need claiming will appear here.",
     },
     settled: {
-      title: 'No resolved bets',
-      subtitle: "Resolved bets appear here after markets are resolved.",
+      title: 'No resolved positions yet',
+      subtitle: "Resolved bets and parlays appear here after final outcome settlement.",
     },
     history: {
       title: 'No transaction history',
-      subtitle: "All confirmed transactions will appear here.",
+      subtitle: "All confirmed bets and parlay tickets will appear here.",
     },
     watchlist: {
       title: 'No saved markets',
@@ -398,7 +481,15 @@ export function MyBets() {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="font-display text-[2rem] leading-[1.15] tracking-tight text-white mb-1">Portfolio</h1>
-              <p className="text-surface-400 text-sm">Track your positions and performance</p>
+              <div className="flex items-center gap-3">
+                <p className="text-surface-400 text-sm">Track your positions and performance</p>
+                <Link
+                  to="/my-parlays"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-400 hover:bg-brand-500/20 transition-colors"
+                >
+                  Parlay Details
+                </Link>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -424,25 +515,62 @@ export function MyBets() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {(() => {
               const activeBets = userBets.filter(b => b.status === 'active' && b.type !== 'sell')
-              const portfolioVal = activeBets.reduce((sum, b) => {
-                const market = getMarketInfo(b.marketId)
-                return sum + getOpenPositionMetrics(b, market).currentValue
-              }, 0)
-              const wonBets = userBets.filter(b => b.status === 'won')
-              const totalWon = wonBets.reduce((sum, b) => sum + Number(b.sharesReceived || b.amount), 0) / 1_000_000
-              const totalStaked = wonBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
-              const pnl = totalWon - totalStaked
-              const lostBets = userBets.filter(b => b.status === 'lost')
-              const totalLost = lostBets.reduce((sum, b) => sum + Number(b.amount), 0) / 1_000_000
-              const netPnl = pnl - totalLost
+              const exposureByToken = createPortfolioTokenTotals()
+              const profitByToken = createPortfolioTokenTotals()
+              const activeBetCount = activeBets.length
+
+              activeBets.forEach((bet) => {
+                const market = getMarketInfo(bet.marketId)
+                const token = normalizePortfolioToken(market?.tokenType || bet.tokenType)
+                exposureByToken[token] += getOpenPositionMetrics(bet, market).currentValue
+              })
+
+              activeParlays.forEach((parlay) => {
+                exposureByToken[parlay.tokenType] += Number(parlay.stake) / 1_000_000
+              })
+
+              const wonParlays = settledParlays.filter((parlay) => parlay.status === 'won')
+              const lostParlays = settledParlays.filter((parlay) => parlay.status === 'lost')
+              userBets.forEach((bet) => {
+                if (bet.type === 'sell') return
+                const market = getMarketInfo(bet.marketId)
+                const token = normalizePortfolioToken(market?.tokenType || bet.tokenType)
+
+                if (bet.status === 'won') {
+                  profitByToken[token] += Number((bet.sharesReceived || bet.amount) - bet.amount) / 1_000_000
+                } else if (bet.status === 'lost') {
+                  profitByToken[token] -= Number(bet.amount) / 1_000_000
+                }
+              })
+
+              wonParlays.forEach((parlay) => {
+                profitByToken[parlay.tokenType] += Number(parlay.potentialPayout - parlay.stake) / 1_000_000
+              })
+
+              lostParlays.forEach((parlay) => {
+                profitByToken[parlay.tokenType] -= Number(parlay.stake) / 1_000_000
+              })
+
               const claimable = userBets.filter(b => (b.status === 'won' || b.status === 'refunded') && !b.claimed)
-              const claimableVal = claimable.reduce((sum, b) => sum + Number(b.sharesReceived || b.amount), 0) / 1_000_000
+              const claimableItems = claimable.length + claimableParlays.length
 
               return [
-                { label: 'Portfolio Value', value: `${portfolioVal.toFixed(2)} ALEO`, icon: DollarSign, color: 'text-white', sub: `${activeBets.length} active positions` },
-                { label: 'Total P&L', value: `${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} ALEO`, icon: netPnl >= 0 ? TrendingUp : TrendingDown, color: netPnl >= 0 ? 'text-yes-400' : 'text-no-400', sub: `${wonBets.length} won, ${lostBets.length} lost` },
-                { label: 'Open Positions', value: `${activeBets.length + uniquePending.length}`, icon: BarChart2, color: 'text-white', sub: `${uniquePending.length} pending` },
-                { label: 'Claimable', value: `${claimableVal.toFixed(2)} ALEO`, icon: Shield, color: claimableVal > 0 ? 'text-brand-400' : 'text-white', sub: `${claimable.length} unredeemed` },
+                {
+                  label: 'Active Exposure',
+                  value: formatPortfolioTokenSummary(exposureByToken, { emptyLabel: '0' }),
+                  icon: DollarSign,
+                  color: 'text-white',
+                  sub: `${activeBetCount} market positions · ${activeParlays.length} active parlays`,
+                },
+                {
+                  label: 'Total P&L',
+                  value: formatPortfolioTokenSummary(profitByToken, { signed: true, emptyLabel: '0' }),
+                  icon: Object.values(profitByToken).reduce((sum, amount) => sum + amount, 0) >= 0 ? TrendingUp : TrendingDown,
+                  color: Object.values(profitByToken).reduce((sum, amount) => sum + amount, 0) >= 0 ? 'text-yes-400' : 'text-no-400',
+                  sub: `${userBets.filter((bet) => bet.status === 'won').length} won bets · ${wonParlays.length} won parlays`,
+                },
+                { label: 'Open Positions', value: `${activeBets.length + uniquePending.length + activeParlays.length}`, icon: BarChart2, color: 'text-white', sub: `${uniquePending.length} pending bets · ${activeParlays.length} active parlays` },
+                { label: 'Claimable Items', value: `${claimableItems}`, icon: Shield, color: claimableItems > 0 ? 'text-brand-400' : 'text-white', sub: `${claimable.length} bets · ${claimableParlays.length} parlays` },
               ].map((stat, i) => (
                 <motion.div key={stat.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + i * 0.04 }}
                   className="glass-card rounded-2xl p-5">
@@ -466,7 +594,7 @@ export function MyBets() {
           >
             <div className="mb-4">
               <h2 className="text-base font-heading font-semibold text-white">Performance</h2>
-              <p className="text-xs text-surface-500 mt-0.5">Portfolio value over time</p>
+              <p className="text-xs text-surface-500 mt-0.5">Market position value over time. Parlays are included in the activity feed below.</p>
             </div>
             {performanceData ? (
               <div className="h-[200px] w-full min-w-0">
@@ -582,7 +710,7 @@ export function MyBets() {
                 </div>
               ))}
             </div>
-          ) : displayBets.length === 0 ? (
+          ) : !hasPortfolioEntries ? (
             <EmptyState
               icon={<Search className="w-8 h-8 text-surface-500" />}
               title={emptyConfig[filter].title}
@@ -598,195 +726,218 @@ export function MyBets() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15 }}
+                className="space-y-6"
               >
-                {/* Desktop table */}
-                <div className="hidden md:block glass-card rounded-2xl overflow-hidden">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-white/[0.04]">
-                        <th className="text-left px-5 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Market</th>
-                        <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Side</th>
-                        <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Shares</th>
-                        <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Value</th>
-                        <th className="text-right px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Unrealized P&L</th>
-                        <th className="w-10 px-3 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                {displayBets.length > 0 && (
+                  <>
+                    {displayParlays.length > 0 && (
+                      <div className="flex items-center gap-2 px-1">
+                        <BarChart2 className="w-4 h-4 text-surface-400" />
+                        <p className="text-sm font-heading font-semibold text-white">Market Positions</p>
+                      </div>
+                    )}
+
+                    {/* Desktop table */}
+                    <div className="hidden md:block glass-card rounded-2xl overflow-hidden">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-white/[0.04]">
+                            <th className="text-left px-5 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Market</th>
+                            <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Side</th>
+                            <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Shares</th>
+                            <th className="text-center px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Value</th>
+                            <th className="text-right px-4 py-3 text-xs font-heading font-semibold text-surface-500 uppercase tracking-wider">Unrealized P&L</th>
+                            <th className="w-10 px-3 py-3"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayBets.map((bet, index) => {
+                            const market = getMarketInfo(bet.marketId)
+                            const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
+                            const outcomeIdx = outcomeToIndex(bet.outcome)
+                            const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
+                            const outcomeLabel = getBetOutcomeLabel(bet, market)
+                            const isPending = bet.status === 'pending'
+                            const {
+                              shares,
+                              avgPrice,
+                              exitPrice,
+                              currentValue,
+                              pnlAmount,
+                              pnlPct,
+                            } = getOpenPositionMetrics(bet, market)
+
+                            return (
+                              <motion.tr
+                                key={bet.id}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: index * 0.03 }}
+                                onClick={() => navigate(`/market/${bet.marketId}`)}
+                                className="border-b border-white/[0.03] last:border-0 cursor-pointer hover:bg-white/[0.02] transition-colors group"
+                              >
+                                <td className="px-5 py-4 max-w-[320px]">
+                                  <p className="text-sm font-heading font-medium text-white truncate">
+                                    {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
+                                  </p>
+                                  <p className="text-[10px] text-surface-400 mt-1">
+                                    {formatPurchaseTime(bet.placedAt)}
+                                  </p>
+                                  <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
+                                    Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; Exit {exitPrice.toFixed(3)} {tokenSymbol}
+                                  </p>
+                                </td>
+                                <td className="px-4 py-4 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {isPending && (
+                                      <Loader2 className="w-3 h-3 animate-spin text-accent-400" />
+                                    )}
+                                    <span className={cn(
+                                      "px-2 py-0.5 text-[10px] font-bold rounded uppercase",
+                                      badgeColors.bg, badgeColors.text
+                                    )}>
+                                      {outcomeLabel}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-4 text-center">
+                                  <span className="text-sm font-heading font-semibold text-white tabular-nums">
+                                    {formatShareQuantity(shares)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-4 text-center">
+                                  <span className="text-sm font-heading font-semibold text-white tabular-nums">
+                                    {currentValue.toLocaleString(undefined, {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 4,
+                                    })} {tokenSymbol}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-4 text-right">
+                                  <div className="flex items-center justify-end gap-1">
+                                    {pnlAmount >= 0 ? (
+                                      <ArrowUpRight className="w-3.5 h-3.5 text-yes-400" />
+                                    ) : (
+                                      <ArrowDownRight className="w-3.5 h-3.5 text-no-400" />
+                                    )}
+                                    <span className={cn(
+                                      "text-sm font-heading font-semibold tabular-nums",
+                                      pnlAmount >= 0 ? "text-yes-400" : "text-no-400"
+                                    )}>
+                                      {pnlAmount >= 0 ? '+' : ''}{pnlAmount.toFixed(2)}
+                                    </span>
+                                    <span className={cn(
+                                      "text-[10px] tabular-nums ml-0.5",
+                                      pnlAmount >= 0 ? "text-yes-400/60" : "text-no-400/60"
+                                    )}>
+                                      ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-4">
+                                  <ChevronRight className="w-4 h-4 text-surface-600 group-hover:text-surface-400 transition-colors" />
+                                </td>
+                              </motion.tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile cards for Open Positions */}
+                    <div className="md:hidden space-y-3">
                       {displayBets.map((bet, index) => {
                         const market = getMarketInfo(bet.marketId)
                         const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
                         const outcomeIdx = outcomeToIndex(bet.outcome)
                         const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
-                        const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
+                        const outcomeLabel = getBetOutcomeLabel(bet, market)
                         const isPending = bet.status === 'pending'
                         const {
                           shares,
-                          avgPrice,
-                          exitPrice,
                           currentValue,
                           pnlAmount,
                           pnlPct,
                         } = getOpenPositionMetrics(bet, market)
 
                         return (
-                          <motion.tr
+                          <motion.div
                             key={bet.id}
-                            initial={{ opacity: 0, y: 6 }}
+                            initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: index * 0.03 }}
                             onClick={() => navigate(`/market/${bet.marketId}`)}
-                            className="border-b border-white/[0.03] last:border-0 cursor-pointer hover:bg-white/[0.02] transition-colors group"
+                            className="glass-card p-4 cursor-pointer hover:border-surface-600/50 transition-all"
                           >
-                            {/* MARKET */}
-                            <td className="px-5 py-4 max-w-[320px]">
-                              <p className="text-sm font-heading font-medium text-white truncate">
-                                {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
-                              </p>
-                              <p className="text-[10px] text-surface-400 mt-1">
-                                {formatPurchaseTime(bet.placedAt)}
-                              </p>
-                              <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
-                                Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; Exit {exitPrice.toFixed(3)} {tokenSymbol}
-                              </p>
-                            </td>
-                            {/* SIDE */}
-                            <td className="px-4 py-4 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                {isPending && (
-                                  <Loader2 className="w-3 h-3 animate-spin text-accent-400" />
-                                )}
-                                <span className={cn(
-                                  "px-2 py-0.5 text-[10px] font-bold rounded uppercase",
-                                  badgeColors.bg, badgeColors.text
-                                )}>
-                                  {outcomeLabel}
-                                </span>
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  {isPending && <Loader2 className="w-3 h-3 animate-spin text-accent-400" />}
+                                  <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded uppercase", badgeColors.bg, badgeColors.text)}>
+                                    {outcomeLabel}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-heading font-medium text-white truncate">
+                                  {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
+                                </p>
+                                <p className="text-[10px] text-surface-400 mt-1">
+                                  {formatPurchaseTime(bet.placedAt)}
+                                </p>
                               </div>
-                            </td>
-                            {/* SHARES */}
-                            <td className="px-4 py-4 text-center">
-                              <span className="text-sm font-heading font-semibold text-white tabular-nums">
-                                {formatShareQuantity(shares)}
-                              </span>
-                            </td>
-                            {/* VALUE */}
-                            <td className="px-4 py-4 text-center">
-                              <span className="text-sm font-heading font-semibold text-white tabular-nums">
-                                {currentValue.toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 4,
-                                })} {tokenSymbol}
-                              </span>
-                            </td>
-                            {/* P&L */}
-                            <td className="px-4 py-4 text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                {pnlAmount >= 0 ? (
-                                  <ArrowUpRight className="w-3.5 h-3.5 text-yes-400" />
-                                ) : (
-                                  <ArrowDownRight className="w-3.5 h-3.5 text-no-400" />
-                                )}
-                                <span className={cn(
-                                  "text-sm font-heading font-semibold tabular-nums",
-                                  pnlAmount >= 0 ? "text-yes-400" : "text-no-400"
-                                )}>
-                                  {pnlAmount >= 0 ? '+' : ''}{pnlAmount.toFixed(2)}
-                                </span>
-                                <span className={cn(
-                                  "text-[10px] tabular-nums ml-0.5",
-                                  pnlAmount >= 0 ? "text-yes-400/60" : "text-no-400/60"
-                                )}>
-                                  ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
-                                </span>
+                              <ChevronRight className="w-4 h-4 text-surface-600 flex-shrink-0 mt-1" />
+                            </div>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div>
+                                <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Shares</p>
+                                <p className="text-sm font-heading font-semibold text-white tabular-nums">{formatShareQuantity(shares)}</p>
                               </div>
-                            </td>
-                            {/* Chevron */}
-                            <td className="px-3 py-4">
-                              <ChevronRight className="w-4 h-4 text-surface-600 group-hover:text-surface-400 transition-colors" />
-                            </td>
-                          </motion.tr>
+                              <div>
+                                <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Value</p>
+                                <p className="text-sm font-heading font-semibold text-white tabular-nums">
+                                  {currentValue.toLocaleString(undefined, {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 4,
+                                  })} {tokenSymbol}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Unrealized P&L</p>
+                                <div className="flex items-center justify-end gap-0.5">
+                                  {pnlAmount >= 0 ? (
+                                    <ArrowUpRight className="w-3 h-3 text-yes-400" />
+                                  ) : (
+                                    <ArrowDownRight className="w-3 h-3 text-no-400" />
+                                  )}
+                                  <span className={cn("text-sm font-heading font-semibold tabular-nums", pnlAmount >= 0 ? "text-yes-400" : "text-no-400")}>
+                                    {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
                         )
                       })}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
+                  </>
+                )}
 
-                {/* Mobile cards for Open Positions */}
-                <div className="md:hidden space-y-3">
-                  {displayBets.map((bet, index) => {
-                    const market = getMarketInfo(bet.marketId)
-                    const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
-                    const outcomeIdx = outcomeToIndex(bet.outcome)
-                    const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
-                    const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
-                    const isPending = bet.status === 'pending'
-                    const {
-                      shares,
-                      currentValue,
-                      pnlAmount,
-                      pnlPct,
-                    } = getOpenPositionMetrics(bet, market)
-
-                    return (
-                      <motion.div
-                        key={bet.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.03 }}
-                        onClick={() => navigate(`/market/${bet.marketId}`)}
-                        className="glass-card p-4 cursor-pointer hover:border-surface-600/50 transition-all"
-                      >
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              {isPending && <Loader2 className="w-3 h-3 animate-spin text-accent-400" />}
-                              <span className={cn("px-2 py-0.5 text-[10px] font-bold rounded uppercase", badgeColors.bg, badgeColors.text)}>
-                                {outcomeLabel}
-                              </span>
-                            </div>
-                            <p className="text-sm font-heading font-medium text-white truncate">
-                              {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
-                            </p>
-                            <p className="text-[10px] text-surface-400 mt-1">
-                              {formatPurchaseTime(bet.placedAt)}
-                            </p>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-surface-600 flex-shrink-0 mt-1" />
-                        </div>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div>
-                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Shares</p>
-                            <p className="text-sm font-heading font-semibold text-white tabular-nums">{formatShareQuantity(shares)}</p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Value</p>
-                            <p className="text-sm font-heading font-semibold text-white tabular-nums">
-                              {currentValue.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 4,
-                              })} {tokenSymbol}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Unrealized P&L</p>
-                            <div className="flex items-center justify-end gap-0.5">
-                              {pnlAmount >= 0 ? (
-                                <ArrowUpRight className="w-3 h-3 text-yes-400" />
-                              ) : (
-                                <ArrowDownRight className="w-3 h-3 text-no-400" />
-                              )}
-                              <span className={cn("text-sm font-heading font-semibold tabular-nums", pnlAmount >= 0 ? "text-yes-400" : "text-no-400")}>
-                                {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    )
-            })}
-          </div>
-
+                {displayParlays.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 px-1">
+                      <Ticket className="w-4 h-4 text-brand-400" />
+                      <p className="text-sm font-heading font-semibold text-white">Parlays</p>
+                    </div>
+                    {displayParlays.map((parlay, index) => (
+                      <ParlayPortfolioCard
+                        key={parlay.id}
+                        parlay={parlay}
+                        index={index}
+                        showClaimAction={false}
+                        onClaim={() => setClaimParlay(parlay)}
+                      />
+                    ))}
+                  </div>
+                )}
               </motion.div>
             </AnimatePresence>
           ) : (
@@ -798,23 +949,53 @@ export function MyBets() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.15 }}
-                className="space-y-3"
+                className="space-y-6"
               >
-                {displayBets.map((bet, index) => (
-                  <BetCard
-                    key={bet.id}
-                    bet={bet}
-                    market={getMarketInfo(bet.marketId)}
-                    index={index}
-                    onClaim={(mode) => openClaimModal(bet, mode)}
-                    onRestoreClaim={() => {
-                      markBetUnclaimed(bet.id)
-                      setClaimRepairNotice('Claim status was restored manually. You can retry redemption now.')
-                    }}
-                    onRemove={bet.status === 'pending' ? () => removePendingBet(bet.id) : undefined}
-                    showClaimAction={filter === 'unredeemed' || filter === 'all'}
-                  />
-                ))}
+                {displayBets.length > 0 && (
+                  <div className="space-y-3">
+                    {displayParlays.length > 0 && (
+                      <div className="flex items-center gap-2 px-1">
+                        <BarChart2 className="w-4 h-4 text-surface-400" />
+                        <p className="text-sm font-heading font-semibold text-white">Market Positions</p>
+                      </div>
+                    )}
+                    {displayBets.map((bet, index) => (
+                      <BetCard
+                        key={bet.id}
+                        bet={bet}
+                        market={getMarketInfo(bet.marketId)}
+                        index={index}
+                        onClaim={(mode) => openClaimModal(bet, mode)}
+                        onRestoreClaim={() => {
+                          markBetUnclaimed(bet.id)
+                          setClaimRepairNotice('Claim status was restored manually. You can retry redemption now.')
+                        }}
+                        onRemove={bet.status === 'pending' ? () => removePendingBet(bet.id) : undefined}
+                        showClaimAction={filter === 'unredeemed' || filter === 'all'}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {displayParlays.length > 0 && (
+                  <div className="space-y-3">
+                    {displayBets.length > 0 && (
+                      <div className="flex items-center gap-2 px-1">
+                        <Ticket className="w-4 h-4 text-brand-400" />
+                        <p className="text-sm font-heading font-semibold text-white">Parlays</p>
+                      </div>
+                    )}
+                    {displayParlays.map((parlay, index) => (
+                      <ParlayPortfolioCard
+                        key={parlay.id}
+                        parlay={parlay}
+                        index={index}
+                        showClaimAction={filter === 'unredeemed' || filter === 'all'}
+                        onClaim={() => setClaimParlay(parlay)}
+                      />
+                    ))}
+                  </div>
+                )}
               </motion.div>
             </AnimatePresence>
           )}
@@ -991,6 +1172,12 @@ export function MyBets() {
           fetchUserBets()
         }}
       />
+
+      <ParlayClaimModal
+        parlay={claimParlay}
+        isOpen={claimParlay !== null}
+        onClose={() => setClaimParlay(null)}
+      />
     </div>
   )
 }
@@ -1022,7 +1209,7 @@ function BetCard({
   const isActive = bet.status === 'active'
 
   // Resolve outcome label from market data
-  const outcomeLabel = market?.outcomeLabels?.[outcomeIdx - 1]?.toUpperCase() || DEFAULT_LABELS[outcomeIdx - 1] || bet.outcome.toUpperCase()
+  const outcomeLabel = getBetOutcomeLabel(bet, market)
   const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
 
   return (
@@ -1240,6 +1427,215 @@ function BetCard({
               )}
             </div>
           )}
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+function getParlayStatusBadge(status: ParlayRecord['status']) {
+  switch (status) {
+    case 'active':
+      return (
+        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-500/15 text-blue-300">
+          Active
+        </span>
+      )
+    case 'pending_dispute':
+      return (
+        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-500/15 text-amber-300">
+          Pending Dispute
+        </span>
+      )
+    case 'won':
+      return (
+        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-yes-500/15 text-yes-400">
+          Won
+        </span>
+      )
+    case 'lost':
+      return (
+        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-no-500/15 text-no-400">
+          Lost
+        </span>
+      )
+    case 'cancelled':
+      return (
+        <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-white/[0.06] text-surface-400">
+          Cancelled
+        </span>
+      )
+    default:
+      return null
+  }
+}
+
+function ParlayPortfolioCard({
+  parlay,
+  index,
+  showClaimAction,
+  onClaim,
+}: {
+  parlay: ParlayRecord
+  index: number
+  showClaimAction: boolean
+  onClaim: () => void
+}) {
+  const txUrl = getParlayTransactionUrl(parlay.txId)
+  const hasWalletSubmissionRef = Boolean(parlay.txId && !txUrl)
+  const isWon = parlay.status === 'won'
+  const isLost = parlay.status === 'lost'
+  const isCancelled = parlay.status === 'cancelled'
+  const isPendingDispute = parlay.status === 'pending_dispute'
+  const isActive = parlay.status === 'active'
+  const previewLegs = parlay.legs.slice(0, 2)
+  const remainingLegs = Math.max(parlay.legs.length - previewLegs.length, 0)
+  const legSummary = previewLegs
+    .map((leg) => `${leg.outcomeLabel}: ${leg.marketQuestion}`)
+    .join(' • ')
+  const compactLegSummary = remainingLegs > 0
+    ? `${legSummary} • +${remainingLegs} more`
+    : legSummary
+  const statusSummary = parlay.claimed
+    ? 'Already claimed'
+    : isWon
+      ? 'Ready to claim'
+      : isLost
+        ? 'Ticket lost'
+        : isCancelled
+          ? 'Ticket cancelled'
+          : isActive
+            ? 'Waiting for resolution'
+            : 'Waiting for dispute outcome'
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.03 }}
+      className={cn(
+        'glass-card p-5 transition-all duration-200 hover:border-surface-600/50',
+        isWon && !parlay.claimed && 'border-yes-500/20',
+        isLost && 'border-no-500/15',
+        isPendingDispute && 'border-amber-500/20',
+        isCancelled && 'border-white/[0.08]',
+      )}
+    >
+      <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[minmax(0,1.8fr)_minmax(120px,0.6fr)_minmax(140px,0.7fr)_auto] lg:items-center lg:gap-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div
+            className={cn(
+              'w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0',
+              isWon
+                ? 'bg-yes-500/10'
+                : isLost
+                  ? 'bg-no-500/10'
+                  : isPendingDispute
+                    ? 'bg-amber-500/10'
+                    : isCancelled
+                      ? 'bg-white/[0.06]'
+                      : 'bg-brand-500/10',
+            )}
+          >
+            {isWon ? (
+              <Trophy className="w-5 h-5 text-yes-400" />
+            ) : isLost ? (
+              <XCircle className="w-5 h-5 text-no-400" />
+            ) : isPendingDispute ? (
+              <Clock className="w-5 h-5 text-amber-300" />
+            ) : isCancelled ? (
+              <RefreshCcw className="w-5 h-5 text-surface-400" />
+            ) : (
+              <Ticket className="w-5 h-5 text-brand-400" />
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-heading font-semibold text-white">
+                {parlay.numLegs}-Leg Parlay
+              </h3>
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase bg-brand-500/15 text-brand-300">
+                {parlay.tokenType}
+              </span>
+              {getParlayStatusBadge(parlay.status)}
+              {parlay.claimed && (
+                <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-500/10 text-emerald-300">
+                  Claimed
+                </span>
+              )}
+            </div>
+
+            <p className="mt-1 text-xs text-surface-300 truncate">{compactLegSummary}</p>
+
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-surface-500">
+              <span className="rounded-full border border-white/[0.08] px-2 py-1">
+                {new Date(parlay.createdAt).toLocaleDateString()}
+              </span>
+              <span className="rounded-full border border-white/[0.08] px-2 py-1">
+                {describeParlayFundingSource(parlay.fundingSource)}
+              </span>
+              <span className="rounded-full border border-white/[0.08] px-2 py-1">
+                Ticket {getShortParlayId(parlay.onChainParlayId) ?? 'pending sync'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3">
+          <p className="text-xs font-heading text-surface-500">Stake</p>
+          <p className="mt-1 text-sm font-heading font-bold text-white tabular-nums">
+            {formatParlayAmount(parlay.stake)} {parlay.tokenType}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
+          <p className="text-xs font-heading text-emerald-300/80">Potential</p>
+          <p
+            className={cn(
+              'mt-1 text-sm font-heading font-bold tabular-nums',
+              isLost ? 'text-red-300 line-through' : 'text-emerald-300',
+            )}
+          >
+            {formatParlayAmount(parlay.potentialPayout)} {parlay.tokenType}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3 sm:flex-row sm:items-center sm:justify-between lg:min-w-[240px]">
+          <p className="text-xs text-surface-500">{statusSummary}</p>
+
+          <div className="flex items-center gap-2">
+            {txUrl ? (
+              <a
+                href={txUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs font-medium text-surface-300 hover:text-white transition-colors"
+              >
+                Explorer
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : hasWalletSubmissionRef ? (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-surface-500">
+                Wallet Ref {getShortParlayId(parlay.txId)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-surface-500">
+                <Clock className="w-3.5 h-3.5" />
+                Pending
+              </span>
+            )}
+
+            {showClaimAction && isWon && !parlay.claimed && (
+              <button
+                onClick={onClaim}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-600"
+              >
+                <Gift className="w-3.5 h-3.5" />
+                Claim
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </motion.div>

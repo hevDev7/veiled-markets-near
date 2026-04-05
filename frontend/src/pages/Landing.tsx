@@ -7,7 +7,8 @@ import { useRealMarketsStore } from '@/lib/market-store'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
 import { Network } from '@provablehq/aleo-types'
-import { formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor } from '@/lib/utils'
+import { getLeadingOutcome, getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 import { TrendingMarkets } from '@/components/TrendingMarkets'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
@@ -62,6 +63,8 @@ function HeroFeaturedCard({ market }: { market: Market }) {
   const catColor = getCategoryColor(market.category)
   const thumbUrl = getMarketThumbnail(market.question, market.category, market.thumbnailUrl)
   const useContain = isContainThumbnail(thumbUrl)
+  const outcomes = useMemo(() => getMarketOutcomeSummaries(market), [market])
+  const leadingOutcome = useMemo(() => getLeadingOutcome(market), [market])
 
   return (
     <div className="landing-market-card relative rounded-2xl overflow-hidden">
@@ -97,25 +100,40 @@ function HeroFeaturedCard({ market }: { market: Market }) {
         </div>
 
         <div className="flex items-baseline gap-2 mb-4">
-          <span className="text-3xl font-display font-bold tabular-nums" style={{ color: market.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
-            {formatPercentage(market.yesPercentage)}
+          <span className={cn('text-3xl font-display font-bold tabular-nums', leadingOutcome?.styles.text || 'text-white')}>
+            {formatPercentage(leadingOutcome?.percentage ?? 0)}
           </span>
-          <span className="text-sm text-surface-400">probability</span>
+          <span className="text-sm text-surface-400">
+            {leadingOutcome ? `${leadingOutcome.label} lead` : 'probability'}
+          </span>
         </div>
 
-        <div className="w-full h-1.5 rounded-full bg-surface-700/40 overflow-hidden mb-6">
-          <div className="h-full rounded-full bg-yes-500 transition-all duration-700" style={{ width: `${market.yesPercentage}%` }} />
+        <div className="w-full h-1.5 rounded-full bg-surface-700/40 overflow-hidden mb-6 flex">
+          {outcomes.map((outcome) => (
+            <div
+              key={outcome.outcome}
+              className={cn('h-full transition-all duration-700', outcome.styles.bar)}
+              style={{ width: `${outcome.percentage}%` }}
+            />
+          ))}
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-yes-500/[0.04]">
-            <span className="text-xs font-medium text-surface-300">Yes</span>
-            <span className="text-sm font-bold text-yes-400 tabular-nums">{formatPercentage(market.yesPercentage)}</span>
-          </div>
-          <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-no-500/[0.04]">
-            <span className="text-xs font-medium text-surface-300">No</span>
-            <span className="text-sm font-bold text-no-400 tabular-nums">{formatPercentage(market.noPercentage)}</span>
-          </div>
+          {outcomes.map((outcome) => (
+            <div
+              key={outcome.outcome}
+              className={cn(
+                'flex items-center justify-between px-4 py-3 rounded-xl border',
+                outcome.styles.bg,
+                outcome.styles.border
+              )}
+            >
+              <span className="text-xs font-medium text-surface-300 truncate pr-2">{outcome.label}</span>
+              <span className={cn('text-sm font-bold tabular-nums', outcome.styles.text)}>
+                {formatPercentage(outcome.percentage)}
+              </span>
+            </div>
+          ))}
         </div>
 
         <div className="flex items-center gap-4 pt-5 text-surface-500">
@@ -139,6 +157,7 @@ function HeroFeaturedCard({ market }: { market: Market }) {
 
 function HeroCompactCard({ market }: { market: Market }) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
+  const leadingOutcome = useMemo(() => getLeadingOutcome(market), [market])
 
   return (
     <div className="landing-market-card rounded-xl p-4 transition-all duration-300">
@@ -154,9 +173,14 @@ function HeroCompactCard({ market }: { market: Market }) {
           <span className="text-xs text-surface-600">·</span>
           <span className="text-xs text-surface-500 tabular-nums">{timeRemaining}</span>
         </div>
-        <span className="text-lg font-display font-bold tabular-nums" style={{ color: market.yesPercentage >= 50 ? '#00dc82' : '#ff4757' }}>
-          {formatPercentage(market.yesPercentage)}
-        </span>
+        <div className="text-right">
+          <p className={cn('text-[10px] font-semibold uppercase tracking-wider', leadingOutcome?.styles.text || 'text-surface-400')}>
+            {leadingOutcome?.label || 'Lead'}
+          </p>
+          <span className={cn('text-lg font-display font-bold tabular-nums', leadingOutcome?.styles.text || 'text-white')}>
+            {formatPercentage(leadingOutcome?.percentage ?? 0)}
+          </span>
+        </div>
       </div>
     </div>
   )

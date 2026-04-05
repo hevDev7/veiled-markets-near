@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import { type Market } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
-import { buildSellSharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
+import { buildSellSharesInputs, getMarket, getCurrentBlockHeight, getMarketGovernanceConfig, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { devWarn } from '@/lib/logger'
 import {
   calculateSellSharesNeeded,
@@ -15,6 +15,7 @@ import {
   type AMMReserves,
 } from '@/lib/amm'
 import { TransactionLink } from './TransactionLink'
+import { useMarketGovernanceConfig } from '@/hooks/useMarketGovernanceConfig'
 
 interface SellSharesModalProps {
   isOpen: boolean
@@ -27,6 +28,8 @@ type SellStep = 'input' | 'success'
 
 export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSharesModalProps) {
   const { executeTransaction } = useAleoTransaction()
+  const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const governanceConfig = useMarketGovernanceConfig(tokenType)
 
   const [tokensDesired, setTokensDesired] = useState('')
   const [slippage, setSlippage] = useState(2) // 2% default
@@ -51,6 +54,10 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
     const outcomeMatch = shareRecord.match(/outcome:\s*(\d+)u8/)
     return outcomeMatch ? parseInt(outcomeMatch[1]) : 1
   }, [shareRecord])
+  const shareOutcomeLabel = useMemo(() => {
+    if (!shareOutcome || shareOutcome < 1) return 'Unknown Outcome'
+    return market.outcomeLabels?.[shareOutcome - 1] || `Outcome ${shareOutcome}`
+  }, [market.outcomeLabels, shareOutcome])
 
   // Parse share quantity from record
   const totalShares = useMemo(() => {
@@ -61,22 +68,26 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
   // Maximum tokens the user can withdraw with their available shares
   const maxTokens = useMemo(() => {
     if (totalShares <= 0n) return 0n
-    return calculateMaxTokensDesired(reserves, shareOutcome, totalShares)
-  }, [reserves, shareOutcome, totalShares])
+    return calculateMaxTokensDesired(reserves, shareOutcome, totalShares, governanceConfig)
+  }, [governanceConfig, reserves, shareOutcome, totalShares])
 
   const tokensDesiredMicro = tokensDesired
     ? BigInt(Math.floor(parseFloat(tokensDesired) * 1_000_000))
     : 0n
+  const meetsMinTrade = tokensDesiredMicro >= governanceConfig.minTradeAmount
+  const totalFeePercent = Number(
+    governanceConfig.protocolFeeBps + governanceConfig.creatorFeeBps + governanceConfig.lpFeeBps
+  ) / 100
 
   // Compute shares needed and net tokens
   const sellPreview = useMemo(() => {
-    if (tokensDesiredMicro <= 0n) return null
+    if (tokensDesiredMicro <= 0n || governanceConfig.pauseState || !meetsMinTrade) return null
 
-    const sharesNeeded = calculateSellSharesNeeded(reserves, shareOutcome, tokensDesiredMicro)
+    const sharesNeeded = calculateSellSharesNeeded(reserves, shareOutcome, tokensDesiredMicro, governanceConfig)
     const maxSharesUsed = (sharesNeeded * BigInt(Math.floor((100 + slippage) * 100))) / 10000n
-    const netTokens = calculateSellNetTokens(tokensDesiredMicro)
-    const fees = calculateFees(tokensDesiredMicro)
-    const priceImpact = calculateSellPriceImpact(reserves, shareOutcome, tokensDesiredMicro)
+    const netTokens = calculateSellNetTokens(tokensDesiredMicro, governanceConfig)
+    const fees = calculateFees(tokensDesiredMicro, governanceConfig)
+    const priceImpact = calculateSellPriceImpact(reserves, shareOutcome, tokensDesiredMicro, governanceConfig)
 
     return {
       sharesNeeded,
@@ -86,7 +97,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
       priceImpact,
       exceedsBalance: maxSharesUsed > totalShares,
     }
-  }, [reserves, shareOutcome, tokensDesiredMicro, slippage, totalShares])
+  }, [governanceConfig, meetsMinTrade, reserves, shareOutcome, tokensDesiredMicro, slippage, totalShares])
 
   const highPriceImpact = sellPreview ? Math.abs(sellPreview.priceImpact) > 5 : false
 
@@ -104,7 +115,15 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
       }
 
       // Pre-validate market status and token type before submitting
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      if (governanceConfig.pauseState) {
+        throw new Error('Trading is currently paused by governance.')
+      }
+      if (tokensDesiredMicro < governanceConfig.minTradeAmount) {
+        throw new Error(
+          `Minimum trade amount is ${(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} ${tokenSymbol}.`
+        )
+      }
+
       try {
         const [onChainMarket, currentBlock] = await Promise.all([
           getMarket(market.id),
@@ -139,11 +158,14 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
         devWarn('Pre-validation skipped (network error):', validationErr)
       }
 
+      const feeConfig = await getMarketGovernanceConfig(getProgramIdForToken(tokenType))
+
       const { functionName, inputs } = buildSellSharesInputs(
         shareRecord,
         tokensDesiredMicro,
         sellPreview.maxSharesUsed,
         tokenType,
+        feeConfig,
       )
 
       const result = await executeTransaction({
@@ -211,7 +233,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                   <div>
                     <h2 className="text-xl font-semibold text-white">Sell Shares</h2>
                     <p className="text-sm text-surface-400">
-                      Outcome {shareOutcome} -- {market.question.slice(0, 40)}...
+                      {shareOutcomeLabel} -- {market.question.slice(0, 40)}...
                     </p>
                   </div>
                 </div>
@@ -269,6 +291,9 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                             <span className="text-surface-400 text-sm">{tokenSymbol}</span>
                           </div>
                         </div>
+                        <p className="text-xs text-surface-500 mt-2">
+                          Minimum trade: {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol}
+                        </p>
                       </div>
 
                       {/* Slippage Tolerance */}
@@ -310,7 +335,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                             </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-surface-400 text-sm">Fees (2%)</span>
+                            <span className="text-surface-400 text-sm">Fees ({totalFeePercent.toFixed(2)}%)</span>
                             <span className="text-sm text-surface-300">
                               {formatCredits(sellPreview.fees.totalFees)} {tokenSymbol}
                             </span>
@@ -347,6 +372,30 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
                         </div>
                       )}
 
+                      {governanceConfig.pauseState && (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                          <AlertTriangle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-yellow-300">Trading Paused</p>
+                            <p className="text-xs text-surface-400 mt-1">
+                              Governance has paused trading for this market program.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {!governanceConfig.pauseState && tokensDesiredMicro > 0n && !meetsMinTrade && (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+                          <AlertTriangle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-yellow-300">Below Minimum Trade</p>
+                            <p className="text-xs text-surface-400 mt-1">
+                              Withdraw at least {(Number(governanceConfig.minTradeAmount) / 1_000_000).toFixed(6)} {tokenSymbol} to match the current governance setting.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       {/* High Price Impact Warning */}
                       {highPriceImpact && !sellPreview?.exceedsBalance && (
                         <div className="flex items-start gap-3 p-4 rounded-xl bg-no-500/10 border border-no-500/20">
@@ -371,10 +420,10 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
 
                       <button
                         onClick={handleSell}
-                        disabled={!tokensDesired || parseFloat(tokensDesired) <= 0 || isSelling || sellPreview?.exceedsBalance}
+                        disabled={!tokensDesired || parseFloat(tokensDesired) <= 0 || isSelling || governanceConfig.pauseState || !meetsMinTrade || sellPreview?.exceedsBalance}
                         className={cn(
                           'w-full flex items-center justify-center gap-2 btn-primary',
-                          (!tokensDesired || parseFloat(tokensDesired) <= 0 || sellPreview?.exceedsBalance) && 'opacity-50 cursor-not-allowed'
+                          (!tokensDesired || parseFloat(tokensDesired) <= 0 || governanceConfig.pauseState || !meetsMinTrade || sellPreview?.exceedsBalance) && 'opacity-50 cursor-not-allowed'
                         )}
                       >
                         {isSelling ? (

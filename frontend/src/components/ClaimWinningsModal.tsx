@@ -3,12 +3,9 @@ import {
   X,
   Trophy,
   Shield,
-  Copy,
   Check,
   RefreshCcw,
-  Terminal,
   AlertTriangle,
-  ExternalLink,
   Loader2,
   Wallet,
   Search,
@@ -19,6 +16,7 @@ import { type Bet, useBetsStore, useWalletStore, outcomeToIndex } from '@/lib/st
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { diagnoseTransaction, getMarketCredits, getRedeemFunction, getRefundFunction, getProgramIdForToken } from '@/lib/aleo-client'
+import { getMarketOutcomeLabels } from '@/lib/market-outcomes'
 import { fetchOutcomeShareRecords, type ParsedOutcomeShare } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
 
@@ -27,7 +25,7 @@ interface ClaimWinningsModalProps {
   isOpen: boolean
   onClose: () => void
   bets: Bet[]
-  market?: { outcomeLabels?: string[] }
+  market?: { numOutcomes?: number; outcomeLabels?: string[] }
   onClaimSuccess?: () => void
 }
 
@@ -60,12 +58,10 @@ export function ClaimWinningsModal({
   market,
   onClaimSuccess
 }: ClaimWinningsModalProps) {
-  const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [txId, setTxId] = useState<string | null>(null)
   const [txPhase, setTxPhase] = useState<'idle' | 'pending' | 'confirmed'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [showCli, setShowCli] = useState(false)
   const { markBetClaimed } = useBetsStore()
   const { wallet } = useWalletStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
@@ -152,11 +148,9 @@ export function ClaimWinningsModal({
   }, [isOpen, bet, wallet.connected, fetchRecords])
 
   const handleClose = () => {
-    setCopiedCommand(null)
     setError(null)
     setTxId(null)
     setTxPhase('idle')
-    setShowCli(false)
     onClose()
   }
 
@@ -166,23 +160,6 @@ export function ClaimWinningsModal({
       onClaimSuccess?.()
     }
     handleClose()
-  }
-
-  const copyToClipboard = async (text: string, id: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopiedCommand(id)
-      setTimeout(() => setCopiedCommand(null), 2000)
-    } catch {
-      const textarea = document.createElement('textarea')
-      textarea.value = text
-      document.body.appendChild(textarea)
-      textarea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textarea)
-      setCopiedCommand(id)
-      setTimeout(() => setCopiedCommand(null), 2000)
-    }
   }
 
   // Get the record plaintext to use for the transaction
@@ -332,8 +309,6 @@ export function ClaimWinningsModal({
 
   const tokenType = bet.tokenType || 'ALEO'
   const tokenSymbol = getTokenSymbol(tokenType)
-  const refundFn = getRefundFunction(tokenType)
-  const redeemFn = getRedeemFunction(tokenType)
 
   // FPMM: winning shares redeem 1:1, payout = quantity from OutcomeShare record (most accurate)
   // Fallback chain: selected record quantity > bet.sharesReceived > bet.amount
@@ -344,27 +319,16 @@ export function ClaimWinningsModal({
 
   // Resolve outcome label from market data
   const resolveOutcomeLabel = (outcomeNum: number): string => {
-    const defaultLabels = ['YES', 'NO', 'OPTION C', 'OPTION D']
-    return market?.outcomeLabels?.[outcomeNum - 1]?.toUpperCase() || defaultLabels[outcomeNum - 1] || `Outcome ${outcomeNum}`
+    if (outcomeNum < 1) return 'Pending'
+    return market ? (getMarketOutcomeLabels({
+      numOutcomes: Math.max(market.numOutcomes || market.outcomeLabels?.length || 2, 2),
+      outcomeLabels: market.outcomeLabels ?? [],
+    })[outcomeNum - 1] || `Outcome ${outcomeNum}`) : `Outcome ${outcomeNum}`
   }
 
   const hasRecord = !!getRecordPlaintext()
   const canMarkClaimedManually = fetchError === 'No OutcomeShare records found. Your wallet may not support record fetching, or records may be spent.'
   const hasRecordMismatch = !!fetchError && fetchError.includes('different outcome or trade')
-
-  // CLI commands as fallback
-  const claimProgramId = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
-  const claimRefundCmd = `snarkos developer execute ${claimProgramId} ${refundFn} \\
-  "<YOUR_OUTCOME_SHARE_RECORD>" \\
-  --private-key <YOUR_PRIVATE_KEY> \\
-  --endpoint https://api.explorer.provable.com \\
-  --broadcast --network 1 --priority-fee 500000`
-
-  const redeemSharesCmd = `snarkos developer execute ${claimProgramId} ${redeemFn} \\
-  "<YOUR_OUTCOME_SHARE_RECORD>" \\
-  --private-key <YOUR_PRIVATE_KEY> \\
-  --endpoint https://api.explorer.provable.com \\
-  --broadcast --network 1 --priority-fee 500000`
 
   return (
     <AnimatePresence>

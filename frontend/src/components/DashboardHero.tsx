@@ -12,8 +12,8 @@ import {
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryEmoji, getCategoryName } from '@/lib/utils'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
-import { calculateAllPrices, type AMMReserves } from '@/lib/amm'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 
 const CATEGORY_GRADIENTS: Record<number, string> = {
   1: 'linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.06) 100%)',
@@ -58,34 +58,15 @@ function MarketSlide({
 }) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const numOutcomes = market.numOutcomes ?? 2
-  const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
-  const isBinary = numOutcomes === 2
-
-  const prices = useMemo(() => {
-    const reserves: AMMReserves = {
-      reserve_1: market.yesReserve ?? 0n,
-      reserve_2: market.noReserve ?? 0n,
-      reserve_3: market.reserve3 ?? 0n,
-      reserve_4: market.reserve4 ?? 0n,
-      num_outcomes: numOutcomes,
-    }
-    return calculateAllPrices(reserves)
-  }, [market.yesReserve, market.noReserve, market.reserve3, market.reserve4, numOutcomes])
+  const outcomeSummaries = useMemo(() => getMarketOutcomeSummaries(market), [market])
 
   const outcomeData = useMemo<OutcomeDatum[]>(() => {
-    if (isBinary) {
-      return [
-        { index: 0, label: outcomeLabels[0], pct: market.yesPercentage },
-        { index: 1, label: outcomeLabels[1], pct: market.noPercentage },
-      ]
-    }
-
-    return outcomeLabels.map((label, i) => ({
-      index: i,
-      label,
-      pct: (prices[i] ?? 0) * 100,
+    return outcomeSummaries.map((outcome) => ({
+      index: outcome.index,
+      label: outcome.label,
+      pct: outcome.percentage,
     }))
-  }, [isBinary, outcomeLabels, market.yesPercentage, market.noPercentage, prices])
+  }, [outcomeSummaries])
 
   const sortedOutcomes = useMemo(
     () => [...outcomeData].sort((a, b) => b.pct - a.pct),

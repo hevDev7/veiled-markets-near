@@ -23,6 +23,9 @@
 // ============================================================================
 
 import credits.aleo;
+import veiled_markets_v35.aleo;
+import veiled_markets_usdcx_v5.aleo;
+import veiled_markets_usad_v12.aleo;
 
 program veiled_governance_v4.aleo {
 
@@ -43,6 +46,13 @@ program veiled_governance_v4.aleo {
     const PROPOSAL_PARAMETER: u8 = 4u8;
     const PROPOSAL_EMERGENCY_PAUSE: u8 = 5u8;
     const PROPOSAL_RESOLVER_ELECTION: u8 = 6u8;
+    const CONFIG_NOOP: field = 0field;
+    const CONFIG_PROTOCOL_FEE_BPS: field = 1field;
+    const CONFIG_CREATOR_FEE_BPS: field = 2field;
+    const CONFIG_LP_FEE_BPS: field = 3field;
+    const CONFIG_MIN_TRADE_AMOUNT: field = 4field;
+    const CONFIG_MIN_LIQUIDITY: field = 5field;
+    const CONFIG_PAUSE_STATE: field = 6field;
 
     const STATUS_ACTIVE: u8 = 0u8;
     const STATUS_PASSED: u8 = 1u8;
@@ -266,12 +276,9 @@ program veiled_governance_v4.aleo {
     mapping user_contributions: field => UserContribution;
     mapping reward_claimed: field => bool;
 
-    // v4: Governance execution state
-    // Key is field (hashed from address) because proposal.payload_2 is field type
-    // NOTE: These mappings are written by execute_governance and read by off-chain
-    // systems (frontend/backend via RPC mapping queries). Cross-program mapping reads
-    // are not supported in Leo. Market contracts use Open Voting + Bond system
-    // where anyone can submit outcomes — governance tracks resolver eligibility separately.
+    // v5: Governance execution state + market config mirror
+    // execute_governance now writes these mappings and also pushes the same values
+    // into each market program via cross-program transitions for on-chain enforcement.
     mapping governance_approved_resolvers: field => bool;
     mapping governance_params: field => u128;
     mapping governance_paused: u8 => bool;
@@ -310,7 +317,7 @@ program veiled_governance_v4.aleo {
         assert(proposal_type >= 1u8 && proposal_type <= 6u8);
 
         let seed: ProposalSeedGov = ProposalSeedGov {
-            proposer: self.caller,
+            proposer: credits_in.owner,
             proposal_type: proposal_type,
             target: target,
             payload_1: payload_1,
@@ -319,7 +326,7 @@ program veiled_governance_v4.aleo {
         let proposal_id: field = BHP256::hash_to_field(seed);
 
         let lock: VoteLock = VoteLock {
-            owner: self.caller,
+            owner: credits_in.owner,
             proposal_id: proposal_id,
             amount: MIN_PROPOSAL_STAKE,
             unlock_at: 0u64,
@@ -329,7 +336,7 @@ program veiled_governance_v4.aleo {
             credits.aleo/transfer_private_to_public(credits_in, self.address, MIN_PROPOSAL_STAKE);
 
         return (lock, change, proposal_id, create_proposal_fin(
-            transfer_future, proposal_id, self.caller, proposal_type, target, payload_1, payload_2
+            transfer_future, proposal_id, credits_in.owner, proposal_type, target, payload_1, payload_2
         ));
     }
 
@@ -381,7 +388,7 @@ program veiled_governance_v4.aleo {
         assert(amount >= MIN_VOTE_AMOUNT);
 
         let lock: VoteLock = VoteLock {
-            owner: self.caller,
+            owner: credits_in.owner,
             proposal_id: proposal_id,
             amount: amount,
             unlock_at: 0u64,
@@ -390,7 +397,7 @@ program veiled_governance_v4.aleo {
         let (change, transfer_future): (credits.aleo/credits, Future) =
             credits.aleo/transfer_private_to_public(credits_in, self.address, amount);
 
-        return (lock, change, vote_for_fin(transfer_future, proposal_id, self.caller, amount as u128));
+        return (lock, change, vote_for_fin(transfer_future, proposal_id, credits_in.owner, amount as u128));
     }
 
     async function vote_for_fin(
@@ -441,7 +448,7 @@ program veiled_governance_v4.aleo {
         assert(amount >= MIN_VOTE_AMOUNT);
 
         let lock: VoteLock = VoteLock {
-            owner: self.caller,
+            owner: credits_in.owner,
             proposal_id: proposal_id,
             amount: amount,
             unlock_at: 0u64,
@@ -450,7 +457,7 @@ program veiled_governance_v4.aleo {
         let (change, transfer_future): (credits.aleo/credits, Future) =
             credits.aleo/transfer_private_to_public(credits_in, self.address, amount);
 
-        return (lock, change, vote_against_fin(transfer_future, proposal_id, self.caller, amount as u128));
+        return (lock, change, vote_against_fin(transfer_future, proposal_id, credits_in.owner, amount as u128));
     }
 
     async function vote_against_fin(
@@ -563,47 +570,79 @@ program veiled_governance_v4.aleo {
     //   - TREASURY: use execute_treasury_proposal (T29) instead
     // ========================================================================
 
-    async transition execute_governance(public proposal_id: field) -> Future {
-        return execute_governance_fin(proposal_id);
+    async transition execute_governance(
+        public proposal_id: field,
+        public proposal_type: u8,
+        public target: field,
+        public payload_1: u128,
+        public payload_2: field,
+    ) -> Future {
+        // TREASURY proposals are executed via execute_treasury_proposal instead.
+        assert(proposal_type != PROPOSAL_TREASURY);
+
+        let is_config_update: bool = proposal_type == PROPOSAL_FEE_CHANGE || proposal_type == PROPOSAL_PARAMETER;
+        let is_pause_update: bool = proposal_type == PROPOSAL_EMERGENCY_PAUSE;
+        let config_key: field = is_config_update ? target : (is_pause_update ? CONFIG_PAUSE_STATE : CONFIG_NOOP);
+        let config_value: u128 = (is_config_update || is_pause_update) ? payload_1 : 0u128;
+
+        let aleo_future: Future = veiled_markets_v35.aleo/set_governance_value(config_key, config_value);
+        let usdcx_future: Future = veiled_markets_usdcx_v5.aleo/set_governance_value(config_key, config_value);
+        let usad_future: Future = veiled_markets_usad_v12.aleo/set_governance_value(config_key, config_value);
+
+        return execute_governance_fin(
+            aleo_future,
+            usdcx_future,
+            usad_future,
+            proposal_id,
+            proposal_type,
+            target,
+            payload_1,
+            payload_2,
+        );
     }
 
-    async function execute_governance_fin(proposal_id: field) {
+    async function execute_governance_fin(
+        aleo_future: Future,
+        usdcx_future: Future,
+        usad_future: Future,
+        proposal_id: field,
+        proposal_type: u8,
+        target: field,
+        payload_1: u128,
+        payload_2: field,
+    ) {
+        aleo_future.await();
+        usdcx_future.await();
+        usad_future.await();
+
         let proposal: GovernanceProposal = governance_proposals.get(proposal_id);
         assert(proposal.status == STATUS_PASSED);
-        assert(proposal.timelock_until > 0u64);
-        assert(block.height as u64 > proposal.timelock_until);
+        assert(proposal.timelock_until == 0u64 || block.height as u64 > proposal.timelock_until);
+        assert(proposal.proposal_type == proposal_type);
+        assert(proposal.target == target);
+        assert(proposal.payload_1 == payload_1);
+        assert(proposal.payload_2 == payload_2);
 
-        // v4 fix: TREASURY proposals must use execute_treasury_proposal, not this function
+        // TREASURY proposals must use execute_treasury_proposal.
         assert(proposal.proposal_type != PROPOSAL_TREASURY);
 
-        // v4: Execute based on proposal_type
-        // RESOLVER_ELECTION: payload_2 = resolver address as field, payload_1 = 1 (approve) or 0 (revoke)
-        if (proposal.proposal_type == PROPOSAL_RESOLVER_ELECTION) {
-            let approved: bool = proposal.payload_1 > 0u128;
-            // Store in governance's own approved registry
-            // Governance tracks resolver eligibility; market contracts use Open Voting + Bond
-            governance_approved_resolvers.set(proposal.payload_2, approved);
-        }
-
-        // FEE_CHANGE: target = fee_key (as field), payload_1 = new fee value
-        if (proposal.proposal_type == PROPOSAL_FEE_CHANGE) {
+        if (proposal.proposal_type == PROPOSAL_FEE_CHANGE || proposal.proposal_type == PROPOSAL_PARAMETER) {
             governance_params.set(proposal.target, proposal.payload_1);
         }
 
-        // PARAMETER: target = param_key (as field), payload_1 = new value
-        if (proposal.proposal_type == PROPOSAL_PARAMETER) {
-            governance_params.set(proposal.target, proposal.payload_1);
-        }
-
-        // EMERGENCY_PAUSE: payload_1 = 1 (pause) or 0 (unpause)
         if (proposal.proposal_type == PROPOSAL_EMERGENCY_PAUSE) {
             let pause_state: bool = proposal.payload_1 > 0u128;
             governance_paused.set(0u8, pause_state);
+            governance_params.set(CONFIG_PAUSE_STATE, proposal.payload_1);
         }
 
-        // TREASURY: handled by execute_treasury_proposal (T29) which does actual ALEO transfer
-        // RESOLVE_DISPUTE: handled by governance_resolve (T14)
+        // RESOLVER_ELECTION: payload_2 = resolver address as field, payload_1 = 1 (approve) or 0 (revoke)
+        if (proposal.proposal_type == PROPOSAL_RESOLVER_ELECTION) {
+            let approved: bool = proposal.payload_1 > 0u128;
+            governance_approved_resolvers.set(proposal.payload_2, approved);
+        }
 
+        // RESOLVE_DISPUTE proposals are finalized via governance_resolve (T14).
         governance_proposals.set(proposal_id, GovernanceProposal {
             proposal_id: proposal.proposal_id, proposer: proposal.proposer,
             proposal_type: proposal.proposal_type, target: proposal.target,
@@ -697,7 +736,7 @@ program veiled_governance_v4.aleo {
         private credits_in: credits.aleo/credits,
     ) -> (ResolverStakeReceipt, credits.aleo/credits, Future) {
         let receipt: ResolverStakeReceipt = ResolverStakeReceipt {
-            owner: self.caller,
+            owner: credits_in.owner,
             stake_amount: RESOLVER_STAKE_BRONZE,
             tier: TIER_BRONZE,
             registered_at: 0u64,
@@ -706,7 +745,7 @@ program veiled_governance_v4.aleo {
         let (change, transfer_future): (credits.aleo/credits, Future) =
             credits.aleo/transfer_private_to_public(credits_in, self.address, RESOLVER_STAKE_BRONZE);
 
-        return (receipt, change, register_resolver_fin(transfer_future, self.caller));
+        return (receipt, change, register_resolver_fin(transfer_future, credits_in.owner));
     }
 
     async function register_resolver_fin(

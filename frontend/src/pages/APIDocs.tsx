@@ -160,40 +160,47 @@ const value = await client.getMappingValue('markets', '123field')`}</CodeBlock>
               <h2 className="text-lg font-semibold text-white">AMM Utilities</h2>
             </div>
             <p className="text-surface-400 mb-4">
-              Pure functions for FPMM price and trade calculations. All amounts use microcredits (1 token = 1,000,000 microcredits).
+              Contract-parity helpers for FPMM price, trade, and liquidity calculations. All amounts use microcredits
+              (1 token = 1,000,000 microcredits).
             </p>
 
             <CodeBlock title="typescript">{`import {
-  calculateOutcomePrice,
-  calculateAllPrices,
-  calculateTradeFees,
-  calculateBuySharesOut,
-  calculateSellTokensOut,
-  calculateLPSharesOut,
-  calculateLPTokensOut,
+  calculateContractAllPrices,
+  calculateContractOutcomePrice,
+  calculateContractTradeFees,
+  quoteContractBuy,
+  quoteContractSell,
+  quoteContractAddLiquidity,
   calculateMinSharesOut,
 } from '@veiled-markets/sdk'
 
-// Get current prices (supports 2-4 outcome markets)
-const prices = calculateAllPrices(pool.reserves)  // number[] (0.0 - 1.0 each)
-const yesPrice = calculateOutcomePrice(pool.reserves, Outcome.Yes)
+const reserves = {
+  reserve1: pool.reserve1,
+  reserve2: pool.reserve2,
+  reserve3: pool.reserve3,
+  reserve4: pool.reserve4,
+  numOutcomes: market.numOutcomes,
+}
 
-// Calculate trade fees (2% total)
-const fees = calculateTradeFees(1_000_000n)
-// { protocolFee: 5000n, creatorFee: 5000n, lpFee: 10000n, total: 20000n }
+// Get current prices (supports 2-4 outcome markets)
+const prices = calculateContractAllPrices(reserves)
+const outcomeOnePrice = calculateContractOutcomePrice(reserves, Outcome.One)
+
+// Calculate trade fees (2% total by default)
+const fees = calculateContractTradeFees(1_000_000n)
+// { protocolFee: 5000n, creatorFee: 5000n, lpFee: 10000n, totalFees: 20000n, ... }
 
 // Estimate shares received from a buy
-const sharesOut = calculateBuySharesOut(pool.reserves, Outcome.Yes, 1_000_000n)
+const buyQuote = quoteContractBuy(reserves, Outcome.Yes, 1_000_000n)
 
-// Estimate tokens received from a sell
-const tokensOut = calculateSellTokensOut(pool.reserves, Outcome.Yes, sharesAmount)
+// Estimate how many shares are needed to receive 0.5 tokens on a sell
+const sellQuote = quoteContractSell(reserves, Outcome.Yes, 500_000n)
 
 // Calculate LP shares for a deposit
-const lpShares = calculateLPSharesOut(pool, depositAmount)
-const lpTokens = calculateLPTokensOut(pool, depositAmount)
+const liquidityQuote = quoteContractAddLiquidity(reserves, pool.totalLPShares, depositAmount)
 
-// Calculate minimum shares with slippage tolerance
-const minShares = calculateMinSharesOut(expectedShares, slippageBps)`}</CodeBlock>
+// Apply slippage tolerance to the parity quote
+const minShares = calculateMinSharesOut(buyQuote.sharesOut, slippageBps)`}</CodeBlock>
           </section>
 
           {/* Types */}
@@ -233,20 +240,19 @@ interface MarketWithStats extends Market {
   pool: AMMPool
   resolution?: MarketResolution
   fees?: MarketFees
-  prices: number[]               // Outcome prices (0-1 range)
+  outcomePrices: number[]        // Outcome prices (0-1 range)
+  outcomePercentages: number[]   // Outcome percentages (0-100)
   totalVolume: bigint
   totalLiquidity: bigint
-  potentialPayouts: number[]     // 1/price for each outcome
-  yesPercentage: number          // Legacy binary fields
-  noPercentage: number
-}
+  outcomePayouts: number[]       // 1/price for each outcome
+} 
 
 interface AMMPool {
   marketId: string               // field
-  reserve1: bigint               // u128 — Outcome 1 shares in pool
-  reserve2: bigint               // u128 — Outcome 2 shares
-  reserve3: bigint               // u128 — Outcome 3 (0 if binary)
-  reserve4: bigint               // u128 — Outcome 4 (0 if binary)
+  reserve1: bigint               // u128 — Shares backing the first configured outcome label
+  reserve2: bigint               // u128 — Shares backing the second configured outcome label
+  reserve3: bigint               // u128 — Shares backing the third configured outcome label (0 when unused)
+  reserve4: bigint               // u128 — Shares backing the fourth configured outcome label (0 when unused)
   totalLiquidity: bigint         // u128
   totalLPShares: bigint          // u128
   totalVolume: bigint            // u128
@@ -311,7 +317,7 @@ interface DisputeData {
                 <p className="text-xs text-surface-500 mb-3">Governance program — 29 transitions</p>
                 <p className="text-sm text-surface-400">
                   On-chain governance for protocol decisions: dispute resolution overrides, fee changes, 3-of-N
-                  multisig treasury management, parameter updates, and emergency pause. ALEO native staking governance is Coming Soon.
+                  multisig treasury management, parameter updates, and emergency pause. The frontend now exposes the operational proposal and execution flows on testnet as well.
                 </p>
               </div>
             </div>

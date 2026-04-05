@@ -35,7 +35,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'How do I place a bet?',
-    answer: 'Connect your wallet, navigate to a market, choose an outcome (YES or NO), enter your bet amount, and confirm the transaction in your wallet. The FPMM (Fixed Product Market Maker) determines how many shares you receive based on current market reserves. Your position is encrypted on-chain — only you can see your bet details.',
+    answer: 'Connect your wallet, navigate to a market, choose an outcome, enter your bet amount, and confirm the transaction in your wallet. Markets can have 2, 3, or 4 outcomes. The FPMM (Fixed Product Market Maker) determines how many shares you receive based on current market reserves. Your position is encrypted on-chain — only you can see your bet details.',
   },
   {
     category: 'Trading',
@@ -61,7 +61,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Markets',
     question: 'How are markets created?',
-    answer: 'Anyone with a connected wallet can create a market by specifying a question, deadline (in block height), category, initial liquidity amount, and token type. The creator provides the initial liquidity and receives LP shares. Market creation requires a blockchain transaction.',
+    answer: 'Anyone with a connected wallet can create a market by specifying a question, 2, 3, or 4 outcome labels, deadline (in block height), category, initial liquidity amount, and token type. The creator provides the initial liquidity and receives LP shares. Market creation requires a blockchain transaction.',
   },
   {
     category: 'Markets',
@@ -113,7 +113,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Privacy & Security',
     question: 'Can anyone see my bets?',
-    answer: 'No. Your bet amounts, outcome choices, and positions are private by default on the Aleo blockchain. Only you can view your own records using your view key. The protocol front-end decrypts your data locally in the browser.',
+    answer: 'No. Your bet amounts, selected outcome, and resulting positions are private by default on the Aleo blockchain. Only you can view your own records using your view key. The protocol front-end decrypts your data locally in the browser.',
   },
   {
     category: 'Privacy & Security',
@@ -124,7 +124,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Governance',
     question: 'How does governance work?',
-    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v4.aleo, 29 transitions) powered by ALEO token voting. Features include dispute resolution overrides, fee changes, 3-of-N multisig treasury management, parameter updates, and emergency pause. ALEO native staking governance is Coming Soon in the UI.',
+    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v4.aleo, 29 transitions) powered by ALEO token voting. Features include dispute resolution overrides, fee changes, 3-of-N multisig treasury management, parameter updates, and emergency pause. The app UI now exposes the operational proposal, voting, execution, resolver, and reward flows needed to use that governance system on testnet.',
   },
   {
     category: 'Governance',

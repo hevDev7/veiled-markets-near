@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Wallet, BarChart3, Lock, Zap, Target, ArrowRight } from 'lucide-react'
+import { Wallet, Lock, Zap, Target } from 'lucide-react'
 
 const steps = [
   {
