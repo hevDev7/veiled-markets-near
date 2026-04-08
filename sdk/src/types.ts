@@ -1,7 +1,8 @@
 // ============================================================================
 // VEILED MARKETS SDK - Type Definitions
 // ============================================================================
-// Matches the Leo contract: veiled_markets_v35.aleo
+// Matches the Leo contracts: veiled_markets_v37.aleo, veiled_markets_usdcx_v7.aleo,
+// veiled_markets_usad_v14.aleo, veiled_governance_v6.aleo
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -216,6 +217,7 @@ export interface CreateMarketParams {
   deadline: Date;
   resolutionDeadline: Date;
   resolver?: string;             // Defaults to creator
+  creatorOwner?: string;         // Defaults to self.caller (signer)
   tokenType?: TokenType;         // Defaults to ALEO
   initialLiquidity: bigint;      // Required to seed AMM
 }
@@ -227,7 +229,9 @@ export interface BuySharesParams {
   marketId: string;
   outcome: number;               // 1-4
   amountIn: bigint;              // Amount in microcredits
+  expectedShares?: bigint;       // Quoted from contract math; required by contract
   minSharesOut?: bigint;         // Slippage protection
+  shareNonce?: string;           // Caller-provided field nonce; auto-generated if omitted
 }
 
 /** Legacy alias */
@@ -237,9 +241,14 @@ export type PlaceBetParams = BuySharesParams;
  * Sell shares parameters
  */
 export interface SellSharesParams {
-  shareRecord: string;           // Encrypted OutcomeShare record
-  sharesToSell: bigint;
+  shareRecord: string;           // Encrypted OutcomeShare record (appended by wallet)
+  sharesToSell: bigint;          // Legacy alias for maxSharesUsed
+  tokensDesired?: bigint;        // Gross tokens out (before fees)
+  maxSharesUsed?: bigint;        // Max OutcomeShare quantity to consume
   minTokensOut?: bigint;         // Slippage protection
+  protocolFeeBps?: bigint;       // Fee snapshot from market_fees
+  creatorFeeBps?: bigint;
+  lpFeeBps?: bigint;
 }
 
 /**
@@ -248,6 +257,8 @@ export interface SellSharesParams {
 export interface AddLiquidityParams {
   marketId: string;
   amount: bigint;
+  expectedLpShares?: bigint;     // Quoted from contract math
+  lpNonce?: string;              // Caller-provided; auto-generated if omitted
 }
 
 // RemoveLiquidityParams removed in v17 — LP locked until finalize/cancel
@@ -360,3 +371,22 @@ export const NETWORK_CONFIG = {
     explorerUrl: 'https://testnet.explorer.provable.com',
   },
 } as const;
+
+/**
+ * Deployed program IDs (post-audit hardening, 2026-04-08)
+ */
+export const PROGRAM_IDS = {
+  ALEO_MARKET: 'veiled_markets_v37.aleo',
+  USDCX_MARKET: 'veiled_markets_usdcx_v7.aleo',
+  USAD_MARKET: 'veiled_markets_usad_v14.aleo',
+  GOVERNANCE: 'veiled_governance_v6.aleo',
+} as const;
+
+/**
+ * Map TokenType -> deployed market program ID
+ */
+export const MARKET_PROGRAM_BY_TOKEN: Record<TokenType, string> = {
+  [TokenType.ALEO]: PROGRAM_IDS.ALEO_MARKET,
+  [TokenType.USDCX]: PROGRAM_IDS.USDCX_MARKET,
+  [TokenType.USAD]: PROGRAM_IDS.USAD_MARKET,
+};

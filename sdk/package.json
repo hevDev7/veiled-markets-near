@@ -1,10 +1,15 @@
 {
   "name": "@veiled-markets/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript SDK for Veiled Markets prediction protocol on Aleo",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.mjs",

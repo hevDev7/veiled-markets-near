@@ -15,7 +15,7 @@ describe('VeiledMarketsClient', () => {
   beforeEach(() => {
     client = createClient({
       network: 'testnet',
-      programId: 'veiled_markets_v35.aleo',
+      programId: 'veiled_markets_v37.aleo',
     });
     vi.clearAllMocks();
   });
@@ -23,7 +23,7 @@ describe('VeiledMarketsClient', () => {
   describe('constructor', () => {
     it('should create client with default config', () => {
       const defaultClient = createClient();
-      expect(defaultClient.programId).toBe('veiled_markets_v35.aleo');
+      expect(defaultClient.programId).toBe('veiled_markets_v37.aleo');
       expect(defaultClient.network).toBe('testnet');
     });
 
@@ -128,6 +128,7 @@ describe('VeiledMarketsClient', () => {
         initialLiquidity: 10000000n,
       });
 
+      expect(result.programId).toBe('veiled_markets_v37.aleo');
       expect(result.functionName).toBe('create_market');
       expect(result.inputs.length).toBe(8);
       expect(result.inputs[1]).toBe('3u8'); // category
@@ -151,6 +152,7 @@ describe('VeiledMarketsClient', () => {
         initialLiquidity: 5000000n,
       });
 
+      expect(result.programId).toBe('veiled_markets_usdcx_v7.aleo');
       expect(result.functionName).toBe('create_market_usdcx');
     });
   });
@@ -163,8 +165,9 @@ describe('VeiledMarketsClient', () => {
         outcome: Outcome.Yes,
       });
 
-      expect(result.functionName).toBe('buy_shares_public');
-      expect(result.inputs.length).toBe(5);
+      expect(result.programId).toBe('veiled_markets_v37.aleo');
+      expect(result.functionName).toBe('buy_shares_private');
+      expect(result.inputs.length).toBe(6);
       expect(result.inputs[0]).toBe('test_market_id');
       expect(result.inputs[1]).toBe('1u8'); // outcome
       expect(result.inputs[2]).toBe('1000000u128'); // amountIn
@@ -175,7 +178,17 @@ describe('VeiledMarketsClient', () => {
         { marketId: 'id', amountIn: 1000n, outcome: Outcome.Yes },
         TokenType.USDCX,
       );
-      expect(result.functionName).toBe('buy_shares_public_usdcx');
+      expect(result.programId).toBe('veiled_markets_usdcx_v7.aleo');
+      expect(result.functionName).toBe('buy_shares_usdcx');
+    });
+
+    it('should use USAD function name for USAD token', () => {
+      const result = client.buildBuySharesInputs(
+        { marketId: 'id', amountIn: 1000n, outcome: Outcome.Yes },
+        TokenType.USAD,
+      );
+      expect(result.programId).toBe('veiled_markets_usad_v14.aleo');
+      expect(result.functionName).toBe('buy_shares_usad');
     });
 
     it('should use correct multi-outcome values', () => {
@@ -195,10 +208,10 @@ describe('VeiledMarketsClient', () => {
         sharesToSell: 500000n,
       });
 
+      expect(result.programId).toBe('veiled_markets_v37.aleo');
       expect(result.functionName).toBe('sell_shares');
-      expect(result.inputs.length).toBe(3);
-      expect(result.inputs[0]).toBe('encrypted_record_data');
-      expect(result.inputs[1]).toBe('500000u128');
+      expect(result.inputs.length).toBe(5); // tokens_desired, max_shares, 3 fee bps
+      expect(result.inputs[0]).toBe('500000u128');
     });
   });
 
@@ -209,31 +222,50 @@ describe('VeiledMarketsClient', () => {
         amount: 5000000n,
       });
 
+      expect(result.programId).toBe('veiled_markets_v37.aleo');
       expect(result.functionName).toBe('add_liquidity');
-      expect(result.inputs).toEqual(['market_123', '5000000u128']);
+      expect(result.inputs[0]).toBe('market_123');
+      expect(result.inputs[1]).toBe('5000000u128');
+      expect(result.inputs.length).toBe(4); // marketId, amount, expected_lp, lp_nonce
     });
   });
 
   describe('buildResolveMarketInputs', () => {
-    it('should build valid resolve market inputs', () => {
-      const inputs = client.buildResolveMarketInputs('market_id', Outcome.Yes);
-      expect(inputs).toEqual(['market_id', '1u8']);
+    it('should build valid vote_outcome inputs', () => {
+      const call = client.buildResolveMarketInputs('market_id', Outcome.Yes);
+      expect(call.programId).toBe('veiled_markets_v37.aleo');
+      expect(call.functionName).toBe('vote_outcome');
+      expect(call.inputs).toEqual(['market_id', '1u8']);
     });
   });
 
   describe('buildDisputeResolutionInputs', () => {
     it('should build valid dispute inputs', () => {
       const result = client.buildDisputeResolutionInputs('market_id', 2);
+      expect(result.programId).toBe('veiled_markets_v37.aleo');
       expect(result.functionName).toBe('dispute_resolution');
       expect(result.inputs).toEqual(['market_id', '2u8']);
+    });
+
+    it('should route to USDCX program for USDCX market', () => {
+      const result = client.buildDisputeResolutionInputs('market_id', 2, TokenType.USDCX);
+      expect(result.programId).toBe('veiled_markets_usdcx_v7.aleo');
+      expect(result.functionName).toBe('dispute_resolution');
     });
   });
 
   describe('buildRedeemSharesInputs', () => {
     it('should build valid redeem inputs', () => {
       const result = client.buildRedeemSharesInputs('share_record');
+      expect(result.programId).toBe('veiled_markets_v37.aleo');
       expect(result.functionName).toBe('redeem_shares');
       expect(result.inputs).toEqual(['share_record']);
+    });
+
+    it('should route USDCX redemptions to v7 with token-suffixed name', () => {
+      const result = client.buildRedeemSharesInputs('share_record', TokenType.USDCX);
+      expect(result.programId).toBe('veiled_markets_usdcx_v7.aleo');
+      expect(result.functionName).toBe('redeem_shares_usdcx');
     });
   });
 
@@ -337,19 +369,13 @@ describe('VeiledMarketsClient', () => {
     });
   });
 
-  describe('legacy aliases', () => {
-    it('buildPlaceBetInputs should still work', () => {
-      const inputs = client.buildPlaceBetInputs(
-        { marketId: 'test_id', amountIn: 1000000n, outcome: 1 },
-        'mock_credits_record',
-      );
-      expect(inputs.length).toBe(4);
-      expect(inputs[0]).toBe('test_id');
-    });
-
-    it('buildClaimWinningsInputs should still work', () => {
-      const inputs = client.buildClaimWinningsInputs('share_record');
-      expect(inputs).toEqual(['share_record']);
+  describe('getMarketProgramId', () => {
+    it('should map TokenType to deployed program ID', async () => {
+      const { getMarketProgramId } = await import('../client');
+      const { TokenType: TT } = await import('../types');
+      expect(getMarketProgramId(TT.ALEO)).toBe('veiled_markets_v37.aleo');
+      expect(getMarketProgramId(TT.USDCX)).toBe('veiled_markets_usdcx_v7.aleo');
+      expect(getMarketProgramId(TT.USAD)).toBe('veiled_markets_usad_v14.aleo');
     });
   });
 });

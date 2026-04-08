@@ -1,7 +1,8 @@
 // ============================================================================
 // VEILED MARKETS SDK - Aleo Client
 // ============================================================================
-// Main client for interacting with the veiled_markets_v35.aleo program
+// Main client for interacting with the veiled_markets_v37.aleo program (and
+// USDCX v7 / USAD v14 variants via TokenType)
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
@@ -26,6 +27,8 @@ import {
   MarketStatus,
   TokenType,
   NETWORK_CONFIG,
+  PROGRAM_IDS,
+  MARKET_PROGRAM_BY_TOKEN,
   PROTOCOL_FEE_BPS,
   CREATOR_FEE_BPS,
   LP_FEE_BPS,
@@ -43,7 +46,78 @@ import { calculateContractAllPrices } from './contract-math';
  */
 const DEFAULT_CONFIG: VeiledMarketsConfig = {
   network: 'testnet',
-  programId: 'veiled_markets_v35.aleo',
+  programId: PROGRAM_IDS.ALEO_MARKET,
+};
+
+/**
+ * Resolve the deployed market program ID for a given token type.
+ * Useful when the same client instance needs to query different token markets.
+ */
+export function getMarketProgramId(tokenType: TokenType): string {
+  const programId = MARKET_PROGRAM_BY_TOKEN[tokenType];
+  if (!programId) throw new Error(`Unknown TokenType: ${tokenType}`);
+  return programId;
+}
+
+/**
+ * Self-describing transaction call: caller has everything needed to execute.
+ */
+export interface MarketCall {
+  programId: string;
+  functionName: string;
+  inputs: string[];
+}
+
+// ----------------------------------------------------------------------------
+// Per-token function name tables (verified against deployed contracts)
+//   v37 (ALEO):  create_market, buy_shares_private, sell_shares, add_liquidity,
+//                redeem_shares, claim_refund, withdraw_creator_fees, dispute_resolution
+//   v7 (USDCX):  create_market_usdcx, buy_shares_usdcx, sell_shares_usdcx,
+//                add_liquidity_usdcx, redeem_shares_usdcx, claim_refund_usdcx,
+//                withdraw_fees_usdcx, dispute_resolution
+//   v14 (USAD):  create_market_usad, buy_shares_usad, sell_shares_usad,
+//                add_liquidity_usad, redeem_shares_usad, claim_refund_usad,
+//                withdraw_fees_usad, dispute_resolution
+// Note: dispute_resolution, vote_outcome, finalize_votes, confirm_resolution,
+//       close_market, cancel_market are SHARED names (no token suffix).
+// ----------------------------------------------------------------------------
+
+const FN_NAMES: Record<TokenType, {
+  createMarket: string;
+  buyShares: string;
+  sellShares: string;
+  addLiquidity: string;
+  redeemShares: string;
+  claimRefund: string;
+  withdrawFees: string;
+}> = {
+  [TokenType.ALEO]: {
+    createMarket: 'create_market',
+    buyShares: 'buy_shares_private',
+    sellShares: 'sell_shares',
+    addLiquidity: 'add_liquidity',
+    redeemShares: 'redeem_shares',
+    claimRefund: 'claim_refund',
+    withdrawFees: 'withdraw_creator_fees',
+  },
+  [TokenType.USDCX]: {
+    createMarket: 'create_market_usdcx',
+    buyShares: 'buy_shares_usdcx',
+    sellShares: 'sell_shares_usdcx',
+    addLiquidity: 'add_liquidity_usdcx',
+    redeemShares: 'redeem_shares_usdcx',
+    claimRefund: 'claim_refund_usdcx',
+    withdrawFees: 'withdraw_fees_usdcx',
+  },
+  [TokenType.USAD]: {
+    createMarket: 'create_market_usad',
+    buyShares: 'buy_shares_usad',
+    sellShares: 'sell_shares_usad',
+    addLiquidity: 'add_liquidity_usad',
+    redeemShares: 'redeem_shares_usad',
+    claimRefund: 'claim_refund_usad',
+    withdrawFees: 'withdraw_fees_usad',
+  },
 };
 
 /**
@@ -215,10 +289,7 @@ export class VeiledMarketsClient {
   // TRANSACTION BUILDERS
   // ========================================================================
 
-  async buildCreateMarketInputs(params: CreateMarketParams): Promise<{
-    functionName: string;
-    inputs: string[];
-  }> {
+  async buildCreateMarketInputs(params: CreateMarketParams): Promise<MarketCall> {
     const questionHash = await hashToField(params.question);
     const currentBlock = await this.getCurrentBlockHeight();
 
@@ -226,10 +297,13 @@ export class VeiledMarketsClient {
     const resolutionBlocks = BigInt(Math.floor((params.resolutionDeadline.getTime() - Date.now()) / 15000));
     const tokenType = params.tokenType ?? TokenType.ALEO;
 
-    const functionName = tokenType === TokenType.USDCX ? 'create_market_usdcx' : 'create_market';
-
+    // Contract signature (all 3 token variants):
+    //   create_market[_token](question_hash, category, num_outcomes,
+    //                          deadline, resolution_deadline, resolver,
+    //                          creator_owner, initial_liquidity)
     return {
-      functionName,
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].createMarket,
       inputs: [
         questionHash,
         `${params.category}u8`,
@@ -237,171 +311,167 @@ export class VeiledMarketsClient {
         `${currentBlock + deadlineBlocks}u64`,
         `${currentBlock + resolutionBlocks}u64`,
         params.resolver || 'self.caller',
-        `${tokenType}u8`,
+        params.creatorOwner || 'self.caller',
         `${params.initialLiquidity}u128`,
       ],
     };
   }
 
-  buildBuySharesInputs(params: BuySharesParams, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'buy_shares_public_usdcx'
-      : 'buy_shares_public';
-
-    const nonce = `${BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))}field`;
+  /**
+   * Build inputs for buy_shares_* (private path).
+   *
+   * Contract signature (all 3 variants take expected_shares + share_nonce):
+   *   buy_shares_*(market_id, outcome, amount_in, expected_shares,
+   *                min_shares_out, share_nonce, <token_record>, [<merkle_proofs>])
+   *
+   * The token record (and MerkleProofs for USDCX/USAD) are appended by the
+   * wallet layer at signing time, since they require live record scanning.
+   * This builder returns only the public/computed inputs.
+   */
+  buildBuySharesInputs(
+    params: BuySharesParams,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    const shareNonce = params.shareNonce
+      ?? `${BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))}field`;
 
     return {
-      functionName,
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].buyShares,
       inputs: [
         params.marketId,
         `${params.outcome}u8`,
         `${params.amountIn}u128`,
+        `${params.expectedShares ?? 0n}u128`,
         `${params.minSharesOut ?? 0n}u128`,
-        nonce,
+        shareNonce,
       ],
     };
   }
 
   /**
-   * Build inputs for buy_shares_private_usdcx (flattened MerkleProof inputs).
-   * Uses transfer_private_to_public with Token record for full privacy.
+   * Build inputs for sell_shares_*.
+   * Contract takes the OutcomeShare record + fee snapshot (3 bps params).
+   * The share record is appended by the wallet at signing time.
    */
-  buildBuySharesPrivateUsdcxInputs(params: {
-    marketId: string;
-    outcome: number;
-    amountIn: bigint;
-    expectedShares: bigint;
-    minSharesOut: bigint;
-    tokenRecord: string;
-    merkleProofs: { siblings: string[]; leafIndex: number }[];
-  }): { functionName: string; inputs: string[] } {
-    const nonce = `${BigInt(Math.floor(Math.random() * 2 ** 64))}field`;
-    const inputs: string[] = [
-      params.marketId,
-      `${params.outcome}u8`,
-      `${params.amountIn}u128`,
-      `${params.expectedShares}u128`,
-      `${params.minSharesOut}u128`,
-      nonce,
-      params.tokenRecord,
-      // Flattened MerkleProof 0
-      `[${params.merkleProofs[0].siblings.join(', ')}]`,
-      `${params.merkleProofs[0].leafIndex}u32`,
-      // Flattened MerkleProof 1
-      `[${params.merkleProofs[1].siblings.join(', ')}]`,
-      `${params.merkleProofs[1].leafIndex}u32`,
-    ];
-    return { functionName: 'buy_shares_private_usdcx', inputs };
-  }
-
-  buildSellSharesInputs(params: SellSharesParams, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'sell_shares_usdcx'
-      : 'sell_shares';
-
+  buildSellSharesInputs(
+    params: SellSharesParams,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
     return {
-      functionName,
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].sellShares,
       inputs: [
-        params.shareRecord,
-        `${params.sharesToSell}u128`,
-        `${params.minTokensOut ?? 0n}u128`,
+        `${params.tokensDesired ?? params.sharesToSell}u128`,
+        `${params.maxSharesUsed ?? params.sharesToSell}u128`,
+        `${params.protocolFeeBps ?? PROTOCOL_FEE_BPS}u128`,
+        `${params.creatorFeeBps ?? CREATOR_FEE_BPS}u128`,
+        `${params.lpFeeBps ?? LP_FEE_BPS}u128`,
       ],
     };
   }
 
-  buildAddLiquidityInputs(params: AddLiquidityParams, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'add_liquidity_usdcx'
-      : 'add_liquidity';
-
+  /**
+   * Build inputs for add_liquidity_*.
+   * Contract signature (all variants):
+   *   add_liquidity[_token](market_id, amount, expected_lp_shares, lp_nonce, <token_in>)
+   */
+  buildAddLiquidityInputs(
+    params: AddLiquidityParams,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    const lpNonce = params.lpNonce
+      ?? `${BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))}field`;
     return {
-      functionName,
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].addLiquidity,
       inputs: [
         params.marketId,
         `${params.amount}u128`,
+        `${params.expectedLpShares ?? 0n}u128`,
+        lpNonce,
       ],
     };
   }
 
   // buildRemoveLiquidityInputs removed in v17 — LP locked until finalize/cancel
 
-  buildCloseMarketInputs(marketId: string): string[] {
-    return [marketId];
+  buildCloseMarketInputs(marketId: string, tokenType: TokenType = TokenType.ALEO): MarketCall {
+    return {
+      programId: getMarketProgramId(tokenType),
+      functionName: 'close_market',
+      inputs: [marketId],
+    };
   }
 
-  buildResolveMarketInputs(marketId: string, outcome: number): string[] {
-    return [marketId, `${outcome}u8`];
+  /** vote_outcome on the market contract. */
+  buildResolveMarketInputs(
+    marketId: string,
+    outcome: number,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    return {
+      programId: getMarketProgramId(tokenType),
+      functionName: 'vote_outcome',
+      inputs: [marketId, `${outcome}u8`],
+    };
   }
 
-  buildFinalizeResolutionInputs(marketId: string): string[] {
-    return [marketId];
+  buildFinalizeResolutionInputs(
+    marketId: string,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    return {
+      programId: getMarketProgramId(tokenType),
+      functionName: 'finalize_votes',
+      inputs: [marketId],
+    };
   }
 
+  /** dispute_resolution — same name across all 3 token contracts. */
   buildDisputeResolutionInputs(
     marketId: string,
     proposedOutcome: number,
     tokenType: TokenType = TokenType.ALEO,
-  ): { functionName: string; inputs: string[] } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'dispute_resolution_usdcx'
-      : 'dispute_resolution';
+  ): MarketCall {
     return {
-      functionName,
+      programId: getMarketProgramId(tokenType),
+      functionName: 'dispute_resolution',
       inputs: [marketId, `${proposedOutcome}u8`],
     };
   }
 
-  buildRedeemSharesInputs(shareRecord: string, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'redeem_shares_usdcx'
-      : 'redeem_shares';
-    return { functionName, inputs: [shareRecord] };
+  buildRedeemSharesInputs(
+    shareRecord: string,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    return {
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].redeemShares,
+      inputs: [shareRecord],
+    };
   }
 
-  buildClaimRefundInputs(shareRecord: string, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'claim_refund_usdcx'
-      : 'claim_refund';
-    return { functionName, inputs: [shareRecord] };
+  buildClaimRefundInputs(
+    shareRecord: string,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    return {
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].claimRefund,
+      inputs: [shareRecord],
+    };
   }
 
-  buildWithdrawCreatorFeesInputs(marketId: string, tokenType: TokenType = TokenType.ALEO): {
-    functionName: string;
-    inputs: string[];
-  } {
-    const functionName = tokenType === TokenType.USDCX
-      ? 'withdraw_creator_fees_usdcx'
-      : 'withdraw_creator_fees';
-    return { functionName, inputs: [marketId] };
-  }
-
-  // Legacy aliases
-  buildPlaceBetInputs(params: BuySharesParams, creditsRecord: string): string[] {
-    return [
-      params.marketId,
-      `${params.amountIn}u128`,
-      `${params.outcome}u8`,
-      creditsRecord,
-    ];
-  }
-
-  buildClaimWinningsInputs(shareRecord: string): string[] {
-    return [shareRecord];
+  buildWithdrawCreatorFeesInputs(
+    marketId: string,
+    tokenType: TokenType = TokenType.ALEO,
+  ): MarketCall {
+    return {
+      programId: getMarketProgramId(tokenType),
+      functionName: FN_NAMES[tokenType].withdrawFees,
+      inputs: [marketId],
+    };
   }
 
   // ========================================================================

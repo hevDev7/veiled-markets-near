@@ -1,12 +1,31 @@
 // ============================================================================
 // VEILED MARKETS SDK - Main Entry Point
 // ============================================================================
-// TypeScript SDK for interacting with the veiled_markets_v35.aleo program
+// TypeScript SDK for the Veiled Markets protocol on Aleo
+// Programs: veiled_markets_v37.aleo, veiled_markets_usdcx_v7.aleo,
+// veiled_markets_usad_v14.aleo, veiled_governance_v6.aleo
 // AMM-based multi-outcome prediction markets
 // ============================================================================
 
 // Client
-export { VeiledMarketsClient, createClient } from './client';
+export { VeiledMarketsClient, createClient, getMarketProgramId } from './client';
+
+// Program IDs (deployed contracts)
+export { PROGRAM_IDS, MARKET_PROGRAM_BY_TOKEN } from './types';
+
+// Governance client (veiled_governance_v6.aleo)
+export {
+  VeiledGovernanceClient,
+  createGovernanceClient,
+  ESCALATION_TIER_NONE,
+  ESCALATION_TIER_COMMITTEE,
+  ESCALATION_TIER_COMMUNITY,
+} from './governance-client';
+export type {
+  CommitteeDecision,
+  MarketDisputeState,
+  ResolverProfile,
+} from './governance-client';
 
 // Types - Enums
 export {
