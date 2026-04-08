@@ -26,6 +26,7 @@ import {
   getMarketDispute,
   getMarketResolution,
   getCurrentBlockHeight,
+  hasUserVotedOnMarket,
   MARKET_STATUS,
   type MarketResolutionData,
   getProgramIdForMarket,
@@ -39,7 +40,7 @@ interface ResolvePanelProps {
   onResolutionChange?: () => void
 }
 
-type ResolveStep = 'close' | 'submit' | 'challenge' | 'finalize' | 'cancel' | 'done'
+type ResolveStep = 'close' | 'submit' | 'challenge' | 'disputed' | 'finalize' | 'cancel' | 'done'
 
 // v33 constants (must match contract)
 const MIN_RESOLUTION_BOND = 1_000_000n // 1 ALEO
@@ -214,9 +215,11 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     return () => { mounted = false; clearInterval(interval) }
   }, [])
 
-  // Determine current step (v34: Multi-Voter Quorum + Dispute)
+  // Determine current step (v36: Status DISPUTED gates governance escalation)
   // Status flow: ACTIVE(1) → CLOSED(2) → PENDING_RESOLUTION(5) → PENDING_FINALIZATION(6) → RESOLVED(3)
+  // Plus new path: PENDING_FINALIZATION(6) → DISPUTED(7) → RESOLVED(3) via governance
   const STATUS_PENDING_FINALIZATION = 6
+  const STATUS_DISPUTED = 7
   const isPastResolutionDeadline = currentBlock > 0n && market.resolutionDeadline > 0n && currentBlock > market.resolutionDeadline
   const currentStep: ResolveStep = useMemo(() => {
     if (market.status === MARKET_STATUS.RESOLVED) return 'done'
@@ -224,6 +227,9 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     if (currentBlock > 0n && market.resolutionDeadline > 0n && currentBlock > market.resolutionDeadline) {
       return 'cancel'
     }
+    // v36: STATUS_DISPUTED markets are locked until governance resolves them.
+    // No claim/redeem allowed; UI directs user to the governance escalation path.
+    if (market.status === STATUS_DISPUTED) return 'disputed'
     if (market.status === STATUS_PENDING_FINALIZATION) {
       // Dispute window — challenge_deadline is set to dispute_deadline when status=6
       // (see getMarketResolution: challengeDeadline = disputeDeadline when PENDING_FINALIZATION)
@@ -369,12 +375,17 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     wallet.address,
   ])
 
-  // Steps config
+  // Steps config — order matches contract semantics:
+  //   ACTIVE → Close → CLOSED → Vote → PENDING_RESOLUTION → Finalize →
+  //   PENDING_FINALIZATION → [Dispute (optional) → STATUS_DISPUTED → governance]
+  //   or                    → [no dispute → Finalize again calls confirm_resolution] → RESOLVED
+  // Cancel is a separate alternative path (creator early-cancel or emergency cancel
+  // past resolution_deadline) and is shown last.
   const steps: { key: ResolveStep; label: string; icon: React.ElementType }[] = [
     { key: 'close', label: 'Close', icon: Lock },
-    { key: 'submit', label: 'Submit', icon: Gavel },
-    { key: 'challenge', label: 'Dispute', icon: Shield },
+    { key: 'submit', label: 'Vote', icon: Gavel },
     { key: 'finalize', label: 'Finalize', icon: CheckCircle2 },
+    { key: 'challenge', label: 'Dispute', icon: Shield },
     { key: 'cancel', label: 'Cancel', icon: AlertCircle },
   ]
 
@@ -457,6 +468,16 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         )
       }
 
+      // Precheck: contract enforces one vote per (market_id, voter). If we
+      // submit a second time the on-chain finalize will reject the tx, so
+      // surface a clear message before opening the wallet popup.
+      const alreadyVoted = await hasUserVotedOnMarket(market.id, wallet.address, marketProgramId)
+      if (alreadyVoted) {
+        throw new Error(
+          'You have already voted on this market with this wallet. Each address can only submit one vote per market — switch wallets to add another vote, or wait for the voting window to end.'
+        )
+      }
+
       const publicFeeRequired = 1_500_000n
       if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
         throw new Error(
@@ -521,6 +542,38 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     try {
       if (!wallet.address) {
         throw new Error('Wallet address not available. Reconnect your wallet and try again.')
+      }
+
+      // Re-fetch on-chain market status to avoid stale UI state. dispute_resolution
+      // is only valid when market is in STATUS_PENDING_FINALIZATION (6). Calling it
+      // during PENDING_RESOLUTION (5, voting phase) always rejects on-chain.
+      const [onChainMarket, onChainTally, onChainBlock] = await Promise.all([
+        getMarket(market.id, marketProgramId),
+        getMarketResolution(market.id, marketProgramId),
+        getCurrentBlockHeight(),
+      ])
+      if (!onChainMarket) {
+        throw new Error('Market data could not be loaded from chain. Refresh and try again.')
+      }
+      if (onChainMarket.status !== MARKET_STATUS.PENDING_FINALIZATION) {
+        if (onChainMarket.status === MARKET_STATUS.PENDING_RESOLUTION) {
+          throw new Error(
+            'This market is still in the voting phase. Use Vote (vote_outcome) instead — disputes only open after the voting window is finalized.'
+          )
+        }
+        throw new Error(
+          `Market is not in the dispute window (status=${onChainMarket.status}). dispute_resolution is rejected outside PENDING_FINALIZATION.`
+        )
+      }
+      if (onChainTally && onChainTally.challenge_deadline > 0n && onChainBlock > onChainTally.challenge_deadline) {
+        throw new Error(
+          `Dispute window already ended at block ${onChainTally.challenge_deadline.toString()}. Use confirm_resolution / finalize instead.`
+        )
+      }
+      if (onChainTally && onChainTally.winning_outcome === selectedOutcome) {
+        throw new Error(
+          'You must dispute with a DIFFERENT outcome than the current winning outcome. Pick another option.'
+        )
       }
 
       const publicFeeRequired = 1_500_000n
@@ -1022,7 +1075,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
               </div>
             )}
 
-            {/* Step 2: Submit Outcome (Open Voting + Bond) */}
+            {/* Step 2: Vote Outcome (Open Voting + Bond) */}
             {currentStep === 'submit' && (
               <div className="space-y-4">
                 {shieldNeedsPrivateBondSync && (
@@ -1125,7 +1178,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
 
                 <button onClick={handleSubmitOutcome} disabled={isSubmitting || !selectedOutcome}
                   className={cn('w-full flex items-center justify-center gap-2 btn-primary', !selectedOutcome && 'opacity-50 cursor-not-allowed')}>
-                  {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Gavel className="w-5 h-5" /><span>{selectedOutcome ? `Submit: ${outcomeLabels[selectedOutcome - 1]} Wins (1 ALEO bond)` : 'Select Outcome'}</span></>}
+                  {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Gavel className="w-5 h-5" /><span>{selectedOutcome ? `Vote: ${outcomeLabels[selectedOutcome - 1]} Wins (1 ALEO bond)` : 'Select Outcome'}</span></>}
                 </button>
               </div>
             )}
@@ -1250,6 +1303,71 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     className={cn('w-full flex items-center justify-center gap-2 mt-4', 'bg-no-500/20 hover:bg-no-500/30 text-no-300 font-medium py-3 rounded-xl transition-colors', !selectedOutcome && 'opacity-50 cursor-not-allowed')}>
                     {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Swords className="w-5 h-5" /><span>{selectedOutcome ? `Dispute: ${outcomeLabels[selectedOutcome - 1]} (${Number(BigInt(roundInfo?.totalBonded || 0) * 3n) / 1_000_000} ALEO)` : 'Select Outcome to Dispute'}</span></>}
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3b (v36): DISPUTED — locked, awaiting governance escalation */}
+            {currentStep === 'disputed' && (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-purple-500/5 border border-purple-500/20">
+                  <Shield className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-purple-200">Awaiting governance resolution</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      A dispute has been filed on this market. All payouts are locked until the
+                      governance committee or community vote confirms a final outcome via{' '}
+                      <code className="text-purple-300">apply_governance_resolution</code>.
+                    </p>
+                  </div>
+                </div>
+
+                {roundInfo && (
+                  <div className="p-4 rounded-xl bg-white/[0.02] space-y-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Swords className="w-4 h-4 text-no-400" />
+                      <span className="text-sm font-medium text-white">Dispute snapshot</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-surface-400">Voted winner</span>
+                      <span className="text-white font-medium">
+                        {getOutcomeLabel(roundInfo.proposedOutcome)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-surface-400">Total voter bond</span>
+                      <span className="text-white font-mono">
+                        {Number(roundInfo.totalBonded) / 1_000_000} ALEO
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-surface-400">Voters</span>
+                      <span className="text-white">{roundInfo.round}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-500/5 border border-brand-500/20">
+                  <Gavel className="w-5 h-5 text-brand-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-white">Next step: governance escalation</p>
+                    <p className="text-xs text-surface-400 mt-1">
+                      Open the Governance workspace to file a committee panel vote
+                      (<code className="text-brand-300">initiate_escalation_aleo/usdcx/usad</code> →{' '}
+                      <code className="text-brand-300">assign_resolver_panel</code> →{' '}
+                      <code className="text-brand-300">panel_vote</code>) or escalate to a community
+                      proposal. Once the committee or community settles the outcome,{' '}
+                      <code className="text-brand-300">governance_resolve_*</code> (with the matching
+                      tier) will unlock this market with the corrected winner.
+                    </p>
+                    <a
+                      href="/governance"
+                      className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-500/15 border border-brand-500/30 text-brand-200 text-xs font-medium hover:bg-brand-500/25 transition-colors"
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      Open Governance
+                    </a>
+                  </div>
                 </div>
               </div>
             )}

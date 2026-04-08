@@ -13,6 +13,7 @@ import {
   type ResolverProfile,
   type Delegation,
   type GovernanceEscalationMarket,
+  type VoteLock,
   type UserReward,
   PROPOSAL_STATUS,
   PROPOSAL_TYPES,
@@ -39,6 +40,7 @@ export interface GovernanceState {
 
   // Delegation
   delegations: Delegation[];
+  voteLocks: VoteLock[];
 
   // Rewards
   unclaimedRewards: UserReward[];
@@ -70,6 +72,7 @@ export interface GovernanceState {
   setActorFocus: (address: string | null, role: GovernanceActorRole | null) => void;
   clearProposalContext: () => void;
   setDelegations: (delegations: Delegation[]) => void;
+  setVoteLocks: (voteLocks: VoteLock[]) => void;
   setUnclaimedRewards: (rewards: UserReward[]) => void;
   setResolverProfile: (profile: ResolverProfile | null) => void;
   setEscalations: (escalations: GovernanceEscalationMarket[]) => void;
@@ -187,6 +190,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
   actorFocusAddress: null,
   actorFocusRole: null,
   delegations: [],
+  voteLocks: [],
   unclaimedRewards: [],
   totalClaimable: 0n,
   resolverProfile: null,
@@ -200,7 +204,12 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
   // Actions
   setVeilBalance: (balance) => set({ veilBalance: balance }),
   setVotingPower: (power) => set({ votingPower: power }),
-  setProposals: (proposals) => set({ proposals }),
+  setProposals: (proposals) => set((state) => ({
+    proposals,
+    selectedProposal: state.selectedProposal
+      ? proposals.find((proposal) => proposal.proposalId === state.selectedProposal?.proposalId) ?? null
+      : null,
+  })),
 
   addProposal: (proposal) => set((state) => ({
     proposals: [proposal, ...state.proposals],
@@ -229,6 +238,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
     actorFocusRole: null,
   }),
   setDelegations: (delegations) => set({ delegations }),
+  setVoteLocks: (voteLocks) => set({ voteLocks }),
 
   setUnclaimedRewards: (rewards) => set({
     unclaimedRewards: rewards,
@@ -311,6 +321,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
     actorFocusAddress: null,
     actorFocusRole: null,
     delegations: [],
+    voteLocks: [],
     unclaimedRewards: [],
     totalClaimable: 0n,
     resolverProfile: null,

@@ -48,8 +48,8 @@ export function RiskDisclosure() {
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Code Vulnerabilities:</strong> Despite testing and review, smart contracts may contain undiscovered bugs or vulnerabilities that could result in loss of funds.</li>
               <li><strong className="text-surface-300">Immutability:</strong> Once deployed, smart contract code cannot be easily modified. Fixes may require deploying new contracts and migrating state.</li>
-              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v35.aleo for ALEO markets, veiled_markets_usdcx_v5.aleo for USDCX markets, veiled_markets_usad_v12.aleo for USAD markets, and veiled_governance_v4.aleo for governance). Issues in any component could affect the entire system.</li>
-              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses 22 transitions and the governance contract uses 29 transitions.</li>
+              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v37.aleo for ALEO markets, veiled_markets_usdcx_v7.aleo for USDCX markets, veiled_markets_usad_v14.aleo for USAD markets, and veiled_governance_v6.aleo for governance). Issues in any component could affect the entire system.</li>
+              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses up to 25 transitions and the governance contract uses 31 transitions.</li>
             </ul>
           </section>
 
@@ -94,10 +94,10 @@ export function RiskDisclosure() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">6. Stablecoin Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens, each with its own market contract: native ALEO (veiled_markets_v35.aleo), USDCX (veiled_markets_usdcx_v5.aleo), and USAD (veiled_markets_usad_v12.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
+              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens, each with its own market contract: native ALEO (veiled_markets_v37.aleo), USDCX (veiled_markets_usdcx_v7.aleo), and USAD (veiled_markets_usad_v14.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
               <li><strong className="text-surface-300">De-peg Risk:</strong> Stablecoins can lose their peg due to market conditions, smart contract issues, or governance failures.</li>
               <li><strong className="text-surface-300">Two-Transaction Flow:</strong> Buying shares with USDCX or USAD requires two sequential blockchain transactions (deposit to public, then buy). If the first transaction succeeds but the second fails, your funds may be temporarily locked in the contract's public balance until you retry.</li>
-              <li><strong className="text-surface-300">Separate Contract Risk:</strong> Each token type operates through its own smart contract (ALEO via veiled_markets_v35.aleo, USDCX via veiled_markets_usdcx_v5.aleo, USAD via veiled_markets_usad_v12.aleo). This multi-contract architecture adds composability risk.</li>
+              <li><strong className="text-surface-300">Separate Contract Risk:</strong> Each token type operates through its own smart contract (ALEO via veiled_markets_v37.aleo, USDCX via veiled_markets_usdcx_v7.aleo, USAD via veiled_markets_usad_v14.aleo). This multi-contract architecture adds composability risk.</li>
             </ul>
           </section>
 

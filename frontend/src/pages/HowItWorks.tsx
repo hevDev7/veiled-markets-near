@@ -82,7 +82,7 @@ const mechanisms = [
   {
     icon: Vote,
     title: 'Governance',
-    description: 'The Protocol is governed by ALEO token holders through on-chain governance (veiled_governance_v4.aleo, 29 transitions):',
+    description: 'The Protocol is governed by ALEO token holders through on-chain governance (veiled_governance_v6.aleo, 31 transitions):',
     items: [
       '3-of-N multisig treasury management',
       'Dispute resolution overrides, fee changes, parameter updates, emergency pause',
@@ -95,9 +95,9 @@ const mechanisms = [
     title: 'Supported Tokens',
     description: 'Markets can be denominated in three different tokens, each with its own market contract:',
     items: [
-      'ALEO — Native Aleo blockchain token via veiled_markets_v35.aleo (22 transitions)',
-      'USDCX — Test stablecoin via veiled_markets_usdcx_v5.aleo (22 transitions)',
-      'USAD — Stablecoin via veiled_markets_usad_v12.aleo (22 transitions)',
+      'ALEO — Native Aleo blockchain token via veiled_markets_v37.aleo (25 transitions)',
+      'USDCX — Test stablecoin via veiled_markets_usdcx_v7.aleo (25 transitions)',
+      'USAD — Stablecoin via veiled_markets_usad_v14.aleo (25 transitions)',
       'ALEO uses private credits records; USDCX/USAD use Token records + MerkleProof for private trading',
     ],
   },

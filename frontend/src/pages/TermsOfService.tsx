@@ -99,7 +99,7 @@ export function TermsOfService() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">7. Governance</h2>
             <p className="mb-3">
-              The Protocol includes an on-chain governance system (veiled_governance_v4.aleo) that enables community decision-making. Governance features include:
+              The Protocol includes an on-chain governance system (veiled_governance_v6.aleo) that enables community decision-making. Governance features include:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li>Dispute resolution overrides for contested market outcomes.</li>

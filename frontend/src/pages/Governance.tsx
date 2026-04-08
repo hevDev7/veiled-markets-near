@@ -3,19 +3,25 @@
 // ============================================================================
 
 import { useCallback, useState } from 'react';
-import { Plus, Vote as VoteIcon } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useGovernance } from '../hooks/useGovernance';
-import { useAleoTransaction } from '../hooks/useAleoTransaction';
+import { useAleoTransaction, type TxStatus } from '../hooks/useAleoTransaction';
 import {
   buildCreateProposalInputs,
-  buildDelegateInputs,
   buildExecuteGovernanceInputs,
+  buildExecuteTreasuryProposalInputs,
   buildFinalizeVoteInputs,
   buildRegisterResolverInputs,
+  buildUnlockVoteInputs,
   buildUnstakeResolverInputs,
   buildUpgradeResolverTierInputs,
   buildVetoProposalInputs,
   buildVoteInputs,
+  computeGovernanceProposalId,
+  getGovernanceMappingValue,
+  getGovernanceProposal,
+  getVeilPublicBalance,
+  hashAddressToField,
   parseVeilInput as parseAleoInput,
 } from '../lib/governance-client';
 import { config } from '../lib/config';
@@ -27,13 +33,14 @@ import {
   PROPOSAL_TYPES,
   type GovernanceProposal,
   type ResolverTier,
+  type VoteLock,
 } from '../lib/governance-types';
 import { proposalMatchesActorFocus } from '../lib/governance-store';
 import {
   ActorDetailDrawer,
   CreateProposalModal,
-  DelegateModal,
   EscalationPanel,
+  GovernanceHeader,
   GovernanceStats,
   ProposalList,
   RewardClaimPanel,
@@ -44,7 +51,11 @@ import {
 import { DashboardHeader } from '../components/DashboardHeader';
 import { Footer } from '../components/Footer';
 import { useWalletStore } from '../lib/store';
-import { devLog } from '../lib/logger';
+import {
+  markGovernanceRewardClaimed,
+  saveGovernanceProposalMetadata,
+  saveGovernanceVoteReceipt,
+} from '../lib/governance-persistence';
 
 type Tab = 'proposals' | 'resolver';
 type ProposalStatusFilter = 'all' | 'active' | 'passed' | 'executed' | 'rejected';
@@ -75,17 +86,74 @@ function proposalMatchesLane(proposal: GovernanceProposal, lane: GovernancePropo
 }
 
 export function Governance() {
-  const { executeTransaction } = useAleoTransaction();
+  const { executeTransaction, pollTransactionStatus } = useAleoTransaction();
   const governance = useGovernance();
   const { wallet } = useWalletStore();
 
   const [activeTab, setActiveTab] = useState<Tab>('proposals');
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showDelegateModal, setShowDelegateModal] = useState(false);
   const [activeProposalActionId, setActiveProposalActionId] = useState<string | null>(null);
   const [isClaimingAllRewards, setIsClaimingAllRewards] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const ensurePublicFeeBalance = useCallback(async (requiredFeeAleo: number, actionLabel: string) => {
+    if (!wallet.address) {
+      throw new Error('Connect your wallet first.');
+    }
+
+    const requiredFee = BigInt(Math.round(requiredFeeAleo * 1_000_000));
+    let publicBalance = wallet.balance.public;
+
+    if (publicBalance < requiredFee) {
+      publicBalance = await getVeilPublicBalance(wallet.address);
+    }
+
+    if (publicBalance < requiredFee) {
+      const requiredLabel = requiredFeeAleo.toFixed(requiredFeeAleo % 1 === 0 ? 0 : 1);
+      const currentLabel = (Number(publicBalance) / 1_000_000).toFixed(6);
+      throw new Error(
+        `Need at least ${requiredLabel} ALEO public balance to pay the ${actionLabel} fee. `
+        + `Current public balance: ${currentLabel} ALEO.`,
+      );
+    }
+  }, [wallet.address, wallet.balance.public]);
+
+  const ensureGovernanceInitialized = useCallback(async () => {
+    const initialized = await getGovernanceMappingValue<boolean | string>('governance_initialized', '0u8');
+    const isInitialized = initialized === true || String(initialized || '').replace(/"/g, '').trim() === 'true';
+
+    if (!isInitialized) {
+      throw new Error(
+        'Governance contract is not initialized on-chain yet. '
+        + 'Run init_governance from the deployer wallet before creating proposals.',
+      );
+    }
+  }, []);
+
+  const waitForConfirmedTransaction = useCallback(async (
+    submittedTxId: string,
+    onChainVerify?: () => Promise<boolean>,
+  ): Promise<string> => new Promise((resolve, reject) => {
+    let settled = false;
+
+    const settle = (status: TxStatus, resolvedTxId?: string) => {
+      if (settled) return;
+      if (status === 'confirmed') {
+        settled = true;
+        resolve(resolvedTxId || submittedTxId);
+        return;
+      }
+      if (status === 'failed' || status === 'unknown') {
+        settled = true;
+        reject(new Error(status === 'failed'
+          ? 'Transaction was rejected on-chain.'
+          : 'Transaction confirmation timed out. Please refresh governance data shortly.'));
+      }
+    };
+
+    void pollTransactionStatus(submittedTxId, settle, 30, 10_000, onChainVerify);
+  }), [pollTransactionStatus]);
 
   const handleCreateProposal = useCallback(async (data: ProposalFormData) => {
     governance.setIsCreatingProposal(true);
@@ -94,6 +162,9 @@ export function Governance() {
       if (!wallet.address) {
         throw new Error('Connect your wallet before creating a proposal.');
       }
+
+      await ensureGovernanceInitialized();
+      await ensurePublicFeeBalance(1.5, 'create proposal');
 
       const nonce = BigInt(Date.now());
       const { fetchCreditsRecord } = await import('../lib/credits-record');
@@ -104,7 +175,28 @@ export function Governance() {
 
       const targetField = data.target.trim() || '0field';
       const payload1Value = parseAleoInput(data.payload1.trim() || '0');
-      const payload2Field = data.payload2.trim() || '0field';
+      let payload2Field = data.payload2.trim() || '0field';
+
+      if (data.proposalType === PROPOSAL_TYPES.TREASURY) {
+        if (!data.recipientAddress?.startsWith('aleo1')) {
+          throw new Error('Treasury proposals require a valid recipient address.');
+        }
+
+        const recipientHash = await hashAddressToField(data.recipientAddress);
+        if (!recipientHash) {
+          throw new Error('Failed to hash the treasury recipient address.');
+        }
+        payload2Field = recipientHash;
+      }
+
+      const proposalId = await computeGovernanceProposalId({
+        proposer: wallet.address,
+        proposalType: data.proposalType,
+        target: targetField,
+        payload1: payload1Value,
+        nonce,
+      });
+
       const inputs = buildCreateProposalInputs(
         creditsRecord,
         data.proposalType,
@@ -119,86 +211,48 @@ export function Governance() {
         function: 'create_proposal',
         inputs,
         fee: 1.5,
+        recordIndices: [0],
       });
 
-      const transactionId = result.transactionId;
-
-      if (transactionId) {
-        try {
-          const { isSupabaseAvailable, supabase } = await import('../lib/supabase');
-          const { getCurrentBlockHeight } = await import('../lib/aleo-client');
-
-          if (isSupabaseAvailable() && supabase) {
-            const currentBlock = await getCurrentBlockHeight().catch(() => 0n);
-            const votingDeadline = currentBlock > 0n ? String(currentBlock + 40320n) : '0';
-
-            let proposalId = '';
-            try {
-              const sdk = await import('@provablehq/sdk');
-              const structStr = `{ proposer: ${wallet.address}, proposal_type: ${data.proposalType}u8, target: ${targetField.endsWith('field') ? targetField : `${targetField}field`}, payload_1: ${payload1Value}u128, nonce: ${nonce}u64 }`;
-              devLog('[Governance] Computing BHP256 hash for:', structStr);
-              const hashField = sdk.Field as unknown as { hashBhp256?: (value: string) => { toString: () => string } };
-              const hashResult = hashField?.hashBhp256 ? hashField.hashBhp256(structStr) : null;
-              if (hashResult) {
-                proposalId = hashResult.toString();
-                if (!proposalId.endsWith('field')) proposalId += 'field';
-              }
-            } catch (hashErr) {
-              console.warn('[Governance] BHP256 hash computation failed:', hashErr);
-            }
-
-            if (!proposalId) {
-              await new Promise((resolve) => setTimeout(resolve, 8000));
-              try {
-                const txResp = await fetch(`${config.rpcUrl}/transaction/${transactionId}`);
-                if (txResp.ok) {
-                  const txData = await txResp.text();
-                  const fieldMatches = txData.match(/(\d{20,})field/g);
-                  if (fieldMatches && fieldMatches.length > 0) {
-                    proposalId = fieldMatches[fieldMatches.length - 1];
-                  }
-                }
-              } catch {
-                // Ignore explorer lookup failures and fall back to a pending ID.
-              }
-            }
-
-            if (!proposalId) {
-              proposalId = `pending_${transactionId}`;
-            }
-
-            await supabase.from('governance_proposals').upsert(
-              {
-                proposal_id: proposalId,
-                proposer: wallet.address,
-                proposal_type: data.proposalType,
-                proposal_type_name: data.proposalTypeName,
-                title: data.title || `Proposal #${nonce}`,
-                description: data.description || '',
-                target: targetField,
-                payload_1: data.payload1 || '0',
-                payload_2: payload2Field,
-                votes_for: '0',
-                votes_against: '0',
-                quorum_required: '0',
-                status: 'active',
-                created_at_ts: new Date().toISOString(),
-                voting_deadline: votingDeadline,
-                transaction_id: transactionId,
-              },
-              { onConflict: 'proposal_id' },
-            );
-          }
-        } catch (error) {
-          console.warn('[Governance] Failed to save proposal metadata:', error);
-        }
+      if (!result.transactionId) {
+        throw new Error('Wallet did not return a governance transaction ID.');
       }
+
+      const confirmedTxId = await waitForConfirmedTransaction(
+        result.transactionId,
+        proposalId
+          ? async () => (await getGovernanceProposal(proposalId)) !== null
+          : undefined,
+      );
+
+      await saveGovernanceProposalMetadata({
+        proposalId: proposalId || `pending_${confirmedTxId}`,
+        proposer: wallet.address,
+        proposalType: data.proposalType,
+        proposalTypeName: data.proposalTypeName,
+        title: data.title || `Proposal #${nonce}`,
+        description: data.description || '',
+        target: targetField,
+        payload1: payload1Value.toString(),
+        payload2: payload2Field,
+        transactionId: confirmedTxId,
+        recipientAddress: data.recipientAddress || null,
+        createdAtTs: new Date().toISOString(),
+        status: PROPOSAL_STATUS.ACTIVE,
+      });
 
       await governance.refetch();
     } finally {
       governance.setIsCreatingProposal(false);
     }
-  }, [executeTransaction, governance, wallet.address]);
+  }, [
+    ensureGovernanceInitialized,
+    ensurePublicFeeBalance,
+    executeTransaction,
+    governance,
+    waitForConfirmedTransaction,
+    wallet.address,
+  ]);
 
   const handleVote = useCallback(async (proposalId: string, direction: 'for' | 'against', amount: bigint) => {
     governance.setIsVoting(true);
@@ -208,6 +262,8 @@ export function Governance() {
         throw new Error('Connect your wallet before voting.');
       }
 
+      await ensurePublicFeeBalance(1.5, 'governance vote');
+
       const { fetchCreditsRecord } = await import('../lib/credits-record');
       const creditsRecord = await fetchCreditsRecord(Number(amount), wallet.address);
       if (!creditsRecord) {
@@ -215,18 +271,32 @@ export function Governance() {
       }
 
       const inputs = buildVoteInputs(creditsRecord, proposalId, amount);
-      await executeTransaction({
+      const result = await executeTransaction({
         program: config.governanceProgramId,
         function: direction === 'for' ? 'vote_for' : 'vote_against',
         inputs,
         fee: 1.5,
+        recordIndices: [0],
+      });
+
+      if (!result.transactionId) {
+        throw new Error('Wallet did not return a governance vote transaction ID.');
+      }
+
+      const confirmedTxId = await waitForConfirmedTransaction(result.transactionId);
+      await saveGovernanceVoteReceipt({
+        proposalId,
+        voter: wallet.address,
+        direction,
+        amount,
+        transactionId: confirmedTxId,
       });
 
       await governance.refetch();
     } finally {
       governance.setIsVoting(false);
     }
-  }, [executeTransaction, governance, wallet.address]);
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction, wallet.address]);
 
   const claimRewardInternal = useCallback(async (
     epochId: number,
@@ -234,17 +304,33 @@ export function Governance() {
     amount: bigint,
     refetchAfter: boolean,
   ) => {
-    await executeTransaction({
+    await ensurePublicFeeBalance(0.3, 'reward claim');
+
+    const result = await executeTransaction({
       program: config.governanceProgramId,
       function: 'claim_reward',
       inputs: [`${epochId}u64`, rewardType === 'lp' ? '1u8' : '2u8', `${amount}u64`],
       fee: 0.3,
     });
 
+    if (!result.transactionId) {
+      throw new Error('Wallet did not return a reward claim transaction ID.');
+    }
+
+    const confirmedTxId = await waitForConfirmedTransaction(result.transactionId);
+    if (wallet.address) {
+      await markGovernanceRewardClaimed({
+        userAddress: wallet.address,
+        epochId,
+        rewardType,
+        claimTxId: confirmedTxId,
+      });
+    }
+
     if (refetchAfter) {
       await governance.refetch();
     }
-  }, [executeTransaction, governance]);
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction, wallet.address]);
 
   const handleClaimReward = useCallback(async (epochId: number, rewardType: 'lp' | 'trading', amount: bigint) => {
     if (amount <= 0n) {
@@ -269,31 +355,12 @@ export function Governance() {
     }
   }, [claimRewardInternal, governance]);
 
-  const handleDelegateVotes = useCallback(async (delegateAddress: string, amount: bigint) => {
-    if (!wallet.address) {
-      throw new Error('Connect your wallet before delegating voting power.');
-    }
-
-    const { fetchCreditsRecord } = await import('../lib/credits-record');
-    const creditsRecord = await fetchCreditsRecord(Number(amount), wallet.address);
-    if (!creditsRecord) {
-      throw new Error(`No credits record found. Need at least ${Number(amount) / 1_000000} ALEO private balance.`);
-    }
-
-    await executeTransaction({
-      program: config.governanceProgramId,
-      function: 'delegate_votes',
-      inputs: buildDelegateInputs(creditsRecord, delegateAddress, amount),
-      fee: 0.5,
-    });
-
-    await governance.refetch();
-  }, [executeTransaction, governance, wallet.address]);
-
   const handleRegisterResolver = useCallback(async (_tier: ResolverTier) => {
     if (!wallet.address) {
       throw new Error('Connect your wallet before registering as a resolver.');
     }
+
+    await ensurePublicFeeBalance(0.5, 'resolver registration');
 
     const { fetchCreditsRecord } = await import('../lib/credits-record');
     const creditsRecord = await fetchCreditsRecord(50_000000, wallet.address);
@@ -301,30 +368,41 @@ export function Governance() {
       throw new Error('No credits record found with sufficient balance. Need at least 50 ALEO private balance.');
     }
 
-    await executeTransaction({
+    const result = await executeTransaction({
       program: config.governanceProgramId,
       function: 'register_resolver',
       inputs: buildRegisterResolverInputs(creditsRecord),
       fee: 0.5,
+      recordIndices: [0],
     });
 
+    if (result.transactionId) {
+      await waitForConfirmedTransaction(result.transactionId);
+    }
+
     await governance.refetch();
-  }, [executeTransaction, governance, wallet.address]);
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction, wallet.address]);
 
   const handleUpgradeResolver = useCallback(async (_newTier: ResolverTier) => {
     if (!wallet.address) {
       throw new Error('Connect your wallet before upgrading resolver tier.');
     }
 
-    await executeTransaction({
+    await ensurePublicFeeBalance(0.3, 'resolver upgrade');
+
+    const result = await executeTransaction({
       program: config.governanceProgramId,
       function: 'upgrade_resolver_tier',
       inputs: buildUpgradeResolverTierInputs(wallet.address),
       fee: 0.3,
     });
 
+    if (result.transactionId) {
+      await waitForConfirmedTransaction(result.transactionId);
+    }
+
     await governance.refetch();
-  }, [executeTransaction, governance, wallet.address]);
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction, wallet.address]);
 
   const handleDeregisterResolver = useCallback(async () => {
     let receiptRecord: string | null = null;
@@ -366,15 +444,22 @@ export function Governance() {
       throw new Error('Resolver stake amount is unavailable. Refresh governance data and try again.');
     }
 
-    await executeTransaction({
+    await ensurePublicFeeBalance(0.3, 'resolver unstake');
+
+    const result = await executeTransaction({
       program: config.governanceProgramId,
       function: 'unstake_resolver',
       inputs: buildUnstakeResolverInputs(receiptRecord, withdrawAmount),
       fee: 0.3,
+      recordIndices: [0],
     });
 
+    if (result.transactionId) {
+      await waitForConfirmedTransaction(result.transactionId);
+    }
+
     await governance.refetch();
-  }, [executeTransaction, governance]);
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction]);
 
   const runProposalAction = useCallback(async (
     proposal: GovernanceProposal,
@@ -384,6 +469,8 @@ export function Governance() {
     setActiveProposalActionId(proposal.proposalId);
 
     try {
+      await ensurePublicFeeBalance(fee, fn.replace('_', ' '));
+
       const inputs =
         fn === 'execute_governance'
           ? buildExecuteGovernanceInputs(proposal)
@@ -391,30 +478,142 @@ export function Governance() {
             ? buildFinalizeVoteInputs(proposal.proposalId)
             : buildVetoProposalInputs(proposal.proposalId);
 
-      await executeTransaction({
+      const result = await executeTransaction({
         program: config.governanceProgramId,
         function: fn,
         inputs,
         fee,
       });
 
+      if (!result.transactionId) {
+        throw new Error('Wallet did not return a governance action transaction ID.');
+      }
+
+      const confirmedTxId = await waitForConfirmedTransaction(
+        result.transactionId,
+        async () => {
+          const updated = await getGovernanceProposal(proposal.proposalId);
+          if (!updated) return false;
+          if (fn === 'finalize_vote') return updated.status !== PROPOSAL_STATUS.ACTIVE;
+          if (fn === 'veto_proposal') return updated.status === PROPOSAL_STATUS.VETOED;
+          return updated.status === PROPOSAL_STATUS.EXECUTED;
+        },
+      );
+
+      if (fn === 'execute_governance') {
+        await saveGovernanceProposalMetadata({
+          proposalId: proposal.proposalId,
+          proposer: proposal.proposer,
+          proposalType: proposal.proposalType,
+          proposalTypeName: proposal.proposalTypeName,
+          title: proposal.title,
+          description: proposal.description,
+          target: proposal.target,
+          payload1: proposal.payload1.toString(),
+          payload2: proposal.payload2,
+          transactionId: proposal.transactionId || null,
+          executedTxId: confirmedTxId,
+          recipientAddress: proposal.recipientAddress || null,
+          status: PROPOSAL_STATUS.EXECUTED,
+        });
+      }
+
       await governance.refetch();
     } finally {
       setActiveProposalActionId(null);
     }
-  }, [executeTransaction, governance]);
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction]);
 
   const handleFinalizeProposal = useCallback(async (proposal: GovernanceProposal) => {
     await runProposalAction(proposal, 'finalize_vote', 0.3);
   }, [runProposalAction]);
 
   const handleExecuteProposal = useCallback(async (proposal: GovernanceProposal) => {
-    if (proposal.proposalType === PROPOSAL_TYPES.TREASURY) {
-      throw new Error('Treasury proposal execution still needs recipient-aware wiring in the UI. Execute this one via CLI for now.');
-    }
-
     await runProposalAction(proposal, 'execute_governance', 0.5);
   }, [runProposalAction]);
+
+  const handleExecuteTreasuryProposal = useCallback(async (proposal: GovernanceProposal, recipientAddress: string) => {
+    const recipientHash = await hashAddressToField(recipientAddress);
+    if (!recipientHash) {
+      throw new Error('Failed to hash the treasury recipient address.');
+    }
+
+    if (recipientHash !== proposal.payload2) {
+      throw new Error('Recipient address does not match the treasury recipient hashed into this proposal.');
+    }
+
+    setActiveProposalActionId(proposal.proposalId);
+    try {
+      await ensurePublicFeeBalance(0.5, 'treasury execution');
+
+      const result = await executeTransaction({
+        program: config.governanceProgramId,
+        function: 'execute_treasury_proposal',
+        inputs: buildExecuteTreasuryProposalInputs(proposal.proposalId, recipientAddress, BigInt(proposal.payload1)),
+        fee: 0.5,
+      });
+
+      if (!result.transactionId) {
+        throw new Error('Wallet did not return a treasury execution transaction ID.');
+      }
+
+      const confirmedTxId = await waitForConfirmedTransaction(
+        result.transactionId,
+        async () => {
+          const updated = await getGovernanceProposal(proposal.proposalId);
+          return updated?.status === PROPOSAL_STATUS.EXECUTED;
+        },
+      );
+
+      await saveGovernanceProposalMetadata({
+        proposalId: proposal.proposalId,
+        proposer: proposal.proposer,
+        proposalType: proposal.proposalType,
+        proposalTypeName: proposal.proposalTypeName,
+        title: proposal.title,
+        description: proposal.description,
+        target: proposal.target,
+        payload1: proposal.payload1.toString(),
+        payload2: proposal.payload2,
+        transactionId: proposal.transactionId || null,
+        executedTxId: confirmedTxId,
+        recipientAddress,
+        status: PROPOSAL_STATUS.EXECUTED,
+      });
+
+      await governance.refetch();
+    } finally {
+      setActiveProposalActionId(null);
+    }
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction]);
+
+  const handleUnlockVoteLock = useCallback(async (voteLock: VoteLock) => {
+    if (!voteLock.recordPlaintext) {
+      throw new Error('Vote lock record is unavailable. Refresh governance data and try again.');
+    }
+
+    setActiveProposalActionId(voteLock.proposalId);
+    try {
+      await ensurePublicFeeBalance(0.3, 'vote unlock');
+
+      const result = await executeTransaction({
+        program: config.governanceProgramId,
+        function: 'unlock_after_vote',
+        inputs: buildUnlockVoteInputs(voteLock.recordPlaintext),
+        fee: 0.3,
+        recordIndices: [0],
+      });
+
+      if (!result.transactionId) {
+        throw new Error('Wallet did not return an unlock transaction ID.');
+      }
+
+      await waitForConfirmedTransaction(result.transactionId);
+      await governance.refetch();
+    } finally {
+      setActiveProposalActionId(null);
+    }
+  }, [ensurePublicFeeBalance, executeTransaction, governance, waitForConfirmedTransaction]);
 
   const handleVetoProposal = useCallback(async (proposal: GovernanceProposal) => {
     await runProposalAction(proposal, 'veto_proposal', 0.3);
@@ -479,114 +678,135 @@ export function Governance() {
       <DashboardHeader />
 
       <main className="flex-1 pt-24 lg:pt-28 pb-20">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-          {/* Header — compact */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <h1 className="text-xl font-semibold text-white">Governance</h1>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Create Proposal
-              </button>
-              <button
-                onClick={() => setShowDelegateModal(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-sm font-medium text-surface-300 hover:bg-white/[0.06] transition-colors"
-              >
-                <VoteIcon className="w-4 h-4 text-purple-400" />
-                Delegate
-              </button>
+        <div className="mx-auto max-w-7xl space-y-5 px-4 sm:px-6 lg:px-8">
+          <div className="rounded-2xl border border-white/[0.06] bg-surface-900/40 p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brand-200/80">Veiled Governance</div>
+                <h1 className="mt-2 text-2xl font-semibold text-white">Governance</h1>
+                <p className="mt-1 text-sm text-surface-400">
+                  Proposal voting, resolver ops, rewards, and escalation context are all kept in one compact workspace.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-600"
+                >
+                  <Plus className="h-4 w-4" />
+                  Create Proposal
+                </button>
+              </div>
             </div>
+
+            {!wallet.connected && (
+              <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-2.5 text-xs text-amber-200">
+                Connect a wallet to vote, create proposals, claim rewards, or manage resolver status.
+              </p>
+            )}
           </div>
 
-          {!wallet.connected && (
-            <p className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-2.5 text-xs text-amber-200">
-              Connect a wallet to vote, create proposals, and claim rewards.
-            </p>
-          )}
+          <GovernanceHeader
+            onClaimAll={handleClaimAllRewards}
+            isClaimingAll={isClaimingAllRewards}
+          />
 
-          {/* Tabs + content */}
-          <div className="flex items-center gap-2 border-b border-white/[0.06] pb-px">
-            {[
-              { key: 'proposals' as const, label: 'Proposals' },
-              { key: 'resolver' as const, label: 'Resolvers' },
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  setActiveTab(tab.key);
-                  if (tab.key !== 'proposals') {
-                    setView('list');
-                    governance.setSelectedProposal(null);
-                  }
-                }}
-                className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                  activeTab === tab.key
-                    ? 'border-brand-400 text-brand-300'
-                    : 'border-transparent text-surface-400 hover:text-white'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="rounded-2xl border border-white/[0.06] bg-surface-900/35 overflow-hidden">
+            <div className="flex flex-col gap-3 border-b border-white/[0.06] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div className="flex items-center gap-2">
+                {[
+                  { key: 'proposals' as const, label: 'Proposals', count: governance.proposals.length },
+                  { key: 'resolver' as const, label: 'Resolvers', count: governance.stats.totalResolvers || 0 },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => {
+                      setActiveTab(tab.key);
+                      if (tab.key !== 'proposals') {
+                        setView('list');
+                        governance.setSelectedProposal(null);
+                      }
+                    }}
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-colors ${
+                      activeTab === tab.key
+                        ? 'bg-brand-500/15 text-brand-200'
+                        : 'text-surface-400 hover:bg-white/[0.04] hover:text-white'
+                    }`}
+                  >
+                    {tab.label}
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] ${
+                      activeTab === tab.key
+                        ? 'bg-brand-500/15 text-brand-100'
+                        : 'bg-white/[0.05] text-surface-500'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
 
-            {/* Sidebar toggle — right-aligned */}
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-xs text-surface-400 hover:text-white transition-colors"
-            >
-              {sidebarOpen ? 'Hide' : 'Stats'}
-            </button>
-          </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-surface-500">
+                  {activeTab === 'proposals'
+                    ? 'Review motions, open details, and act on governance lifecycle steps.'
+                    : 'Register, upgrade, or review current resolver standing.'}
+                </span>
+                <button
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5 text-xs text-surface-400 transition-colors hover:text-white"
+                >
+                  {sidebarOpen ? 'Hide panels' : 'Show panels'}
+                </button>
+              </div>
+            </div>
 
-          <div className={`grid gap-6 ${sidebarOpen ? 'xl:grid-cols-[minmax(0,1fr)_280px]' : ''}`}>
-            {/* Main content */}
-            <div className="min-w-0">
-              {activeTab === 'proposals' ? (
-                view === 'detail' && governance.selectedProposal ? (
-                  <VotePanel
-                    proposal={governance.selectedProposal}
-                    onBack={handleBackToList}
-                    onVote={handleVote}
-                    onFinalize={handleFinalizeProposal}
-                    onExecute={handleExecuteProposal}
-                    onVeto={handleVetoProposal}
-                    isActing={activeProposalActionId === governance.selectedProposal.proposalId}
-                  />
+            <div className={`grid gap-6 p-4 sm:p-5 ${sidebarOpen ? 'xl:grid-cols-[minmax(0,1fr)_300px]' : ''}`}>
+              <div className="min-w-0">
+                {activeTab === 'proposals' ? (
+                  view === 'detail' && governance.selectedProposal ? (
+                    <VotePanel
+                      proposal={governance.selectedProposal}
+                      onBack={handleBackToList}
+                      onVote={handleVote}
+                      onFinalize={handleFinalizeProposal}
+                      onExecute={handleExecuteProposal}
+                      onExecuteTreasury={handleExecuteTreasuryProposal}
+                      onVeto={handleVetoProposal}
+                      onUnlockVoteLock={handleUnlockVoteLock}
+                      isActing={activeProposalActionId === governance.selectedProposal.proposalId}
+                    />
+                  ) : (
+                    <ProposalList
+                      onSelectProposal={handleSelectProposal}
+                    />
+                  )
                 ) : (
-                  <ProposalList
-                    onCreateProposal={() => setShowCreateModal(true)}
-                    onSelectProposal={handleSelectProposal}
+                  <ResolverPanel
+                    onRegister={handleRegisterResolver}
+                    onUpgrade={handleUpgradeResolver}
+                    onDeregister={handleDeregisterResolver}
+                    onFocusActor={handleFocusActor}
                   />
-                )
-              ) : (
-                <ResolverPanel
-                  onRegister={handleRegisterResolver}
-                  onUpgrade={handleUpgradeResolver}
-                  onDeregister={handleDeregisterResolver}
-                  onFocusActor={handleFocusActor}
-                />
+                )}
+              </div>
+
+              {sidebarOpen && (
+                <div className="space-y-3">
+                  <GovernanceStats />
+                  <EscalationPanel
+                    onOpenProposal={handleSelectProposal}
+                    onReviewLane={handleReviewDisputeLane}
+                    onOpenContextLane={handleOpenContextLane}
+                  />
+                  <RewardClaimPanel
+                    onClaimReward={handleClaimReward}
+                    onClaimAllRewards={handleClaimAllRewards}
+                    isClaimingAll={isClaimingAllRewards}
+                  />
+                </div>
               )}
             </div>
-
-            {/* Sidebar — toggle-based, compact */}
-            {sidebarOpen && (
-              <div className="space-y-3">
-                <GovernanceStats />
-                <EscalationPanel
-                  onOpenProposal={handleSelectProposal}
-                  onReviewLane={handleReviewDisputeLane}
-                  onOpenContextLane={handleOpenContextLane}
-                />
-                <RewardClaimPanel
-                  onClaimReward={handleClaimReward}
-                  onClaimAllRewards={handleClaimAllRewards}
-                  isClaimingAll={isClaimingAllRewards}
-                />
-              </div>
-            )}
           </div>
         </div>
       </main>
@@ -601,12 +821,6 @@ export function Governance() {
         onSelectProposal={handleSelectProposal}
         onReviewLane={handleReviewDisputeLane}
         onOpenContextLane={handleOpenContextLane}
-      />
-
-      <DelegateModal
-        isOpen={showDelegateModal}
-        onClose={() => setShowDelegateModal(false)}
-        onDelegate={handleDelegateVotes}
       />
 
       <Footer />

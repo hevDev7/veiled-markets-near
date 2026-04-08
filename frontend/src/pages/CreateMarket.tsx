@@ -586,7 +586,34 @@ export function CreateMarketPage() {
                         <label className="text-sm font-medium text-white mb-3 block">Outcomes</label>
                         <div className="grid grid-cols-3 gap-3 mb-4">
                           {[2, 3, 4].map((n) => (
-                            <button key={n} onClick={() => { const labels = [...formData.outcomeLabels]; if (n >= 3 && !labels[2]) labels[2] = 'Option C'; if (n >= 4 && !labels[3]) labels[3] = 'Option D'; updateForm({ numOutcomes: n, outcomeLabels: labels }) }}
+                            <button key={n} onClick={() => {
+                              // Default labels per mode. Only auto-replace slots that
+                              // still hold the OTHER mode's defaults (or are empty), so
+                              // any custom labels typed by the user are preserved.
+                              const BINARY_DEFAULTS = ['Yes', 'No']
+                              const MULTI_DEFAULTS = ['Option 1', 'Option 2', 'Option 3', 'Option 4']
+                              const labels = [...formData.outcomeLabels]
+
+                              if (n === 2) {
+                                // Switching to binary: restore Yes/No on slots 0-1 if
+                                // they're empty or still using multi-mode defaults.
+                                for (let i = 0; i < 2; i++) {
+                                  if (!labels[i] || MULTI_DEFAULTS.includes(labels[i])) {
+                                    labels[i] = BINARY_DEFAULTS[i]
+                                  }
+                                }
+                              } else {
+                                // Switching to 3-way / 4-way: replace Yes/No with
+                                // Option 1/Option 2 (and fill 3/4 if empty), again
+                                // only if labels are still defaults.
+                                for (let i = 0; i < n; i++) {
+                                  if (!labels[i] || BINARY_DEFAULTS.includes(labels[i]) || MULTI_DEFAULTS.includes(labels[i])) {
+                                    labels[i] = MULTI_DEFAULTS[i]
+                                  }
+                                }
+                              }
+                              updateForm({ numOutcomes: n, outcomeLabels: labels })
+                            }}
                               className={cn('p-3 rounded-xl text-center transition-all', formData.numOutcomes === n ? 'bg-brand-400/[0.12] border border-brand-400/[0.2]' : 'bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04]')}>
                               <span className="text-lg font-semibold text-white block">{n}</span>
                               <span className="text-2xs text-surface-400">{n === 2 ? 'Binary' : `${n}-way`}</span>

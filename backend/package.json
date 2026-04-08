@@ -8,6 +8,8 @@
         "index:watch": "tsx watch src/index-markets.ts",
         "governance": "tsx src/governance-indexer.ts",
         "governance:watch": "tsx watch src/governance-indexer.ts",
+        "disputes": "tsx src/dispute-indexer.ts",
+        "disputes:watch": "tsx watch src/dispute-indexer.ts",
         "build": "tsc",
         "dev": "tsx watch src/index-markets.ts"
     },

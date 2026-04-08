@@ -1,0 +1,22 @@
+{
+  "program": "veiled_markets_usdcx_v7.aleo",
+  "version": "0.3.0",
+  "description": "USDCX prediction market v7 — Bug B/D fixes: cross-program auth uses program literal veiled_governance_v6.aleo, MarketSeed includes token_type so market_id is unique vs ALEO/USAD contracts.",
+  "license": "MIT",
+  "leo": "4.0.0",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "test_usdcx_stablecoin.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}

@@ -1,7 +1,17 @@
 // ============================================================================
 // VEILED GOVERNANCE — Blockchain Client
 // ============================================================================
-// Client for interacting with the veiled_governance_v4.aleo program (pure ALEO)
+// Client for interacting with the veiled_governance_v6.aleo program (pure ALEO).
+// v6 post-audit hardening:
+//   - initiate_escalation split into 3 token-specific transitions
+//     (initiate_escalation_aleo/usdcx/usad), each cross-program calls
+//     assert_disputed in the matching market contract.
+//   - governance_resolve_aleo/usdcx/usad now take a `tier` parameter that
+//     propagates through to the market's apply_governance_resolution call
+//     (committee=2 vs community=3) instead of being hardcoded.
+//   - blacklist_resolver and update_resolver_stats removed (auto-blacklist
+//     happens in slash_resolver after MAX_STRIKES; resolver stats are
+//     reconstructed off-chain).
 // ============================================================================
 
 import { config } from './config';
@@ -15,14 +25,16 @@ import {
   type ResolverProfile,
   type RewardEpoch,
   type CommitteeDecision,
+  type VoteLock,
 } from './governance-types';
+import type { ScannedRecord } from './record-scanner';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
-const GOV_PROGRAM_ID = config.governanceProgramId || 'veiled_governance_v4.aleo';
+const GOV_PROGRAM_ID = config.governanceProgramId || 'veiled_governance_v6.aleo';
 // v2: No separate token program — governance uses native ALEO credits
 const TOKEN_PROGRAM_ID = 'credits.aleo';
 const FETCH_TIMEOUT_MS = 15_000;
@@ -311,6 +323,61 @@ export async function getCommitteeDecision(marketId: string): Promise<CommitteeD
   };
 }
 
+/**
+ * v6: Persistent dispute state stored in each market contract.
+ * Reads `market_dispute_state` from the market program (not governance).
+ */
+export interface MarketDisputeState {
+  marketId: string;
+  disputer: string;
+  originalOutcome: number;
+  proposedOutcome: number;
+  disputeBond: bigint;
+  disputedAt: bigint;
+  escalatedTier: number;
+  finalOutcome: number;
+  resolvedBy: string;
+}
+
+export async function getMarketDisputeState(
+  marketId: string,
+  marketProgramId: string,
+): Promise<MarketDisputeState | null> {
+  // Reuse the generic mapping fetcher from aleo-client (governance-client only
+  // talks to the governance program). We import lazily to avoid circular deps.
+  const { getMappingValue } = await import('./aleo-client');
+  const raw = await getMappingValue<Record<string, unknown>>(
+    'market_dispute_state',
+    marketId,
+    marketProgramId,
+  );
+  if (!raw) return null;
+  return {
+    marketId: String(raw.market_id || marketId),
+    disputer: String(raw.disputer || ''),
+    originalOutcome: Number(String(raw.original_outcome || '0').replace(/u\d+$/, '')),
+    proposedOutcome: Number(String(raw.proposed_outcome || '0').replace(/u\d+$/, '')),
+    disputeBond: BigInt(String(raw.dispute_bond || '0').replace(/u\d+$/, '')),
+    disputedAt: BigInt(String(raw.disputed_at || '0').replace(/u\d+$/, '')),
+    escalatedTier: Number(String(raw.escalated_tier || '0').replace(/u\d+$/, '')),
+    finalOutcome: Number(String(raw.final_outcome || '0').replace(/u\d+$/, '')),
+    resolvedBy: String(raw.resolved_by || ''),
+  };
+}
+
+/**
+ * v6: Read `market_escalation_tier` mapping from governance contract.
+ * Returns 0 (default) when no record is found.
+ */
+export async function getMarketEscalationTier(marketId: string): Promise<number> {
+  const raw = await getGovernanceMappingValue<string | number>(
+    'market_escalation_tier',
+    marketId,
+  );
+  if (raw == null) return 0;
+  return Number(String(raw).replace(/u\d+$/, '')) || 0;
+}
+
 export interface GovernanceLiveConfig {
   pauseState: boolean;
   protocolFeeBps: bigint;
@@ -448,6 +515,18 @@ export function buildVetoProposalInputs(proposalId: string): string[] {
   return [normalizeFieldInput(proposalId)];
 }
 
+export function buildUnlockVoteInputs(voteLockRecord: string): string[] {
+  return [voteLockRecord];
+}
+
+export function buildExecuteTreasuryProposalInputs(
+  proposalId: string,
+  recipientAddress: string,
+  amount: bigint,
+): string[] {
+  return [normalizeFieldInput(proposalId), recipientAddress, `${amount}u64`];
+}
+
 export function buildUpgradeResolverTierInputs(resolver: string): string[] {
   return [resolver];
 }
@@ -457,6 +536,145 @@ export function buildUnstakeResolverInputs(
   withdrawAmount: bigint,
 ): string[] {
   return [receiptRecord, `${withdrawAmount}u64`];
+}
+
+// ============================================================================
+// v6: Escalation flow builders (post-audit hardening)
+// ============================================================================
+//
+// v6 changes from v5:
+// - initiate_escalation REMOVED, replaced by 3 token-specific transitions:
+//   initiate_escalation_aleo / initiate_escalation_usdcx / initiate_escalation_usad
+//   Each cross-program calls assert_disputed in the matching market contract
+//   to verify the market exists and is in STATUS_DISPUTED before mutating tier.
+// - governance_resolve_aleo/usdcx/usad now take a `tier: u8` parameter that
+//   propagates to apply_governance_resolution (committee=2 vs community=3).
+//
+// ============================================================================
+
+function normalizeFieldValue(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '0field';
+  return trimmed.endsWith('field') ? trimmed : `${trimmed}field`;
+}
+
+/** initiate_escalation_aleo(market_id) — Tier 0 → Tier 2 for ALEO market */
+export function buildInitiateEscalationAleoInputs(marketId: string): string[] {
+  return [normalizeFieldValue(marketId)];
+}
+
+/** initiate_escalation_usdcx(market_id) — Tier 0 → Tier 2 for USDCX market */
+export function buildInitiateEscalationUsdcxInputs(marketId: string): string[] {
+  return [normalizeFieldValue(marketId)];
+}
+
+/** initiate_escalation_usad(market_id) — Tier 0 → Tier 2 for USAD market */
+export function buildInitiateEscalationUsadInputs(marketId: string): string[] {
+  return [normalizeFieldValue(marketId)];
+}
+
+/**
+ * Pick the right initiate_escalation_* function name based on market token type.
+ * Returns null if token type is unknown.
+ */
+export function getInitiateEscalationFunctionName(
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' | string | undefined,
+): string | null {
+  if (tokenType === 'USDCX') return 'initiate_escalation_usdcx';
+  if (tokenType === 'USAD') return 'initiate_escalation_usad';
+  if (tokenType === 'ALEO') return 'initiate_escalation_aleo';
+  return null;
+}
+
+/** assign_resolver_panel(market_id, panel_member_1..5) — admin only */
+export function buildAssignResolverPanelInputs(
+  marketId: string,
+  panelMembers: [string, string, string, string, string],
+): string[] {
+  return [normalizeFieldValue(marketId), ...panelMembers];
+}
+
+/** committee_vote_resolve(market_id, outcome) — committee member panel vote */
+export function buildCommitteeVoteResolveInputs(
+  marketId: string,
+  outcome: number,
+): string[] {
+  return [normalizeFieldValue(marketId), `${outcome}u8`];
+}
+
+/** finalize_committee_vote(market_id) — anyone can trigger after panel votes */
+export function buildFinalizeCommitteeVoteInputs(marketId: string): string[] {
+  return [normalizeFieldValue(marketId)];
+}
+
+/** panel_vote(market_id, outcome) — committee member casts vote */
+export function buildPanelVoteInputs(marketId: string, outcome: number): string[] {
+  return [normalizeFieldValue(marketId), `${outcome}u8`];
+}
+
+/** escalate_to_community(market_id, proposed_outcome, nonce) — Tier 2 → Tier 3 */
+export function buildEscalateToCommunityInputs(
+  marketId: string,
+  proposedOutcome: number,
+  nonce: bigint,
+): string[] {
+  return [normalizeFieldValue(marketId), `${proposedOutcome}u8`, `${nonce}u64`];
+}
+
+// v6 (Bug C): tier is now a public input for all governance_resolve_* variants.
+// Pass 2 for committee resolution, 3 for community resolution. The market
+// contract cross-checks against market_escalation_tier[market_id].
+export const ESCALATION_TIER_COMMITTEE = 2;
+export const ESCALATION_TIER_COMMUNITY = 3;
+
+/** governance_resolve_aleo(market_id, winning_outcome, tier) — for ALEO market */
+export function buildGovernanceResolveAleoInputs(
+  marketId: string,
+  winningOutcome: number,
+  tier: number,
+): string[] {
+  return [normalizeFieldValue(marketId), `${winningOutcome}u8`, `${tier}u8`];
+}
+
+/** governance_resolve_usdcx(market_id, winning_outcome, tier) — for USDCX market */
+export function buildGovernanceResolveUsdcxInputs(
+  marketId: string,
+  winningOutcome: number,
+  tier: number,
+): string[] {
+  return [normalizeFieldValue(marketId), `${winningOutcome}u8`, `${tier}u8`];
+}
+
+/** governance_resolve_usad(market_id, winning_outcome, tier) — for USAD market */
+export function buildGovernanceResolveUsadInputs(
+  marketId: string,
+  winningOutcome: number,
+  tier: number,
+): string[] {
+  return [normalizeFieldValue(marketId), `${winningOutcome}u8`, `${tier}u8`];
+}
+
+/**
+ * slash_resolver(resolver, market_id) — admin slash for wrong resolution.
+ * Only callable by DEPLOYER address (per governance contract assertion).
+ * v6: Auto-blacklist triggers inside slash_resolver_fin once strikes reach
+ * MAX_STRIKES — the explicit blacklist_resolver transition was removed.
+ */
+export function buildSlashResolverInputs(resolver: string, marketId: string): string[] {
+  return [resolver, normalizeFieldValue(marketId)];
+}
+
+/**
+ * Pick the right governance_resolve_* function name based on market token type.
+ * Returns null if token type is unknown.
+ */
+export function getGovernanceResolveFunctionName(
+  tokenType: 'ALEO' | 'USDCX' | 'USAD' | string | undefined,
+): string | null {
+  if (tokenType === 'USDCX') return 'governance_resolve_usdcx';
+  if (tokenType === 'USAD') return 'governance_resolve_usad';
+  if (tokenType === 'ALEO') return 'governance_resolve_aleo';
+  return null;
 }
 
 // ============================================================================
@@ -517,6 +735,72 @@ export function estimateBlockTime(targetBlock: bigint, currentBlock: bigint): nu
   const blocksAway = Number(targetBlock - currentBlock);
   const secondsPerBlock = config.secondsPerBlock;
   return Date.now() + (blocksAway * secondsPerBlock * 1000);
+}
+
+export async function computeGovernanceProposalId(params: {
+  proposer: string;
+  proposalType: number;
+  target: string;
+  payload1: bigint;
+  nonce: bigint;
+}): Promise<string | null> {
+  try {
+    const sdk = await import('@provablehq/sdk');
+    const hashField = sdk.Field as unknown as {
+      hashBhp256?: (value: string) => { toString: () => string };
+    };
+
+    if (!hashField?.hashBhp256) return null;
+
+    const struct = `{ proposer: ${params.proposer}, proposal_type: ${params.proposalType}u8, `
+      + `target: ${normalizeFieldInput(params.target)}, payload_1: ${params.payload1}u128, nonce: ${params.nonce}u64 }`;
+    const hash = hashField.hashBhp256(struct).toString();
+    return hash.endsWith('field') ? hash : `${hash}field`;
+  } catch (error) {
+    devWarn('[Governance] Failed to compute proposal ID:', error);
+    return null;
+  }
+}
+
+export async function hashAddressToField(address: string): Promise<string | null> {
+  try {
+    const sdk = await import('@provablehq/sdk');
+    const hashField = sdk.Field as unknown as {
+      hashBhp256?: (value: string) => { toString: () => string };
+    };
+
+    if (!hashField?.hashBhp256) return null;
+
+    const hash = hashField.hashBhp256(address).toString();
+    return hash.endsWith('field') ? hash : `${hash}field`;
+  } catch (error) {
+    devWarn('[Governance] Failed to hash address to field:', error);
+    return null;
+  }
+}
+
+export function parseVoteLockRecord(
+  plaintext: string,
+  metadata?: Pick<ScannedRecord, 'transactionId' | 'blockHeight'>,
+): VoteLock | null {
+  const ownerMatch = plaintext.match(/owner:\s*(aleo1[0-9a-z]+)/);
+  const proposalIdMatch = plaintext.match(/proposal_id:\s*([0-9a-z]+field)/);
+  const amountMatch = plaintext.match(/amount:\s*(\d+)u64/);
+  const unlockAtMatch = plaintext.match(/unlock_at:\s*(\d+)u64/);
+
+  if (!ownerMatch || !proposalIdMatch || !amountMatch || !unlockAtMatch) {
+    return null;
+  }
+
+  return {
+    owner: ownerMatch[1],
+    proposalId: proposalIdMatch[1],
+    amount: BigInt(amountMatch[1]),
+    unlockAt: BigInt(unlockAtMatch[1]),
+    recordPlaintext: plaintext,
+    transactionId: metadata?.transactionId,
+    blockHeight: metadata?.blockHeight,
+  };
 }
 
 /**

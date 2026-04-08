@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { motion } from 'framer-motion';
-import { Coins, Vote, Gift, ArrowRight, Loader2, Lock, Unlock } from 'lucide-react';
+import { Coins, Vote, Gift, ArrowRight, Loader2, Lock } from 'lucide-react';
 import { formatVeil } from '../../lib/governance-client';
 import { useGovernanceStore } from '../../lib/governance-store';
 import { useWalletStore } from '../../lib/store';
@@ -13,13 +13,11 @@ import { formatCredits, shortenAddress } from '../../lib/utils';
 
 interface GovernanceHeaderProps {
   onClaimAll?: () => Promise<void>;
-  onOpenDelegate?: () => void;
   isClaimingAll?: boolean;
 }
 
 export function GovernanceHeader({
   onClaimAll,
-  onOpenDelegate,
   isClaimingAll = false,
 }: GovernanceHeaderProps) {
   const {
@@ -33,225 +31,156 @@ export function GovernanceHeader({
   const totalAleo = wallet.balance.public + wallet.balance.private;
 
   return (
-    <div className="space-y-4">
-      {/* Balance Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        {/* ALEO Balance */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5"
-        >
-          <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
-            <Coins className="w-4 h-4 text-brand-400" />
-            Your ALEO
-          </div>
-          <div className="text-2xl font-bold text-white">
-            {formatCredits(totalAleo, 2)}
-          </div>
-          <div className="text-xs text-surface-500 mt-1">
-            {formatCredits(wallet.balance.public, 2)} public · {formatCredits(wallet.balance.private, 2)} private
-          </div>
-        </motion.div>
-
-        {/* Staked in Governance */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-brand-500/20 rounded-2xl p-5"
-        >
-          <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
-            <Lock className="w-4 h-4 text-yellow-400" />
-            Protocol Locked
-          </div>
-          {isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin text-surface-500" />
-          ) : (
-            <>
-              <div className="text-2xl font-bold text-yellow-400">
-                {formatVeil(stats.totalStakedInVotes)}
-              </div>
-              <div className="text-xs text-surface-500 mt-1">ALEO currently locked in tracked proposals</div>
-            </>
-          )}
-        </motion.div>
-
-        {/* Voting Power */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5"
-        >
-          <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
-            <Vote className="w-4 h-4 text-purple-400" />
-            Voting Power
-          </div>
-          {isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin text-surface-500" />
-          ) : (
-            <>
-              <div className="text-2xl font-bold text-white">
-                {formatVeil(votingPower)}
-              </div>
-              <div className="text-xs text-surface-500 mt-1">ALEO (incl. delegated)</div>
-              {onOpenDelegate && (
-                <button
-                  onClick={onOpenDelegate}
-                  className="mt-2 flex items-center gap-1 text-xs text-purple-400 hover:text-purple-300 transition-colors"
-                >
-                  Delegate votes <ArrowRight className="w-3 h-3" />
-                </button>
+    <div className="space-y-3">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.08 }}
+        className="rounded-2xl border border-white/[0.06] bg-surface-900/55 p-4 sm:p-5"
+      >
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-brand-500/20 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-200">
+                Governance Workspace
+              </span>
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                stats.pauseState ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'
+              }`}>
+                {stats.pauseState ? 'Markets Paused' : 'Markets Active'}
+              </span>
+              {wallet.address && (
+                <span className="rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[11px] font-mono text-surface-300">
+                  {shortenAddress(wallet.address, 4)}
+                </span>
               )}
-            </>
-          )}
-        </motion.div>
+            </div>
 
-        {/* Claimable Rewards */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5"
-        >
-          <div className="flex items-center gap-2 text-surface-400 text-sm mb-2">
-            <Gift className="w-4 h-4 text-emerald-400" />
-            Rewards
+            <div>
+              <h2 className="text-lg font-semibold text-white sm:text-xl">Stake, vote, and manage protocol changes from one page.</h2>
+              <p className="mt-1 text-sm text-surface-400">
+                Track voting power, rewards, and live control parameters without digging through separate panels.
+              </p>
+            </div>
           </div>
-          {isLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin text-surface-500" />
-          ) : (
-            <>
-              <div className="text-2xl font-bold text-emerald-400">
-                {formatVeil(totalClaimable)}
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[420px] xl:max-w-[460px] xl:grid-cols-4">
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
+              <div className="flex items-center gap-1.5 text-[11px] text-surface-500">
+                <Coins className="h-3.5 w-3.5 text-brand-400" />
+                Wallet ALEO
               </div>
-              <div className="text-xs text-surface-500 mt-1">ALEO to claim</div>
-              {totalClaimable > 0n && onClaimAll && (
-                <button
-                  onClick={() => void onClaimAll()}
-                  disabled={isClaimingAll}
-                  className="mt-2 flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 transition-colors disabled:opacity-50"
-                >
-                  {isClaimingAll ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                  Claim All <ArrowRight className="w-3 h-3" />
-                </button>
+              <div className="mt-2 text-lg font-semibold text-white">{formatCredits(totalAleo, 2)}</div>
+              <div className="mt-1 text-[11px] text-surface-500">
+                {formatCredits(wallet.balance.public, 2)} public · {formatCredits(wallet.balance.private, 2)} private
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-brand-500/15 bg-brand-500/6 p-3">
+              <div className="flex items-center gap-1.5 text-[11px] text-surface-500">
+                <Lock className="h-3.5 w-3.5 text-yellow-400" />
+                Protocol Locked
+              </div>
+              {isLoading ? (
+                <div className="mt-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-surface-500" />
+                </div>
+              ) : (
+                <>
+                  <div className="mt-2 text-lg font-semibold text-yellow-300">{formatVeil(stats.totalStakedInVotes)}</div>
+                  <div className="mt-1 text-[11px] text-surface-500">ALEO currently bonded into governance votes</div>
+                </>
               )}
-            </>
-          )}
-        </motion.div>
-      </div>
+            </div>
+
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
+              <div className="flex items-center gap-1.5 text-[11px] text-surface-500">
+                <Vote className="h-3.5 w-3.5 text-purple-400" />
+                Voting Power
+              </div>
+              {isLoading ? (
+                <div className="mt-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-surface-500" />
+                </div>
+              ) : (
+                <>
+                  <div className="mt-2 text-lg font-semibold text-white">{formatVeil(votingPower)}</div>
+                  <div className="mt-1 text-[11px] text-surface-500">Current wallet power recognized in live governance tallies</div>
+                  <div className="mt-2 text-[11px] text-amber-300/90">
+                    Delegation submit is disabled in-app until delegated power is surfaced consistently end-to-end.
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
+              <div className="flex items-center gap-1.5 text-[11px] text-surface-500">
+                <Gift className="h-3.5 w-3.5 text-emerald-400" />
+                Claimable
+              </div>
+              {isLoading ? (
+                <div className="mt-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-surface-500" />
+                </div>
+              ) : (
+                <>
+                  <div className="mt-2 text-lg font-semibold text-emerald-300">{formatVeil(totalClaimable)}</div>
+                  <div className="mt-1 text-[11px] text-surface-500">Rewards ready to withdraw</div>
+                  {totalClaimable > 0n && onClaimAll && (
+                    <button
+                      onClick={() => void onClaimAll()}
+                      disabled={isClaimingAll}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-300 transition-colors hover:text-emerald-200 disabled:opacity-50"
+                    >
+                      {isClaimingAll ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                      Claim all
+                      <ArrowRight className="h-3 w-3" />
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </motion.div>
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.28 }}
-        className="bg-surface-900/40 border border-surface-700/30 rounded-xl p-4"
+        transition={{ delay: 0.14 }}
+        className="rounded-xl border border-white/[0.06] bg-surface-900/45 p-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-surface-300">Live Market Controls</h3>
-            <p className="text-xs text-surface-500 mt-1">
-              Current on-chain settings pushed by governance into the market contracts.
-            </p>
+            <h3 className="text-sm font-semibold text-surface-200">Live Protocol Controls</h3>
+            <p className="mt-1 text-xs text-surface-500">Current market parameters pushed by governance on-chain.</p>
           </div>
-          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
-            stats.pauseState ? 'bg-red-500/15 text-red-300' : 'bg-emerald-500/15 text-emerald-300'
-          }`}>
-            {stats.pauseState ? 'Markets Paused' : 'Markets Active'}
-          </span>
-        </div>
-        <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-          <div className="rounded-lg bg-white/[0.02] p-3">
-            <div className="text-surface-500">Protocol Fee</div>
-            <div className="mt-1 text-white font-medium">{(Number(stats.protocolFeeBps) / 100).toFixed(2)}%</div>
-          </div>
-          <div className="rounded-lg bg-white/[0.02] p-3">
-            <div className="text-surface-500">Creator Fee</div>
-            <div className="mt-1 text-white font-medium">{(Number(stats.creatorFeeBps) / 100).toFixed(2)}%</div>
-          </div>
-          <div className="rounded-lg bg-white/[0.02] p-3">
-            <div className="text-surface-500">LP Fee</div>
-            <div className="mt-1 text-white font-medium">{(Number(stats.lpFeeBps) / 100).toFixed(2)}%</div>
-          </div>
-          <div className="rounded-lg bg-white/[0.02] p-3">
-            <div className="text-surface-500">Min Trade</div>
-            <div className="mt-1 text-white font-medium">{formatCredits(stats.minTradeAmount, 4)} ALEO</div>
-          </div>
-          <div className="rounded-lg bg-white/[0.02] p-3">
-            <div className="text-surface-500">Min Liquidity</div>
-            <div className="mt-1 text-white font-medium">{formatCredits(stats.minLiquidity, 4)} ALEO</div>
+          <div className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1 text-[11px] text-surface-300">
+            Guardian threshold: {stats.guardianThreshold > 0 ? `${stats.guardianThreshold} of ${stats.guardianAddresses.length || 3}` : 'Loading'}
           </div>
         </div>
-        <div className="mt-4 rounded-lg bg-white/[0.02] p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-xs text-surface-500">Guardian Committee</div>
-              <div className="mt-1 text-sm text-white font-medium">
-                {stats.guardianThreshold > 0
-                  ? `${stats.guardianThreshold} of ${stats.guardianAddresses.length || 3} approvals required`
-                  : 'Loading guardian configuration...'}
-              </div>
-            </div>
-            {stats.guardianAddresses.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {stats.guardianAddresses.map((address) => (
-                  <span
-                    key={address}
-                    className="rounded-full border border-white/[0.08] bg-surface-950/70 px-2.5 py-1 font-mono text-[11px] text-surface-300"
-                  >
-                    {shortenAddress(address, 4)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </motion.div>
 
-      {/* How Staking Works */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-        className="bg-surface-900/40 border border-surface-700/30 rounded-xl p-4"
-      >
-        <h3 className="text-sm font-semibold text-surface-300 mb-3 flex items-center gap-2">
-          <Lock className="w-4 h-4 text-brand-400" />
-          How ALEO Staking Works
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-          <div className="flex items-start gap-2">
-            <Vote className="w-3.5 h-3.5 text-purple-400 mt-0.5 shrink-0" />
-            <div>
-              <span className="text-surface-300 font-medium">Vote on Proposals</span>
-              <p className="text-surface-500 mt-0.5">Lock ALEO to vote. Unlocks after voting ends.</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Coins className="w-3.5 h-3.5 text-brand-400 mt-0.5 shrink-0" />
-            <div>
-              <span className="text-surface-300 font-medium">Create Proposals</span>
-              <p className="text-surface-500 mt-0.5">Stake 10 ALEO to submit a proposal.</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Lock className="w-3.5 h-3.5 text-yellow-400 mt-0.5 shrink-0" />
-            <div>
-              <span className="text-surface-300 font-medium">Become Resolver</span>
-              <p className="text-surface-500 mt-0.5">Stake 50 ALEO to resolve markets.</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Unlock className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
-            <div>
-              <span className="text-surface-300 font-medium">Earn Rewards</span>
-              <p className="text-surface-500 mt-0.5">LP & traders earn ALEO from protocol fees.</p>
-            </div>
-          </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+          <ControlStat label="Protocol Fee" value={`${(Number(stats.protocolFeeBps) / 100).toFixed(2)}%`} />
+          <ControlStat label="Creator Fee" value={`${(Number(stats.creatorFeeBps) / 100).toFixed(2)}%`} />
+          <ControlStat label="LP Fee" value={`${(Number(stats.lpFeeBps) / 100).toFixed(2)}%`} />
+          <ControlStat label="Min Trade" value={`${formatCredits(stats.minTradeAmount, 4)} ALEO`} />
+          <ControlStat label="Min Liquidity" value={`${formatCredits(stats.minLiquidity, 4)} ALEO`} />
+          <ControlStat
+            label="Guardian Set"
+            value={stats.guardianAddresses.length > 0 ? `${stats.guardianAddresses.length} configured` : 'Loading'}
+          />
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+function ControlStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/[0.05] bg-white/[0.02] px-3 py-2.5">
+      <div className="text-[11px] text-surface-500">{label}</div>
+      <div className="mt-1 text-sm font-medium text-white">{value}</div>
     </div>
   );
 }

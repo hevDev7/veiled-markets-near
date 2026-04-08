@@ -25,6 +25,7 @@ import {
   fetchPendingBets as sbFetchPendingBets, upsertPendingBets as sbUpsertPendingBets,
   removePendingBet as sbRemovePendingBet, removeUserBet as sbRemoveUserBet,
   fetchCommitments as sbFetchCommitments, upsertCommitments as sbUpsertCommitments,
+  setSupabaseAleoAddress,
 } from './supabase'
 
 // Re-export for use in components
@@ -274,6 +275,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         error: null,
       })
 
+      // Inform Supabase client about the connected address so RLS works
+      setSupabaseAleoAddress(account.address)
+
       // Set up event listeners for real wallets
       // Clean up previous listeners first to prevent duplicates
       if (_listenerCleanups.length > 0) {
@@ -286,6 +290,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
           if (newAccount) {
             devLog('[Store] Account changed to:', newAccount.address?.slice(0, 12))
             import('./record-scanner').then(({ resetScanner }) => resetScanner()).catch(() => {})
+            setSupabaseAleoAddress(newAccount.address)
             set({
               wallet: {
                 ...get().wallet,
@@ -347,6 +352,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     } catch (error) {
       console.error('Disconnect error:', error)
     }
+    setSupabaseAleoAddress(null)
     import('./record-scanner').then(({ resetScanner }) => resetScanner()).catch(() => {})
     if (disconnectAddress) {
       _activeBalanceRefreshIds.delete(disconnectAddress)
@@ -1031,7 +1037,7 @@ const seedMockBinaryMarketFields = (
 // ============================================================================
 // These markets are for UI demonstration only and are NOT on-chain.
 // Real markets created via the "Create Market" modal will be stored on-chain
-// in the veiled_markets_v35.aleo program.
+// in the veiled_markets_v37.aleo program.
 //
 // TODO: Replace with real blockchain data once indexer is available
 // An indexer service will track market creation events and provide a list

@@ -1,0 +1,16 @@
+{
+  "program": "veiled_markets_v37.aleo",
+  "version": "0.29.0",
+  "description": "ALEO prediction market v37 — Bug B/D fixes: cross-program auth uses program literal veiled_governance_v6.aleo, MarketSeed includes token_type so market_id is unique vs USDCX/USAD contracts.",
+  "license": "MIT",
+  "leo": "4.0.0",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}

@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { motion } from 'framer-motion';
-import { Plus, Filter, Loader2, FileQuestion, X } from 'lucide-react';
+import { Filter, Loader2, FileQuestion, X } from 'lucide-react';
 import { useMemo } from 'react';
 import { useGovernanceStore } from '../../lib/governance-store';
 import {
@@ -14,7 +14,6 @@ import {
 import { ProposalCard } from './ProposalCard';
 
 interface ProposalListProps {
-  onCreateProposal: () => void;
   onSelectProposal: (proposalId: string) => void;
 }
 
@@ -34,7 +33,7 @@ const LANE_OPTIONS = [
   { key: GOVERNANCE_PROPOSAL_LANES.TREASURY, label: 'Treasury' },
 ] as const;
 
-export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalListProps) {
+export function ProposalList({ onSelectProposal }: ProposalListProps) {
   const {
     proposalFilter,
     proposalLaneFilter,
@@ -102,80 +101,85 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
     proposal.proposalType === PROPOSAL_TYPES.RESOLVER_ELECTION
     && (proposal.status === PROPOSAL_STATUS.ACTIVE || proposal.status === PROPOSAL_STATUS.PASSED)
   ).length;
+  const hasAnyProposals = proposals.length > 0;
+  const hasVisibleProposals = orderedProposals.length > 0;
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Filter className="w-5 h-5 text-brand-400" />
-          Proposals
-        </h2>
-        <button
-          onClick={onCreateProposal}
-          className="flex items-center gap-1.5 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-medium transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Create Proposal
-        </button>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-xl border border-white/[0.06] bg-surface-900/50 p-4">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Dispute Lane</div>
-          <div className="mt-2 text-2xl font-semibold text-white">{liveDisputeProposals}</div>
-          <p className="mt-1 text-xs text-surface-400">Active or timelocked proposals that can override disputed market outcomes.</p>
-        </div>
-        <div className="rounded-xl border border-white/[0.06] bg-surface-900/50 p-4">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Resolver Elections</div>
-          <div className="mt-2 text-2xl font-semibold text-white">{liveResolverElections}</div>
-          <p className="mt-1 text-xs text-surface-400">Governance motions currently shaping the resolver committee and escalation lane.</p>
-        </div>
-        <div className="rounded-xl border border-white/[0.06] bg-surface-900/50 p-4">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Emergency Guardians</div>
-          <div className="mt-2 text-2xl font-semibold text-white">
-            {stats.guardianThreshold > 0 ? `${stats.guardianThreshold}/${stats.guardianAddresses.length || 3}` : '...'}
+      <div className="rounded-2xl border border-white/[0.06] bg-surface-900/45 p-4 space-y-4">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+              <Filter className="h-4 w-4 text-brand-400" />
+              Proposal Feed
+            </h2>
+            <p className="mt-1 text-xs text-surface-400">
+              {orderedProposals.length} result{orderedProposals.length === 1 ? '' : 's'} in {activeLaneLabel.toLowerCase()} with {activeFilterLabel.toLowerCase()} status.
+            </p>
           </div>
-          <p className="mt-1 text-xs text-surface-400">Guardian threshold required to veto malicious proposals or enforce an emergency market pause.</p>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <SummaryTile label="Shown" value={String(orderedProposals.length)} />
+            <SummaryTile label="Disputes" value={String(liveDisputeProposals)} />
+            <SummaryTile label="Resolver" value={String(liveResolverElections)} />
+            <SummaryTile
+              label="Guardians"
+              value={stats.guardianThreshold > 0 ? `${stats.guardianThreshold}/${stats.guardianAddresses.length || 3}` : '...'}
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-1 bg-surface-900/60 p-1 rounded-xl border border-white/[0.06]">
-        {FILTER_OPTIONS.map((opt) => (
-          <button
-            key={opt.key}
-            onClick={() => setProposalFilter(opt.key as typeof proposalFilter)}
-            className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              proposalFilter === opt.key
-                ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
-                : 'text-surface-400 hover:text-surface-300 hover:bg-white/[0.03]'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setProposalFilter(opt.key as typeof proposalFilter)}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                  proposalFilter === opt.key
+                    ? 'border border-brand-500/30 bg-brand-500/20 text-brand-300'
+                    : 'border border-white/[0.06] bg-white/[0.02] text-surface-400 hover:bg-white/[0.04] hover:text-surface-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
-      <div className="flex flex-wrap gap-2">
-        {LANE_OPTIONS.map((opt) => (
-          <button
-            key={opt.key}
-            onClick={() => {
-              setProposalLaneFilter(opt.key);
-              if (opt.key !== GOVERNANCE_PROPOSAL_LANES.DISPUTE && proposalFocusMarketId) {
-                setProposalFocusMarketId(null);
-              }
-            }}
-            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
-              proposalLaneFilter === opt.key
-                ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
-                : 'border border-white/[0.06] bg-surface-900/60 text-surface-400 hover:text-surface-300 hover:bg-white/[0.03]'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+          <div className="flex flex-wrap gap-2">
+            {LANE_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => {
+                  setProposalLaneFilter(opt.key);
+                  if (opt.key !== GOVERNANCE_PROPOSAL_LANES.DISPUTE && proposalFocusMarketId) {
+                    setProposalFocusMarketId(null);
+                  }
+                }}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                  proposalLaneFilter === opt.key
+                    ? 'border border-brand-500/30 bg-brand-500/20 text-brand-300'
+                    : 'border border-white/[0.06] bg-white/[0.02] text-surface-400 hover:bg-white/[0.04] hover:text-surface-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-brand-500/15 bg-brand-500/8 px-4 py-3 text-sm">
+            <div className="font-medium text-brand-100">
+              {hasAnyProposals ? 'Voting opens inside each proposal detail.' : 'No governance proposal is available to vote on yet.'}
+            </div>
+            <div className="mt-1 text-xs text-brand-200/80">
+              {hasVisibleProposals
+                ? 'Click any proposal card below to open the vote panel and cast your vote.'
+                : hasAnyProposals
+                  ? 'Your current filters hide the available proposals. Try switching to All status or All Lanes.'
+                  : 'Create the first proposal, or wait until governance proposals sync in, then the vote panel will appear automatically.'}
+            </div>
+          </div>
+        </div>
       </div>
 
       {proposalFocusMarketId && (
@@ -183,7 +187,7 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
           <div>
             <div className="font-medium">Focused on disputed market</div>
             <div className="mt-1 text-xs text-brand-200/90">
-              Showing {filteredProposals.length} proposal{filteredProposals.length === 1 ? '' : 's'} in {activeLaneLabel.toLowerCase()} with {activeFilterLabel.toLowerCase()} status.
+              {filteredProposals.length} proposal{filteredProposals.length === 1 ? '' : 's'} currently match this market context.
             </div>
             <div className="mt-1 font-mono text-xs text-brand-200/80">{proposalFocusMarketId}</div>
           </div>
@@ -212,7 +216,7 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
           <div>
             <div className="font-medium">Focused on {actorFocusRole} context</div>
             <div className="mt-1 text-xs text-purple-100/80">
-              Showing {filteredProposals.length} proposal{filteredProposals.length === 1 ? '' : 's'} in {activeLaneLabel.toLowerCase()} with {activeFilterLabel.toLowerCase()} status that match this actor.
+              {filteredProposals.length} proposal{filteredProposals.length === 1 ? '' : 's'} currently match this actor focus.
             </div>
             <div className="mt-1 font-mono text-xs text-purple-100/70">{actorFocusAddress}</div>
           </div>
@@ -316,14 +320,14 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
               ? 'No proposals found for this actor focus'
               : proposalFocusMarketId
                 ? 'No proposals found for this market lane'
-                : 'No proposals found'}
+                : 'No proposals found yet'}
           </p>
           <p className="text-xs mt-1">
             {actorFocusAddress
               ? 'Try showing all statuses or clear the actor focus.'
               : proposalFocusMarketId
               ? 'Try clearing the market focus or switching governance lanes.'
-              : 'Be the first to create a governance proposal'}
+              : 'Voting appears after at least one proposal exists and you open its detail view.'}
           </p>
         </motion.div>
       ) : (
@@ -355,6 +359,15 @@ export function ProposalList({ onCreateProposal, onSelectProposal }: ProposalLis
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-surface-500">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-white">{value}</div>
     </div>
   );
 }

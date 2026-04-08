@@ -36,9 +36,6 @@ export interface AppConfig {
   usadProgramId: string;
   governanceProgramId: string;
   parlayProgramId: string;
-  // Legacy program IDs for querying old markets
-  legacyProgramIds: string[];
-  legacyUsadProgramIds: string[];
 
   // Wallet
   enableDemoMode: boolean;
@@ -112,21 +109,25 @@ function loadConfig(): AppConfig {
     secondsPerBlock: network === 'mainnet' ? 15 : 4,
     msPerBlock: network === 'mainnet' ? 15000 : 4000,
 
-    // Program
-    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v35.aleo'),
+    // Program (v6 post-audit hardening, deployed 2026-04-08)
+    // - Bug A: removed governance_resolved_outcomes collision in committee/panel
+    // - Bug B: cross-program auth uses program literal veiled_governance_v6.aleo
+    // - Bug C: governance_resolve_* propagates real escalation tier (2 vs 3)
+    // - Bug D: MarketSeed includes token_type so market_id unique across tokens
+    // - Hardening: initiate_escalation split into 3 token-specific variants
+    programId: getEnv('VITE_PROGRAM_ID', 'veiled_markets_v37.aleo'),
     creditsProgramId: getEnv('VITE_CREDITS_PROGRAM_ID', 'credits.aleo'),
     usdcxProgramId: getEnv('VITE_USDCX_PROGRAM_ID', 'test_usdcx_stablecoin.aleo'),
-    usdcxMarketProgramId: getEnv('VITE_USDCX_MARKET_PROGRAM_ID', 'veiled_markets_usdcx_v5.aleo'),
-    usadProgramId: getEnv('VITE_USAD_PROGRAM_ID', 'veiled_markets_usad_v12.aleo'),
-    governanceProgramId: getEnv('VITE_GOVERNANCE_PROGRAM_ID', 'veiled_governance_v4.aleo'),
+    usdcxMarketProgramId: getEnv('VITE_USDCX_MARKET_PROGRAM_ID', 'veiled_markets_usdcx_v7.aleo'),
+    usadProgramId: getEnv('VITE_USAD_PROGRAM_ID', 'veiled_markets_usad_v14.aleo'),
+    governanceProgramId: getEnv('VITE_GOVERNANCE_PROGRAM_ID', 'veiled_governance_v6.aleo'),
     parlayProgramId: getEnv('VITE_PARLAY_PROGRAM_ID', 'veiled_parlay_v3.aleo'),
-    // Legacy programs — markets created on older versions still live there
-    legacyProgramIds: [],
-    legacyUsadProgramIds: [],
 
     // Wallet
-    enableDemoMode: getEnvBool('VITE_ENABLE_DEMO_MODE', true),
-    defaultWallet: getEnv('VITE_DEFAULT_WALLET', 'puzzle') as WalletType,
+    // Demo mode is force-disabled in production builds regardless of env to
+    // prevent fake balances and fake TX IDs from leaking into prod.
+    enableDemoMode: import.meta.env.PROD ? false : getEnvBool('VITE_ENABLE_DEMO_MODE', true),
+    defaultWallet: getEnv('VITE_DEFAULT_WALLET', 'shield') as WalletType,
 
     // Development keys (local testing only)
     devPrivateKey: getEnv('VITE_DEV_PRIVATE_KEY') || null,

@@ -44,11 +44,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       autoConnect={true}
       decryptPermission={DecryptPermission.AutoDecrypt}
       programs={[
+        // Active v6 post-audit hardening (v37/v7/v14/v6) — only set
         config.programId,
         config.usdcxMarketProgramId,
         config.usadProgramId,
         config.governanceProgramId,
         config.parlayProgramId,
+        // Token + utility programs
         'credits.aleo',
         config.usdcxProgramId,
         'test_usad_stablecoin.aleo',

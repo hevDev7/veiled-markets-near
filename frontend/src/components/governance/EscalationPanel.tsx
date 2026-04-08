@@ -1,4 +1,5 @@
-import { AlertTriangle, ArrowRight, Gavel, Scale, Shield, Vote } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, ArrowRight, Gavel, Loader2, Scale, Shield, Vote } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { escalationMatchesActorFocus, useGovernanceStore } from '../../lib/governance-store';
 import {
@@ -7,7 +8,24 @@ import {
   type GovernanceProposalLane,
   PROPOSAL_STATUS_LABELS,
 } from '../../lib/governance-types';
-import { formatVeilCompact } from '../../lib/governance-client';
+import {
+  buildInitiateEscalationAleoInputs,
+  buildInitiateEscalationUsdcxInputs,
+  buildInitiateEscalationUsadInputs,
+  buildFinalizeCommitteeVoteInputs,
+  buildGovernanceResolveAleoInputs,
+  buildGovernanceResolveUsdcxInputs,
+  buildGovernanceResolveUsadInputs,
+  buildSlashResolverInputs,
+  formatVeilCompact,
+  getGovernanceResolveFunctionName,
+  getInitiateEscalationFunctionName,
+  ESCALATION_TIER_COMMITTEE,
+  ESCALATION_TIER_COMMUNITY,
+} from '../../lib/governance-client';
+import { useWalletStore } from '../../lib/store';
+import { useAleoTransaction } from '../../hooks/useAleoTransaction';
+import { config } from '../../lib/config';
 import { cn, shortenAddress } from '../../lib/utils';
 
 const STAGE_STYLES = {
@@ -73,12 +91,128 @@ interface EscalationPanelProps {
   onOpenContextLane?: (lane: GovernanceProposalLane) => void;
 }
 
+// Admin (deployer) address that holds slash_resolver authority on-chain.
+const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8';
+
 export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLane }: EscalationPanelProps) {
   const navigate = useNavigate();
   const { escalations, currentBlockHeight, actorFocusAddress, actorFocusRole, clearProposalContext } = useGovernanceStore();
+  const { executeTransaction } = useAleoTransaction();
+  const { wallet } = useWalletStore();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [activeAction, setActiveAction] = useState<string | null>(null);
+  const isAdmin = wallet.address === ADMIN_ADDRESS;
+
   const filteredEscalations = actorFocusAddress && actorFocusRole
     ? escalations.filter((item) => escalationMatchesActorFocus(item, actorFocusAddress, actorFocusRole))
     : escalations;
+
+  const handleInitiateEscalation = async (marketId: string, tokenType: string | undefined) => {
+    setActionError(null);
+    setActiveAction(`init-${marketId}`);
+    try {
+      // v6: split into 3 token-specific transitions, each cross-program calls
+      // assert_disputed in the matching market contract.
+      const fnName = getInitiateEscalationFunctionName(tokenType);
+      if (!fnName) {
+        throw new Error(`Unknown token type "${tokenType}" — cannot route initiate_escalation`);
+      }
+      const inputs =
+        fnName === 'initiate_escalation_usdcx'
+          ? buildInitiateEscalationUsdcxInputs(marketId)
+          : fnName === 'initiate_escalation_usad'
+            ? buildInitiateEscalationUsadInputs(marketId)
+            : buildInitiateEscalationAleoInputs(marketId);
+
+      await executeTransaction({
+        program: config.governanceProgramId,
+        function: fnName,
+        inputs,
+        fee: 0.5,
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to initiate escalation');
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const handleFinalizeCommitteeVote = async (marketId: string) => {
+    setActionError(null);
+    setActiveAction(`finalize-${marketId}`);
+    try {
+      await executeTransaction({
+        program: config.governanceProgramId,
+        function: 'finalize_committee_vote',
+        inputs: buildFinalizeCommitteeVoteInputs(marketId),
+        fee: 0.5,
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to finalize committee vote');
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const handleGovernanceResolve = async (
+    marketId: string,
+    winningOutcome: number,
+    tokenType: string | undefined,
+    escalationTier: number | undefined,
+  ) => {
+    setActionError(null);
+    setActiveAction(`resolve-${marketId}`);
+    try {
+      const fnName = getGovernanceResolveFunctionName(tokenType);
+      if (!fnName) {
+        throw new Error(`Unknown token type "${tokenType}" — cannot route governance_resolve`);
+      }
+      // v6 (Bug C): tier must match the on-chain market_escalation_tier mapping.
+      // Default to committee=2 if escalationTier is missing (most common case);
+      // for community-resolved disputes, escalationTier should be 3.
+      const tier = escalationTier === ESCALATION_TIER_COMMUNITY
+        ? ESCALATION_TIER_COMMUNITY
+        : ESCALATION_TIER_COMMITTEE;
+
+      const inputs =
+        fnName === 'governance_resolve_usdcx'
+          ? buildGovernanceResolveUsdcxInputs(marketId, winningOutcome, tier)
+          : fnName === 'governance_resolve_usad'
+            ? buildGovernanceResolveUsadInputs(marketId, winningOutcome, tier)
+            : buildGovernanceResolveAleoInputs(marketId, winningOutcome, tier);
+
+      await executeTransaction({
+        program: config.governanceProgramId,
+        function: fnName,
+        inputs,
+        fee: 1.0,
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to apply governance resolution');
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const handleSlashResolver = async (resolverAddress: string, marketId: string) => {
+    setActionError(null);
+    setActiveAction(`slash-${marketId}`);
+    try {
+      if (!isAdmin) {
+        throw new Error('Only the admin/deployer wallet can slash resolvers (on-chain assertion).');
+      }
+      await executeTransaction({
+        program: config.governanceProgramId,
+        function: 'slash_resolver',
+        inputs: buildSlashResolverInputs(resolverAddress, marketId),
+        fee: 0.5,
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to slash resolver');
+    } finally {
+      setActiveAction(null);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -266,6 +400,98 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
                       </button>
                     )}
                   </div>
+
+                  {/* v5 governance escalation action buttons */}
+                  <div className="border-t border-white/[0.06] pt-3 mt-2">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500 mb-2">
+                      Governance Actions
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(item.stage === 'disputed' || item.stage === 'dispute_window') && (
+                        <button
+                          onClick={() => handleInitiateEscalation(item.marketId, item.tokenType)}
+                          disabled={activeAction === `init-${item.marketId}`}
+                          className="inline-flex items-center gap-2 rounded-lg border border-purple-500/40 bg-purple-500/15 px-3 py-2 text-xs font-medium text-purple-100 transition-colors hover:bg-purple-500/25 disabled:opacity-50"
+                        >
+                          {activeAction === `init-${item.marketId}` ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Scale className="w-3.5 h-3.5" />
+                          )}
+                          Initiate Escalation → Tier 2
+                        </button>
+                      )}
+
+                      {item.stage === 'committee' && (
+                        <button
+                          onClick={() => handleFinalizeCommitteeVote(item.marketId)}
+                          disabled={activeAction === `finalize-${item.marketId}`}
+                          className="inline-flex items-center gap-2 rounded-lg border border-purple-500/40 bg-purple-500/15 px-3 py-2 text-xs font-medium text-purple-100 transition-colors hover:bg-purple-500/25 disabled:opacity-50"
+                        >
+                          {activeAction === `finalize-${item.marketId}` ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Vote className="w-3.5 h-3.5" />
+                          )}
+                          Finalize Committee Vote
+                        </button>
+                      )}
+
+                      {item.committeeOutcome && item.committeeDecisionFinalized && (
+                        <button
+                          onClick={() =>
+                            handleGovernanceResolve(
+                              item.marketId,
+                              item.committeeOutcome ?? 1,
+                              item.tokenType,
+                              item.escalationTier,
+                            )
+                          }
+                          disabled={activeAction === `resolve-${item.marketId}`}
+                          className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-100 transition-colors hover:bg-emerald-500/25 disabled:opacity-50"
+                        >
+                          {activeAction === `resolve-${item.marketId}` ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Shield className="w-3.5 h-3.5" />
+                          )}
+                          Apply Resolution → {getOutcomeLabel(item.outcomeLabels, item.committeeOutcome) || 'outcome'}
+                        </button>
+                      )}
+
+                      {/* Admin slash button — show when governance has decided
+                          a different outcome than the original voter winner. */}
+                      {isAdmin
+                        && item.resolverAddress
+                        && item.committeeOutcome
+                        && item.currentOutcome
+                        && item.committeeOutcome !== item.currentOutcome
+                        && item.committeeDecisionFinalized && (
+                          <button
+                            onClick={() =>
+                              item.resolverAddress &&
+                              handleSlashResolver(item.resolverAddress, item.marketId)
+                            }
+                            disabled={activeAction === `slash-${item.marketId}`}
+                            className="inline-flex items-center gap-2 rounded-lg border border-red-500/40 bg-red-500/15 px-3 py-2 text-xs font-medium text-red-100 transition-colors hover:bg-red-500/25 disabled:opacity-50"
+                          >
+                            {activeAction === `slash-${item.marketId}` ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                            )}
+                            Slash Resolver
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
+                  {actionError && (
+                    <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                      {actionError}
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-surface-500">
                     Market detail opens in read-only mode for viewers. Use the lane shortcuts to jump straight into the governance motions that matter for this escalation stage.
                   </p>

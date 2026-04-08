@@ -63,7 +63,7 @@ export function APIDocs() {
 // Initialize client
 const client = createClient({
   rpcUrl: 'https://api.explorer.provable.com/v1/testnet',
-  programId: 'veiled_markets_v35.aleo',
+  programId: 'veiled_markets_v37.aleo',
 })
 
 // Fetch a market (marketId is a field string, e.g. "123field")
@@ -288,36 +288,49 @@ interface DisputeData {
             <h2 className="text-lg font-semibold text-white mb-4">On-Chain Programs</h2>
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_v35.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">ALEO market contract — 22 transitions</p>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_v37.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">ALEO market contract — 25 transitions</p>
                 <p className="text-sm text-surface-400">
                   Handles ALEO-denominated markets: creation, trading (buy/sell), liquidity provision,
                   Multi-Voter Quorum resolution (vote_outcome, finalize_votes, confirm_resolution, dispute_resolution),
-                  bond claiming (claim_voter_bond, claim_dispute_bond, claim_voter_reward), fee collection, and multisig treasury.
+                  bond claiming, fee collection, and multisig treasury. v37 ships post-audit fixes (Bug A/B/C/D —
+                  cross-program auth literal, MarketSeed token_type, and related hardening), adds the
+                  assert_disputed helper, and keeps STATUS_DISPUTED gating with the apply_governance_resolution
+                  cross-program override callable only by governance.
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usdcx_v5.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">USDCX market contract — 22 transitions</p>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usdcx_v7.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">USDCX market contract — 25 transitions</p>
                 <p className="text-sm text-surface-400">
                   Handles USDCX-denominated markets with the same functionality as the ALEO contract.
-                  Uses Token records with MerkleProof for private trading.
+                  Uses Token records with MerkleProof for private trading. v7 ships post-audit fixes
+                  (Bug A/B/C/D — cross-program auth literal, MarketSeed token_type, and related hardening),
+                  adds the assert_disputed helper, and keeps STATUS_DISPUTED gating with
+                  apply_governance_resolution.
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usad_v12.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">USAD market contract — 22 transitions</p>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_markets_usad_v14.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">USAD market contract — 25 transitions</p>
                 <p className="text-sm text-surface-400">
                   Handles USAD-denominated markets with the same functionality as the ALEO contract.
-                  Uses Token records with MerkleProof for private trading.
+                  Uses Token records with MerkleProof for private trading. v14 ships post-audit fixes
+                  (Bug A/B/C/D — cross-program auth literal, MarketSeed token_type, and related hardening),
+                  adds the assert_disputed helper, and keeps STATUS_DISPUTED gating with
+                  apply_governance_resolution.
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_governance_v4.aleo</h3>
-                <p className="text-xs text-surface-500 mb-3">Governance program — 29 transitions</p>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_governance_v6.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">Governance program — 31 transitions</p>
                 <p className="text-sm text-surface-400">
-                  On-chain governance for protocol decisions: dispute resolution overrides, fee changes, 3-of-N
-                  multisig treasury management, parameter updates, and emergency pause. The frontend now exposes the operational proposal and execution flows on testnet as well.
+                  On-chain governance for protocol decisions: dispute resolution overrides via committee or
+                  community vote, fee changes, 3-of-N multisig treasury management, parameter updates, and
+                  emergency pause. v6 splits initiate_escalation into three token-specific transitions
+                  (ALEO/USDCX/USAD), adds tier passthrough to governance_resolve_*, removes blacklist_resolver
+                  and update_resolver_stats, and keeps the cross-program resolve calls that drive
+                  STATUS_DISPUTED markets to RESOLVED with the governance-chosen outcome.
                 </p>
               </div>
             </div>
@@ -329,13 +342,13 @@ interface DisputeData {
             <CodeBlock title="typescript">{`// Testnet (default)
 const client = createClient({
   networkUrl: 'https://api.explorer.provable.com/v1/testnet',
-  programId: 'veiled_markets_v35.aleo',
+  programId: 'veiled_markets_v37.aleo',
 })
 
 // Mainnet (future)
 const client = createClient({
   networkUrl: 'https://api.explorer.provable.com/v1/mainnet',
-  programId: 'veiled_markets_v35.aleo',
+  programId: 'veiled_markets_v37.aleo',
 })
 
 // Explorer URLs

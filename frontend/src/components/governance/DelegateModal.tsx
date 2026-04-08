@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Users, AlertCircle, Loader2 } from 'lucide-react';
-import { formatVeil, parseVeilInput } from '../../lib/governance-client';
+import { formatVeil } from '../../lib/governance-client';
 import { useGovernanceStore } from '../../lib/governance-store';
 
 interface DelegateModalProps {
@@ -20,24 +20,13 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
   const [delegateAddress, setDelegateAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    setError(null);
-    if (!delegateAddress.startsWith('aleo1')) {
-      setError('Invalid Aleo address');
-      return;
-    }
-    const parsedAmount = parseVeilInput(amount || '0');
-    if (parsedAmount <= 0n) { setError('Enter a delegation amount'); return; }
-    if (parsedAmount > veilBalance) { setError('Insufficient ALEO balance'); return; }
-
     setIsSubmitting(true);
     try {
-      await onDelegate(delegateAddress, parsedAmount);
-      onClose();
+      await onDelegate(delegateAddress, 0n);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delegation failed');
+      console.warn('[Governance] Delegation is disabled in UI:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -71,8 +60,9 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
 
             <div className="p-5 space-y-4">
               <p className="text-sm text-surface-400">
-                Delegate your ALEO voting power to a trusted address. They will vote on your behalf
-                for all active proposals. You can revoke delegation at any time.
+                New delegation submissions are disabled in the app for now. The contract still stores
+                delegation balances, but the frontend does not surface delegated vote weight
+                consistently enough to present this as a live feature yet.
               </p>
 
               <div>
@@ -82,6 +72,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
                   value={delegateAddress}
                   onChange={(e) => setDelegateAddress(e.target.value)}
                   placeholder="aleo1..."
+                  disabled
                   className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
                 />
               </div>
@@ -93,6 +84,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
+                  disabled
                   className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
                 />
                 <div className="text-xs text-surface-500 mt-1">
@@ -100,12 +92,10 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
                 </div>
               </div>
 
-              {error && (
-                <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  {error}
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                Existing delegations should be managed outside this UI until live tally support is completed.
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 p-5 border-t border-white/[0.06]">
@@ -114,11 +104,11 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-surface-700 disabled:text-surface-500 text-white rounded-xl text-sm font-medium transition-colors"
+                disabled
+                className="flex items-center gap-2 px-5 py-2 bg-surface-700 disabled:text-surface-500 text-white rounded-xl text-sm font-medium transition-colors"
               >
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                Delegate
+                Temporarily Disabled
               </button>
             </div>
           </motion.div>

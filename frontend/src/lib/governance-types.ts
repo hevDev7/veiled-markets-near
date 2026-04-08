@@ -13,6 +13,9 @@ export interface VoteLock {
   proposalId: string;
   amount: bigint;
   unlockAt: bigint;
+  recordPlaintext?: string;
+  transactionId?: string;
+  blockHeight?: number;
 }
 
 // --- Proposal Types ---
@@ -106,6 +109,10 @@ export interface GovernanceProposal {
   // Frontend-computed fields
   title?: string;
   description?: string;
+  transactionId?: string;
+  executedTxId?: string;
+  recipientAddress?: string;
+  metadataSource?: 'chain' | 'supabase' | 'local' | 'hybrid';
   totalVotes: bigint;
   quorumPercent: number;
   forPercent: number;
@@ -242,6 +249,14 @@ export interface GovernanceEscalationMarket {
   communityProposalId?: string;
   communityProposalStatus?: ProposalStatus;
   committeeDecisionFinalized?: boolean;
+  // v6: Governance escalation tier (read from market_escalation_tier mapping).
+  //   0 = local dispute (not yet escalated)
+  //   2 = committee review (initiate_escalation_aleo/usdcx/usad called)
+  //   3 = community override (escalate_to_community called)
+  escalationTier?: number;
+  // v6: Final outcome chosen by governance (read from market_dispute_state.final_outcome).
+  // 0 = pending governance decision, 1-4 = applied outcome.
+  finalOutcome?: number;
 }
 
 export const GOVERNANCE_PROPOSAL_LANES = {
@@ -285,7 +300,7 @@ export const MIN_PROPOSAL_STAKE = 10_000000n;            // 10 ALEO
 export const MIN_VOTE_AMOUNT = 1_000000n;                // 1 ALEO
 export const RESOLVER_STAKE_BRONZE = 50_000000n;         // 50 ALEO
 export const VOTING_PERIOD_BLOCKS = 40320n;              // ~7 days
-export const GOVERNANCE_PROGRAM_ID = 'veiled_governance_v4.aleo';
+export const GOVERNANCE_PROGRAM_ID = 'veiled_governance_v6.aleo';
 export const VEIL_TOKEN_PROGRAM_ID = 'credits.aleo'; // v2: uses native ALEO
 
 // --- Parameter Registry (keys for governance parameter updates) ---

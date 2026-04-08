@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "build:check": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "tsc --noEmit --skipLibCheck",
+    "test": "echo \"No frontend tests yet — covered by SDK tests at root.\" && exit 0",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,0 +1,34 @@
+{
+  "program": "veiled_governance_v6.aleo",
+  "version": "6.0.0",
+  "description": "Veiled governance v6 — Bug A/C fixes: removed governance_resolved_outcomes collision in finalize_committee_vote/panel_vote and made governance_resolve_* propagate the actual escalation tier (committee=2 vs community=3) to the cross-program apply_governance_resolution call. Imports updated to v37/v7/v14 markets.",
+  "license": "MIT",
+  "leo": "4.0.0",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "veiled_markets_v37.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "veiled_markets_usdcx_v7.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    },
+    {
+      "name": "veiled_markets_usad_v14.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}

@@ -1,7 +1,8 @@
 // ============================================================================
 // VEILED MARKETS - Aleo Client Integration
 // ============================================================================
-// Client for interacting with the deployed veiled_markets_v35.aleo program
+// Client for interacting with the deployed veiled_markets_v37.aleo program
+// (v6 post-audit hardening — Bug A/B/C/D fixes).
 // ============================================================================
 
 import { config } from './config';
@@ -515,8 +516,6 @@ function getCreateMarketProgramIds(preferredProgramId?: string): string[] {
     PROGRAM_ID,
     config.usdcxMarketProgramId,
     config.usadProgramId,
-    ...config.legacyUsadProgramIds,
-    ...config.legacyProgramIds,
   ].filter((pid): pid is string => Boolean(pid));
 
   return [...new Set(programIds)];
@@ -953,6 +952,44 @@ export async function getAMMPool(marketId: string, programId?: string): Promise<
 
 // Legacy alias
 export const getMarketPool = getAMMPool;
+
+/**
+ * Compute the BHP256 voter_key hash used by `voter_participated` mapping in
+ * the market contracts. Returns the field representation including the
+ * `field` suffix, or null if the SDK hash function is unavailable.
+ */
+export async function computeVoterKey(marketId: string, voterAddress: string): Promise<string | null> {
+  try {
+    const sdk = await import('@provablehq/sdk');
+    const hashField = sdk.Field as unknown as {
+      hashBhp256?: (value: string) => { toString: () => string };
+    };
+    if (!hashField?.hashBhp256) return null;
+    const normalizedMarket = marketId.endsWith('field') ? marketId : `${marketId}field`;
+    const struct = `{ market_id: ${normalizedMarket}, voter: ${voterAddress} }`;
+    const hash = hashField.hashBhp256(struct).toString();
+    return hash.endsWith('field') ? hash : `${hash}field`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check whether a wallet address has already voted on a given market by
+ * looking up `voter_participated[hash(VoterKey)]` in the contract.
+ * Returns true only when the on-chain mapping value is the literal string `true`.
+ */
+export async function hasUserVotedOnMarket(
+  marketId: string,
+  voterAddress: string,
+  programId?: string,
+): Promise<boolean> {
+  const voterKey = await computeVoterKey(marketId, voterAddress);
+  if (!voterKey) return false;
+  const value = await getMappingValue<string>('voter_participated', voterKey, programId);
+  if (value == null) return false;
+  return String(value).toLowerCase().includes('true');
+}
 
 /**
  * Fetch market resolution data (v12 - with challenge window fields)
@@ -2687,8 +2724,6 @@ export async function fetchMarketById(marketId: string) {
       const fallbackPids = [
         config.usdcxMarketProgramId,
         config.usadProgramId,
-        ...config.legacyUsadProgramIds,
-        ...config.legacyProgramIds,
       ].filter(pid => pid && pid !== PROGRAM_ID);
       // Deduplicate
       const uniquePids = [...new Set(fallbackPids)];

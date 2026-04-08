@@ -130,8 +130,11 @@ export function useAleoTransaction() {
       devWarn(`[TX] executeTransaction — walletType: ${wallet.walletType}`)
 
       try {
-        // Demo mode: simulate transaction
+        // Demo mode: simulate transaction (development only)
         if (isDemo) {
+          if (import.meta.env.PROD) {
+            throw new Error('Demo mode is not available in production builds.')
+          }
           devWarn('[TX] Demo mode — simulating transaction')
           await new Promise(resolve => setTimeout(resolve, 2000))
           return { transactionId: `demo_tx_${Date.now()}_${Math.random().toString(36).substring(7)}` }

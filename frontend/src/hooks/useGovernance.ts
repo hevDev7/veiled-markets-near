@@ -12,21 +12,28 @@ import {
   getCommitteeDecision,
   getBlockHeight,
   getGovernanceLiveConfig,
+  getGovernanceProposal,
   getVeilTotalSupply,
   getGovernanceMappingValue,
   getResolverProfile,
+  getMarketDisputeState,
+  getMarketEscalationTier,
   formatVeil,
+  parseVoteLockRecord,
+  type MarketDisputeState,
 } from '../lib/governance-client';
-import { supabase, isSupabaseAvailable } from '../lib/supabase';
 import {
   PROPOSAL_TYPES,
   PROPOSAL_STATUS,
-  PROPOSAL_TYPE_LABELS,
   type GovernanceEscalationMarket,
   type GovernanceProposal,
-  type ProposalType,
-  type ProposalStatus,
+  type VoteLock,
 } from '../lib/governance-types';
+import {
+  fetchGovernanceRewards,
+  listGovernanceProposalMetadata,
+  type GovernanceProposalMetadata,
+} from '../lib/governance-persistence';
 import {
   fetchAllMarkets,
   fetchMarketById,
@@ -36,6 +43,7 @@ import {
   MARKET_STATUS,
   TOKEN_SYMBOLS,
 } from '../lib/aleo-client';
+import { findVoteLocks } from '../lib/record-scanner';
 
 const POLL_INTERVAL = 30_000; // 30s
 
@@ -47,18 +55,27 @@ export function useGovernance() {
   const fetchGovernanceData = useCallback(async () => {
     store.setIsLoading(true);
     try {
-      // 1. Fetch block height from chain
-      const height = await getBlockHeight();
+      const [
+        height,
+        supply,
+        liveConfig,
+        proposalMetadata,
+        walletRewards,
+        voteLocks,
+      ] = await Promise.all([
+        getBlockHeight(),
+        getVeilTotalSupply(),
+        getGovernanceLiveConfig(),
+        listGovernanceProposalMetadata(wallet.address || undefined),
+        wallet.address ? fetchGovernanceRewards(wallet.address) : Promise.resolve([]),
+        wallet.address ? fetchGovernanceVoteLocks() : Promise.resolve([]),
+      ]);
+
       store.setCurrentBlockHeight(height);
-
-      // 2. Fetch VEIL supply from on-chain mapping
-      const supply = await getVeilTotalSupply();
       store.setStats({ circulatingSupply: supply });
-
-      const liveConfig = await getGovernanceLiveConfig();
       store.setStats(liveConfig);
+      store.setVoteLocks(voteLocks);
 
-      // 3. Check if user is a registered resolver (on-chain)
       if (wallet.address) {
         const resolverProfile = await getResolverProfile(wallet.address);
         store.setResolverProfile(resolverProfile);
@@ -66,78 +83,34 @@ export function useGovernance() {
         store.setResolverProfile(null);
       }
 
-      // 4. Fetch governance_initialized state (verify contract is live)
       await getGovernanceMappingValue<string>('governance_initialized', '0u8');
 
-      let parsedProposals: GovernanceProposal[] = [];
+      const parsedProposals = await hydrateGovernanceProposals(
+        proposalMetadata,
+        voteLocks,
+        useGovernanceStore.getState().proposals,
+      );
 
-      // 5. Fetch proposals from Supabase (if available)
-      if (isSupabaseAvailable() && supabase) {
-        try {
-          const { data: proposals } = await supabase
-            .from('governance_proposals')
-            .select('*')
-            .order('created_at_ts', { ascending: false })
-            .limit(50);
-
-          if (proposals && proposals.length > 0) {
-            parsedProposals = proposals.map(parseSupabaseProposal);
-            store.setProposals(parsedProposals);
-            updateStats(parsedProposals, store);
-          }
-        } catch {
-          // Supabase tables may not exist yet — this is fine
-        }
-
-        // 6. Fetch unclaimed rewards
-        if (wallet.address) {
-          try {
-            const { data: rewards } = await supabase
-              .from('veil_rewards')
-              .select('*')
-              .eq('user_address', wallet.address)
-              .eq('claimed', false);
-
-            if (rewards) {
-              store.setUnclaimedRewards(rewards.map((r: Record<string, unknown>) => ({
-                userAddress: String(r.user_address),
-                epochId: Number(r.epoch_id),
-                rewardType: String(r.reward_type) as 'lp' | 'trading',
-                amount: BigInt(String(r.amount || '0')),
-                claimed: false,
-              })));
-            }
-          } catch {
-            // veil_rewards table may not exist yet
-          }
-        } else {
-          store.setUnclaimedRewards([]);
-        }
-      } else {
-        store.setProposals([]);
-        store.setUnclaimedRewards([]);
-      }
+      store.setProposals(parsedProposals);
+      updateStats(parsedProposals, store);
+      store.setUnclaimedRewards(walletRewards);
 
       const escalations = await fetchGovernanceEscalations(parsedProposals);
       store.setEscalations(escalations);
 
-      // 7. Set VEIL balance from wallet's actual ALEO balance
-      // Governance uses ALEO credits for staking/voting
       if (wallet.isDemoMode) {
         store.setVeilBalance(12450_000000n);
         store.setVotingPower(15650_000000n);
       } else if (wallet.connected) {
-        // Use real wallet balance (public + private ALEO)
         const { useWalletStore } = await import('../lib/store');
         const walletState = useWalletStore.getState().wallet;
         const totalBalance = walletState.balance.public + walletState.balance.private;
         store.setVeilBalance(totalBalance);
-        store.setVotingPower(totalBalance); // Voting power = own balance (+ delegated in future)
+        store.setVotingPower(totalBalance);
       } else {
         store.setVeilBalance(0n);
         store.setVotingPower(0n);
       }
-
     } catch (error) {
       console.error('[governance] Failed to fetch data:', error);
     } finally {
@@ -164,6 +137,86 @@ export function useGovernance() {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+async function fetchGovernanceVoteLocks(): Promise<VoteLock[]> {
+  try {
+    const records = await findVoteLocks();
+    return records
+      .map((record) => parseVoteLockRecord(record.plaintext, record))
+      .filter((lock): lock is VoteLock => lock !== null);
+  } catch (error) {
+    console.warn('[governance] Failed to fetch vote locks:', error);
+    return [];
+  }
+}
+
+async function hydrateGovernanceProposals(
+  metadataEntries: GovernanceProposalMetadata[],
+  voteLocks: VoteLock[],
+  existingProposals: GovernanceProposal[],
+): Promise<GovernanceProposal[]> {
+  const metadataMap = new Map<string, GovernanceProposalMetadata>();
+  const candidateIds = new Set<string>();
+
+  for (const entry of metadataEntries) {
+    if (!entry?.proposalId) continue;
+    metadataMap.set(entry.proposalId, entry);
+    if (isHydratableProposalId(entry.proposalId)) {
+      candidateIds.add(entry.proposalId);
+    }
+  }
+
+  for (const lock of voteLocks) {
+    if (isHydratableProposalId(lock.proposalId)) {
+      candidateIds.add(lock.proposalId);
+    }
+  }
+
+  for (const proposal of existingProposals) {
+    if (isHydratableProposalId(proposal.proposalId)) {
+      candidateIds.add(proposal.proposalId);
+    }
+  }
+
+  const hydrated = await Promise.all(
+    Array.from(candidateIds).map(async (proposalId) => {
+      const onChainProposal = await getGovernanceProposal(proposalId);
+      if (!onChainProposal) return null;
+      return mergeProposalMetadata(onChainProposal, metadataMap.get(proposalId));
+    }),
+  );
+
+  return hydrated
+    .filter((proposal): proposal is GovernanceProposal => proposal !== null)
+    .sort((a, b) => Number(b.createdAt - a.createdAt));
+}
+
+function mergeProposalMetadata(
+  proposal: GovernanceProposal,
+  metadata?: GovernanceProposalMetadata,
+): GovernanceProposal {
+  if (!metadata) {
+    return {
+      ...proposal,
+      metadataSource: 'chain',
+    };
+  }
+
+  return {
+    ...proposal,
+    proposalTypeName: metadata.proposalTypeName || proposal.proposalTypeName,
+    title: metadata.title || proposal.title,
+    description: metadata.description || proposal.description,
+    transactionId: metadata.transactionId ?? proposal.transactionId,
+    executedTxId: metadata.executedTxId ?? proposal.executedTxId,
+    recipientAddress: metadata.recipientAddress ?? proposal.recipientAddress,
+    metadataSource: 'hybrid',
+  };
+}
+
+function isHydratableProposalId(proposalId: string): boolean {
+  return proposalId.endsWith('field') && !proposalId.startsWith('pending_');
+}
 
 async function fetchGovernanceEscalations(
   proposals: GovernanceProposal[],
@@ -193,9 +246,15 @@ async function fetchGovernanceEscalations(
 
     const escalations = await Promise.all(
       Array.from(candidateMap.values()).map(async ({ market, resolution, programId }) => {
-        const [dispute, committeeDecision] = await Promise.all([
+        // v6: Fetch on-chain dispute state from the market contract itself,
+        // plus the escalation tier from governance contract.
+        const [dispute, committeeDecision, disputeStateOnChain, escalationTier] = await Promise.all([
           getMarketDispute(market.id, programId),
           getCommitteeDecision(market.id),
+          programId
+            ? getMarketDisputeState(market.id, programId).catch(() => null as MarketDisputeState | null)
+            : Promise.resolve(null as MarketDisputeState | null),
+          getMarketEscalationTier(market.id).catch(() => 0),
         ]);
 
         const communityProposal = communityProposalByMarket.get(market.id);
@@ -213,7 +272,9 @@ async function fetchGovernanceEscalations(
           stage = 'community';
         } else if (committeeDecision) {
           stage = 'committee';
-        } else if (dispute) {
+        } else if (market.status === MARKET_STATUS.DISPUTED || dispute || disputeStateOnChain) {
+          // v6: STATUS_DISPUTED markets always show in disputed stage until
+          // governance applies the resolution.
           stage = 'disputed';
         } else if (market.status === MARKET_STATUS.PENDING_FINALIZATION) {
           stage = 'dispute_window';
@@ -233,16 +294,20 @@ async function fetchGovernanceEscalations(
           stage,
           outcomeLabels,
           currentOutcome: resolution?.proposed_outcome || resolution?.winning_outcome || undefined,
-          disputeOutcome: dispute?.proposed_outcome || undefined,
+          // v6: prefer the persistent dispute state stored in the market contract.
+          disputeOutcome: disputeStateOnChain?.proposedOutcome || dispute?.proposed_outcome || undefined,
           committeeOutcome: committeeDecision?.outcome || undefined,
           totalVoters: resolution?.round || 0,
           totalBonded: resolution?.total_bonded || 0n,
           challengeDeadline: resolution?.challenge_deadline,
-          disputer: dispute?.disputer || undefined,
-          disputeBond: dispute?.bond_amount || undefined,
+          disputer: disputeStateOnChain?.disputer || dispute?.disputer || undefined,
+          disputeBond: disputeStateOnChain?.disputeBond || dispute?.bond_amount || undefined,
           communityProposalId: communityProposal?.proposalId,
           communityProposalStatus: communityProposal?.status,
           committeeDecisionFinalized: committeeDecision?.finalized,
+          // v6 enrichment — these fields are read by EscalationPanel buttons.
+          escalationTier,
+          finalOutcome: disputeStateOnChain?.finalOutcome || undefined,
         } satisfies GovernanceEscalationMarket;
       }),
     );
@@ -268,39 +333,6 @@ async function fetchGovernanceEscalations(
   }
 }
 
-function parseSupabaseProposal(p: Record<string, unknown>): GovernanceProposal {
-  const votesFor = BigInt(String(p.votes_for || '0'));
-  const votesAgainst = BigInt(String(p.votes_against || '0'));
-  const quorumRequired = BigInt(String(p.quorum_required || '0'));
-  const totalVotes = votesFor + votesAgainst;
-  const totalVotesNum = Number(totalVotes);
-  const quorumReqNum = Number(quorumRequired);
-
-  return {
-    proposalId: String(p.proposal_id),
-    proposer: String(p.proposer),
-    proposalType: Number(p.proposal_type) as ProposalType,
-    proposalTypeName: String(p.proposal_type_name || PROPOSAL_TYPE_LABELS[Number(p.proposal_type) as ProposalType] || 'Unknown'),
-    target: String(p.target || ''),
-    payload1: BigInt(String(p.payload_1 || '0')),
-    payload2: String(p.payload_2 || ''),
-    votesFor,
-    votesAgainst,
-    quorumRequired,
-    createdAt: BigInt(String(p.created_at || '0')),
-    votingDeadline: BigInt(String(p.voting_deadline || '0')),
-    timelockUntil: BigInt(String(p.timelock_until || '0')),
-    status: mapStatusString(String(p.status)) as ProposalStatus,
-    title: String(p.title || ''),
-    description: String(p.description || ''),
-    totalVotes,
-    quorumPercent: quorumReqNum > 0 ? Math.min(100, (totalVotesNum / quorumReqNum) * 100) : 0,
-    forPercent: totalVotesNum > 0 ? (Number(votesFor) / totalVotesNum) * 100 : 50,
-    againstPercent: totalVotesNum > 0 ? (Number(votesAgainst) / totalVotesNum) * 100 : 50,
-    isQuorumMet: totalVotes >= quorumRequired,
-  };
-}
-
 function updateStats(proposals: GovernanceProposal[], store: { setStats: (s: Record<string, unknown>) => void }) {
   const totalStakedInVotes = proposals
     .filter((proposal) => proposal.status === PROPOSAL_STATUS.ACTIVE || proposal.status === PROPOSAL_STATUS.PASSED)
@@ -314,16 +346,4 @@ function updateStats(proposals: GovernanceProposal[], store: { setStats: (s: Rec
     proposalsRejected: proposals.filter(p => p.status === PROPOSAL_STATUS.REJECTED).length,
     proposalsVetoed: proposals.filter(p => p.status === PROPOSAL_STATUS.VETOED).length,
   });
-}
-
-function mapStatusString(status: string): number {
-  switch (status.toLowerCase()) {
-    case 'active': return PROPOSAL_STATUS.ACTIVE;
-    case 'passed': return PROPOSAL_STATUS.PASSED;
-    case 'rejected': return PROPOSAL_STATUS.REJECTED;
-    case 'executed': return PROPOSAL_STATUS.EXECUTED;
-    case 'vetoed': return PROPOSAL_STATUS.VETOED;
-    case 'expired': return PROPOSAL_STATUS.EXPIRED;
-    default: return PROPOSAL_STATUS.ACTIVE;
-  }
 }

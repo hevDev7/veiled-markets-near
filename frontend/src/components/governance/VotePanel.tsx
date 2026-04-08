@@ -4,7 +4,7 @@
 // Full proposal detail view with voting controls
 // ============================================================================
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, ThumbsUp, ThumbsDown, Clock, CheckCircle,
@@ -16,7 +16,9 @@ import { useGovernanceStore } from '../../lib/governance-store';
 import {
   PROPOSAL_STATUS,
   PROPOSAL_STATUS_LABELS,
+  PROPOSAL_TYPES,
   type GovernanceProposal,
+  type VoteLock,
 } from '../../lib/governance-types';
 
 interface VotePanelProps {
@@ -25,7 +27,9 @@ interface VotePanelProps {
   onVote: (proposalId: string, direction: 'for' | 'against', amount: bigint) => Promise<void>;
   onFinalize?: (proposal: GovernanceProposal) => Promise<void>;
   onExecute?: (proposal: GovernanceProposal) => Promise<void>;
+  onExecuteTreasury?: (proposal: GovernanceProposal, recipientAddress: string) => Promise<void>;
   onVeto?: (proposal: GovernanceProposal) => Promise<void>;
+  onUnlockVoteLock?: (voteLock: VoteLock) => Promise<void>;
   isActing?: boolean;
 }
 
@@ -35,12 +39,16 @@ export function VotePanel({
   onVote,
   onFinalize,
   onExecute,
+  onExecuteTreasury,
   onVeto,
+  onUnlockVoteLock,
   isActing = false,
 }: VotePanelProps) {
-  const { veilBalance, currentBlockHeight, isVoting } = useGovernanceStore();
+  const { veilBalance, currentBlockHeight, isVoting, voteLocks } = useGovernanceStore();
   const [voteAmount, setVoteAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [treasuryRecipient, setTreasuryRecipient] = useState(proposal.recipientAddress || '');
 
   const blocksRemaining = proposal.votingDeadline > currentBlockHeight
     ? proposal.votingDeadline - currentBlockHeight
@@ -52,6 +60,13 @@ export function VotePanel({
   const canFinalize = proposal.status === PROPOSAL_STATUS.ACTIVE && blocksRemaining === 0n;
   const canExecute = proposal.status === PROPOSAL_STATUS.PASSED && timelockRemaining === 0n;
   const canVeto = proposal.status === PROPOSAL_STATUS.PASSED && timelockRemaining > 0n;
+  const unlockBlock = proposal.timelockUntil > 0n ? proposal.timelockUntil : proposal.votingDeadline;
+  const proposalVoteLocks = voteLocks.filter((lock) => lock.proposalId === proposal.proposalId);
+
+  useEffect(() => {
+    setTreasuryRecipient(proposal.recipientAddress || '');
+    setActionError(null);
+  }, [proposal.proposalId, proposal.recipientAddress]);
 
   const handleVote = async (direction: 'for' | 'against') => {
     setError(null);
@@ -66,6 +81,33 @@ export function VotePanel({
     }
   };
 
+  const handleTreasuryExecute = async () => {
+    setActionError(null);
+    if (!treasuryRecipient.trim().startsWith('aleo1')) {
+      setActionError('Enter the treasury recipient address for this proposal.');
+      return;
+    }
+
+    if (!onExecuteTreasury) return;
+
+    try {
+      await onExecuteTreasury(proposal, treasuryRecipient.trim());
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Treasury execution failed');
+    }
+  };
+
+  const handleUnlockVote = async (voteLock: VoteLock) => {
+    setActionError(null);
+    if (!onUnlockVoteLock) return;
+
+    try {
+      await onUnlockVoteLock(voteLock);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Unlock failed');
+    }
+  };
+
   const setPercentage = (pct: number) => {
     const amount = (veilBalance * BigInt(pct)) / 100n;
     setVoteAmount(formatVeil(amount, 6));
@@ -77,7 +119,6 @@ export function VotePanel({
       animate={{ opacity: 1, x: 0 }}
       className="space-y-5"
     >
-      {/* Back button */}
       <button
         onClick={onBack}
         className="flex items-center gap-1.5 text-sm text-surface-400 hover:text-white transition-colors"
@@ -86,7 +127,6 @@ export function VotePanel({
         Back to proposals
       </button>
 
-      {/* Proposal Header */}
       <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
@@ -107,7 +147,6 @@ export function VotePanel({
           </span>
         </div>
 
-        {/* Proposer */}
         <div className="flex items-center gap-2 text-xs text-surface-400 mb-4">
           <User className="w-3.5 h-3.5" />
           Proposed by: <span className="font-mono text-surface-300">{proposal.proposer.slice(0, 20)}...</span>
@@ -128,9 +167,7 @@ export function VotePanel({
           </div>
         </div>
 
-        {/* Vote Tally */}
         <div className="space-y-3">
-          {/* FOR bar */}
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span className="flex items-center gap-1 text-emerald-400">
@@ -151,7 +188,6 @@ export function VotePanel({
             </div>
           </div>
 
-          {/* AGAINST bar */}
           <div>
             <div className="flex justify-between text-sm mb-1">
               <span className="flex items-center gap-1 text-red-400">
@@ -172,7 +208,6 @@ export function VotePanel({
             </div>
           </div>
 
-          {/* Quorum */}
           <div className="pt-2 border-t border-white/[0.06]">
             <div className="flex justify-between text-xs mb-1">
               <span className="text-surface-400">
@@ -196,7 +231,6 @@ export function VotePanel({
           </div>
         </div>
 
-        {/* Timeline */}
         <div className="mt-4 grid grid-cols-2 gap-3">
           <div className="bg-white/[0.02] rounded-xl p-3">
             <div className="text-xs text-surface-500 mb-1 flex items-center gap-1">
@@ -223,12 +257,10 @@ export function VotePanel({
         </div>
       </div>
 
-      {/* Vote Controls */}
       {isVotingOpen && (
         <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6">
           <h3 className="text-base font-bold text-white mb-4">Cast Your Vote</h3>
 
-          {/* Amount Input */}
           <div className="mb-4">
             <label className="text-sm text-surface-400 mb-1.5 block">Vote Amount (ALEO)</label>
             <div className="relative">
@@ -257,7 +289,6 @@ export function VotePanel({
             </div>
           </div>
 
-          {/* Vote Buttons */}
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => handleVote('for')}
@@ -277,7 +308,6 @@ export function VotePanel({
             </button>
           </div>
 
-          {/* Error */}
           {error && (
             <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5 mt-3">
               <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -287,12 +317,63 @@ export function VotePanel({
         </div>
       )}
 
-      {(canFinalize || canExecute || canVeto) && (
+      {(canFinalize || canExecute || canVeto || proposalVoteLocks.length > 0) && (
         <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6">
           <h3 className="text-base font-bold text-white mb-2">Proposal Actions</h3>
           <p className="text-sm text-surface-400 mb-4">
-            This proposal is no longer in the voting phase. Continue the governance lifecycle with the next available action.
+            Continue the governance lifecycle, then release vote locks once the deadline or timelock has elapsed.
           </p>
+
+          {proposalVoteLocks.length > 0 && (
+            <div className="mb-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium text-white">Your locked votes</div>
+                  <div className="mt-1 text-xs text-surface-500">
+                    Unlock available after block {unlockBlock.toString()}.
+                  </div>
+                </div>
+                <div className="text-xs text-surface-500">
+                  {proposalVoteLocks.length} record{proposalVoteLocks.length === 1 ? '' : 's'}
+                </div>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                {proposalVoteLocks.map((lock, index) => {
+                  const isUnlockReady = currentBlockHeight > unlockBlock;
+                  return (
+                    <div
+                      key={`${lock.proposalId}-${lock.amount.toString()}-${index}`}
+                      className="flex flex-col gap-2 rounded-lg border border-white/[0.05] bg-surface-800/25 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <div className="text-sm font-medium text-white">{formatVeil(lock.amount)} ALEO locked</div>
+                        <div className="mt-1 text-xs text-surface-500">
+                          {isUnlockReady
+                            ? 'Ready to unlock now'
+                            : `Unlocks in ${formatBlocksRemaining(unlockBlock - currentBlockHeight)}`}
+                        </div>
+                      </div>
+
+                      {isUnlockReady && onUnlockVoteLock && lock.recordPlaintext ? (
+                        <button
+                          onClick={() => void handleUnlockVote(lock)}
+                          disabled={isActing}
+                          className="inline-flex items-center justify-center rounded-lg border border-brand-500/30 bg-brand-500/15 px-3 py-2 text-sm font-medium text-brand-200 transition-colors hover:bg-brand-500/25 disabled:opacity-50"
+                        >
+                          Unlock Vote
+                        </button>
+                      ) : (
+                        <div className="text-xs text-surface-500">
+                          {isUnlockReady ? 'Wallet record required to unlock' : 'Still locked'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-3">
             {canFinalize && onFinalize && (
@@ -306,7 +387,7 @@ export function VotePanel({
               </button>
             )}
 
-            {canExecute && onExecute && (
+            {canExecute && proposal.proposalType !== PROPOSAL_TYPES.TREASURY && onExecute && (
               <button
                 onClick={() => void onExecute(proposal)}
                 disabled={isActing}
@@ -328,6 +409,42 @@ export function VotePanel({
               </button>
             )}
           </div>
+
+          {canExecute && proposal.proposalType === PROPOSAL_TYPES.TREASURY && onExecuteTreasury && (
+            <div className="mt-4 rounded-xl border border-emerald-500/15 bg-emerald-500/6 p-4">
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-medium text-white">Execute treasury transfer</div>
+                <div className="text-xs text-surface-500">
+                  Amount locked in proposal: {formatVeil(proposal.payload1)} ALEO. The recipient address must hash to the proposal payload.
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                <input
+                  type="text"
+                  value={treasuryRecipient}
+                  onChange={(event) => setTreasuryRecipient(event.target.value)}
+                  placeholder="aleo1..."
+                  className="flex-1 rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 text-sm font-mono text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+                <button
+                  onClick={() => void handleTreasuryExecute()}
+                  disabled={isActing}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/20 px-4 py-3 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/30 disabled:opacity-50"
+                >
+                  {isActing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  Execute Treasury Proposal
+                </button>
+              </div>
+            </div>
+          )}
+
+          {actionError && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              {actionError}
+            </div>
+          )}
         </div>
       )}
     </motion.div>

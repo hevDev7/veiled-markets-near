@@ -35,8 +35,29 @@ export interface MarketRegistryEntry {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
+// Track the current wallet address so RLS policies on Supabase can scope
+// writes to that user. The header `x-aleo-address` is read by the
+// `current_aleo_address()` SQL helper (see harden_rls_policies.sql).
+let currentAleoAddress: string | null = null
+
+export function setSupabaseAleoAddress(address: string | null): void {
+  currentAleoAddress = address && address.trim().length > 0 ? address : null
+}
+
 export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        // Inject the connected wallet address into every request so RLS
+        // policies can validate row ownership before insert/update/delete.
+        fetch: (url, options = {}) => {
+          const headers = new Headers((options as RequestInit).headers || {})
+          if (currentAleoAddress) {
+            headers.set('x-aleo-address', currentAleoAddress)
+          }
+          return fetch(url, { ...(options as RequestInit), headers })
+        },
+      },
+    })
   : null
 
 export function isSupabaseAvailable(): boolean {
@@ -45,9 +66,32 @@ export function isSupabaseAvailable(): boolean {
 
 // ---- Encryption helpers ----
 
-/** Encrypt a field value if encryption key is available; otherwise pass through */
+/**
+ * Strict mode toggle. When true, sensitive writes throw if no encryption key
+ * is available (preventing silent plaintext fallback). The previous behavior
+ * is preserved for reads only.
+ *
+ * Default: enabled in production builds, disabled in dev so demo flows still
+ * work without forcing every developer to derive a key.
+ */
+const ENCRYPTION_REQUIRED = import.meta.env.PROD
+
+export class EncryptionRequiredError extends Error {
+  constructor(message = 'Encryption key required for sensitive write. Sign the wallet message to derive the key.') {
+    super(message)
+    this.name = 'EncryptionRequiredError'
+  }
+}
+
+/** Encrypt a field value. In strict mode, missing key throws; otherwise passes through. */
 async function enc(value: string | null, key: CryptoKey | null): Promise<string | null> {
-  if (!key || value === null) return value
+  if (value === null) return null
+  if (!key) {
+    if (ENCRYPTION_REQUIRED) {
+      throw new EncryptionRequiredError()
+    }
+    return value
+  }
   return encryptField(value, key)
 }
 
@@ -209,6 +253,8 @@ export async function upsertBets(bets: Bet[], address: string, encryptionKey: Cr
       }
     }
   } catch (e) {
+    // Surface encryption-required errors so callers can prompt the user
+    if (e instanceof EncryptionRequiredError) throw e
     console.error('[Supabase] upsertBets exception:', e)
   }
 }
@@ -238,6 +284,7 @@ export async function upsertPendingBets(bets: Bet[], address: string, encryption
       .upsert(rows, { onConflict: 'id,address' })
     if (error) devWarn('[Supabase] upsertPendingBets error:', error.message)
   } catch (e) {
+    if (e instanceof EncryptionRequiredError) throw e
     devWarn('[Supabase] upsertPendingBets exception:', e)
   }
 }
@@ -330,6 +377,7 @@ export async function upsertCommitments(records: CommitmentRecord[], address: st
       .upsert(rows, { onConflict: 'id,address' })
     if (error) devWarn('[Supabase] upsertCommitments error:', error.message)
   } catch (e) {
+    if (e instanceof EncryptionRequiredError) throw e
     devWarn('[Supabase] upsertCommitments exception:', e)
   }
 }
@@ -573,6 +621,7 @@ export async function upsertParlays(
       .upsert(rows, { onConflict: 'id,address' })
     if (error) devWarn('[Supabase] upsertParlays error:', error.message)
   } catch (e) {
+    if (e instanceof EncryptionRequiredError) throw e
     devWarn('[Supabase] upsertParlays exception:', e)
   }
 }

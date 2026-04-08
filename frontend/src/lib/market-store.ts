@@ -1,7 +1,7 @@
 // ============================================================================
 // REAL BLOCKCHAIN MARKET STORE
 // ============================================================================
-// This store fetches real market data from the deployed veiled_markets_v35.aleo contract
+// This store fetches real market data from the deployed veiled_markets_v37.aleo contract
 // Markets created via "Create Market" modal will appear here automatically
 // ============================================================================
 

@@ -40,7 +40,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'What tokens can I use?',
-    answer: 'Markets support three token types, each with its own market contract: ALEO (native token via veiled_markets_v35.aleo), USDCX (test stablecoin via veiled_markets_usdcx_v5.aleo), and USAD (stablecoin via veiled_markets_usad_v12.aleo). Each market is denominated in one specific token. ALEO markets use private credits records, while USDCX and USAD markets use Token records with MerkleProof verification for private trading.',
+    answer: 'Markets support three token types, each with its own market contract: ALEO (native token via veiled_markets_v37.aleo), USDCX (test stablecoin via veiled_markets_usdcx_v7.aleo), and USAD (stablecoin via veiled_markets_usad_v14.aleo). Each market is denominated in one specific token. ALEO markets use private credits records, while USDCX and USAD markets use Token records with MerkleProof verification for private trading.',
   },
   {
     category: 'Trading',
@@ -124,7 +124,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Governance',
     question: 'How does governance work?',
-    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v4.aleo, 29 transitions) powered by ALEO token voting. Features include dispute resolution overrides, fee changes, 3-of-N multisig treasury management, parameter updates, and emergency pause. The app UI now exposes the operational proposal, voting, execution, resolver, and reward flows needed to use that governance system on testnet.',
+    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v6.aleo, 31 transitions) powered by ALEO token voting. Features include dispute resolution overrides via cross-program calls (governance_resolve_aleo/usdcx/usad), fee changes, 3-of-N multisig treasury management, parameter updates, and emergency pause. The app UI now exposes the operational proposal, voting, execution, resolver, and reward flows needed to use that governance system on testnet.',
   },
   {
     category: 'Governance',

@@ -25,8 +25,10 @@ CREATE TABLE IF NOT EXISTS governance_proposals (
     created_at        BIGINT,
     voting_deadline   BIGINT NOT NULL,
     timelock_until    BIGINT DEFAULT 0,
+    transaction_id    TEXT,
+    executed_tx_id    TEXT,
+    recipient_address TEXT,
     executed_at       TIMESTAMPTZ,
-    execution_tx      TEXT,
     created_at_ts     TIMESTAMPTZ DEFAULT now(),
     updated_at        TIMESTAMPTZ DEFAULT now()
 );
@@ -42,10 +44,11 @@ CREATE TABLE IF NOT EXISTS governance_votes (
     id                SERIAL PRIMARY KEY,
     proposal_id       TEXT NOT NULL REFERENCES governance_proposals(proposal_id),
     voter             TEXT NOT NULL,
-    vote_direction    TEXT NOT NULL,
-    veil_weight       NUMERIC NOT NULL,
-    voted_at          TIMESTAMPTZ DEFAULT now(),
+    direction         TEXT NOT NULL,
+    amount            TEXT DEFAULT '0',
     transaction_id    TEXT,
+    voted_at          TIMESTAMPTZ DEFAULT now(),
+    created_at        TIMESTAMPTZ DEFAULT now(),
     UNIQUE(proposal_id, voter)
 );
 
@@ -60,12 +63,11 @@ CREATE TABLE IF NOT EXISTS veil_rewards (
     user_address      TEXT NOT NULL,
     epoch_id          INTEGER NOT NULL,
     reward_type       TEXT NOT NULL,
-    market_id         TEXT,
-    amount            NUMERIC NOT NULL,
+    amount            TEXT NOT NULL,
     claimed           BOOLEAN DEFAULT false,
-    claimed_at        TIMESTAMPTZ,
-    claim_tx          TEXT,
-    UNIQUE(user_address, epoch_id, reward_type, COALESCE(market_id, ''))
+    claim_tx_id       TEXT,
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(user_address, epoch_id, reward_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_veil_rewards_user ON veil_rewards(user_address);

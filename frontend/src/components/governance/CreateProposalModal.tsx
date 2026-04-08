@@ -31,6 +31,7 @@ export interface ProposalFormData {
   target: string;
   payload1: string;
   payload2: string;
+  recipientAddress?: string;
 }
 
 const TYPE_ICONS: Record<number, typeof FileText> = {
@@ -51,6 +52,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
   const [target, setTarget] = useState('');
   const [payload1, setPayload1] = useState('');
   const [payload2, setPayload2] = useState('');
+  const [recipientAddress, setRecipientAddress] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const hasEnoughStake = veilBalance >= MIN_PROPOSAL_STAKE;
@@ -61,6 +63,10 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
     setError(null);
     if (!title.trim()) { setError('Title is required'); return; }
     if (!hasEnoughStake) { setError('Insufficient ALEO balance for stake'); return; }
+    if (proposalType === PROPOSAL_TYPES.TREASURY && !recipientAddress.trim().startsWith('aleo1')) {
+      setError('Treasury proposals require a valid recipient address');
+      return;
+    }
 
     try {
       await onSubmit({
@@ -71,6 +77,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
         target,
         payload1,
         payload2,
+        recipientAddress: recipientAddress.trim() || undefined,
       });
       onClose();
     } catch (err) {
@@ -173,23 +180,40 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-sm font-medium text-surface-300 mb-1.5 block">Payload 1</label>
-                  <input
-                    type="text"
-                    value={payload1}
-                    onChange={(e) => setPayload1(e.target.value)}
-                    placeholder="0"
-                    className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
-                  />
-                </div>
+                <input
+                  type="text"
+                  value={payload1}
+                  onChange={(e) => setPayload1(e.target.value)}
+                  placeholder={proposalType === PROPOSAL_TYPES.TREASURY ? 'Amount in ALEO' : '0'}
+                  className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
+                />
+              </div>
                 <div>
-                  <label className="text-sm font-medium text-surface-300 mb-1.5 block">Payload 2</label>
-                  <input
-                    type="text"
-                    value={payload2}
-                    onChange={(e) => setPayload2(e.target.value)}
-                    placeholder="0field"
-                    className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
-                  />
+                  <label className="text-sm font-medium text-surface-300 mb-1.5 block">
+                    {proposalType === PROPOSAL_TYPES.TREASURY ? 'Recipient Address' : 'Payload 2'}
+                  </label>
+                  {proposalType === PROPOSAL_TYPES.TREASURY ? (
+                    <>
+                      <input
+                        type="text"
+                        value={recipientAddress}
+                        onChange={(e) => setRecipientAddress(e.target.value)}
+                        placeholder="aleo1..."
+                        className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
+                      />
+                      <p className="mt-1 text-[11px] text-surface-500">
+                        The recipient address is hashed into `payload_2` automatically before submission.
+                      </p>
+                    </>
+                  ) : (
+                    <input
+                      type="text"
+                      value={payload2}
+                      onChange={(e) => setPayload2(e.target.value)}
+                      placeholder="0field"
+                      className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
+                    />
+                  )}
                 </div>
               </div>
 
