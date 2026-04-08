@@ -12,6 +12,7 @@ import {
   buildInitiateEscalationAleoInputs,
   buildInitiateEscalationUsdcxInputs,
   buildInitiateEscalationUsadInputs,
+  buildCommitteeVoteResolveInputs,
   buildFinalizeCommitteeVoteInputs,
   buildGovernanceResolveAleoInputs,
   buildGovernanceResolveUsdcxInputs,
@@ -96,7 +97,7 @@ const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpq
 
 export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLane }: EscalationPanelProps) {
   const navigate = useNavigate();
-  const { escalations, currentBlockHeight, actorFocusAddress, actorFocusRole, clearProposalContext } = useGovernanceStore();
+  const { escalations, currentBlockHeight, actorFocusAddress, actorFocusRole, clearProposalContext, committeeMembers } = useGovernanceStore();
   const { executeTransaction } = useAleoTransaction();
   const { wallet } = useWalletStore();
   const [actionError, setActionError] = useState<string | null>(null);
@@ -132,6 +133,33 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
       });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Failed to initiate escalation');
+    } finally {
+      setActiveAction(null);
+    }
+  };
+
+  const handleCommitteeVoteResolve = async (marketId: string, outcome: number) => {
+    setActionError(null);
+    setActiveAction(`cvote-${marketId}-${outcome}`);
+    try {
+      // Pre-flight: caller must be in committee_members. Contract reverts
+      // otherwise; this client-side check just gives a friendlier error.
+      if (!wallet.address) {
+        throw new Error('Connect your wallet to cast a committee vote.');
+      }
+      if (!committeeMembers.includes(wallet.address)) {
+        throw new Error(
+          'Your wallet is not a registered committee member. Only the 5 addresses set via set_committee_members can vote.'
+        );
+      }
+      await executeTransaction({
+        program: config.governanceProgramId,
+        function: 'committee_vote_resolve',
+        inputs: buildCommitteeVoteResolveInputs(marketId, outcome),
+        fee: 0.5,
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to cast committee vote');
     } finally {
       setActiveAction(null);
     }
@@ -401,13 +429,57 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
                     )}
                   </div>
 
-                  {/* v5 governance escalation action buttons */}
+                  {/* v6 governance escalation status + action buttons */}
                   <div className="border-t border-white/[0.06] pt-3 mt-2">
+                    {/* Tier + committee progress banner — shows current state
+                        even before any action button is rendered. This is the
+                        ONLY visible signal that initiate_escalation has run
+                        (escalationTier flips 0 → 2). Without this banner the
+                        user can't tell tier 0 vs tier 2 vs tier 3 apart. */}
+                    {(item.escalationTier === 2 || item.escalationTier === 3) && (
+                      <div className={cn(
+                        'mb-3 flex items-center justify-between rounded-lg border px-3 py-2 text-xs',
+                        item.escalationTier === 3
+                          ? 'border-blue-500/30 bg-blue-500/10 text-blue-200'
+                          : 'border-purple-500/30 bg-purple-500/10 text-purple-200',
+                      )}>
+                        <div className="flex items-center gap-2">
+                          <Scale className="w-3.5 h-3.5" />
+                          <span className="font-medium">
+                            {item.escalationTier === 3
+                              ? 'Tier 3 — Community Override'
+                              : item.committeeDecisionFinalized
+                                ? 'Tier 2 — Committee Decided'
+                                : 'Tier 2 — Committee Review'}
+                          </span>
+                        </div>
+                        {item.escalationTier === 2 && (
+                          <span className="font-mono text-[11px] text-purple-100/80">
+                            Votes: {item.committeeVoteCount ?? 0} / 3 needed
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Hint when connected wallet is not a committee member —
+                        explains why no "Cast Vote" button shows up. Only
+                        renders during tier 2 + not finalized. */}
+                    {item.stage === 'committee'
+                      && !item.committeeDecisionFinalized
+                      && wallet.address
+                      && !committeeMembers.includes(wallet.address) && (
+                      <div className="mb-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-surface-400">
+                        Your wallet is not a registered committee member. Only the 5 addresses set via{' '}
+                        <code className="text-surface-300">set_committee_members</code> can cast committee votes.
+                        Switch wallet to vote, or wait for other members to reach quorum.
+                      </div>
+                    )}
+
                     <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500 mb-2">
                       Governance Actions
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {(item.stage === 'disputed' || item.stage === 'dispute_window') && (
+                      {item.stage === 'disputed' && item.escalationTier !== 2 && item.escalationTier !== 3 && (
                         <button
                           onClick={() => handleInitiateEscalation(item.marketId, item.tokenType)}
                           disabled={activeAction === `init-${item.marketId}`}
@@ -422,11 +494,49 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
                         </button>
                       )}
 
-                      {item.stage === 'committee' && (
+                      {/* Cast committee vote — only visible to addresses
+                          registered in committee_members mapping. One button
+                          per outcome (Yes/No/Outcome 3/Outcome 4) so members
+                          can directly choose their vote without an extra
+                          modal. Contract enforces 1 vote per member per
+                          market via committee_votes mapping check. */}
+                      {item.stage === 'committee'
+                        && !item.committeeDecisionFinalized
+                        && wallet.address
+                        && committeeMembers.includes(wallet.address)
+                        && item.outcomeLabels.map((label, idx) => {
+                          const outcome = idx + 1;
+                          const actionKey = `cvote-${item.marketId}-${outcome}`;
+                          return (
+                            <button
+                              key={`cvote-${outcome}`}
+                              onClick={() => handleCommitteeVoteResolve(item.marketId, outcome)}
+                              disabled={activeAction === actionKey}
+                              className="inline-flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/15 px-3 py-2 text-xs font-medium text-blue-100 transition-colors hover:bg-blue-500/25 disabled:opacity-50"
+                            >
+                              {activeAction === actionKey ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Vote className="w-3.5 h-3.5" />
+                              )}
+                              Cast Vote: {label}
+                            </button>
+                          );
+                        })}
+
+                      {item.stage === 'committee' && !item.committeeDecisionFinalized && (
                         <button
                           onClick={() => handleFinalizeCommitteeVote(item.marketId)}
-                          disabled={activeAction === `finalize-${item.marketId}`}
-                          className="inline-flex items-center gap-2 rounded-lg border border-purple-500/40 bg-purple-500/15 px-3 py-2 text-xs font-medium text-purple-100 transition-colors hover:bg-purple-500/25 disabled:opacity-50"
+                          disabled={
+                            activeAction === `finalize-${item.marketId}`
+                            || (item.committeeVoteCount ?? 0) < 3
+                          }
+                          title={
+                            (item.committeeVoteCount ?? 0) < 3
+                              ? `Need ${3 - (item.committeeVoteCount ?? 0)} more committee vote${3 - (item.committeeVoteCount ?? 0) === 1 ? '' : 's'} before finalize`
+                              : undefined
+                          }
+                          className="inline-flex items-center gap-2 rounded-lg border border-purple-500/40 bg-purple-500/15 px-3 py-2 text-xs font-medium text-purple-100 transition-colors hover:bg-purple-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {activeAction === `finalize-${item.marketId}` ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />

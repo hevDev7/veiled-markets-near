@@ -57,7 +57,7 @@ import {
   saveGovernanceVoteReceipt,
 } from '../lib/governance-persistence';
 
-type Tab = 'proposals' | 'resolver';
+type Tab = 'proposals' | 'disputes' | 'resolver';
 type ProposalStatusFilter = 'all' | 'active' | 'passed' | 'executed' | 'rejected';
 
 function pickPreferredProposalFilter(proposals: GovernanceProposal[]): ProposalStatusFilter {
@@ -95,7 +95,10 @@ export function Governance() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeProposalActionId, setActiveProposalActionId] = useState<string | null>(null);
   const [isClaimingAllRewards, setIsClaimingAllRewards] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Default: sidebar (which contains EscalationPanel) is OPEN so users can see
+  // disputed markets immediately without having to discover the "Show panels"
+  // button. Manually closeable via the toggle.
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const ensurePublicFeeBalance = useCallback(async (requiredFeeAleo: number, actionLabel: string) => {
     if (!wallet.address) {
@@ -716,8 +719,13 @@ export function Governance() {
             <div className="flex flex-col gap-3 border-b border-white/[0.06] px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex items-center gap-2">
                 {[
-                  { key: 'proposals' as const, label: 'Proposals', count: governance.proposals.length },
-                  { key: 'resolver' as const, label: 'Resolvers', count: governance.stats.totalResolvers || 0 },
+                  { key: 'proposals' as const, label: 'Proposals', count: governance.proposals.length, alert: false },
+                  // v6: dispute escalation gets its own first-class tab. The
+                  // count badge turns red when there are active escalations
+                  // so disputed markets are immediately visible without the
+                  // user having to discover the sidebar.
+                  { key: 'disputes' as const, label: 'Disputes', count: governance.escalations.length, alert: governance.escalations.length > 0 },
+                  { key: 'resolver' as const, label: 'Resolvers', count: governance.stats.totalResolvers || 0, alert: false },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -738,7 +746,9 @@ export function Governance() {
                     <span className={`rounded-full px-2 py-0.5 text-[11px] ${
                       activeTab === tab.key
                         ? 'bg-brand-500/15 text-brand-100'
-                        : 'bg-white/[0.05] text-surface-500'
+                        : tab.alert
+                          ? 'bg-red-500/20 text-red-300 ring-1 ring-red-500/30'
+                          : 'bg-white/[0.05] text-surface-500'
                     }`}>
                       {tab.count}
                     </span>
@@ -750,7 +760,9 @@ export function Governance() {
                 <span className="text-xs text-surface-500">
                   {activeTab === 'proposals'
                     ? 'Review motions, open details, and act on governance lifecycle steps.'
-                    : 'Register, upgrade, or review current resolver standing.'}
+                    : activeTab === 'disputes'
+                      ? 'Markets in dispute or escalated to committee/community for resolution.'
+                      : 'Register, upgrade, or review current resolver standing.'}
                 </span>
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -781,6 +793,12 @@ export function Governance() {
                       onSelectProposal={handleSelectProposal}
                     />
                   )
+                ) : activeTab === 'disputes' ? (
+                  <EscalationPanel
+                    onOpenProposal={handleSelectProposal}
+                    onReviewLane={handleReviewDisputeLane}
+                    onOpenContextLane={handleOpenContextLane}
+                  />
                 ) : (
                   <ResolverPanel
                     onRegister={handleRegisterResolver}
@@ -794,11 +812,6 @@ export function Governance() {
               {sidebarOpen && (
                 <div className="space-y-3">
                   <GovernanceStats />
-                  <EscalationPanel
-                    onOpenProposal={handleSelectProposal}
-                    onReviewLane={handleReviewDisputeLane}
-                    onOpenContextLane={handleOpenContextLane}
-                  />
                   <RewardClaimPanel
                     onClaimReward={handleClaimReward}
                     onClaimAllRewards={handleClaimAllRewards}

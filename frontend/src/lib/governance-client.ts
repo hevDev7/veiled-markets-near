@@ -378,6 +378,34 @@ export async function getMarketEscalationTier(marketId: string): Promise<number>
   return Number(String(raw).replace(/u\d+$/, '')) || 0;
 }
 
+/**
+ * Read committee vote count for a market — used by EscalationPanel to show
+ * progress (e.g. "Committee voting 2 / 3"). Returns 0 if no votes yet.
+ */
+export async function getCommitteeVoteCount(marketId: string): Promise<number> {
+  const raw = await getGovernanceMappingValue<string | number>(
+    'committee_vote_count',
+    marketId,
+  );
+  if (raw == null) return 0;
+  return Number(String(raw).replace(/u\d+$/, '')) || 0;
+}
+
+/**
+ * Read all 5 committee member slots and return them as an array.
+ * Used by EscalationPanel to check if the connected wallet is allowed
+ * to cast a committee vote (only registered members can call
+ * committee_vote_resolve, contract reverts otherwise).
+ */
+export async function getCommitteeMembers(): Promise<string[]> {
+  const slots = await Promise.all(
+    [1, 2, 3, 4, 5].map((slot) =>
+      getGovernanceMappingValue<string>('committee_members', `${slot}u8`).catch(() => null),
+    ),
+  );
+  return slots.filter((addr): addr is string => Boolean(addr) && typeof addr === 'string');
+}
+
 export interface GovernanceLiveConfig {
   pauseState: boolean;
   protocolFeeBps: bigint;

@@ -50,6 +50,11 @@ export interface GovernanceState {
   resolverProfile: ResolverProfile | null;
   escalations: GovernanceEscalationMarket[];
 
+  // v6: 5 committee member addresses (set via set_committee_members by deployer).
+  // EscalationPanel uses this to detect if the connected wallet is allowed
+  // to call committee_vote_resolve.
+  committeeMembers: string[];
+
   // Stats
   stats: GovernanceStats;
 
@@ -76,6 +81,7 @@ export interface GovernanceState {
   setUnclaimedRewards: (rewards: UserReward[]) => void;
   setResolverProfile: (profile: ResolverProfile | null) => void;
   setEscalations: (escalations: GovernanceEscalationMarket[]) => void;
+  setCommitteeMembers: (members: string[]) => void;
   setStats: (stats: Partial<GovernanceStats>) => void;
   setIsLoading: (loading: boolean) => void;
   setIsVoting: (voting: boolean) => void;
@@ -195,6 +201,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
   totalClaimable: 0n,
   resolverProfile: null,
   escalations: [],
+  committeeMembers: [],
   stats: defaultStats,
   isLoading: false,
   isVoting: false,
@@ -247,6 +254,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
 
   setResolverProfile: (profile) => set({ resolverProfile: profile }),
   setEscalations: (escalations) => set({ escalations }),
+  setCommitteeMembers: (committeeMembers) => set({ committeeMembers }),
 
   setStats: (updates) => set((state) => ({
     stats: { ...state.stats, ...updates },
@@ -326,6 +334,7 @@ export const useGovernanceStore = create<GovernanceState>((set, get) => ({
     totalClaimable: 0n,
     resolverProfile: null,
     escalations: [],
+    committeeMembers: [],
     stats: defaultStats,
     isLoading: false,
     isVoting: false,

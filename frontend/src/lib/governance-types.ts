@@ -249,6 +249,9 @@ export interface GovernanceEscalationMarket {
   communityProposalId?: string;
   communityProposalStatus?: ProposalStatus;
   committeeDecisionFinalized?: boolean;
+  // v6: Number of committee votes cast so far (committee_vote_count mapping).
+  // Used to render progress like "2 / 3" in EscalationPanel.
+  committeeVoteCount?: number;
   // v6: Governance escalation tier (read from market_escalation_tier mapping).
   //   0 = local dispute (not yet escalated)
   //   2 = committee review (initiate_escalation_aleo/usdcx/usad called)
