@@ -43,8 +43,12 @@ interface ResolvePanelProps {
 type ResolveStep = 'close' | 'submit' | 'challenge' | 'disputed' | 'finalize' | 'cancel' | 'done'
 
 // v33 constants (must match contract)
-const MIN_RESOLUTION_BOND = 1_000_000n // 1 ALEO
-const BOND_MULTIPLIER = 2n
+const MIN_RESOLUTION_BOND = 1_000_000n // 1 ALEO per voter (matches contract MIN_VOTE_BOND)
+const MIN_FINALIZE_VOTERS_BIGINT = 3n // matches contract MIN_VOTERS
+// Contract requires `dispute_bond >= 3 × tally.total_bonded`. See
+// contracts-v37/src/main.leo:67 (DISPUTE_BOND_MULTIPLIER = 3) and the
+// assertion in dispute_resolution_fin (line ~721). Frontend MUST match.
+const DISPUTE_BOND_MULTIPLIER = 3n
 const MIN_FINALIZE_VOTERS = 3
 
 interface ParsedVoterBondReceipt {
@@ -263,10 +267,15 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     }
   }, [resolution])
 
-  // Minimum bond for challenge (2x current)
+  // Minimum dispute bond — must match the on-chain contract requirement of
+  // `dispute_bond >= 3 × tally.total_bonded`. Previous implementation used
+  // (single voter bond) × 2 which always undershot the required amount and
+  // would cause dispute_resolution_fin to revert with assertion failure.
+  // Fallback (when roundInfo is null) assumes minimum quorum of 3 voters
+  // each posting MIN_RESOLUTION_BOND, which is the smallest legal dispute.
   const minChallengeBond = roundInfo
-    ? BigInt(roundInfo.bondAmount) * BOND_MULTIPLIER
-    : MIN_RESOLUTION_BOND * BOND_MULTIPLIER
+    ? BigInt(roundInfo.totalBonded) * DISPUTE_BOND_MULTIPLIER
+    : MIN_RESOLUTION_BOND * MIN_FINALIZE_VOTERS_BIGINT * DISPUTE_BOND_MULTIPLIER
 
   // Challenge window countdown
   const challengeInfo = useMemo(() => {
