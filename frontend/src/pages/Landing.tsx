@@ -357,9 +357,10 @@ export function Landing() {
   useEffect(() => {
     if (isConnected) {
       setVisible(false)
-      navigate('/dashboard')
+      // Redirect to app subdomain after wallet connect
+      window.location.href = 'https://app.veiledmarkets.xyz/dashboard'
     }
-  }, [isConnected, navigate, setVisible])
+  }, [isConnected, setVisible])
 
   const handleConnectClick = useCallback(async () => {
     setConnectError(null)

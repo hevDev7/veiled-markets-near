@@ -40,6 +40,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isConnected) {
+    // On app subdomain, redirect to main domain landing page
+    if (window.location.hostname === 'app.veiledmarkets.xyz') {
+      window.location.href = 'https://veiledmarkets.xyz'
+      return null
+    }
     return <Navigate to="/" replace />
   }
 
