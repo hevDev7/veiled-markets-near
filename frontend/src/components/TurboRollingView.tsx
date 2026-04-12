@@ -284,7 +284,7 @@ export function TurboRollingView({ symbol, className, compact: _compact, lockedM
         <button
           onClick={() => navigate(`/market/${market.market_id}`)}
           className={cn(
-            'absolute top-[4.25rem] right-3 z-20 -translate-y-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full',
+            'absolute top-[5.5rem] right-3 z-20 -translate-y-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full',
             'bg-gradient-to-r from-amber-500 to-orange-500',
             'text-white font-bold text-xs shadow-lg shadow-amber-500/40',
             'hover:from-amber-400 hover:to-orange-400 hover:scale-105',
