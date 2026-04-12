@@ -29,12 +29,14 @@ import 'dotenv/config'
 import TelegramBot from 'node-telegram-bot-api'
 import {
   createTurboClient,
+  createClient,
   createNodeExecutor,
   createIndexerClient,
   createPythHermesClient,
   PYTH_FEED_IDS,
   TURBO_MIN_TRADE_AMOUNT,
   quoteTurboPayout,
+  quoteContractBuy,
   TurboMarketStatus,
   type TurboSide,
 } from '@veiled-markets/sdk'
@@ -67,6 +69,10 @@ const indexer =
         supabaseKey: process.env.SUPABASE_ANON_KEY,
       })
     : null
+
+// ── FPMM client ─────────────────────────────────────────────────────────────
+const fpmm = createClient({ network: NETWORK })
+if (indexer) fpmm.setIndexer(indexer)
 
 // ── Load user wallets ───────────────────────────────────────────────────────
 loadWallets()
@@ -271,13 +277,18 @@ bot.onText(/^\/(start|help)$/, (msg) => {
     `/watch \\<SYMBOL\\> \\— notify on new rounds\n` +
     `/unwatch \\— stop notifications\n` +
     `/status \\— bot health\n\n` +
-    `*Wallet \\& Bet commands:*\n` +
+    `*Wallet \\& Turbo commands:*\n` +
     `/wallet \\— show your wallet address \\& balance\n` +
     `/fund \\<AMOUNT\\> \\— convert public ALEO to private record\n` +
-    `/bet \\<SYMBOL\\> \\<UP\\|DOWN\\> \\<AMOUNT\\>\n` +
+    `/bet \\<SYMBOL\\> \\<UP\\|DOWN\\> \\<AMOUNT\\> \\— Turbo bet\n` +
     `/mybets \\— show all tracked bets\n` +
     `/result \\— check all bets for win/loss\n` +
     `/claim \\— auto\\-claim all winnings\n\n` +
+    `*FPMM Prediction Markets:*\n` +
+    `/markets \\— list active prediction markets\n` +
+    `/marketinfo \\<ID\\> \\— market details \\& odds\n` +
+    `/buy \\<ID\\> \\<YES\\|NO\\> \\<AMOUNT\\> \\— buy outcome shares\n` +
+    `/redeem \\<ID\\> \\— redeem shares after resolution\n\n` +
     `💡 *How to start:*\n` +
     `1\\. Run /wallet to see your deposit address\n` +
     `2\\. Send testnet ALEO to that address\n` +
@@ -286,7 +297,7 @@ bot.onText(/^\/(start|help)$/, (msg) => {
     `5\\. Use /mybets, /result, /claim to manage\n\n` +
     `Your wallet: \`${escapeMd(w.address)}\`\n` +
     `Network: \`${escapeMd(NETWORK)}\` \\| Mode: ${DRY_RUN ? '🟡 DRY\\_RUN' : '🔴 LIVE'}`
-  sendMsg(msg.chat.id, text, { parse_mode: 'MarkdownV2' })
+  sendMsg(msg.chat.id, text)
 })
 
 // /wallet — show user's wallet address and balance
@@ -338,7 +349,7 @@ bot.onText(/^\/status$/, async (msg) => {
     `Mode: ${DRY_RUN ? '🟡 DRY\\_RUN' : '🔴 LIVE'} \\| Multi\\-user\n` +
     `Watchers: ${watchers.length}\n` +
     `Tracked bets: ${trackedBets.length}`
-  sendMsg(msg.chat.id, text, { parse_mode: 'MarkdownV2' })
+  sendMsg(msg.chat.id, text)
 })
 
 // /price <SYMBOL> — current Pyth price
@@ -382,9 +393,7 @@ bot.onText(/^\/market(?:\s+(\w+))?$/, async (msg, match) => {
   const symbol = (match?.[1] ?? DEFAULT_SYMBOL).toUpperCase()
   const m = await fetchActiveMarket(symbol)
   if (!m) {
-    sendMsg(msg.chat.id, `No active ${symbol} market \\(oracle unreachable or no round open\\)`, {
-      parse_mode: 'MarkdownV2',
-    })
+    sendMsg(msg.chat.id, `No active ${symbol} market \\(oracle unreachable or no round open\\)`)
     return
   }
   const secsLeft = m.deadline_ms ? Math.max(0, Math.floor((m.deadline_ms - Date.now()) / 1000)) : null
@@ -395,7 +404,7 @@ bot.onText(/^\/market(?:\s+(\w+))?$/, async (msg, match) => {
     `Deadline: ${secsLeft !== null ? `in ${secsLeft}s` : '\\-'}\n` +
     `Market ID: \`${escapeMd(m.market_id.slice(0, 24))}…\`\n\n` +
     `Use /quote ${escapeMd(symbol)} UP 1 for payout estimate`
-  sendMsg(msg.chat.id, text, { parse_mode: 'MarkdownV2' })
+  sendMsg(msg.chat.id, text)
 })
 
 // /quote <SYMBOL> <UP|DOWN> <AMOUNT>
@@ -625,7 +634,7 @@ bot.onText(/^\/history(?:\s+(\w+))?$/, async (msg, match) => {
       text += `${arrow} $${escapeMd(fmtUsd(baseline))} → $${escapeMd(fmtUsd(closing))} \\(${escapeMd(pct.toFixed(3))}%\\)\n`
     }
     text += `\nUP rate: ${upCount}/${rows.length}`
-    sendMsg(msg.chat.id, text, { parse_mode: 'MarkdownV2' })
+    sendMsg(msg.chat.id, text)
   } catch (err) {
     sendMsg(msg.chat.id, `History error: ${(err as Error).message.slice(0, 200)}`)
   }
@@ -743,7 +752,7 @@ bot.onText(/^\/mybets$/, async (msg) => {
     text += `${recorded} ${escapeMd(bet.symbol)} ${escapeMd(bet.side)} ${escapeMd(amount)} ALEO \\(${age}m ago\\)\n`
   }
   text += `\nUse /result to check outcomes\\.`
-  sendMsg(msg.chat.id, text, { parse_mode: 'MarkdownV2' })
+  sendMsg(msg.chat.id, text)
 })
 
 // /result — check user's tracked bets for win/loss
@@ -794,7 +803,7 @@ bot.onText(/^\/result$/, async (msg) => {
   }
 
   text += `\nUse /claim to collect winnings\\.`
-  sendMsg(msg.chat.id, text, { parse_mode: 'MarkdownV2' })
+  sendMsg(msg.chat.id, text)
 })
 
 // /claim — auto-claim all winning bets for user
@@ -901,6 +910,261 @@ bot.onText(/^\/claim$/, async (msg) => {
     } catch (err) {
       sendMsg(msg.chat.id, `❌ Claim ${bet.symbol} ${bet.side} failed: ${(err as Error).message.slice(0, 200)}`)
     }
+  }
+})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FPMM PREDICTION MARKET COMMANDS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// /markets — list active FPMM prediction markets
+bot.onText(/^\/markets$/, async (msg) => {
+  if (!indexer) {
+    bot.sendMessage(msg.chat.id, `FPMM markets require Supabase indexer. Set SUPABASE_URL and SUPABASE_ANON_KEY in .env.`)
+    return
+  }
+
+  try {
+    const markets = await fpmm.getActiveMarkets(10)
+    if (markets.length === 0) {
+      bot.sendMessage(msg.chat.id, `No active prediction markets found.`)
+      return
+    }
+
+    let text = `*Active Prediction Markets:*\n\n`
+    for (const m of markets) {
+      const yes = m.yesPercentage?.toFixed(1) ?? '—'
+      const no = m.noPercentage?.toFixed(1) ?? '—'
+      const mAny = m as any
+      const mktId = mAny.marketId ?? mAny.market_id ?? ''
+      const question = mAny.questionText ?? mAny.question ?? mAny.title ?? mktId.slice(0, 20)
+      const vol = m.totalVolume ? `${(Number(m.totalVolume) / 1e6).toFixed(2)}` : '—'
+      const id = mktId.slice(0, 16)
+      text += `📊 *${escapeMd(String(question).slice(0, 60))}*\n`
+      text += `   YES: ${escapeMd(yes)}% \\| NO: ${escapeMd(no)}% \\| Vol: ${escapeMd(vol)} ALEO\n`
+      text += `   ID: \`${escapeMd(id ?? '')}…\`\n\n`
+    }
+    text += `Use /marketinfo \\<ID\\> for details, /buy \\<ID\\> YES 1 to trade\\.`
+    sendMsg(msg.chat.id, text)
+  } catch (err) {
+    bot.sendMessage(msg.chat.id, `Error fetching markets: ${(err as Error).message.slice(0, 200)}`)
+  }
+})
+
+// /marketinfo <MARKET_ID> — show market details and odds
+bot.onText(/^\/marketinfo\s+(\S+)$/, async (msg, match) => {
+  const marketId = match![1]
+
+  try {
+    const m = await fpmm.getMarket(marketId)
+    if (!m) {
+      bot.sendMessage(msg.chat.id, `Market not found. Check the ID.`)
+      return
+    }
+
+    const question = (m as any).question ?? (m as any).title ?? 'Unknown'
+    const prices = (m as any).prices ?? []
+    const numOutcomes = (m as any).numOutcomes ?? 2
+    const pool = (m as any).pool
+    const resolution = (m as any).resolution
+    const status = resolution?.winningOutcome ? 'RESOLVED' : 'ACTIVE'
+
+    let oddsText = ''
+    const outcomeLabels = numOutcomes === 2
+      ? ['YES', 'NO']
+      : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`)
+
+    for (let i = 0; i < prices.length; i++) {
+      oddsText += `   ${outcomeLabels[i]}: ${(prices[i] * 100).toFixed(1)}%\n`
+    }
+
+    const vol = pool?.totalVolume ? `${(Number(pool.totalVolume) / 1e6).toFixed(2)} ALEO` : '—'
+    const liq = pool?.totalLiquidity ? `${(Number(pool.totalLiquidity) / 1e6).toFixed(2)} ALEO` : '—'
+
+    let text = `*${escapeMd(String(question).slice(0, 100))}*\n\n`
+    text += `Status: ${escapeMd(status)}\n`
+    text += `Outcomes: ${numOutcomes}\n`
+    text += `${escapeMd(oddsText)}\n`
+    text += `Volume: ${escapeMd(vol)}\n`
+    text += `Liquidity: ${escapeMd(liq)}\n`
+    text += `ID: \`${escapeMd(marketId.slice(0, 24))}…\`\n`
+
+    if (resolution?.winningOutcome) {
+      text += `\nWinner: *${escapeMd(outcomeLabels[resolution.winningOutcome - 1] ?? 'Unknown')}*`
+    }
+
+    sendMsg(msg.chat.id, text)
+  } catch (err) {
+    bot.sendMessage(msg.chat.id, `Error: ${(err as Error).message.slice(0, 200)}`)
+  }
+})
+
+// /buy <MARKET_ID> <YES|NO|1|2|3|4> <AMOUNT> — buy FPMM outcome shares
+bot.onText(/^\/buy\s+(\S+)\s+(YES|NO|[1-4])\s+(\d*\.?\d+)$/i, async (msg, match) => {
+  const w = ensureWallet(msg)
+  if (!w) return
+
+  const marketId = match![1]
+  const outcomeStr = match![2].toUpperCase()
+  const amountAleo = parseFloat(match![3])
+  const amountMicro = BigInt(Math.round(amountAleo * 1_000_000))
+
+  if (amountMicro < 100_000n) {
+    bot.sendMessage(msg.chat.id, `Minimum 0.1 ALEO`)
+    return
+  }
+
+  // Parse outcome
+  let outcome: number
+  if (outcomeStr === 'YES') outcome = 1
+  else if (outcomeStr === 'NO') outcome = 2
+  else outcome = parseInt(outcomeStr)
+
+  // Check user has a credits record
+  const creditsRecord = DRY_RUN
+    ? '{owner: aleo1placeholder.private, microcredits: 1000000000u64.private, _nonce: 0group.public}'
+    : w.creditsRecord
+
+  if (!creditsRecord) {
+    bot.sendMessage(msg.chat.id, `No private record available. Run /fund ${Math.ceil(amountAleo + 1)} first.`)
+    return
+  }
+
+  try {
+    // Fetch market to calculate expected shares
+    const m = await fpmm.getMarket(marketId)
+    if (!m) {
+      bot.sendMessage(msg.chat.id, `Market not found`)
+      return
+    }
+
+    const pool = (m as any).pool
+    if (!pool) {
+      bot.sendMessage(msg.chat.id, `Pool not found for this market`)
+      return
+    }
+
+    // Calculate expected shares via FPMM math
+    const reserves = {
+      reserve1: BigInt(pool.reserve1 ?? 0),
+      reserve2: BigInt(pool.reserve2 ?? 0),
+      reserve3: BigInt(pool.reserve3 ?? 0),
+      reserve4: BigInt(pool.reserve4 ?? 0),
+      numOutcomes: (m as any).numOutcomes ?? 2,
+    }
+
+    const quote = quoteContractBuy(reserves, outcome, amountMicro)
+    const expectedShares = quote.sharesOut
+    const minSharesOut = expectedShares * 95n / 100n // 5% slippage
+
+    sendMsg(msg.chat.id,
+      `⏳ Buying ${escapeMd(outcomeStr)} shares on market\\.\\.\\.\\.\n` +
+        `Amount: ${escapeMd(amountAleo.toFixed(4))} ALEO\n` +
+        `Expected shares: ${escapeMd((Number(expectedShares) / 1e6).toFixed(4))}\n` +
+        `Mode: ${DRY_RUN ? '🟡 DRY\\_RUN' : '🔴 LIVE'}`,
+    )
+
+    // Build inputs — SDK returns inputs without credits record, we append it
+    const call = fpmm.buildBuySharesInputs({
+      marketId,
+      outcome,
+      amountIn: amountMicro,
+      expectedShares,
+      minSharesOut,
+    })
+
+    // Append credits record to inputs
+    call.inputs.push(creditsRecord)
+
+    const userExecutor = getUserExecutor(w.privateKey)
+    const result = await userExecutor.execute(call)
+
+    if (DRY_RUN) {
+      bot.sendMessage(msg.chat.id, `✅ DRY RUN complete — no on-chain broadcast`)
+    } else {
+      // Clear used record
+      updateCreditsRecord(w.telegramId, null)
+
+      // Track bet
+      const bet: TrackedBet = {
+        userId: w.telegramId,
+        marketId,
+        symbol: `FPMM-${outcomeStr}`,
+        side: outcomeStr as TurboSide,
+        amountMicro,
+        txId: result.txId,
+        shareRecord: null,
+        timestamp: Date.now(),
+      }
+      trackedBets.push(bet)
+
+      sendMsg(msg.chat.id,
+        `✅ *Buy broadcast\\!*\n\n` +
+          `Tx: \`${escapeMd(result.txId.slice(0, 32))}…\`\n` +
+          `Shares: ~${escapeMd((Number(expectedShares) / 1e6).toFixed(4))} ${escapeMd(outcomeStr)}\n\n` +
+          `Track: https://testnet\\.explorer\\.provable\\.com/transaction/${escapeMd(result.txId)}\n\n` +
+          `⏳ Capturing share record\\.\\.\\.`,
+      )
+
+      // Auto-capture share + change record
+      captureBetOutputs(bet, msg.chat.id).catch(() => {})
+    }
+  } catch (err) {
+    bot.sendMessage(msg.chat.id, `❌ Buy failed: ${(err as Error).message.slice(0, 300)}`)
+  }
+})
+
+// /redeem <MARKET_ID> — redeem winning FPMM shares (uses tracked share record)
+bot.onText(/^\/redeem\s+(\S+)$/, async (msg, match) => {
+  const w = ensureWallet(msg)
+  if (!w) return
+
+  const marketId = match![1]
+  const userBets = trackedBets.filter(b => b.userId === w.telegramId && b.marketId === marketId && b.shareRecord)
+
+  if (userBets.length === 0) {
+    bot.sendMessage(msg.chat.id, `No tracked shares for this market. Check /mybets.`)
+    return
+  }
+
+  try {
+    const m = await fpmm.getMarket(marketId)
+    if (!m) {
+      bot.sendMessage(msg.chat.id, `Market not found`)
+      return
+    }
+
+    const resolution = (m as any).resolution
+    if (!resolution?.winningOutcome) {
+      bot.sendMessage(msg.chat.id, `Market not resolved yet. Wait for resolution.`)
+      return
+    }
+
+    for (const bet of userBets) {
+      try {
+        const call = fpmm.buildRedeemSharesInputs(bet.shareRecord!)
+        const userExecutor = getUserExecutor(w.privateKey)
+        const result = await userExecutor.execute(call)
+
+        sendMsg(msg.chat.id,
+          `✅ *Redeemed ${escapeMd(bet.symbol)} shares\\!*\n` +
+            `Tx: \`${escapeMd(result.txId.slice(0, 32))}…\``,
+        )
+
+        // Capture payout record
+        captureChangeRecord(result.txId, w.privateKey).then((rec) => {
+          if (rec) updateCreditsRecord(w.telegramId, rec)
+        }).catch(() => {})
+
+        // Remove from tracker
+        const idx = trackedBets.indexOf(bet)
+        if (idx >= 0) trackedBets.splice(idx, 1)
+      } catch (err) {
+        bot.sendMessage(msg.chat.id, `❌ Redeem failed: ${(err as Error).message.slice(0, 200)}`)
+      }
+    }
+  } catch (err) {
+    bot.sendMessage(msg.chat.id, `❌ Error: ${(err as Error).message.slice(0, 200)}`)
   }
 })
 
