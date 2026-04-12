@@ -404,16 +404,24 @@ export function TurboMarketPanel({
       if (!baselinePrice || baselinePrice <= 0) {
         return [{ t: Date.now(), price: closingPrice }]
       }
-      // Synthesize a baseline → closing move so the chart has something to
-      // render. Timestamps are arbitrary (only relative spacing matters for
-      // the canvas renderer), we use deadlineMs as the end anchor when
-      // available so the line aligns with the countdown axis.
+      // Synthesize a smooth curve from baseline → closing so the chart
+      // doesn't show a flat line on late-join/refresh. Create ~20 points
+      // with slight randomness to look natural.
       const endT = deadlineMs > 0 ? deadlineMs : Date.now()
-      const startT = endT - 5 * 60 * 1000 // 5-minute turbo window
-      return [
-        { t: startT, price: baselinePrice },
-        { t: endT, price: closingPrice },
-      ]
+      const startT = endT - 5 * 60 * 1000
+      const steps = 20
+      const synth: PriceTick[] = []
+      for (let i = 0; i <= steps; i++) {
+        const progress = i / steps
+        // Ease-in curve with small noise
+        const eased = progress * progress
+        const noise = (Math.random() - 0.5) * Math.abs(closingPrice - baselinePrice) * 0.15
+        const price = baselinePrice + (closingPrice - baselinePrice) * eased + (i < steps ? noise : 0)
+        synth.push({ t: startT + (endT - startT) * progress, price })
+      }
+      // Ensure last point is exact closing price
+      synth[synth.length - 1].price = closingPrice
+      return synth
     })
   }, [closingPrice, baselinePrice, deadlineMs])
 
