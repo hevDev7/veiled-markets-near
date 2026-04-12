@@ -970,8 +970,13 @@ export function TurboMarketPanel({
       {/* Chart */}
       {!hideChart && (
         <div className="px-3 py-2 flex-1 min-h-0 relative">
-          {/* Chart type toggle */}
-          <div className="absolute top-1 right-1 z-10 flex bg-surface-800/80 rounded-lg p-0.5 backdrop-blur-sm border border-white/[0.06]">
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full block"
+            style={{ width: '100%', minHeight: '180px' }}
+          />
+          {/* Chart type toggle — bottom right */}
+          <div className="absolute bottom-2 right-2 z-10 flex bg-surface-800/80 rounded-lg p-0.5 backdrop-blur-sm border border-white/[0.06]">
             <button
               onClick={() => setChartType('line')}
               className={cn(
@@ -980,7 +985,6 @@ export function TurboMarketPanel({
                   ? 'bg-brand-400/20 text-brand-300'
                   : 'text-surface-500 hover:text-surface-300',
               )}
-              title="Line chart"
             >
               Line
             </button>
@@ -992,16 +996,10 @@ export function TurboMarketPanel({
                   ? 'bg-brand-400/20 text-brand-300'
                   : 'text-surface-500 hover:text-surface-300',
               )}
-              title="Candlestick chart"
             >
               Candle
             </button>
           </div>
-          <canvas
-            ref={canvasRef}
-            className="w-full h-full block"
-            style={{ width: '100%', minHeight: '180px' }}
-          />
         </div>
       )}
 
