@@ -1,6 +1,6 @@
 {
   "name": "@veiled-markets/sdk",
-  "version": "0.5.2",
+  "version": "0.5.4",
   "description": "TypeScript SDK for Veiled Markets on Aleo — FAMM + Governance + Parlay + Turbo, with Supabase indexer, Pyth Hermes verifier, wallet adapters, and Node executor",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
