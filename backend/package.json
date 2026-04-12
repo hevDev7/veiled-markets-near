@@ -10,10 +10,14 @@
         "governance:watch": "tsx watch src/governance-indexer.ts",
         "disputes": "tsx src/dispute-indexer.ts",
         "disputes:watch": "tsx watch src/dispute-indexer.ts",
+        "oracle": "tsx src/pyth-oracle.ts --serve",
+        "oracle:watch": "tsx watch src/pyth-oracle.ts --serve",
+        "oracle:dev": "tsx src/pyth-oracle.ts",
         "build": "tsc",
         "dev": "tsx watch src/index-markets.ts"
     },
     "dependencies": {
+        "eventsource": "^3.0.7",
         "node-fetch": "^3.3.2"
     },
     "devDependencies": {
