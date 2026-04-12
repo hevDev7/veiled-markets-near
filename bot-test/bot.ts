@@ -267,34 +267,43 @@ bot.onText(/^\/(start|help)$/, (msg) => {
   const w = ensureWallet(msg)
   if (!w) return
   const text =
-    `*Veiled Markets Bot* \\— Turbo Prediction Markets\n\n` +
-    `*Read commands \\(open to all\\):*\n` +
-    `/price \\<SYMBOL\\> \\— current Pyth price\n` +
-    `/market \\<SYMBOL\\> \\— current Turbo round status\n` +
-    `/quote \\<SYMBOL\\> \\<UP\\|DOWN\\> \\<AMOUNT\\> \\— payout calculator\n` +
-    `/history \\<SYMBOL\\> \\— last 5 resolved rounds\n` +
-    `/verify \\<MARKET\\_ID\\> \\— cross\\-check operator vs Pyth\n` +
+    `*Veiled Markets Bot*\n` +
+    `Privacy\\-preserving prediction markets on Aleo\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⚡ *TURBO MARKETS* \\(5\\-min UP/DOWN\\)\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Fast parimutuel rounds on BTC/ETH/SOL\\.\n` +
+    `Predict if price goes UP or DOWN in 5 min\\.\n\n` +
+    `/price \\<SYMBOL\\> \\— live Pyth price\n` +
+    `/market \\<SYMBOL\\> \\— current round status\n` +
+    `/quote \\<SYMBOL\\> \\<UP\\|DOWN\\> \\<AMT\\> \\— payout calc\n` +
+    `/bet \\<SYMBOL\\> \\<UP\\|DOWN\\> \\<AMT\\> \\— place bet\n` +
     `/watch \\<SYMBOL\\> \\— notify on new rounds\n` +
-    `/unwatch \\— stop notifications\n` +
+    `/unwatch \\— stop notifications\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📊 *FPMM MARKETS* \\(prediction markets\\)\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Custom YES/NO questions with AMM liquidity\\.\n` +
+    `Trade outcome shares with FPMM pricing\\.\n\n` +
+    `/markets \\— list active markets\n` +
+    `/marketinfo \\<ID\\> \\— details \\& odds\n` +
+    `/buy \\<ID\\> \\<YES\\|NO\\> \\<AMT\\> \\— buy shares\n` +
+    `/redeem \\<ID\\> \\— redeem after resolution\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `💰 *WALLET \\& GENERAL*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `/wallet \\— your address \\& balance\n` +
+    `/fund \\<AMT\\> \\— convert public → private ALEO\n` +
+    `/mybets \\— all tracked bets \\(Turbo \\+ FPMM\\)\n` +
+    `/result \\— check win/loss\n` +
+    `/claim \\— auto\\-claim winnings\n` +
     `/status \\— bot health\n\n` +
-    `*Wallet \\& Turbo commands:*\n` +
-    `/wallet \\— show your wallet address \\& balance\n` +
-    `/fund \\<AMOUNT\\> \\— convert public ALEO to private record\n` +
-    `/bet \\<SYMBOL\\> \\<UP\\|DOWN\\> \\<AMOUNT\\> \\— Turbo bet\n` +
-    `/mybets \\— show all tracked bets\n` +
-    `/result \\— check all bets for win/loss\n` +
-    `/claim \\— auto\\-claim all winnings\n\n` +
-    `*FPMM Prediction Markets:*\n` +
-    `/markets \\— list active prediction markets\n` +
-    `/marketinfo \\<ID\\> \\— market details \\& odds\n` +
-    `/buy \\<ID\\> \\<YES\\|NO\\> \\<AMOUNT\\> \\— buy outcome shares\n` +
-    `/redeem \\<ID\\> \\— redeem shares after resolution\n\n` +
-    `💡 *How to start:*\n` +
-    `1\\. Run /wallet to see your deposit address\n` +
+    `💡 *Quick Start:*\n` +
+    `1\\. /wallet → copy your deposit address\n` +
     `2\\. Send testnet ALEO to that address\n` +
-    `3\\. Run /fund 5 to convert to private record\n` +
-    `4\\. Run /bet BTC UP 1 to place a bet\n` +
-    `5\\. Use /mybets, /result, /claim to manage\n\n` +
+    `3\\. /fund 5 → create private record\n` +
+    `4\\. /bet BTC UP 1 → Turbo bet, or\n` +
+    `   /buy \\<ID\\> YES 1 → FPMM bet\n\n` +
     `Your wallet: \`${escapeMd(w.address)}\`\n` +
     `Network: \`${escapeMd(NETWORK)}\` \\| Mode: ${DRY_RUN ? '🟡 DRY\\_RUN' : '🔴 LIVE'}`
   sendMsg(msg.chat.id, text)
