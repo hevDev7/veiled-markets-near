@@ -940,16 +940,52 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
     return closingPrice
   }
 
+  // ── Stagger tracking ──
+  // When multiple symbols are enabled, stagger initial market creation so
+  // markets don't all resolve at the same time. Each symbol gets an offset
+  // of DURATION/N, so with 3 symbols and 5-min rounds:
+  //   BTC creates immediately, ETH after ~100s, SOL after ~200s.
+  // After initial stagger, each symbol chains independently via rolling loop.
+  const staggerStarted = new Set<Symbol>()
+  const staggerTimers = new Map<Symbol, ReturnType<typeof setTimeout>>()
+
   const tick = async () => {
     const symbols: Symbol[] = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP', 'BNB', 'ADA', 'AVAX', 'LINK', 'DOT']
     // Filter symbols — set TURBO_SYMBOLS=BTC to test one at a time
     const enabledStr = process.env.TURBO_SYMBOLS || symbols.join(',')
     const enabled = enabledStr.split(',').map(s => s.trim()) as Symbol[]
-    for (const symbol of enabled.filter(s => symbols.includes(s))) {
+    const activeSymbols = enabled.filter(s => symbols.includes(s))
+
+    // Stagger initial creation — only applies when a symbol has no chainState yet
+    const durationMs = Number(DURATION_BLOCKS) * SECS_PER_BLOCK * 1000
+    const staggerOffsetMs = activeSymbols.length > 1
+      ? Math.floor(durationMs / activeSymbols.length)
+      : 0
+
+    for (let idx = 0; idx < activeSymbols.length; idx++) {
+      const symbol = activeSymbols[idx]
       try {
         const current = chainState.get(symbol)
 
         if (!current || current.status === 'resolved') {
+          // Stagger: on first create, delay based on symbol index
+          if (!staggerStarted.has(symbol) && !current && idx > 0 && staggerOffsetMs > 0) {
+            if (!staggerTimers.has(symbol)) {
+              const delayMs = staggerOffsetMs * idx
+              console.log(`[chain] ${symbol} staggered — will create in ${(delayMs / 1000).toFixed(0)}s`)
+              staggerTimers.set(symbol, setTimeout(async () => {
+                staggerStarted.add(symbol)
+                staggerTimers.delete(symbol)
+                const q = stream.latest(symbol)
+                if (q) {
+                  await createMarket(symbol, undefined, undefined)
+                }
+              }, delayMs))
+            }
+            continue
+          }
+          staggerStarted.add(symbol)
+
           // Create new market. Chain baseline from:
           // 1. Previous market closing_price (if resolved successfully)
           // 2. lastClosingPrice fallback (if resolve tx failed but we saved Pyth price)
