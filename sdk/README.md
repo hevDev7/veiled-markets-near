@@ -6,7 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Tests](https://img.shields.io/badge/tests-191%20passing-brightgreen.svg)](#testing)
 
-Complete client library for the Veiled Markets protocol — covers FAMM AMM markets, Turbo (5-minute UP/DOWN) markets, governance proposals, parlay multi-leg bets, the Supabase indexer, and Pyth Hermes oracle verification. Works in both Node.js (bots, schedulers, services) and the browser (via wallet adapters).
+Complete client library for the Veiled Markets protocol — covers FPMM AMM markets, Turbo (5-minute UP/DOWN) markets, governance proposals, parlay multi-leg bets, the Supabase indexer, and Pyth Hermes oracle verification. Works in both Node.js (bots, schedulers, services) and the browser (via wallet adapters).
+
+**Live Telegram Bot:** [@veiledmarkets_bot](https://t.me/veiledmarkets_bot) — interact with both Turbo and FPMM markets via Telegram (built with this SDK).
 
 ## Features
 
@@ -183,7 +185,7 @@ await wallet.executeTransaction(call)
 
 | Class | Contract | Purpose |
 |---|---|---|
-| `VeiledMarketsClient` | `veiled_markets_v37/_usdcx_v7/_usad_v14` | FAMM AMM markets — create, buy/sell shares, add/remove LP, dispute, claim |
+| `VeiledMarketsClient` | `veiled_markets_v37/_usdcx_v7/_usad_v14` | FPMM AMM markets — create, buy/sell shares, add/remove LP, dispute, claim |
 | `TurboClient` | `veiled_turbo_v8.aleo` | 5-min UP/DOWN markets — buy, claim winnings, claim refund, off-chain quote |
 | `VeiledGovernanceClient` | `veiled_governance_v6.aleo` | Proposals (fee/param/pause/treasury/resolver), voting, escalation, finalization |
 | `ParlayClient` | `veiled_parlay_v3.aleo` | Multi-leg parlay bets across all 3 token markets |
@@ -292,9 +294,9 @@ The SDK targets these deployed contracts on Aleo testnet:
 
 | Contract | Program ID | Purpose |
 |---|---|---|
-| ALEO market | `veiled_markets_v37.aleo` | FAMM AMM, ALEO token |
-| USDCX market | `veiled_markets_usdcx_v7.aleo` | FAMM AMM, USDCX stablecoin |
-| USAD market | `veiled_markets_usad_v14.aleo` | FAMM AMM, USAD stablecoin |
+| ALEO market | `veiled_markets_v37.aleo` | FPMM AMM, ALEO token |
+| USDCX market | `veiled_markets_usdcx_v7.aleo` | FPMM AMM, USDCX stablecoin |
+| USAD market | `veiled_markets_usad_v14.aleo` | FPMM AMM, USAD stablecoin |
 | Governance | `veiled_governance_v6.aleo` | Proposals, escalation, cross-program exec |
 | Turbo | `veiled_turbo_v8.aleo` | 5-min UP/DOWN, shared vault, Pyth oracle |
 | Parlay | `veiled_parlay_v3.aleo` | Multi-leg parlay bets |
@@ -332,6 +334,15 @@ import { createNodeExecutor } from '@veiled-markets/sdk'
 
 A future v0.6.0 will split these into sub-entrypoints (`@veiled-markets/sdk/browser`, `@veiled-markets/sdk/node`) to fully eliminate the warning.
 
+## Changelog
+
+| Version | Changes |
+|---|---|
+| `0.5.3` | Fix: pass `outcomeLabels` from indexer to enriched markets; parse on-chain struct fields to correct types (BigInt for u128); camelCase + snake_case dual keys |
+| `0.5.2` | Fix: struct field parsing with newline separators, snake_case to camelCase conversion |
+| `0.5.1` | Fix: parse on-chain mapping struct values to BigInt instead of raw strings |
+| `0.5.0` | Initial public release — 6 clients, 191 tests, tri-token support |
+
 ## Versioning
 
 The SDK follows [semver](https://semver.org). During the 0.x phase, breaking changes may occur in minor versions. From 1.0.0 onwards, breaking changes will only occur in major versions.
@@ -341,6 +352,9 @@ Each release is tagged against a specific contract deployment — see the [Contr
 ## Links
 
 - **Live demo:** https://veiledmarkets.xyz
+- **Telegram Bot:** https://t.me/veiledmarkets_bot (SDK integration example)
+- **Bot source:** https://github.com/hevDev7/veiled-markets-near/tree/main/bot-test
+- **npm:** https://www.npmjs.com/package/@veiled-markets/sdk
 - **Project repo:** https://github.com/hevDev7/veiled-markets-near
 - **Provable Explorer:** https://testnet.explorer.provable.com
 - **Aleo Discord:** https://discord.gg/aleo
