@@ -353,17 +353,22 @@ export function Landing() {
   const [connectError, setConnectError] = useState<string | null>(null)
 
   const isConnected = wallet.connected || providerConnected
+  const [userClickedConnect, setUserClickedConnect] = useState(false)
 
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && userClickedConnect) {
       setVisible(false)
-      // Redirect to app subdomain after wallet connect
+      // Redirect to app subdomain only after user explicitly clicked Launch App
       window.location.href = 'https://app.veiledmarkets.xyz/dashboard'
+    } else if (isConnected) {
+      // Already connected (auto-reconnect) — go to dashboard on same domain
+      navigate('/dashboard')
     }
-  }, [isConnected, setVisible])
+  }, [isConnected, userClickedConnect, setVisible, navigate])
 
   const handleConnectClick = useCallback(async () => {
     setConnectError(null)
+    setUserClickedConnect(true)
     try {
       const hasShield = !!(window as any).shield
       if (hasShield) {
@@ -379,7 +384,7 @@ export function Landing() {
     }
   }, [connecting, selectWallet, connect, setVisible])
 
-  if (isConnected) return null
+  if (isConnected && !userClickedConnect) return null
 
   return (
     <div className="min-h-screen bg-surface-950 relative overflow-hidden">
