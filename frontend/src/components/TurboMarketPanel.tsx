@@ -394,7 +394,7 @@ export function TurboMarketPanel({
 
     const w = rect.width
     const h = rect.height
-    const PAD_RIGHT = 56   // room for right-axis price labels
+    const PAD_RIGHT = 76   // room for right-axis price labels (wider for decimals)
     const PAD_BOTTOM = 22  // room for bottom-axis time labels
     const PAD_TOP = 12
     const PAD_LEFT = 6
