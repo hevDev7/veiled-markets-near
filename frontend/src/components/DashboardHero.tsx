@@ -351,10 +351,19 @@ interface DashboardHeroProps {
   onMarketClick: (market: Market) => void
   /** If provided (non-null), renders TurboRollingView as the hero left panel */
   turboMarket?: TurboHeroMarket | null
+  /** Symbols available for hero tab selector */
+  turboSymbols?: string[]
+  /** All fetched turbo markets keyed by symbol */
+  turboMarkets?: Record<string, TurboHeroMarket>
+  /** Currently selected hero symbol */
+  activeHeroSymbol?: string
+  /** Callback when user switches hero symbol tab */
+  onHeroSymbolChange?: (symbol: string) => void
 }
 
 export function DashboardHero({
   markets, activityFeed, onCreateMarket, onMarketClick, turboMarket,
+  turboSymbols, turboMarkets, activeHeroSymbol, onHeroSymbolChange,
 }: DashboardHeroProps) {
   const [currentSlide, setCurrentSlide] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
@@ -557,11 +566,35 @@ export function DashboardHero({
           />
         </div>
 
+        {/* Symbol tabs — switch between BTC/ETH/SOL */}
+        {turboSymbols && turboSymbols.length > 1 && (
+          <div className="absolute top-3 left-3 z-20 flex gap-1.5">
+            {turboSymbols.map((sym) => {
+              const isActive = sym === (activeHeroSymbol || 'BTC')
+              const hasMarket = !!(turboMarkets?.[sym])
+              return (
+                <button
+                  key={sym}
+                  onClick={() => onHeroSymbolChange?.(sym)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                    isActive
+                      ? 'bg-brand-400/20 text-brand-300 border border-brand-400/30'
+                      : 'bg-white/[0.04] text-surface-400 border border-white/[0.06] hover:bg-white/[0.08] hover:text-surface-200'
+                  }`}
+                >
+                  {sym}
+                  {hasMarket && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-yes-400" />}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {/* Hero always shows Turbo rolling market — locked mode keeps the
             current round visible and shows a "Live Market" button when it
             resolves, instead of auto-rotating to the next round. */}
         <TurboRollingView
-          symbol={(turboMarket?.symbol || 'BTC') as TurboSymbol}
+          symbol={(turboMarket?.symbol || activeHeroSymbol || 'BTC') as TurboSymbol}
           className="absolute inset-0 h-full rounded-none border-0 bg-transparent"
           compact
           lockedMode

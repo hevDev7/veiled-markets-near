@@ -81,54 +81,53 @@ export function Dashboard() {
     const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
     const [showFilters, setShowFilters] = useState(false)
     const [parlayMode, setParlayMode] = useState(false)
-    const [turboMarket, setTurboMarket] = useState<TurboHeroMarket | null>(null)
+    const HERO_SYMBOLS = ['BTC', 'ETH', 'SOL'] as const
+    const [turboMarkets, setTurboMarkets] = useState<Record<string, TurboHeroMarket>>({})
+    const [activeHeroSymbol, setActiveHeroSymbol] = useState<string>('BTC')
 
-    // Fetch active turbo market from operator backend /chain/symbol endpoint.
-    // This is the single source of truth — the backend rolling chain loop
-    // tracks current market state in-memory and exposes it via HTTP.
+    // Derived: current turbo market for hero display
+    const turboMarket = turboMarkets[activeHeroSymbol] ?? null
+
+    // Fetch active turbo markets for all hero symbols
     useEffect(() => {
         let cancelled = false
         const ORACLE_URL = (import.meta as any).env?.VITE_TURBO_ORACLE_URL || 'http://localhost:4090'
         const SECS_PER_BLOCK = Number((import.meta as any).env?.VITE_ALEO_SECONDS_PER_BLOCK || 4)
 
         async function fetchTurbo() {
-            try {
-                const res = await fetch(`${ORACLE_URL}/chain/symbol?symbol=BTC`)
-                if (!res.ok) { if (!cancelled) setTurboMarket(null); return }
-                const m = await res.json()
-                if (!m || !m.market_id || m.status === 'resolved') {
-                    if (!cancelled) setTurboMarket(null)
-                    return
-                }
-                // Prefer the backend's absolute deadline_ms so this and
-                // TurboRollingView agree with the backend's precise-freeze
-                // setTimeout on the exact same wallclock moment. Only fall
-                // back to the local block-height estimate for older backends.
-                let deadlineMs: number
-                if (typeof m.deadline_ms === 'number' && m.deadline_ms > 0) {
-                    deadlineMs = m.deadline_ms
-                } else {
-                    deadlineMs = Date.now() + 5 * 60 * 1000 // fallback 5 min
-                    try {
-                        const ALEO_RPC = (import.meta as any).env?.VITE_ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet'
-                        const rpc = ALEO_RPC.replace(/\/(testnet|mainnet|canary)\/?$/, '') + '/testnet'
-                        const hRes = await fetch(`${rpc}/latest/height`)
-                        if (hRes.ok) {
-                            const curBlock = Number(await hRes.text())
-                            const blocksAhead = Math.max(0, Number(m.deadline) - curBlock)
-                            deadlineMs = Date.now() + blocksAhead * SECS_PER_BLOCK * 1000
-                        }
-                    } catch {}
-                }
-                if (!cancelled) setTurboMarket({
-                    marketId: m.market_id,
-                    symbol: m.symbol || 'BTC',
-                    baselinePrice: m.baseline_price,
-                    deadlineMs,
-                })
-            } catch {
-                if (!cancelled) setTurboMarket(null)
-            }
+            const results: Record<string, TurboHeroMarket> = {}
+            await Promise.all(HERO_SYMBOLS.map(async (symbol) => {
+                try {
+                    const res = await fetch(`${ORACLE_URL}/chain/symbol?symbol=${symbol}`)
+                    if (!res.ok) return
+                    const m = await res.json()
+                    if (!m || !m.market_id || m.status === 'resolved') return
+
+                    let deadlineMs: number
+                    if (typeof m.deadline_ms === 'number' && m.deadline_ms > 0) {
+                        deadlineMs = m.deadline_ms
+                    } else {
+                        deadlineMs = Date.now() + 5 * 60 * 1000
+                        try {
+                            const ALEO_RPC = (import.meta as any).env?.VITE_ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet'
+                            const rpc = ALEO_RPC.replace(/\/(testnet|mainnet|canary)\/?$/, '') + '/testnet'
+                            const hRes = await fetch(`${rpc}/latest/height`)
+                            if (hRes.ok) {
+                                const curBlock = Number(await hRes.text())
+                                const blocksAhead = Math.max(0, Number(m.deadline) - curBlock)
+                                deadlineMs = Date.now() + blocksAhead * SECS_PER_BLOCK * 1000
+                            }
+                        } catch {}
+                    }
+                    results[symbol] = {
+                        marketId: m.market_id,
+                        symbol: m.symbol || symbol,
+                        baselinePrice: m.baseline_price,
+                        deadlineMs,
+                    }
+                } catch {}
+            }))
+            if (!cancelled) setTurboMarkets(results)
         }
         fetchTurbo()
         const id = setInterval(fetchTurbo, 10_000)
@@ -331,6 +330,10 @@ export function Dashboard() {
                         activityFeed={activityFeed}
                         onMarketClick={handleMarketClick}
                         turboMarket={turboMarket}
+                        turboSymbols={HERO_SYMBOLS as unknown as string[]}
+                        turboMarkets={turboMarkets}
+                        activeHeroSymbol={activeHeroSymbol}
+                        onHeroSymbolChange={setActiveHeroSymbol}
                     />
 
                     {/* Pending Markets Banner */}
