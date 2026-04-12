@@ -80,12 +80,22 @@ function buildPythHermesUrl(symbol: string, publishTimeIso: string): string | nu
 
 async function fetchPythHistorical(symbol: string, publishTimeIso: string): Promise<PythHistorical | null> {
   const url = buildPythHermesUrl(symbol, publishTimeIso)
-  if (!url) return null
+  if (!url) {
+    console.warn('[VerifyTurbo] buildPythHermesUrl returned null for', symbol, publishTimeIso)
+    return null
+  }
+  console.log('[VerifyTurbo] Fetching Pyth:', url)
   const res = await fetch(url)
-  if (!res.ok) return null
+  if (!res.ok) {
+    console.warn('[VerifyTurbo] Pyth fetch failed:', res.status, await res.text().catch(() => ''))
+    return null
+  }
   const data = await res.json()
   const p = data?.parsed?.[0]?.price
-  if (!p) return null
+  if (!p) {
+    console.warn('[VerifyTurbo] No parsed price in Pyth response:', JSON.stringify(data).slice(0, 200))
+    return null
+  }
   const expo = Number(p.expo)
   const scale = Math.pow(10, expo)
   return {
@@ -114,7 +124,10 @@ export function VerifyTurbo() {
         // Fan out: fetch Pyth historical for each entry in parallel
         const checks = await Promise.all(
           list.map(async (e) => {
-            const ph = await fetchPythHistorical(e.symbol, e.pyth_publish_time).catch(() => null)
+            const ph = await fetchPythHistorical(e.symbol, e.pyth_publish_time).catch((err) => {
+              console.error('[VerifyTurbo] Pyth fetch error for', e.event, e.symbol, ':', err)
+              return null
+            })
             return [e.id, ph] as const
           }),
         )
