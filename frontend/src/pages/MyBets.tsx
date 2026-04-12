@@ -322,7 +322,10 @@ export function MyBets() {
   )
   const historyParlays = walletParlays
 
-  // Sync turbo bet statuses — check on-chain market state for turbo bets
+  // Sync turbo bet statuses — check on-chain market state for turbo bets.
+  // When a turbo bet is marked 'won', also compute the actual parimutuel
+  // payout from on-chain pool state so the PnL card shows the real profit
+  // (not just sharesReceived which is only the net stake at buy time).
   useEffect(() => {
     if (!wallet.connected) return
     let cancelled = false
@@ -337,12 +340,40 @@ export function MyBets() {
           if (!isTurbo) continue
           const result = await syncTurboBetStatus(bet.marketId, bet.outcome)
           if (!result || result.status === 'active') continue
-          // Update bet status in store
+
+          // For winning turbo bets, compute actual parimutuel payout from
+          // on-chain pool state. FAMM bets redeem 1:1 (payout = shares) but
+          // turbo payout = (share_qty × total_pool) / total_winning_shares
+          // which can be much higher than the original stake.
+          let payoutAmount: bigint | undefined
+          if (result.status === 'won') {
+            try {
+              const { fetchTurboPool, fetchMarketCredits, quotePayout } =
+                await import('@/lib/turbo-client')
+              const [pool, credits] = await Promise.all([
+                fetchTurboPool(bet.marketId),
+                fetchMarketCredits(bet.marketId),
+              ])
+              if (pool && credits != null) {
+                const betSide = (bet.outcome === 'up' || bet.outcome === 'yes') ? 'UP' : 'DOWN'
+                const totalWinning = betSide === 'UP'
+                  ? pool.totalUpShares : pool.totalDownShares
+                if (totalWinning > 0n) {
+                  const shareQty = bet.sharesReceived || bet.amount
+                  payoutAmount = quotePayout(credits, totalWinning, shareQty)
+                }
+              }
+            } catch {
+              // Fall back to sharesReceived if pool fetch fails
+            }
+          }
+
           const updatedBets = useBetsStore.getState().userBets.map(b =>
             b.id === bet.id ? {
               ...b,
               status: result.status as Bet['status'],
               winningOutcome: result.winningOutcome,
+              ...(payoutAmount != null ? { payoutAmount } : {}),
             } : b
           )
           useBetsStore.setState({ userBets: updatedBets })
@@ -632,7 +663,11 @@ export function MyBets() {
                 const token = normalizePortfolioToken(market?.tokenType || bet.tokenType)
 
                 if (bet.status === 'won') {
-                  profitByToken[token] += Number((bet.sharesReceived || bet.amount) - bet.amount) / 1_000_000
+                  // Use payoutAmount when available (turbo parimutuel payout
+                  // computed from on-chain pool state). Fall back to
+                  // sharesReceived for FAMM bets (1:1 redemption).
+                  const payout = bet.payoutAmount || bet.sharesReceived || bet.amount
+                  profitByToken[token] += Number(payout - bet.amount) / 1_000_000
                 } else if (bet.status === 'lost') {
                   profitByToken[token] -= Number(bet.amount) / 1_000_000
                 }
@@ -1433,16 +1468,19 @@ function BetCard({
                     isRefunded && "text-orange-400"
                   )}>
                     {isWon
-                      ? `+${formatCredits(bet.sharesReceived || bet.amount)} ${tokenSymbol}`
+                      ? `+${formatCredits(bet.payoutAmount || bet.sharesReceived || bet.amount)} ${tokenSymbol}`
                       : isRefunded
                         ? `${formatCredits(bet.amount)} ${tokenSymbol}`
                         : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
-                  {isWon && bet.sharesReceived != null && bet.sharesReceived > bet.amount ? (
-                    <p className="text-[10px] text-yes-400/60 tabular-nums">
-                      profit +{formatCredits(bet.sharesReceived - bet.amount)} {tokenSymbol}
-                    </p>
-                  ) : null}
+                  {isWon && (() => {
+                    const payout = bet.payoutAmount || bet.sharesReceived
+                    return payout != null && payout > bet.amount ? (
+                      <p className="text-[10px] text-yes-400/60 tabular-nums">
+                        profit +{formatCredits(payout - bet.amount)} {tokenSymbol}
+                      </p>
+                    ) : null
+                  })()}
                 </div>
               )}
 
