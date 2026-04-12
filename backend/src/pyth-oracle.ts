@@ -628,6 +628,10 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
         at_block: currentBlock,
       }
       const inputs = snapshotToCreateInputs(snap, deadline, nonce, operatorAddress)
+      // Capture wallclock deadline BEFORE broadcast so the countdown starts
+      // from creation intent, not from tx confirmation (which can take 30-60s).
+      const SECS_PER_BLOCK_PRE = Number(process.env.ALEO_SECONDS_PER_BLOCK || 4)
+      const preBroadcastDeadlineMs = Date.now() + Number(DURATION_BLOCKS) * SECS_PER_BLOCK_PRE * 1000
       const result = await broadcastCreateTurboMarket(inputs)
       const marketId = result.firstFieldOutput || `pending_${symbol}_${nonce}`
 
@@ -673,21 +677,11 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
       // actual resolve tx, reusing the price we locked in here instead
       // of fetching a fresh `stream.latest()`.
       // ────────────────────────────────────────────────────────────
-      const SECS_PER_BLOCK = Number(process.env.ALEO_SECONDS_PER_BLOCK || 4)
       const capturedMarketId = marketId
-      let absoluteDeadlineMs: number
-      try {
-        const freshBlock = await getAleoBlockHeight()
-        const blocksAhead = Number(deadline - freshBlock)
-        const msUntilDeadline = Math.max(0, blocksAhead * SECS_PER_BLOCK * 1000)
-        absoluteDeadlineMs = Date.now() + msUntilDeadline
-      } catch (err) {
-        console.warn(`[chain] ${symbol} fresh-block fetch failed, using creation-time estimate:`, err)
-        // Fallback: use the pre-broadcast currentBlock (slightly stale, off
-        // by the tx-confirm duration — still better than nothing)
-        const blocksAhead = Number(deadline - currentBlock)
-        absoluteDeadlineMs = Date.now() + blocksAhead * SECS_PER_BLOCK * 1000
-      }
+      // Use the pre-broadcast wallclock deadline so the countdown starts
+      // at 05:00, not 04:xx (broadcast + confirm takes 30-60s during which
+      // blocks advance and eat into the displayed time).
+      const absoluteDeadlineMs = preBroadcastDeadlineMs
 
       // Update with real market_id from tx output
       chainState.set(symbol, {
