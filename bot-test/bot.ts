@@ -940,10 +940,13 @@ bot.onText(/^\/markets$/, async (msg) => {
       return
     }
 
-    // Filter out resolved markets
+    // Filter out resolved/cancelled markets (status 1 = active)
     const activeMarkets = markets.filter((m) => {
-      const resolution = (m as any).resolution
-      return !resolution?.winningOutcome
+      const mAny = m as any
+      const status = mAny.status
+      if (status !== undefined && status !== 1) return false
+      if (mAny.resolution?.winningOutcome) return false
+      return true
     })
 
     if (activeMarkets.length === 0) {
@@ -991,14 +994,21 @@ bot.onText(/^\/marketinfo\s+(\S+)$/, async (msg, match) => {
       return
     }
 
+    // Also fetch from indexer for question text and outcome labels
+    let indexerData: any = null
+    if (indexer) {
+      try { indexerData = await indexer.getMarket(marketId) } catch {}
+    }
+
     const mAny = m as any
-    const question = mAny.questionText ?? mAny.question ?? mAny.title ?? 'Unknown'
+    const question = indexerData?.questionText ?? mAny.questionText ?? mAny.question ?? mAny.title ?? 'Unknown'
     const prices = mAny.prices ?? []
-    const numOutcomes = mAny.numOutcomes ?? prices.length ?? 2
+    const numOutcomes = mAny.numOutcomes ?? mAny.num_outcomes ?? prices.length ?? 2
     const pool = mAny.pool
     const resolution = mAny.resolution
-    const status = resolution?.winningOutcome ? 'RESOLVED' : 'ACTIVE'
-    const outcomeLabels: string[] = mAny.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
+    const marketStatus = mAny.status
+    const status = resolution?.winningOutcome ? 'RESOLVED' : (marketStatus === 3 ? 'RESOLVED' : 'ACTIVE')
+    const outcomeLabels: string[] = indexerData?.outcomeLabels ?? mAny.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
 
     let oddsText = ''
     for (let i = 0; i < Math.max(prices.length, outcomeLabels.length); i++) {
