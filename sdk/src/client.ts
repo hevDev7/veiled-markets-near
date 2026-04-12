@@ -578,16 +578,25 @@ export class VeiledMarketsClient {
   private parseAleoValue(value: string): unknown {
     if (!value) return null;
 
-    // Handle struct strings: "{ key1: val1, key2: val2, ... }"
+    // Handle struct strings: "{\n  key1: val1,\n  key2: val2\n}"
     if (typeof value === 'string' && value.trim().startsWith('{')) {
       const result: Record<string, unknown> = {};
       const clean = value.replace(/^\{|\}$/g, '').trim();
-      for (const part of clean.split(',')) {
-        const colonIdx = part.indexOf(':');
+      // Split on comma or newline (RPC may use either)
+      for (const part of clean.split(/[,\n]/)) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const colonIdx = trimmed.indexOf(':');
         if (colonIdx < 0) continue;
-        const k = part.slice(0, colonIdx).trim();
-        const v = part.slice(colonIdx + 1).trim();
-        if (k && v) result[k] = this.parseAleoValue(v);
+        // Store with both snake_case and camelCase keys
+        const rawKey = trimmed.slice(0, colonIdx).trim();
+        const camelKey = rawKey.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+        const v = trimmed.slice(colonIdx + 1).trim();
+        if (rawKey && v) {
+          const parsed = this.parseAleoValue(v);
+          result[rawKey] = parsed;
+          if (camelKey !== rawKey) result[camelKey] = parsed;
+        }
       }
       return result;
     }
