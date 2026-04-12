@@ -56,7 +56,15 @@ function App() {
     <ErrorBoundary>
       <Routes>
         {/* Landing Page - shown when not connected */}
-        <Route path="/" element={<Landing />} />
+        {/* On app.veiledmarkets.xyz subdomain, "/" redirects to dashboard */}
+        <Route
+          path="/"
+          element={
+            window.location.hostname === 'app.veiledmarkets.xyz'
+              ? <Navigate to="/dashboard" replace />
+              : <Landing />
+          }
+        />
 
         {/* Dashboard - requires wallet connection */}
         <Route
