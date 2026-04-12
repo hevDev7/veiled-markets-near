@@ -922,17 +922,9 @@ export function TurboMarketPanel({
         className,
       )}
     >
-      {/* Header — in sidebar mode (hideChart) we stack the title above the
-          countdown so the narrow column doesn't cramp them on one row;
-          in chart mode they sit side-by-side as before. */}
-      <div
-        className={cn(
-          'px-4 py-3 border-b border-surface-700/30',
-          hideChart
-            ? 'flex flex-col gap-2'
-            : 'flex items-center justify-between',
-        )}
-      >
+      {/* Header + Price bar — hidden in sidebar mode since info already visible in chart */}
+      {!hideChart && (
+      <div className="px-4 py-3 border-b border-surface-700/30 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <img
             src={SYMBOL_LOGOS[symbol]}
@@ -948,22 +940,14 @@ export function TurboMarketPanel({
           </button>
         </div>
 
-        {/* Countdown — in sidebar mode this drops onto its own row below
-            the title via the flex-col on the parent. */}
         {isActive && (
-          <div className={cn(
-            'flex items-baseline gap-1 tabular-nums',
-            hideChart && 'self-start',
-          )}>
+          <div className="flex items-baseline gap-1 tabular-nums">
             <FlipNumber value={String(mins).padStart(2, '0')} className="text-2xl font-black text-rose-400" />
             <span className="text-[10px] text-surface-500 ml-0.5">MIN</span>
             <FlipNumber value={String(secs).padStart(2, '0')} className="text-2xl font-black text-rose-400 ml-1" />
             <span className="text-[10px] text-surface-500 ml-0.5">SECS</span>
           </div>
         )}
-        {/* LOCKED + Final price label removed from header — the price
-            headline row below already shows "FINAL PRICE LOCKED $X" which
-            communicates the same info without duplication. */}
         {showResolved && (
           <div
             className={cn(
@@ -982,18 +966,12 @@ export function TurboMarketPanel({
           </div>
         )}
       </div>
+      )}
 
-      {/* Price headline row — sidebar mode stacks Current Price below
-          Price To Beat (narrow column doesn't fit them side-by-side); the
-          chart embed keeps the inline horizontal layout. */}
-      <div
-        className={cn(
-          'px-4 py-2 border-b border-surface-700/20 bg-surface-900/30',
-          hideChart
-            ? 'flex flex-col gap-2'
-            : 'flex items-center gap-4',
-        )}
-      >
+      {/* Price headline row — hidden in sidebar mode */}
+      {!hideChart && (
+      <div className="px-4 py-2 border-b border-surface-700/20 bg-surface-900/30 flex items-center gap-4">
+
         <div>
           <div className="text-[11px] uppercase tracking-wider text-surface-400">
             Price To Beat
@@ -1083,6 +1061,7 @@ export function TurboMarketPanel({
           </div>
         </div>
       </div>
+      )}
 
       {/* Chart */}
       {!hideChart && (
