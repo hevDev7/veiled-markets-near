@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
-import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
+import { useEffect, useState, useCallback } from 'react'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useWallet, useWalletModal } from '@provablehq/aleo-wallet-adaptor-react'
+import { Network } from '@provablehq/sdk'
 import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, Docs, BrandKit, BugBounty } from './pages'
 import { MyParlays } from './pages/MyParlays'
 import { VerifyTurbo } from './pages/VerifyTurbo'
@@ -11,6 +12,60 @@ import { initializeMarketIds } from './lib/aleo-client'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { MobileNav } from './components/MobileNav'
 import { ParlaySlip } from './components/ParlaySlip'
+
+// Connect Wallet page for app subdomain
+function ConnectPage() {
+  const navigate = useNavigate()
+  const { wallet } = useWalletStore()
+  const { connected: providerConnected, connecting, selectWallet, connect } = useWallet() as any
+  const { setVisible } = useWalletModal()
+
+  const isConnected = wallet.connected || providerConnected
+
+  useEffect(() => {
+    if (isConnected) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [isConnected, navigate])
+
+  const handleConnect = useCallback(async () => {
+    try {
+      const hasShield = !!(window as any).shield
+      if (hasShield) {
+        selectWallet('Shield Wallet')
+        await connect(Network.TESTNET)
+      } else {
+        setVisible(true)
+      }
+    } catch {
+      setVisible(true)
+    }
+  }, [selectWallet, connect, setVisible])
+
+  if (isConnected) return null
+
+  return (
+    <div className="min-h-screen bg-surface-950 flex items-center justify-center">
+      <div className="text-center max-w-md mx-auto px-6">
+        <img src="/logo.svg" alt="Veiled Markets" className="w-12 h-12 mx-auto mb-6" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        <h1 className="font-display text-3xl text-white mb-3">Connect Your Wallet</h1>
+        <p className="text-surface-400 mb-8">Connect your wallet to access the prediction market dashboard.</p>
+        <button onClick={handleConnect} disabled={connecting}
+          className="flex items-center justify-center gap-3 w-full px-7 py-3.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200 disabled:opacity-50"
+          style={{
+            background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
+            color: '#08090c',
+            boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25)',
+          }}>
+          {connecting ? 'Connecting...' : 'Connect Wallet'}
+        </button>
+        <a href="https://veiledmarkets.xyz" className="block mt-6 text-surface-500 hover:text-surface-300 text-sm transition-colors">
+          &larr; Back to home
+        </a>
+      </div>
+    </div>
+  )
+}
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -40,7 +95,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isConnected) {
-    // On any domain, redirect to landing page on same domain
+    // Redirect to "/" which shows ConnectPage on subdomain, Landing on main domain
     return <Navigate to="/" replace />
   }
 
@@ -56,10 +111,12 @@ function App() {
   return (
     <ErrorBoundary>
       <Routes>
-        {/* Landing Page - shown when not connected */}
-        {/* On app.veiledmarkets.xyz: shows Landing with connect wallet flow */}
-        {/* On veiledmarkets.xyz: shows Landing with Launch App link to subdomain */}
-        <Route path="/" element={<Landing />} />
+        {/* Main domain: landing page. Subdomain: connect wallet page */}
+        <Route path="/" element={
+          window.location.hostname === 'app.veiledmarkets.xyz'
+            ? <ConnectPage />
+            : <Landing />
+        } />
 
         {/* Dashboard - requires wallet connection */}
         <Route
