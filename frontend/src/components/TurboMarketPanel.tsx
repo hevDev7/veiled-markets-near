@@ -984,7 +984,7 @@ export function TurboMarketPanel({
           <div className="text-xs tracking-wider text-surface-400">
             Price to Beat
           </div>
-          <div className="text-lg font-bold text-white tabular-nums">
+          <div className="text-xl font-bold text-white tabular-nums">
             ${baselinePrice.toLocaleString(undefined, {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
@@ -1049,7 +1049,7 @@ export function TurboMarketPanel({
           </div>
           <div
             className={cn(
-              'text-lg font-bold tabular-nums',
+              'text-xl font-bold tabular-nums',
               direction === 'UP' && 'text-emerald-400',
               direction === 'DOWN' && 'text-rose-400',
               direction === 'EVEN' && 'text-white',
