@@ -975,31 +975,6 @@ export function TurboMarketPanel({
             className="w-full h-full block"
             style={{ width: '100%', minHeight: '180px' }}
           />
-          {/* Chart type toggle — bottom right */}
-          <div className="absolute bottom-2 right-2 z-10 flex bg-surface-800/80 rounded-lg p-0.5 backdrop-blur-sm border border-white/[0.06]">
-            <button
-              onClick={() => setChartType('line')}
-              className={cn(
-                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
-                chartType === 'line'
-                  ? 'bg-brand-400/20 text-brand-300'
-                  : 'text-surface-500 hover:text-surface-300',
-              )}
-            >
-              Line
-            </button>
-            <button
-              onClick={() => setChartType('candle')}
-              className={cn(
-                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
-                chartType === 'candle'
-                  ? 'bg-brand-400/20 text-brand-300'
-                  : 'text-surface-500 hover:text-surface-300',
-              )}
-            >
-              Candle
-            </button>
-          </div>
         </div>
       )}
 
@@ -1233,8 +1208,8 @@ export function TurboMarketPanel({
           )}
 
           {/* Amount input */}
-          {/* Single row: buy UP + buy DOWN + amount input (right) */}
-          <div className="flex items-stretch gap-2 max-w-[380px] mr-auto mt-8">
+          {/* Single row: buy UP + buy DOWN + amount input + chart toggle */}
+          <div className="flex items-stretch gap-2 mt-8">
             {/* Buy UP */}
             <button
               disabled={busy != null || amountAleo <= 0}
@@ -1330,6 +1305,32 @@ export function TurboMarketPanel({
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Chart type toggle */}
+            <div className="flex flex-col bg-surface-800/40 border border-surface-700/30 rounded-lg p-0.5 justify-center ml-auto">
+              <button
+                onClick={() => setChartType('line')}
+                className={cn(
+                  'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                  chartType === 'line'
+                    ? 'bg-brand-400/20 text-brand-300'
+                    : 'text-surface-500 hover:text-surface-300',
+                )}
+              >
+                Line
+              </button>
+              <button
+                onClick={() => setChartType('candle')}
+                className={cn(
+                  'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                  chartType === 'candle'
+                    ? 'bg-brand-400/20 text-brand-300'
+                    : 'text-surface-500 hover:text-surface-300',
+                )}
+              >
+                Candle
+              </button>
             </div>
           </div>
 
