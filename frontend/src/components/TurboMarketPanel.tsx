@@ -770,23 +770,9 @@ export function TurboMarketPanel({
             <span className="text-[10px] text-surface-500">SECS</span>
           </div>
         )}
-        {!isActive && status === 'active' && (
-          <div className="text-right">
-            <div className="text-xs text-amber-400 font-semibold">LOCKED</div>
-            {currentPrice != null && (
-              <div className={cn(
-                'text-[10px] font-semibold mt-0.5',
-                direction === 'UP' && 'text-emerald-400',
-                direction === 'DOWN' && 'text-rose-400',
-                direction === 'EVEN' && 'text-surface-300',
-              )}>
-                Final: ${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                {direction === 'UP' && ' ↑ UP'}
-                {direction === 'DOWN' && ' ↓ DOWN'}
-              </div>
-            )}
-          </div>
-        )}
+        {/* LOCKED + Final price label removed from header — the price
+            headline row below already shows "FINAL PRICE LOCKED $X" which
+            communicates the same info without duplication. */}
         {showResolved && (
           <div
             className={cn(
