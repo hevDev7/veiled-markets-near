@@ -973,10 +973,10 @@ export function TurboMarketPanel({
       <div className="px-4 py-2 border-b border-surface-700/20 bg-surface-900/30 flex items-center gap-4">
 
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-surface-400">
+          <div className="text-xs uppercase tracking-wider text-surface-400">
             Price To Beat
           </div>
-          <div className="text-base font-bold text-white tabular-nums">
+          <div className="text-lg font-bold text-white tabular-nums">
             ${baselinePrice.toLocaleString(undefined, {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
@@ -1033,7 +1033,7 @@ export function TurboMarketPanel({
           return showPill ? pill : <div className="h-7 w-px bg-surface-700/40" />
         })()}
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-surface-400 flex items-center gap-1">
+          <div className="text-xs uppercase tracking-wider text-surface-400 flex items-center gap-1">
             {frozen ? 'Final Price' : 'Current Price'}
             {frozen && (
               <span className="text-amber-400 ml-1">LOCKED</span>
@@ -1041,7 +1041,7 @@ export function TurboMarketPanel({
           </div>
           <div
             className={cn(
-              'text-base font-bold tabular-nums',
+              'text-lg font-bold tabular-nums',
               direction === 'UP' && 'text-emerald-400',
               direction === 'DOWN' && 'text-rose-400',
               direction === 'EVEN' && 'text-white',
