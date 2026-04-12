@@ -75,3 +75,4 @@ WAVE_5_SUBMISSION.md
 
 # Backend runtime state
 backend/public/indexer-checkpoint.json
+bot-test/wallets.json
