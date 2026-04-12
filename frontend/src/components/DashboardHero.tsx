@@ -568,7 +568,7 @@ export function DashboardHero({
 
         {/* Symbol tabs — switch between BTC/ETH/SOL */}
         {turboSymbols && turboSymbols.length > 1 && (
-          <div className="absolute top-2 right-24 z-20 flex gap-1.5">
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex gap-1.5">
             {turboSymbols.map((sym) => {
               const isActive = sym === (activeHeroSymbol || 'BTC')
               const hasMarket = !!(turboMarkets?.[sym])
