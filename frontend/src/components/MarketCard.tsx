@@ -16,7 +16,7 @@ function MarketThumb({ url, question, size = 'md' }: { url: string; question: st
       <div className={cn(sizeClass, 'overflow-hidden shrink-0 bg-surface-800', useContain && 'p-1.5 flex items-center justify-center')}>
         <img src={url} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
       </div>
-      <h3 className="text-sm md:text-[15px] font-semibold text-white line-clamp-3 group-hover:text-brand-300 transition-colors leading-snug">
+      <h3 className="text-[11px] md:text-xs font-medium text-white line-clamp-3 group-hover:text-brand-300 transition-colors leading-snug">
         {question}
       </h3>
     </div>

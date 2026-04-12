@@ -21,7 +21,7 @@ import { TrendingUp, TrendingDown, Loader2, Radio } from 'lucide-react'
 
 const ORACLE_URL = (import.meta as any).env?.VITE_TURBO_ORACLE_URL || 'http://localhost:4090'
 const SECS_PER_BLOCK = Number((import.meta as any).env?.VITE_ALEO_SECONDS_PER_BLOCK || 4)
-const RESULT_DISPLAY_MS = 5000 // show result screen for 5s before rotating
+const RESULT_DISPLAY_MS = 2000 // show result screen briefly before rotating to next round
 
 interface ChainedMarket {
   market_id: string
@@ -69,6 +69,14 @@ export function TurboRollingView({ symbol, className, compact: _compact, lockedM
   } | null>(null)
   const [deadlineMs, setDeadlineMs] = useState(0)
   const prevMarketId = useRef<string | null>(null)
+  /**
+   * In lockedMode, when the current market resolves and the backend chains
+   * a new round, the hero stays frozen on the resolved market — but the
+   * "Live Market" button should navigate to the NEW market, not the stale
+   * resolved one. We capture the new market_id here so the button can use
+   * it.
+   */
+  const [nextMarketId, setNextMarketId] = useState<string | null>(null)
 
   // Poll backend for current chain state
   const fetchChain = useCallback(async () => {
@@ -97,9 +105,11 @@ export function TurboRollingView({ symbol, className, compact: _compact, lockedM
       // Detect new market (id changed)
       if (m.market_id !== prevMarketId.current) {
         // LOCKED MODE: don't auto-rotate. Keep showing the current (resolved)
-        // market so user can see the final result. User must click "Live Market"
-        // button to navigate to the detail page manually.
-        if (lockedMode && market && market.status === 'resolved') {
+        // market so user can see the final result. Save the new market's id
+        // so the "Live Market" button can navigate to it instead of the stale
+        // resolved one.
+        if (lockedMode && market && (market.status === 'resolved' || market.status === 'resolving')) {
+          setNextMarketId(m.market_id)
           return // ignore new market, stay locked on current
         }
 
@@ -282,7 +292,7 @@ export function TurboRollingView({ symbol, className, compact: _compact, lockedM
         // row sits right under it — we center the button on the price row
         // using top-[4.25rem] + -translate-y-1/2.
         <button
-          onClick={() => navigate(`/market/${market.market_id}`)}
+          onClick={() => navigate(`/market/${nextMarketId ?? market.market_id}`)}
           className={cn(
             'absolute top-[5.5rem] right-3 z-20 -translate-y-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full',
             'bg-gradient-to-r from-amber-500 to-orange-500',
