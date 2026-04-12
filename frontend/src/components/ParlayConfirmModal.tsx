@@ -314,9 +314,9 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
           animate={{ y: 0, opacity: 1, scale: 1 }}
           exit={{ y: 20, opacity: 0, scale: 0.96 }}
           onClick={(event) => event.stopPropagation()}
-          className="relative mx-4 w-full max-w-xl overflow-hidden rounded-[28px] border border-white/10 bg-[#10141f] shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+          className="relative mx-4 w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[#10141f] shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
         >
-          <div className="border-b border-white/[0.08] bg-gradient-to-r from-brand-500/12 via-white/[0.02] to-emerald-500/10 px-6 py-5">
+          <div className="shrink-0 border-b border-white/[0.08] bg-gradient-to-r from-brand-500/12 via-white/[0.02] to-emerald-500/10 px-6 py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-1">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-surface-300">
@@ -344,7 +344,7 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
             </div>
           </div>
 
-          <div className="space-y-5 px-6 py-6">
+          <div className="space-y-5 px-6 py-6 overflow-y-auto flex-1 min-h-0">
             {(step === 'review' || step === 'submitting') && (
               <>
                 <div className="grid gap-3 sm:grid-cols-3">
