@@ -448,8 +448,10 @@ export function TurboMarketPanel({
       ctx.lineTo(PAD_LEFT + plotW, y + 0.5)
       ctx.stroke()
       // label
+      // Show decimals when price range is small (e.g. SOL $82-$83)
+      const fracDigits = yRange < 10 ? 2 : yRange < 100 ? 1 : 0
       ctx.fillText(
-        `$${p.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+        `$${p.toLocaleString(undefined, { minimumFractionDigits: fracDigits, maximumFractionDigits: fracDigits })}`,
         PAD_LEFT + plotW + 6,
         y + 4,
       )
@@ -881,12 +883,16 @@ export function TurboMarketPanel({
           >
             {/* Price stays at the dot-chart value once frozen — same value
                 backend uses in the resolve tx, so no "waiting for oracle" UI. */}
-            {currentPrice != null
-              ? `$${currentPrice.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`
-              : '—'}
+            {(() => {
+              // Use latest tick price for display to stay in sync with chart dot
+              const displayPrice = ticks.length > 0 ? ticks[ticks.length - 1].price : currentPrice
+              return displayPrice != null
+                ? `$${displayPrice.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
+                : '—'
+            })()}
           </div>
         </div>
       </div>
