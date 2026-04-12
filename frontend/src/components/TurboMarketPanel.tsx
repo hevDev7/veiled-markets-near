@@ -1334,10 +1334,6 @@ export function TurboMarketPanel({
             </div>
           </div>
 
-          {/* Fee row */}
-          <div className="text-[10px] text-surface-500 text-right tabular-nums">
-            Fee: {(fee / 1_000_000).toFixed(3)} ALEO
-          </div>
           {errorMsg && (
             <div className="text-[11px] text-rose-400 bg-rose-500/10 rounded px-2 py-1">
               {errorMsg}
