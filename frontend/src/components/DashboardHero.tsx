@@ -557,61 +557,15 @@ export function DashboardHero({
           />
         </div>
 
-        {/* Turbo hero — locked mode: stays on current market, shows Live Market button when ended */}
-        {turboMarket ? (
-          <TurboRollingView
-            symbol={turboMarket.symbol || 'BTC'}
-            className="absolute inset-0 h-full rounded-none border-0 bg-transparent"
-            compact
-            lockedMode
-          />
-        ) : activeMarkets.length === 0 ? (
-          <div className="relative flex h-full flex-col items-center justify-center p-10 text-center">
-            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl border border-brand-400/14 bg-brand-400/[0.08]">
-              <TrendingUp className="h-8 w-8 text-brand-400" />
-            </div>
-
-            <h3 className="font-display text-2xl font-bold text-white">
-              No Trending Markets
-            </h3>
-            <p className="mt-3 max-w-md text-sm leading-7 text-surface-400">
-              Create a market and start trading to give this dashboard a stronger signal.
-            </p>
-
-            <button
-              onClick={onCreateMarket}
-              className="mt-6 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all active:scale-[0.96]"
-              style={{
-                background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
-                color: '#08090c',
-                boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25)',
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              Create Market
-            </button>
-          </div>
-        ) : (
-          <>
-            <AnimatePresence initial={false} mode="wait">
-              <motion.div
-                key={activeMarkets[currentSlide]?.id ?? currentSlide}
-                variants={slideVariants}
-                initial="enter"
-                animate="center"
-                exit="exit"
-                className="absolute inset-0"
-                style={{ willChange: 'transform, opacity' }}
-              >
-                <MarketSlide
-                  market={activeMarkets[currentSlide]}
-                  onClick={() => onMarketClick(activeMarkets[currentSlide])}
-                  controls={sliderControls}
-                />
-              </motion.div>
-            </AnimatePresence>
-          </>
-        )}
+        {/* Hero always shows Turbo rolling market — locked mode keeps the
+            current round visible and shows a "Live Market" button when it
+            resolves, instead of auto-rotating to the next round. */}
+        <TurboRollingView
+          symbol={(turboMarket?.symbol || 'BTC') as TurboSymbol}
+          className="absolute inset-0 h-full rounded-none border-0 bg-transparent"
+          compact
+          lockedMode
+        />
       </div>
 
       <div className="glass-card flex flex-col rounded-2xl border border-white/[0.05] p-3.5 lg:p-4">
