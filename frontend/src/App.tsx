@@ -40,7 +40,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isConnected) {
-    // On app subdomain, redirect to main domain landing page
+    // Always redirect to main domain landing page for wallet connect
     if (window.location.hostname === 'app.veiledmarkets.xyz') {
       window.location.href = 'https://veiledmarkets.xyz'
       return null
