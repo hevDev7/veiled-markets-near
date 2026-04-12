@@ -957,7 +957,8 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
     const activeSymbols = enabled.filter(s => symbols.includes(s))
 
     // Stagger initial creation — only applies when a symbol has no chainState yet
-    const durationMs = Number(DURATION_BLOCKS) * SECS_PER_BLOCK * 1000
+    const secsPerBlock = Number(process.env.ALEO_SECONDS_PER_BLOCK || 4)
+    const durationMs = Number(DURATION_BLOCKS) * secsPerBlock * 1000
     const staggerOffsetMs = activeSymbols.length > 1
       ? Math.floor(durationMs / activeSymbols.length)
       : 0
