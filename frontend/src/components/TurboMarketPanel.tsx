@@ -144,38 +144,57 @@ function writeCachedTicks(symbol: string, marketId: string, ticks: PriceTick[]) 
 }
 
 // Canvas rounded-rect helper (used for the "Target" pill)
-// ── Flip digit animation — slides down on change ──
+// ── Flip digit animation — new digit slides in from bottom ──
 function FlipDigit({ value, className }: { value: string; className?: string }) {
-  const [display, setDisplay] = useState(value)
-  const [prev, setPrev] = useState(value)
-  const [animating, setAnimating] = useState(false)
+  const prevRef = useRef(value)
+  const [digits, setDigits] = useState<{ current: string; previous: string; key: number }>({
+    current: value,
+    previous: value,
+    key: 0,
+  })
 
   useEffect(() => {
-    if (value !== display) {
-      setPrev(display)
-      setAnimating(true)
-      const t = setTimeout(() => {
-        setDisplay(value)
-        setAnimating(false)
-      }, 200)
-      return () => clearTimeout(t)
+    if (value !== prevRef.current) {
+      setDigits(d => ({ current: value, previous: prevRef.current, key: d.key + 1 }))
+      prevRef.current = value
     }
-  }, [value, display])
+  }, [value])
 
   return (
-    <span className={cn('relative inline-block overflow-hidden', className)} style={{ width: '0.65em', height: '1.2em', lineHeight: '1.2em' }}>
+    <span
+      className={cn('relative inline-block overflow-hidden text-center', className)}
+      style={{ width: '0.65em', height: '1.2em', lineHeight: '1.2em' }}
+    >
+      {/* Outgoing digit — slides up and fades out */}
       <span
-        className="absolute inset-x-0 transition-transform duration-200 ease-in-out"
-        style={{ transform: animating ? 'translateY(-100%)' : 'translateY(0)' }}
+        key={`out-${digits.key}`}
+        className="absolute inset-x-0"
+        style={{
+          animation: digits.key > 0 ? 'flipOut 250ms ease-in forwards' : undefined,
+        }}
       >
-        {prev}
+        {digits.previous}
       </span>
+      {/* Incoming digit — slides up from below */}
       <span
-        className="absolute inset-x-0 transition-transform duration-200 ease-in-out"
-        style={{ transform: animating ? 'translateY(0)' : 'translateY(100%)' }}
+        key={`in-${digits.key}`}
+        className="absolute inset-x-0"
+        style={{
+          animation: digits.key > 0 ? 'flipIn 250ms ease-out forwards' : undefined,
+        }}
       >
-        {display}
+        {digits.current}
       </span>
+      <style>{`
+        @keyframes flipOut {
+          0% { transform: translateY(0); opacity: 1; }
+          100% { transform: translateY(-100%); opacity: 0; }
+        }
+        @keyframes flipIn {
+          0% { transform: translateY(100%); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+      `}</style>
     </span>
   )
 }
