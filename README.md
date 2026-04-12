@@ -122,7 +122,7 @@ npm run dev
 
 ## SDK
 
-Published on npm: [`@veiled-markets/sdk@0.5.0`](https://www.npmjs.com/package/@veiled-markets/sdk)
+Published on npm: [`@veiled-markets/sdk@0.5.4`](https://www.npmjs.com/package/@veiled-markets/sdk)
 
 ```bash
 npm install @veiled-markets/sdk @provablehq/sdk
@@ -151,15 +151,24 @@ See [sdk/README.md](sdk/README.md) for full API docs, 6 usage examples, and conf
 
 ### Telegram bot (SDK integration test)
 
-The [`bot-test/`](bot-test/) folder contains a working Telegram bot that exercises the SDK end-to-end:
+Live bot: [@veiledmarkets_bot](https://t.me/veiledmarkets_bot)
+
+The [`bot-test/`](bot-test/) folder contains a multi-user Telegram bot that exercises the SDK end-to-end — both Turbo and FPMM markets. Auto-generates encrypted wallets per user, no setup required for end users.
 
 ```bash
 cd bot-test && npm install && npx tsx smoke.ts  # 24/24 SDK checks pass
-cp .env.example .env                             # fill TELEGRAM_BOT_TOKEN
+cp .env.example .env                             # fill TELEGRAM_BOT_TOKEN + WALLET_ENCRYPTION_KEY
 npx tsx bot.ts                                   # start bot
 ```
 
-Commands: `/price BTC`, `/market BTC`, `/quote BTC UP 1`, `/bet BTC UP 0.5`, `/watch BTC`, `/history BTC`, `/verify <id>`, `/status`
+**Turbo commands:** `/price BTC`, `/market BTC`, `/quote BTC UP 1`, `/bet BTC UP 0.5`, `/watch BTC`
+**FPMM commands:** `/markets`, `/marketinfo <ID>`, `/buy <ID> <1-4> <AMT>`, `/redeem <ID>`
+**Wallet commands:** `/wallet`, `/fund <AMT>`, `/mybets`, `/result`, `/claim`
+
+Features:
+- Multi-user: auto-generates encrypted Aleo wallet per Telegram user (AES-256-GCM)
+- Auto-capture: share records + change records saved automatically after each bet
+- Both market types: Turbo (5-min UP/DOWN) and FPMM (prediction markets) in one bot
 
 See [bot-test/README.md](bot-test/README.md) for full setup instructions.
 
@@ -227,7 +236,7 @@ Dispute window (~3.2h)
 │                    │     └──────────────────┘
 └────────────────────┘
 ┌────────────────────┐     ┌──────────────────┐
-│ @veiled-markets/sdk│────▶│  npm registry    │  ← v0.5.0 published
+│ @veiled-markets/sdk│────▶│  npm registry    │  ← v0.5.4 published
 │ 6 clients, 191 tests     │  npmjs.com       │
 ├────────────────────┤     └──────────────────┘
 │ bot-test/          │
@@ -274,9 +283,9 @@ veiled-markets/
 │       ├── indexer.ts            # Standard market discovery
 │       ├── dispute-indexer.ts    # Dispute scanner
 │       └── governance-indexer.ts # Governance scanner
-├── sdk/                        # TypeScript SDK (published: @veiled-markets/sdk@0.5.0)
+├── sdk/                        # TypeScript SDK (published: @veiled-markets/sdk@0.5.4)
 │   ├── src/
-│   │   ├── client.ts              # VeiledMarketsClient (FAMM markets)
+│   │   ├── client.ts              # VeiledMarketsClient (FPMM markets)
 │   │   ├── turbo-client.ts        # TurboClient (5-min UP/DOWN)
 │   │   ├── governance-client.ts   # VeiledGovernanceClient (proposals)
 │   │   ├── parlay.ts + parlay-client.ts  # Parlay math + client
@@ -287,10 +296,11 @@ veiled-markets/
 │   │   └── __tests__/             # 191 unit tests (8 files)
 │   ├── examples/                  # turbo-bot, market-dashboard, governance-monitor
 │   ├── dist/                      # ESM + CJS + .d.ts (built by tsup)
-│   └── package.json               # v0.5.0, npm published
-├── bot-test/                   # Telegram bot (SDK integration test)
-│   ├── bot.ts                     # 13 Telegram commands (/price /bet /watch etc.)
-│   ├── records.ts                 # @provablehq/sdk record scanner
+│   └── package.json               # v0.5.4, npm published
+├── bot-test/                   # Telegram bot (multi-user, SDK integration)
+│   ├── bot.ts                     # Turbo + FPMM commands, multi-user wallets
+│   ├── wallets.ts                 # Per-user wallet manager (AES-256-GCM encrypted)
+│   ├── records.ts                 # Credits record scanner + auto-capture
 │   ├── smoke.ts                   # 24-check SDK install verification
 │   └── README.md                  # Step-by-step setup guide
 ├── supabase/
@@ -439,8 +449,8 @@ See [contracts-turbo-v1/THREAT_MODEL.md](contracts-turbo-v1/THREAT_MODEL.md) for
 
 | Version | Status | Highlights |
 |---------|--------|-----------|
-| **SDK v0.5.0** (active) | Published 2026-04-12 | 6 clients, 191 tests, wallet adapters, Node executor, npm published |
-| **Telegram bot** (active) | Created 2026-04-12 | SDK integration test via Telegram — `/price`, `/bet`, `/watch`, `/verify` |
+| **SDK v0.5.4** (active) | Published 2026-04-13 | 6 clients, 191 tests, struct parsing fix, outcomeLabels in enriched markets |
+| **Telegram bot** (active) | Updated 2026-04-13 | Multi-user wallets (AES-256-GCM), Turbo + FPMM markets, auto-capture records, `/fund`, `/claim` |
 | **Turbo v8** (active) | Deployed 2026-04-10 | Shared vault, 10 symbols, private transfers, parimutuel model, rolling chain, Pyth oracle |
 | **v37 / v7 / v14 / v6** (active) | Deployed 2026-04-08 | Post-audit hardening: Bug A/B/C/D fixes + `assert_disputed` guard |
 | **v36 / v6 / v13 / v5** (legacy) | Replaced 2026-04-08 | First v6 dispute architecture |
@@ -461,6 +471,6 @@ MIT License — see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [SDK on npm](https://www.npmjs.com/package/@veiled-markets/sdk) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
+[Live Demo](https://veiledmarkets.xyz) · [Telegram Bot](https://t.me/veiledmarkets_bot) · [SDK on npm](https://www.npmjs.com/package/@veiled-markets/sdk) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
 
 </div>
