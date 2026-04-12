@@ -10,6 +10,7 @@ Privacy-preserving prediction market + turbo markets on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiledmarkets.xyz)
 [![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo)
+[![npm](https://img.shields.io/badge/SDK-npm-CB3837?style=for-the-badge)](https://www.npmjs.com/package/@veiled-markets/sdk)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
@@ -119,6 +120,49 @@ npm run dev
 # Open http://localhost:3000/dashboard or http://localhost:3000/turbo/btc
 ```
 
+## SDK
+
+Published on npm: [`@veiled-markets/sdk@0.5.0`](https://www.npmjs.com/package/@veiled-markets/sdk)
+
+```bash
+npm install @veiled-markets/sdk @provablehq/sdk
+```
+
+Full TypeScript SDK for building on the Veiled Markets protocol:
+
+- **6 typed clients** — `VeiledMarketsClient`, `TurboClient`, `VeiledGovernanceClient`, `ParlayClient`, `IndexerClient`, `PythHermesClient`
+- **3 wallet adapters** — Shield, Puzzle, Leo (browser) + auto-detection
+- **Node.js executor** — `NodeExecutor` wraps `snarkos developer execute` for backend bots
+- **Off-chain quoting** — exact mirrors of on-chain `*_fin` math (FPMM, parimutuel, fees, LP, disputes)
+- **191 unit tests** — math, executor, indexer, parlay, turbo, governance, wallets
+- **Dual ESM + CJS** — works in Vite, Next.js, esbuild, and legacy Node CommonJS
+
+Quick example:
+
+```ts
+import { createTurboClient, quoteBuyUpDown } from '@veiled-markets/sdk'
+
+const turbo = createTurboClient({ network: 'testnet' })
+const market = await turbo.getCurrentMarket('BTC')
+const quote = quoteBuyUpDown({ pool: await turbo.getPool(market.market_id), side: 'UP', amountMicro: 1_000_000n })
+```
+
+See [sdk/README.md](sdk/README.md) for full API docs, 6 usage examples, and configuration.
+
+### Telegram bot (SDK integration test)
+
+The [`bot-test/`](bot-test/) folder contains a working Telegram bot that exercises the SDK end-to-end:
+
+```bash
+cd bot-test && npm install && npx tsx smoke.ts  # 24/24 SDK checks pass
+cp .env.example .env                             # fill TELEGRAM_BOT_TOKEN
+npx tsx bot.ts                                   # start bot
+```
+
+Commands: `/price BTC`, `/market BTC`, `/quote BTC UP 1`, `/bet BTC UP 0.5`, `/watch BTC`, `/history BTC`, `/verify <id>`, `/status`
+
+See [bot-test/README.md](bot-test/README.md) for full setup instructions.
+
 ## Standard Markets
 
 Long-duration prediction markets with FPMM AMM, multi-voter quorum resolution, tri-token support, and tiered governance escalation. Full details below.
@@ -182,6 +226,13 @@ Dispute window (~3.2h)
 │                    │     │  - gov-indexer.ts │  ← Governance scanner
 │                    │     └──────────────────┘
 └────────────────────┘
+┌────────────────────┐     ┌──────────────────┐
+│ @veiled-markets/sdk│────▶│  npm registry    │  ← v0.5.0 published
+│ 6 clients, 191 tests     │  npmjs.com       │
+├────────────────────┤     └──────────────────┘
+│ bot-test/          │
+│ Telegram bot       │────▶ SDK integration test via chat commands
+└────────────────────┘
 ```
 
 ## Project Structure
@@ -223,7 +274,25 @@ veiled-markets/
 │       ├── indexer.ts            # Standard market discovery
 │       ├── dispute-indexer.ts    # Dispute scanner
 │       └── governance-indexer.ts # Governance scanner
-├── sdk/                        # TypeScript SDK (@veiled-markets/sdk)
+├── sdk/                        # TypeScript SDK (published: @veiled-markets/sdk@0.5.0)
+│   ├── src/
+│   │   ├── client.ts              # VeiledMarketsClient (FAMM markets)
+│   │   ├── turbo-client.ts        # TurboClient (5-min UP/DOWN)
+│   │   ├── governance-client.ts   # VeiledGovernanceClient (proposals)
+│   │   ├── parlay.ts + parlay-client.ts  # Parlay math + client
+│   │   ├── indexer.ts             # Supabase off-chain query layer
+│   │   ├── pyth-client.ts         # Pyth Hermes verification
+│   │   ├── executor.ts            # NodeExecutor (snarkos wrapper)
+│   │   ├── wallets/               # Shield, Puzzle, Leo adapters
+│   │   └── __tests__/             # 191 unit tests (8 files)
+│   ├── examples/                  # turbo-bot, market-dashboard, governance-monitor
+│   ├── dist/                      # ESM + CJS + .d.ts (built by tsup)
+│   └── package.json               # v0.5.0, npm published
+├── bot-test/                   # Telegram bot (SDK integration test)
+│   ├── bot.ts                     # 13 Telegram commands (/price /bet /watch etc.)
+│   ├── records.ts                 # @provablehq/sdk record scanner
+│   ├── smoke.ts                   # 24-check SDK install verification
+│   └── README.md                  # Step-by-step setup guide
 ├── supabase/
 │   ├── create_turbo_audit_table.sql  # Turbo oracle audit trail
 │   └── *.sql                         # Standard market schemas
@@ -251,6 +320,12 @@ cd contracts-governance-v6 && leo test --no-local
 # Turbo market tests (16)
 cd contracts-turbo-v1 && leo test
 
+# SDK tests (191)
+cd sdk && npm test
+
+# SDK smoke test (24 checks — verifies npm install works)
+cd bot-test && npx tsx smoke.ts
+
 # Frontend type check
 cd frontend && npx tsc --noEmit
 
@@ -258,7 +333,9 @@ cd frontend && npx tsc --noEmit
 cd backend && DRY_RUN=1 TURBO_SYMBOLS=BTC npx tsx src/pyth-oracle.ts --auto-create
 ```
 
-**Total: 59 tests** (15 standard + 28 governance + 16 turbo)
+**Total: 250 tests** (15 standard + 28 governance + 16 turbo + 191 SDK)
+
+All contract tests use `assert_eq(actual, expected)` with exact computed values — not stubs. SDK tests mirror on-chain `*_fin` math to guarantee off-chain quote = on-chain settlement.
 
 ## Quick Start
 
@@ -349,18 +426,21 @@ See [contracts-turbo-v1/THREAT_MODEL.md](contracts-turbo-v1/THREAT_MODEL.md) for
 |-------|-----------|
 | **Contracts** | Leo 4.0, snarkVM, snarkOS |
 | **Frontend** | React 18, TypeScript, Vite 5, Tailwind CSS, Framer Motion |
+| **SDK** | [`@veiled-markets/sdk`](https://www.npmjs.com/package/@veiled-markets/sdk) — TypeScript, tsup (ESM+CJS), vitest (191 tests) |
 | **State** | Zustand |
 | **Charts** | Recharts + Canvas (turbo live chart) |
 | **Price Oracle** | Pyth Network Hermes SSE (turbo markets) |
 | **Wallet** | ProvableHQ Aleo Wallet Adapter (Shield, Puzzle, Leo, Fox, Soter) |
 | **Persistence** | Supabase (AES-256-GCM) + localStorage |
 | **Metadata** | IPFS via Pinata |
-| **Hosting** | Vercel |
+| **Hosting** | Vercel (frontend), npm (SDK) |
 
 ## Release History
 
 | Version | Status | Highlights |
 |---------|--------|-----------|
+| **SDK v0.5.0** (active) | Published 2026-04-12 | 6 clients, 191 tests, wallet adapters, Node executor, npm published |
+| **Telegram bot** (active) | Created 2026-04-12 | SDK integration test via Telegram — `/price`, `/bet`, `/watch`, `/verify` |
 | **Turbo v8** (active) | Deployed 2026-04-10 | Shared vault, 10 symbols, private transfers, parimutuel model, rolling chain, Pyth oracle |
 | **v37 / v7 / v14 / v6** (active) | Deployed 2026-04-08 | Post-audit hardening: Bug A/B/C/D fixes + `assert_disputed` guard |
 | **v36 / v6 / v13 / v5** (legacy) | Replaced 2026-04-08 | First v6 dispute architecture |
@@ -381,6 +461,6 @@ MIT License — see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
+[Live Demo](https://veiledmarkets.xyz) · [SDK on npm](https://www.npmjs.com/package/@veiled-markets/sdk) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
 
 </div>
