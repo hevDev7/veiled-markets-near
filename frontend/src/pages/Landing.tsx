@@ -353,22 +353,15 @@ export function Landing() {
   const [connectError, setConnectError] = useState<string | null>(null)
 
   const isConnected = wallet.connected || providerConnected
-  const isAppSubdomain = window.location.hostname === 'app.veiledmarkets.xyz'
 
   useEffect(() => {
     if (isConnected) {
       setVisible(false)
-      // On subdomain: go to dashboard. On main domain: stay (no cross-domain redirect)
-      if (isAppSubdomain) {
-        navigate('/dashboard')
-      }
+      navigate('/dashboard')
     }
-  }, [isConnected, setVisible, navigate, isAppSubdomain])
+  }, [isConnected, navigate, setVisible])
 
   const handleConnectClick = useCallback(async () => {
-    // On main domain, Launch App just links to subdomain (handled in JSX)
-    // This handler is only used on app subdomain for wallet connect
-    if (!isAppSubdomain) return
     setConnectError(null)
     try {
       const hasShield = !!(window as any).shield
@@ -383,9 +376,9 @@ export function Landing() {
       setConnectError(err?.message || 'Connection failed')
       setVisible(true)
     }
-  }, [isAppSubdomain, connecting, selectWallet, connect, setVisible])
+  }, [connecting, selectWallet, connect, setVisible])
 
-  if (isConnected && isAppSubdomain) return null
+  if (isConnected) return null
 
   return (
     <div className="min-h-screen bg-surface-950 relative overflow-hidden">
@@ -441,31 +434,17 @@ export function Landing() {
                 </a>
               ))}
             </nav>
-            {isAppSubdomain ? (
-              <button onClick={handleConnectClick} disabled={connecting}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200 disabled:opacity-50"
-                style={{
-                  background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
-                  color: '#08090c',
-                  boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25), 0 0 20px -5px rgba(201, 168, 76, 0.3)',
-                }}>
-                <Wallet className="w-4 h-4" />
-                <span>{connecting ? 'Connecting...' : 'Connect Wallet'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            ) : (
-              <a href="https://app.veiledmarkets.xyz"
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200"
-                style={{
-                  background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
-                  color: '#08090c',
-                  boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25), 0 0 20px -5px rgba(201, 168, 76, 0.3)',
-                }}>
-                <Wallet className="w-4 h-4" />
-                <span>Launch App</span>
-                <ArrowRight className="w-4 h-4" />
-              </a>
-            )}
+            <button onClick={handleConnectClick} disabled={connecting}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200 disabled:opacity-50"
+              style={{
+                background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
+                color: '#08090c',
+                boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25), 0 0 20px -5px rgba(201, 168, 76, 0.3)',
+              }}>
+              <Wallet className="w-4 h-4" />
+              <span>{connecting ? 'Connecting...' : 'Launch App'}</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </header>
@@ -495,7 +474,6 @@ export function Landing() {
               </motion.p>
 
               <motion.div variants={fadeUp} className="flex items-center gap-4 mb-8">
-                {isAppSubdomain ? (
                 <button onClick={handleConnectClick} disabled={connecting}
                   className="flex items-center gap-3 px-7 py-3.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200 group disabled:opacity-50"
                   style={{
@@ -507,19 +485,6 @@ export function Landing() {
                   <span>{connecting ? 'Connecting...' : 'Start Predicting'}</span>
                   <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
-                ) : (
-                <a href="https://app.veiledmarkets.xyz"
-                  className="flex items-center gap-3 px-7 py-3.5 rounded-xl font-semibold text-sm active:scale-[0.96] transition-all duration-200 group"
-                  style={{
-                    background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
-                    color: '#08090c',
-                    boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25), 0 0 20px -5px rgba(201, 168, 76, 0.3)',
-                  }}>
-                  <Wallet className="w-5 h-5" />
-                  <span>Start Predicting</span>
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </a>
-                )}
                 <a href="#protocol" className="btn-secondary px-6 py-3.5 text-sm flex items-center gap-2">
                   How It Works <ChevronRight className="w-4 h-4" />
                 </a>
@@ -701,7 +666,6 @@ export function Landing() {
               Join the first privacy-preserving prediction market. Your bets stay hidden.
             </p>
             <div className="flex items-center justify-center gap-4">
-              {isAppSubdomain ? (
               <button onClick={handleConnectClick}
                 className="flex items-center gap-3 px-8 py-4 rounded-xl font-semibold text-base active:scale-[0.96] transition-all duration-200 group"
                 style={{
@@ -711,17 +675,6 @@ export function Landing() {
                 }}>
                 Start Trading <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
-              ) : (
-              <a href="https://app.veiledmarkets.xyz"
-                className="flex items-center gap-3 px-8 py-4 rounded-xl font-semibold text-base active:scale-[0.96] transition-all duration-200 group"
-                style={{
-                  background: 'linear-gradient(135deg, #c9a84c 0%, #b8922e 100%)',
-                  color: '#08090c',
-                  boxShadow: '0 2px 8px rgba(201, 168, 76, 0.25), 0 0 30px -5px rgba(201, 168, 76, 0.3)',
-                }}>
-                Start Trading <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </a>
-              )}
               <a href="#" className="btn-secondary px-8 py-4 text-base flex items-center gap-2">
                 Read Docs <ArrowUpRight className="w-4 h-4" />
               </a>
