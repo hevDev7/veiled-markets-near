@@ -496,22 +496,47 @@ export function TurboMarketPanel({
 
     if (chartType === 'candle') {
       // ── Candlestick chart ──
-      // Group ticks into candles (each candle = ~15 ticks or time-based)
-      const candleSize = Math.max(5, Math.floor(prices.length / 20))
-      const candles: { o: number; h: number; l: number; c: number; idx: number }[] = []
-      for (let i = 0; i < prices.length; i += candleSize) {
-        const slice = prices.slice(i, i + candleSize)
-        candles.push({
-          o: slice[0],
-          h: Math.max(...slice),
-          l: Math.min(...slice),
-          c: slice[slice.length - 1],
-          idx: i + Math.floor(slice.length / 2),
-        })
+      // Fixed 15-second candles so closed candles never change — only the
+      // last (current) candle updates as new ticks arrive.
+      const CANDLE_INTERVAL_MS = 15_000
+      const tMin = times[0]
+      const tMax = times[times.length - 1]
+      const totalCandles = Math.max(1, Math.ceil((tMax - tMin) / CANDLE_INTERVAL_MS))
+
+      // Build candles by time bucket
+      const candles: { o: number; h: number; l: number; c: number; tStart: number }[] = []
+      for (let ci = 0; ci < totalCandles; ci++) {
+        const bucketStart = tMin + ci * CANDLE_INTERVAL_MS
+        const bucketEnd = bucketStart + CANDLE_INTERVAL_MS
+        const bucketPrices: number[] = []
+        for (let ti = 0; ti < times.length; ti++) {
+          if (times[ti] >= bucketStart && times[ti] < bucketEnd) {
+            bucketPrices.push(prices[ti])
+          }
+        }
+        // Also include ticks at/after bucketEnd for the last candle
+        if (ci === totalCandles - 1) {
+          for (let ti = 0; ti < times.length; ti++) {
+            if (times[ti] >= bucketEnd) bucketPrices.push(prices[ti])
+          }
+        }
+        if (bucketPrices.length > 0) {
+          candles.push({
+            o: bucketPrices[0],
+            h: Math.max(...bucketPrices),
+            l: Math.min(...bucketPrices),
+            c: bucketPrices[bucketPrices.length - 1],
+            tStart: bucketStart,
+          })
+        }
       }
-      const candleW = Math.max(3, (plotW / candles.length) * 0.6)
-      for (const c of candles) {
-        const x = xToCanvas(c.idx)
+
+      const maxCandles = Math.max(candles.length, 20) // min 20 slots for spacing
+      const candleW = Math.max(3, Math.min(12, (plotW / maxCandles) * 0.65))
+
+      for (let ci = 0; ci < candles.length; ci++) {
+        const c = candles[ci]
+        const x = PAD_LEFT + ((c.tStart - tMin) / Math.max(1, tMax - tMin)) * plotW
         const isUp = c.c >= c.o
         const color = isUp ? '#10b981' : '#f43f5e' // green / red
 
@@ -529,6 +554,13 @@ export function TurboMarketPanel({
         const bodyH = Math.max(1, bodyBot - bodyTop)
         ctx.fillStyle = color
         ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH)
+
+        // Highlight last candle with a border
+        if (ci === candles.length - 1) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.3)'
+          ctx.lineWidth = 1
+          ctx.strokeRect(x - candleW / 2, bodyTop, candleW, bodyH)
+        }
       }
     } else {
       // ── Line chart with fill ──
