@@ -496,47 +496,44 @@ export function TurboMarketPanel({
 
     if (chartType === 'candle') {
       // ── Candlestick chart ──
-      // Fixed 15-second candles so closed candles never change — only the
-      // last (current) candle updates as new ticks arrive.
+      // Use absolute 15-second buckets aligned to Unix epoch so bucket
+      // boundaries never shift as new ticks arrive. Only the last open
+      // candle changes; all closed candles are frozen.
       const CANDLE_INTERVAL_MS = 15_000
-      const tMin = times[0]
-      const tMax = times[times.length - 1]
-      const totalCandles = Math.max(1, Math.ceil((tMax - tMin) / CANDLE_INTERVAL_MS))
 
-      // Build candles by time bucket
-      const candles: { o: number; h: number; l: number; c: number; tStart: number }[] = []
-      for (let ci = 0; ci < totalCandles; ci++) {
-        const bucketStart = tMin + ci * CANDLE_INTERVAL_MS
-        const bucketEnd = bucketStart + CANDLE_INTERVAL_MS
-        const bucketPrices: number[] = []
-        for (let ti = 0; ti < times.length; ti++) {
-          if (times[ti] >= bucketStart && times[ti] < bucketEnd) {
-            bucketPrices.push(prices[ti])
-          }
-        }
-        // Also include ticks at/after bucketEnd for the last candle
-        if (ci === totalCandles - 1) {
-          for (let ti = 0; ti < times.length; ti++) {
-            if (times[ti] >= bucketEnd) bucketPrices.push(prices[ti])
-          }
-        }
-        if (bucketPrices.length > 0) {
-          candles.push({
-            o: bucketPrices[0],
-            h: Math.max(...bucketPrices),
-            l: Math.min(...bucketPrices),
-            c: bucketPrices[bucketPrices.length - 1],
-            tStart: bucketStart,
-          })
+      // Align bucket start to epoch multiples of CANDLE_INTERVAL_MS
+      const firstBucket = Math.floor(times[0] / CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
+      const lastBucket = Math.floor(times[times.length - 1] / CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
+      const totalSlots = Math.max(1, (lastBucket - firstBucket) / CANDLE_INTERVAL_MS + 1)
+
+      // Build candles by fixed time bucket
+      const candleMap = new Map<number, { o: number; h: number; l: number; c: number }>()
+      for (let ti = 0; ti < times.length; ti++) {
+        const bucket = Math.floor(times[ti] / CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS
+        const existing = candleMap.get(bucket)
+        if (existing) {
+          existing.h = Math.max(existing.h, prices[ti])
+          existing.l = Math.min(existing.l, prices[ti])
+          existing.c = prices[ti]
+        } else {
+          candleMap.set(bucket, { o: prices[ti], h: prices[ti], l: prices[ti], c: prices[ti] })
         }
       }
 
-      // Position candles by index, spaced evenly across current data width
-      const candleW = Math.max(4, Math.min(14, (plotW / Math.max(candles.length, 1)) * 0.7))
+      // Convert to sorted array
+      const candles = Array.from(candleMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([bucket, c]) => ({ ...c, bucket }))
+
+      // Use total 5-min slots (20 candles) for consistent width
+      const expectedSlots = Math.max(totalSlots, 20)
+      const candleW = Math.max(4, Math.min(14, (plotW / expectedSlots) * 0.7))
 
       for (let ci = 0; ci < candles.length; ci++) {
         const c = candles[ci]
-        const x = PAD_LEFT + ((ci + 0.5) / Math.max(candles.length, 1)) * plotW
+        // Position by slot index from firstBucket
+        const slotIdx = (c.bucket - firstBucket) / CANDLE_INTERVAL_MS
+        const x = PAD_LEFT + ((slotIdx + 0.5) / expectedSlots) * plotW
         const isUp = c.c >= c.o
         const color = isUp ? '#10b981' : '#f43f5e' // green / red
 
