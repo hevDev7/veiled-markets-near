@@ -594,7 +594,8 @@ export function DashboardHero({
             current round visible and shows a "Live Market" button when it
             resolves, instead of auto-rotating to the next round. */}
         <TurboRollingView
-          symbol={(turboMarket?.symbol || activeHeroSymbol || 'BTC') as TurboSymbol}
+          key={activeHeroSymbol || 'BTC'}
+          symbol={(activeHeroSymbol || turboMarket?.symbol || 'BTC') as TurboSymbol}
           className="absolute inset-0 h-full rounded-none border-0 bg-transparent"
           compact
           lockedMode
