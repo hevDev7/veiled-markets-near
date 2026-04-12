@@ -531,12 +531,12 @@ export function TurboMarketPanel({
         }
       }
 
-      const maxCandles = Math.max(candles.length, 20) // min 20 slots for spacing
-      const candleW = Math.max(3, Math.min(12, (plotW / maxCandles) * 0.65))
+      // Position candles by index, spaced evenly across current data width
+      const candleW = Math.max(4, Math.min(14, (plotW / Math.max(candles.length, 1)) * 0.7))
 
       for (let ci = 0; ci < candles.length; ci++) {
         const c = candles[ci]
-        const x = PAD_LEFT + ((c.tStart - tMin) / Math.max(1, tMax - tMin)) * plotW
+        const x = PAD_LEFT + ((ci + 0.5) / Math.max(candles.length, 1)) * plotW
         const isUp = c.c >= c.o
         const color = isUp ? '#10b981' : '#f43f5e' // green / red
 
