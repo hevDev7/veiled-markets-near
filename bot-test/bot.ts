@@ -940,8 +940,19 @@ bot.onText(/^\/markets$/, async (msg) => {
       return
     }
 
-    let text = `*Active Prediction Markets:*\n\n`
-    for (const m of markets) {
+    // Filter out resolved markets
+    const activeMarkets = markets.filter((m) => {
+      const resolution = (m as any).resolution
+      return !resolution?.winningOutcome
+    })
+
+    if (activeMarkets.length === 0) {
+      bot.sendMessage(msg.chat.id, `No active prediction markets found.`)
+      return
+    }
+
+    let text = `*Active Prediction Markets \\(${activeMarkets.length}\\):*\n\n`
+    for (const m of activeMarkets) {
       const mAny = m as any
       const mktId = mAny.marketId ?? mAny.market_id ?? ''
       const question = mAny.questionText ?? mAny.question ?? mAny.title ?? mktId.slice(0, 20)
