@@ -957,7 +957,7 @@ bot.onText(/^\/markets$/, async (msg) => {
       const mktId = mAny.marketId ?? mAny.market_id ?? ''
       const question = mAny.questionText ?? mAny.question ?? mAny.title ?? mktId.slice(0, 20)
       const vol = m.totalVolume ? `${(Number(m.totalVolume) / 1e6).toFixed(2)}` : '—'
-      const id = mktId.slice(0, 16)
+      const id = mktId  // show full ID so users can copy
       const prices = mAny.prices ?? []
       const labels: string[] = mAny.outcomeLabels ?? (prices.length === 2 ? ['Yes', 'No'] : prices.map((_: any, i: number) => `Outcome ${i + 1}`))
       const numOutcomes = labels.length || prices.length || 2
@@ -971,7 +971,7 @@ bot.onText(/^\/markets$/, async (msg) => {
         oddsParts.push(`${escapeMd(label)}: ${escapeMd(pct)}%`)
       }
       text += `   ${oddsParts.join(' \\| ')} \\| Vol: ${escapeMd(vol)} ALEO\n`
-      text += `   ID: \`${escapeMd(id ?? '')}…\`\n\n`
+      text += `   ID: \`${escapeMd(id ?? '')}\`\n\n`
     }
     text += `Use /marketinfo \\<ID\\> for details\\.\nUse /buy \\<ID\\> \\<1\\-4\\> \\<AMT\\> to trade \\(outcome number\\)\\.`
     sendMsg(msg.chat.id, text)

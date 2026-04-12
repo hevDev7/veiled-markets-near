@@ -338,11 +338,16 @@ export class VeiledMarketsClient {
       rows.map(async (row) => {
         const market = await this.getMarket(row.marketId);
         if (!market) return null;
-        // Merge question text and off-chain metadata from indexer
+        // Merge on-chain data with off-chain metadata from indexer
         const enriched: MarketWithStats = {
           ...market,
           question: row.questionText ?? market.question,
-        };
+          questionText: row.questionText,
+          outcomeLabels: row.outcomeLabels,
+          description: row.description,
+          resolutionSource: row.resolutionSource,
+          ipfsCid: row.ipfsCid,
+        } as MarketWithStats;
         return enriched;
       }),
     );
