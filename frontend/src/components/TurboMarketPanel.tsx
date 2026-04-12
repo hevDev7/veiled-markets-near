@@ -202,6 +202,7 @@ export function TurboMarketPanel({
   const [secondsLeft, setSecondsLeft] = useState(() =>
     Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)),
   )
+  const [chartType, setChartType] = useState<'line' | 'candle'>('line')
   const [betAmount, setBetAmount] = useState('1')
   const [busy, setBusy] = useState<null | 'UP' | 'DOWN'>(null)
   /**
@@ -489,38 +490,78 @@ export function TurboMarketPanel({
     ctx.fillStyle = '#fbbf24'
     ctx.fill()
 
-    // ── Filled area under curve ──
+    // ── Price line / candles ──
     const last = prices[prices.length - 1]
     const lineColor = '#f59e0b'           // orange
-    const fillTop = 'rgba(249, 115, 22, 0.18)'
-    const fillBot = 'rgba(249, 115, 22, 0.0)'
-    const grad = ctx.createLinearGradient(0, PAD_TOP, 0, PAD_TOP + plotH)
-    grad.addColorStop(0, fillTop)
-    grad.addColorStop(1, fillBot)
 
-    ctx.beginPath()
-    ctx.moveTo(xToCanvas(0), PAD_TOP + plotH)
-    for (let i = 0; i < prices.length; i++) {
-      ctx.lineTo(xToCanvas(i), yToCanvas(prices[i]))
-    }
-    ctx.lineTo(xToCanvas(prices.length - 1), PAD_TOP + plotH)
-    ctx.closePath()
-    ctx.fillStyle = grad
-    ctx.fill()
+    if (chartType === 'candle') {
+      // ── Candlestick chart ──
+      // Group ticks into candles (each candle = ~15 ticks or time-based)
+      const candleSize = Math.max(5, Math.floor(prices.length / 20))
+      const candles: { o: number; h: number; l: number; c: number; idx: number }[] = []
+      for (let i = 0; i < prices.length; i += candleSize) {
+        const slice = prices.slice(i, i + candleSize)
+        candles.push({
+          o: slice[0],
+          h: Math.max(...slice),
+          l: Math.min(...slice),
+          c: slice[slice.length - 1],
+          idx: i + Math.floor(slice.length / 2),
+        })
+      }
+      const candleW = Math.max(3, (plotW / candles.length) * 0.6)
+      for (const c of candles) {
+        const x = xToCanvas(c.idx)
+        const isUp = c.c >= c.o
+        const color = isUp ? '#10b981' : '#f43f5e' // green / red
 
-    // ── Line ──
-    ctx.beginPath()
-    for (let i = 0; i < prices.length; i++) {
-      const x = xToCanvas(i)
-      const y = yToCanvas(prices[i])
-      if (i === 0) ctx.moveTo(x, y)
-      else ctx.lineTo(x, y)
+        // Wick (high-low line)
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(x, yToCanvas(c.h))
+        ctx.lineTo(x, yToCanvas(c.l))
+        ctx.stroke()
+
+        // Body (open-close rect)
+        const bodyTop = yToCanvas(Math.max(c.o, c.c))
+        const bodyBot = yToCanvas(Math.min(c.o, c.c))
+        const bodyH = Math.max(1, bodyBot - bodyTop)
+        ctx.fillStyle = color
+        ctx.fillRect(x - candleW / 2, bodyTop, candleW, bodyH)
+      }
+    } else {
+      // ── Line chart with fill ──
+      const fillTop = 'rgba(249, 115, 22, 0.18)'
+      const fillBot = 'rgba(249, 115, 22, 0.0)'
+      const grad = ctx.createLinearGradient(0, PAD_TOP, 0, PAD_TOP + plotH)
+      grad.addColorStop(0, fillTop)
+      grad.addColorStop(1, fillBot)
+
+      ctx.beginPath()
+      ctx.moveTo(xToCanvas(0), PAD_TOP + plotH)
+      for (let i = 0; i < prices.length; i++) {
+        ctx.lineTo(xToCanvas(i), yToCanvas(prices[i]))
+      }
+      ctx.lineTo(xToCanvas(prices.length - 1), PAD_TOP + plotH)
+      ctx.closePath()
+      ctx.fillStyle = grad
+      ctx.fill()
+
+      // Line
+      ctx.beginPath()
+      for (let i = 0; i < prices.length; i++) {
+        const x = xToCanvas(i)
+        const y = yToCanvas(prices[i])
+        if (i === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.strokeStyle = lineColor
+      ctx.lineWidth = 2
+      ctx.lineJoin = 'round'
+      ctx.lineCap = 'round'
+      ctx.stroke()
     }
-    ctx.strokeStyle = lineColor
-    ctx.lineWidth = 2
-    ctx.lineJoin = 'round'
-    ctx.lineCap = 'round'
-    ctx.stroke()
 
     // ── X-axis time labels (5 evenly spaced ticks) ──
     if (times.length >= 2) {
@@ -569,7 +610,7 @@ export function TurboMarketPanel({
     ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2)
     ctx.fillStyle = lineColor
     ctx.fill()
-  }, [ticks, baselinePrice])
+  }, [ticks, baselinePrice, chartType])
 
   // ── Helpers ──
   const mins = Math.floor(secondsLeft / 60)
@@ -899,7 +940,34 @@ export function TurboMarketPanel({
 
       {/* Chart */}
       {!hideChart && (
-        <div className="px-3 py-2 flex-1 min-h-0">
+        <div className="px-3 py-2 flex-1 min-h-0 relative">
+          {/* Chart type toggle */}
+          <div className="absolute top-1 right-1 z-10 flex bg-surface-800/80 rounded-lg p-0.5 backdrop-blur-sm border border-white/[0.06]">
+            <button
+              onClick={() => setChartType('line')}
+              className={cn(
+                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                chartType === 'line'
+                  ? 'bg-brand-400/20 text-brand-300'
+                  : 'text-surface-500 hover:text-surface-300',
+              )}
+              title="Line chart"
+            >
+              Line
+            </button>
+            <button
+              onClick={() => setChartType('candle')}
+              className={cn(
+                'px-2 py-0.5 rounded text-[10px] font-medium transition-all',
+                chartType === 'candle'
+                  ? 'bg-brand-400/20 text-brand-300'
+                  : 'text-surface-500 hover:text-surface-300',
+              )}
+              title="Candlestick chart"
+            >
+              Candle
+            </button>
+          </div>
           <canvas
             ref={canvasRef}
             className="w-full h-full block"
