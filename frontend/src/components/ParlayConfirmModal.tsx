@@ -85,7 +85,7 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
     [wallet.balance, slipTokenType, slipStake],
   )
 
-  const parlayProgramId = config.parlayProgramId || 'veiled_parlay_v1.aleo'
+  const parlayProgramId = config.parlayProgramId || 'veiled_parlay_v3.aleo'
 
   useEffect(() => {
     isModalOpenRef.current = isOpen

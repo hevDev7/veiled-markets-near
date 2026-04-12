@@ -32,7 +32,7 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
   const [ticketLookupState, setTicketLookupState] = useState<TicketLookupState>('idle')
   const [ticketMessage, setTicketMessage] = useState<string | null>(null)
 
-  const parlayProgramId = config.parlayProgramId || 'veiled_parlay_v1.aleo'
+  const parlayProgramId = config.parlayProgramId || 'veiled_parlay_v3.aleo'
 
   const getFunctionName = (): string => {
     if (!parlay) return 'redeem_parlay_aleo'

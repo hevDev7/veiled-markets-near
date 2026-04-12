@@ -169,7 +169,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
           ),
         ])
         if (!resolveRes.ok || !createRes.ok) {
-          console.error(
+          // console.error(
             `[turbo-history] supabase fetch failed — resolve=${resolveRes.status} create=${createRes.status}`,
             !resolveRes.ok ? await resolveRes.text() : '',
             !createRes.ok ? await createRes.text() : '',
@@ -189,7 +189,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
 
         const resolveRows = (await resolveRes.json()) as any[]
         const createRows = (await createRes.json()) as any[]
-        console.log(`[turbo-history] ${symbol}: ${resolveRows.length} resolve rows (of ${totalFromHeader ?? '?'} total), ${createRows.length} create rows`)
+        // devLog('[turbo-history]' + ${symbol}: ${resolveRows.length} resolve rows (of ${totalFromHeader ?? '?'} total), ${createRows.length} create rows`)
         if (cancelled) return
 
         setTotalRoundsCount(totalFromHeader ?? resolveRows.length)

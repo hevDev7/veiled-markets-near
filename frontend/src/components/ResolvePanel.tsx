@@ -219,7 +219,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     return () => { mounted = false; clearInterval(interval) }
   }, [])
 
-  // Determine current step (v36: Status DISPUTED gates governance escalation)
+  // Determine current step (v37: Status DISPUTED gates governance escalation)
   // Status flow: ACTIVE(1) → CLOSED(2) → PENDING_RESOLUTION(5) → PENDING_FINALIZATION(6) → RESOLVED(3)
   // Plus new path: PENDING_FINALIZATION(6) → DISPUTED(7) → RESOLVED(3) via governance
   const STATUS_PENDING_FINALIZATION = 6
@@ -231,7 +231,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     if (currentBlock > 0n && market.resolutionDeadline > 0n && currentBlock > market.resolutionDeadline) {
       return 'cancel'
     }
-    // v36: STATUS_DISPUTED markets are locked until governance resolves them.
+    // v37: STATUS_DISPUTED markets are locked until governance resolves them.
     // No claim/redeem allowed; UI directs user to the governance escalation path.
     if (market.status === STATUS_DISPUTED) return 'disputed'
     if (market.status === STATUS_PENDING_FINALIZATION) {
@@ -1316,7 +1316,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
               </div>
             )}
 
-            {/* Step 3b (v36): DISPUTED — locked, awaiting governance escalation */}
+            {/* Step 3b (v37): DISPUTED — locked, awaiting governance escalation */}
             {currentStep === 'disputed' && (
               <div className="space-y-4">
                 <div className="flex items-start gap-3 p-4 rounded-xl bg-purple-500/5 border border-purple-500/20">

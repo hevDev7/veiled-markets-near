@@ -92,7 +92,7 @@ const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx',
 
 /**
  * Get the correct program ID for a given token type.
- * USAD markets live in a separate program (veiled_markets_usad_v7.aleo).
+ * USAD markets live in a separate program (veiled_markets_usad_v14.aleo).
  */
 export function getProgramIdForToken(tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO'): string {
   if (tokenType === 'USAD') return config.usadProgramId;
@@ -119,7 +119,7 @@ function isCreateMarketFunction(functionName: unknown): boolean {
   return typeof functionName === 'string' && CREATE_MARKET_FUNCTIONS.has(functionName);
 }
 
-// Types matching the contract structures (v30)
+// Types matching the contract structures (v37)
 export interface MarketData {
   id: string;
   creator: string;
@@ -1115,7 +1115,7 @@ function generateRandomNonce(): string {
 }
 
 /**
- * Build inputs for create_market transaction (v30)
+ * Build inputs for create_market transaction (v37)
  * create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, creator_owner, initial_liquidity)
  * Token type is determined by function name (create_market vs create_market_usdcx)
  */
@@ -1248,7 +1248,7 @@ export function buildDefaultMerkleProofs(): string {
 }
 
 /**
- * Build default flattened Merkle proofs for buy_shares_usdcx (v30).
+ * Build default flattened Merkle proofs for buy_shares_usdcx (v37).
  * Returns array of 2 proof objects with siblings and leafIndex separated,
  * for the flattened input format that bypasses snarkVM parser bug.
  */
@@ -1556,7 +1556,7 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for withdraw_creator_fees (v30)
+ * Build inputs for withdraw_creator_fees (v37)
  * withdraw_creator_fees(market_id, expected_amount) — ALEO
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
@@ -1580,7 +1580,7 @@ export function buildCancelMarketInputs(marketId: string): string[] {
 }
 
 /**
- * Build inputs for emergency cancel via cancel_market (v30)
+ * Build inputs for emergency cancel via cancel_market (v37)
  * In v31, cancel_market handles both creator cancel (active, no volume)
  * and emergency cancel (anyone, past resolution_deadline).
  * Same inputs as buildCancelMarketInputs.
@@ -2778,7 +2778,7 @@ export async function fetchMarketById(marketId: string) {
 }
 
 /**
- * Get the correct redeem/refund function name based on token type (v30)
+ * Get the correct redeem/refund function name based on token type (v37)
  */
 export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
   if (tokenType === 'USAD') return 'redeem_shares_usad';
