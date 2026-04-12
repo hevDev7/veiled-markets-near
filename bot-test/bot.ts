@@ -942,18 +942,27 @@ bot.onText(/^\/markets$/, async (msg) => {
 
     let text = `*Active Prediction Markets:*\n\n`
     for (const m of markets) {
-      const yes = m.yesPercentage?.toFixed(1) ?? '—'
-      const no = m.noPercentage?.toFixed(1) ?? '—'
       const mAny = m as any
       const mktId = mAny.marketId ?? mAny.market_id ?? ''
       const question = mAny.questionText ?? mAny.question ?? mAny.title ?? mktId.slice(0, 20)
       const vol = m.totalVolume ? `${(Number(m.totalVolume) / 1e6).toFixed(2)}` : '—'
       const id = mktId.slice(0, 16)
+      const prices = mAny.prices ?? []
+      const labels: string[] = mAny.outcomeLabels ?? (prices.length === 2 ? ['Yes', 'No'] : prices.map((_: any, i: number) => `Outcome ${i + 1}`))
+      const numOutcomes = labels.length || prices.length || 2
+
       text += `📊 *${escapeMd(String(question).slice(0, 60))}*\n`
-      text += `   YES: ${escapeMd(yes)}% \\| NO: ${escapeMd(no)}% \\| Vol: ${escapeMd(vol)} ALEO\n`
+      // Show each outcome with its odds
+      const oddsParts: string[] = []
+      for (let i = 0; i < numOutcomes; i++) {
+        const label = labels[i] ?? `O${i + 1}`
+        const pct = prices[i] != null ? (prices[i] * 100).toFixed(1) : '—'
+        oddsParts.push(`${escapeMd(label)}: ${escapeMd(pct)}%`)
+      }
+      text += `   ${oddsParts.join(' \\| ')} \\| Vol: ${escapeMd(vol)} ALEO\n`
       text += `   ID: \`${escapeMd(id ?? '')}…\`\n\n`
     }
-    text += `Use /marketinfo \\<ID\\> for details, /buy \\<ID\\> YES 1 to trade\\.`
+    text += `Use /marketinfo \\<ID\\> for details\\.\nUse /buy \\<ID\\> \\<1\\-4\\> \\<AMT\\> to trade \\(outcome number\\)\\.`
     sendMsg(msg.chat.id, text)
   } catch (err) {
     bot.sendMessage(msg.chat.id, `Error fetching markets: ${(err as Error).message.slice(0, 200)}`)
@@ -971,20 +980,20 @@ bot.onText(/^\/marketinfo\s+(\S+)$/, async (msg, match) => {
       return
     }
 
-    const question = (m as any).question ?? (m as any).title ?? 'Unknown'
-    const prices = (m as any).prices ?? []
-    const numOutcomes = (m as any).numOutcomes ?? 2
-    const pool = (m as any).pool
-    const resolution = (m as any).resolution
+    const mAny = m as any
+    const question = mAny.questionText ?? mAny.question ?? mAny.title ?? 'Unknown'
+    const prices = mAny.prices ?? []
+    const numOutcomes = mAny.numOutcomes ?? prices.length ?? 2
+    const pool = mAny.pool
+    const resolution = mAny.resolution
     const status = resolution?.winningOutcome ? 'RESOLVED' : 'ACTIVE'
+    const outcomeLabels: string[] = mAny.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
 
     let oddsText = ''
-    const outcomeLabels = numOutcomes === 2
-      ? ['YES', 'NO']
-      : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`)
-
-    for (let i = 0; i < prices.length; i++) {
-      oddsText += `   ${outcomeLabels[i]}: ${(prices[i] * 100).toFixed(1)}%\n`
+    for (let i = 0; i < Math.max(prices.length, outcomeLabels.length); i++) {
+      const label = outcomeLabels[i] ?? `Outcome ${i + 1}`
+      const pct = prices[i] != null ? (prices[i] * 100).toFixed(1) : '—'
+      oddsText += `   ${i + 1}\\. ${escapeMd(label)}: ${escapeMd(pct)}%\n`
     }
 
     const vol = pool?.totalVolume ? `${(Number(pool.totalVolume) / 1e6).toFixed(2)} ALEO` : '—'
@@ -1000,6 +1009,8 @@ bot.onText(/^\/marketinfo\s+(\S+)$/, async (msg, match) => {
 
     if (resolution?.winningOutcome) {
       text += `\nWinner: *${escapeMd(outcomeLabels[resolution.winningOutcome - 1] ?? 'Unknown')}*`
+    } else {
+      text += `\nTo buy: /buy ${escapeMd(marketId.slice(0, 16))}… \\<1\\-${numOutcomes}\\> \\<AMOUNT\\>`
     }
 
     sendMsg(msg.chat.id, text)
