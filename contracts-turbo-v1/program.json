@@ -1,0 +1,16 @@
+{
+  "program": "veiled_turbo_v8.aleo",
+  "version": "0.8.0",
+  "description": "Veiled Turbo Markets v8 — shared vault architecture with deposit_vault_public + all bug fixes consolidated. Operator deposits ALEO once; all 5-min markets draw from single pool. No per-market LP lock. Pyth-resolved.",
+  "license": "MIT",
+  "leo": "4.0.0",
+  "dependencies": [
+    {
+      "name": "credits.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}

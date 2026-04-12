@@ -36,6 +36,7 @@ import { ParlayClaimModal } from '@/components/ParlayClaimModal'
 import { EmptyState } from '@/components/EmptyState'
 import { useRepairParlayExplorerIds } from '@/hooks/useRepairParlayExplorerIds'
 import { cn, formatCredits } from '@/lib/utils'
+import { syncTurboBetStatus, isTurboMarket } from '@/lib/turbo-client'
 import { devWarn } from '../lib/logger'
 import { calculateAllPrices, calculateSellTokensOut, type AMMReserves } from '@/lib/amm'
 import { getMarketOutcomeLabels } from '@/lib/market-outcomes'
@@ -65,10 +66,26 @@ const OUTCOME_BADGE_COLORS = [
   { bg: 'bg-yellow-500/15', text: 'text-yellow-400' },
 ]
 
+const TURBO_BADGE_COLORS = {
+  up: { bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
+  down: { bg: 'bg-rose-500/15', text: 'text-rose-400' },
+}
+
+function getBetBadgeColors(bet: Bet) {
+  if (bet.outcome === 'up') return TURBO_BADGE_COLORS.up
+  if (bet.outcome === 'down') return TURBO_BADGE_COLORS.down
+  const idx = outcomeToIndex(bet.outcome)
+  return OUTCOME_BADGE_COLORS[idx - 1] || OUTCOME_BADGE_COLORS[0]
+}
+
 function getBetOutcomeLabel(
   bet: Bet,
   market?: Partial<Pick<Market, 'numOutcomes' | 'outcomeLabels'>>,
 ): string {
+  // Turbo markets use 'up'/'down' instead of 'yes'/'no'
+  if (bet.outcome === 'up') return '↑ UP'
+  if (bet.outcome === 'down') return '↓ DOWN'
+
   const outcomeIdx = outcomeToIndex(bet.outcome)
   const label = market ? getMarketOutcomeLabels({
     numOutcomes: market.numOutcomes ?? Math.max(market.outcomeLabels?.length || 2, 2),
@@ -161,6 +178,52 @@ function formatPortfolioTokenSummary(
       return `${prefix}${amount.toFixed(2)} ${token}`
     })
     .join(' · ')
+}
+
+/**
+ * Multi-line JSX version of `formatPortfolioTokenSummary`.
+ *
+ * The string summary joins token amounts with " · " which works for a single
+ * dominant token but becomes unreadable when a user holds exposure across
+ * two or three different tokens (ALEO, USDCX, USAD) — each amount stretches
+ * the card horizontally until it ellipsises. This helper lays the same data
+ * out one token per row so each balance stays readable independently of the
+ * others, and differing decimals / signs align cleanly.
+ *
+ * Used for the "Active Exposure" stat card where multi-token breakdown is
+ * the common case; the string version is still used in places where space
+ * is tight or a single inline summary is preferred.
+ */
+function renderPortfolioTokenLines(
+  totals: PortfolioTokenTotals,
+  options?: { signed?: boolean; emptyLabel?: string },
+) {
+  const signed = options?.signed ?? false
+  const entries = (Object.entries(totals) as [PortfolioToken, number][])
+    .filter(([, amount]) => Math.abs(amount) >= 0.000001)
+
+  if (entries.length === 0) {
+    return <span>{options?.emptyLabel ?? '0'}</span>
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {entries.map(([token, amount]) => {
+        const prefix = signed && amount > 0 ? '+' : ''
+        return (
+          <div
+            key={token}
+            className="flex items-baseline justify-between gap-3 leading-tight"
+          >
+            <span className="tabular-nums">{prefix}{amount.toFixed(2)}</span>
+            <span className="text-[10px] font-semibold tracking-wider text-surface-500 uppercase">
+              {token}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
@@ -258,6 +321,38 @@ export function MyBets() {
     parlay.status === 'won' || parlay.status === 'lost' || parlay.status === 'cancelled'
   )
   const historyParlays = walletParlays
+
+  // Sync turbo bet statuses — check on-chain market state for turbo bets
+  useEffect(() => {
+    if (!wallet.connected) return
+    let cancelled = false
+    const syncTurbo = async () => {
+      const activeTurboBets = userBets.filter(
+        b => b.status === 'active' && b.marketQuestion?.includes('Up or Down')
+      )
+      for (const bet of activeTurboBets) {
+        if (cancelled) break
+        try {
+          const isTurbo = await isTurboMarket(bet.marketId)
+          if (!isTurbo) continue
+          const result = await syncTurboBetStatus(bet.marketId, bet.outcome)
+          if (!result || result.status === 'active') continue
+          // Update bet status in store
+          const updatedBets = useBetsStore.getState().userBets.map(b =>
+            b.id === bet.id ? {
+              ...b,
+              status: result.status as Bet['status'],
+              winningOutcome: result.winningOutcome,
+            } : b
+          )
+          useBetsStore.setState({ userBets: updatedBets })
+        } catch {}
+      }
+    }
+    syncTurbo()
+    const id = setInterval(syncTurbo, 15_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [wallet.connected, userBets.length])
 
   // Tab counts
   const tabCounts: Record<BetFilter, number> = {
@@ -557,7 +652,10 @@ export function MyBets() {
               return [
                 {
                   label: 'Active Exposure',
-                  value: formatPortfolioTokenSummary(exposureByToken, { emptyLabel: '0' }),
+                  // Multi-line JSX: one row per token (ALEO / USDCX / USAD)
+                  // so different-token balances don't get squished onto a
+                  // single ellipsised line.
+                  value: renderPortfolioTokenLines(exposureByToken, { emptyLabel: '0' }),
                   icon: DollarSign,
                   color: 'text-white',
                   sub: `${activeBetCount} market positions · ${activeParlays.length} active parlays`,
@@ -578,7 +676,9 @@ export function MyBets() {
                     <stat.icon className={cn('w-4 h-4', stat.color === 'text-white' ? 'text-surface-500' : stat.color)} />
                     <span className="text-[10px] font-heading font-semibold text-surface-500 uppercase tracking-wider">{stat.label}</span>
                   </div>
-                  <p className={cn('text-base font-heading font-bold tabular-nums', stat.color)}>{stat.value}</p>
+                  {/* div (not p) so `value` may contain block-level JSX —
+                      Active Exposure returns a multi-row breakdown. */}
+                  <div className={cn('text-base font-heading font-bold tabular-nums', stat.color)}>{stat.value}</div>
                   <p className="text-[10px] text-surface-600 mt-1 font-heading">{stat.sub}</p>
                 </motion.div>
               ))
@@ -754,8 +854,7 @@ export function MyBets() {
                           {displayBets.map((bet, index) => {
                             const market = getMarketInfo(bet.marketId)
                             const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
-                            const outcomeIdx = outcomeToIndex(bet.outcome)
-                            const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
+                            const badgeColors = getBetBadgeColors(bet)
                             const outcomeLabel = getBetOutcomeLabel(bet, market)
                             const isPending = bet.status === 'pending'
                             const {
@@ -849,8 +948,7 @@ export function MyBets() {
                       {displayBets.map((bet, index) => {
                         const market = getMarketInfo(bet.marketId)
                         const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
-                        const outcomeIdx = outcomeToIndex(bet.outcome)
-                        const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
+                        const badgeColors = getBetBadgeColors(bet)
                         const outcomeLabel = getBetOutcomeLabel(bet, market)
                         const isPending = bet.status === 'pending'
                         const {
@@ -1210,7 +1308,7 @@ function BetCard({
 
   // Resolve outcome label from market data
   const outcomeLabel = getBetOutcomeLabel(bet, market)
-  const badgeColors = OUTCOME_BADGE_COLORS[outcomeIdx - 1] || OUTCOME_BADGE_COLORS[0]
+  const badgeColors = getBetBadgeColors(bet)
 
   return (
     <motion.div
@@ -1294,8 +1392,8 @@ function BetCard({
           <h3 className="text-sm font-heading font-medium text-white truncate">
             {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
           </h3>
-          <p className="text-xs text-surface-500 mt-0.5 tabular-nums">
-            {new Date(bet.placedAt).toLocaleDateString()}
+          <p className="text-[11px] text-surface-500 mt-0.5 tabular-nums">
+            {formatPurchaseTime(bet.placedAt)}
           </p>
         </div>
 

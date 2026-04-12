@@ -1,7 +1,7 @@
 {
   "name": "@veiled-markets/sdk",
-  "version": "0.3.0",
-  "description": "TypeScript SDK for Veiled Markets prediction protocol on Aleo",
+  "version": "0.5.0",
+  "description": "TypeScript SDK for Veiled Markets on Aleo — FAMM + Governance + Parlay + Turbo, with Supabase indexer, Pyth Hermes verifier, wallet adapters, and Node executor",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -12,16 +12,18 @@
   ],
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "lint": "eslint src/",
-    "test": "vitest"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@provablehq/sdk": "^0.6.0"
@@ -41,11 +43,28 @@
     "prediction-market",
     "zero-knowledge",
     "privacy",
-    "defi"
+    "defi",
+    "amm",
+    "fpmm",
+    "pyth",
+    "oracle",
+    "leo-language",
+    "snarkos"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/veiled-markets/sdk"
+    "url": "git+https://github.com/hevDev7/veiled-markets-near.git",
+    "directory": "sdk"
+  },
+  "homepage": "https://veiledmarkets.xyz",
+  "bugs": {
+    "url": "https://github.com/hevDev7/veiled-markets-near/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "license": "MIT"
 }

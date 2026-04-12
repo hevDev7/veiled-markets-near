@@ -15,7 +15,7 @@ import { MarketCard } from '@/components/MarketCard'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { EmptyState } from '@/components/EmptyState'
-import { DashboardHero } from '@/components/DashboardHero'
+import { DashboardHero, type TurboHeroMarket } from '@/components/DashboardHero'
 import { cn, formatCredits, getCategoryEmoji } from '@/lib/utils'
 import { getLeadingOutcome, getMarketOutcomeLabels } from '@/lib/market-outcomes'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
@@ -81,6 +81,59 @@ export function Dashboard() {
     const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
     const [showFilters, setShowFilters] = useState(false)
     const [parlayMode, setParlayMode] = useState(false)
+    const [turboMarket, setTurboMarket] = useState<TurboHeroMarket | null>(null)
+
+    // Fetch active turbo market from operator backend /chain/symbol endpoint.
+    // This is the single source of truth — the backend rolling chain loop
+    // tracks current market state in-memory and exposes it via HTTP.
+    useEffect(() => {
+        let cancelled = false
+        const ORACLE_URL = (import.meta as any).env?.VITE_TURBO_ORACLE_URL || 'http://localhost:4090'
+        const SECS_PER_BLOCK = Number((import.meta as any).env?.VITE_ALEO_SECONDS_PER_BLOCK || 4)
+
+        async function fetchTurbo() {
+            try {
+                const res = await fetch(`${ORACLE_URL}/chain/symbol?symbol=BTC`)
+                if (!res.ok) { if (!cancelled) setTurboMarket(null); return }
+                const m = await res.json()
+                if (!m || !m.market_id || m.status === 'resolved') {
+                    if (!cancelled) setTurboMarket(null)
+                    return
+                }
+                // Prefer the backend's absolute deadline_ms so this and
+                // TurboRollingView agree with the backend's precise-freeze
+                // setTimeout on the exact same wallclock moment. Only fall
+                // back to the local block-height estimate for older backends.
+                let deadlineMs: number
+                if (typeof m.deadline_ms === 'number' && m.deadline_ms > 0) {
+                    deadlineMs = m.deadline_ms
+                } else {
+                    deadlineMs = Date.now() + 5 * 60 * 1000 // fallback 5 min
+                    try {
+                        const ALEO_RPC = (import.meta as any).env?.VITE_ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet'
+                        const rpc = ALEO_RPC.replace(/\/(testnet|mainnet|canary)\/?$/, '') + '/testnet'
+                        const hRes = await fetch(`${rpc}/latest/height`)
+                        if (hRes.ok) {
+                            const curBlock = Number(await hRes.text())
+                            const blocksAhead = Math.max(0, Number(m.deadline) - curBlock)
+                            deadlineMs = Date.now() + blocksAhead * SECS_PER_BLOCK * 1000
+                        }
+                    } catch {}
+                }
+                if (!cancelled) setTurboMarket({
+                    marketId: m.market_id,
+                    symbol: m.symbol || 'BTC',
+                    baselinePrice: m.baseline_price,
+                    deadlineMs,
+                })
+            } catch {
+                if (!cancelled) setTurboMarket(null)
+            }
+        }
+        fetchTurbo()
+        const id = setInterval(fetchTurbo, 10_000)
+        return () => { cancelled = true; clearInterval(id) }
+    }, [])
 
     useEffect(() => {
         if (slipLegs.length > 0) {
@@ -150,11 +203,34 @@ export function Dashboard() {
 
     useEffect(() => {
         const feed: ActivityItem[] = []
+        // Standard market activity
         for (const m of markets) {
-            if (m.totalBets > 0 && m.status === 1) feed.push({ id: `act-${m.id}`, message: `${m.totalBets} bet${m.totalBets > 1 ? 's' : ''} on "${m.question.slice(0, 30)}..."`, time: m.deadlineTimestamp ? m.deadlineTimestamp - Number(m.deadline) * 1000 : Date.now(), marketId: m.id })
+            if (m.totalBets > 0 && m.status === 1) {
+                feed.push({
+                    id: `act-${m.id}`,
+                    message: `${m.totalBets} bet${m.totalBets > 1 ? 's' : ''} on "${m.question.slice(0, 30)}..."`,
+                    time: m.deadlineTimestamp ? m.deadlineTimestamp - Number(m.deadline) * 1000 : Date.now(),
+                    marketId: m.id,
+                })
+            }
+        }
+        // Turbo market bets — recent UP/DOWN bets from user's portfolio
+        const turboBets = userBets
+            .filter(b => (b.outcome === 'up' || b.outcome === 'down') && b.type !== 'sell')
+            .slice(0, 10)
+        for (const bet of turboBets) {
+            const sym = bet.marketQuestion?.match(/^(\w+)\s+Up or Down/)?.[1] || 'BTC'
+            const direction = bet.outcome === 'up' ? '↑ UP' : '↓ DOWN'
+            const amount = (Number(bet.amount) / 1_000_000).toFixed(2)
+            feed.push({
+                id: `turbo-${bet.id}`,
+                message: `${amount} ALEO on ${sym} ${direction}`,
+                time: bet.placedAt,
+                marketId: bet.marketId,
+            })
         }
         setActivityFeed(feed.sort((a, b) => b.time - a.time).slice(0, 5))
-    }, [markets])
+    }, [markets, userBets])
 
     const handleMarketClick = useCallback((market: Market) => navigate(`/market/${market.id}`), [navigate])
     const handleQuickAddParlay = useCallback((market: Market, outcome: number) => {
@@ -254,6 +330,7 @@ export function Dashboard() {
                         onCreateMarket={() => navigate('/create')}
                         activityFeed={activityFeed}
                         onMarketClick={handleMarketClick}
+                        turboMarket={turboMarket}
                     />
 
                     {/* Pending Markets Banner */}
@@ -301,7 +378,7 @@ export function Dashboard() {
                         const hasMorePositions = allPositions.length > 3
                         return (
                         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
-                            className="mb-6 rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)', border: '1px solid rgba(201, 168, 76, 0.1)', boxShadow: '0 1px 0 0 rgba(255, 255, 255, 0.02) inset' }}>
+                            className="mb-6 rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.08) 0%, rgba(13, 15, 20, 0.12) 100%)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', border: '1px solid rgba(201, 168, 76, 0.1)', boxShadow: '0 1px 0 0 rgba(255, 255, 255, 0.02) inset' }}>
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-2">
                                     <Activity className="w-4 h-4 text-brand-400" />
@@ -431,7 +508,7 @@ export function Dashboard() {
                         <AnimatePresence>
                             {showFilters && (
                                 <motion.div data-filters initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}>
-                                    <div className="rounded-2xl p-5 space-y-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                                    <div className="rounded-2xl p-5 space-y-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.08) 0%, rgba(13, 15, 20, 0.12) 100%)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
                                         {/* Token filter */}
                                         <div>
                                             <label className="text-[9px] font-semibold text-surface-500 mb-2 block uppercase tracking-wider">Token Type</label>
@@ -485,31 +562,6 @@ export function Dashboard() {
                             )}
                         </AnimatePresence>
 
-                        {parlayMode && (
-                            <motion.div
-                                initial={{ opacity: 0, y: 6 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="rounded-2xl border border-brand-500/12 bg-gradient-to-r from-brand-500/[0.07] via-white/[0.01] to-emerald-500/[0.05] px-4 py-3"
-                            >
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <div>
-                                        <p className="text-sm font-semibold text-white">Build a parlay without leaving the dashboard</p>
-                                        <p className="text-xs text-surface-400">
-                                            Click any outcome chip to add it to your slip. Click the same chip again to remove it, or choose a different outcome to replace that leg.
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2 text-xs text-surface-300">
-                                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                                            {slipLegs.length} leg{slipLegs.length === 1 ? '' : 's'} in slip
-                                        </span>
-                                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                                            Card click still opens analysis
-                                        </span>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        )}
-
                         {/* Category pills + Live indicator */}
                         <div className="flex items-center gap-2">
                             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none flex-1">
@@ -539,7 +591,7 @@ export function Dashboard() {
                     {isLoading ? (
                         <div className={viewMode === 'grid' ? 'grid md:grid-cols-2 xl:grid-cols-4 gap-4' : 'space-y-3'}>
                             {[...Array(6)].map((_, i) => (
-                                <div key={i} className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                                <div key={i} className="rounded-2xl p-5" style={{ background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.08) 0%, rgba(13, 15, 20, 0.12) 100%)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', border: '1px solid rgba(255, 255, 255, 0.04)' }}>
                                     <div className="flex items-center gap-3 mb-3"><div className="skeleton w-8 h-8 rounded-full" /><div className="skeleton h-3 w-20 rounded" /></div>
                                     <div className="skeleton h-5 w-3/4 rounded mb-3" />
                                     <div className="skeleton h-2 w-full rounded-full mb-4" />

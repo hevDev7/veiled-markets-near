@@ -45,6 +45,31 @@ export function WalletBridge() {
     useWalletStore.getState().refreshBalance()
     useBetsStore.getState().loadBetsForAddress(addr)
 
+    // Skip signMessage on public pages that don't need bet decryption.
+    //
+    // The encryption key is only used to decrypt the user's own historical
+    // bet data from Supabase (store.ts). Pages like /verify/turbo/:id are
+    // public on-chain verification views — they read oracle attestations
+    // and Pyth historical data, never the user's encrypted records. Asking
+    // for a wallet signature there would be pure friction.
+    //
+    // This also fixes the "sign popup on every open" problem when the user
+    // clicks a Verify link from the History tab via target=_blank: browsers
+    // do NOT propagate sessionStorage to link-opened tabs, so the cached
+    // signature (vm_enc_sig) is missing in the new tab and WalletBridge
+    // would otherwise re-prompt for it. Skipping the derivation entirely
+    // on public pages sidesteps the problem — the navbar wallet connection,
+    // balance, and address all still work without it.
+    const currentPath =
+      typeof window !== 'undefined' ? window.location.pathname : ''
+    if (currentPath.startsWith('/verify/')) {
+      devLog(
+        '[WalletBridge] Skipping signMessage on public verify page:',
+        currentPath,
+      )
+      return
+    }
+
     // Derive encryption key — locked to prevent duplicate sign popups
     if (signingLock.current) {
       devLog('[WalletBridge] Skipping signMessage — already in progress')
