@@ -144,6 +144,52 @@ function writeCachedTicks(symbol: string, marketId: string, ticks: PriceTick[]) 
 }
 
 // Canvas rounded-rect helper (used for the "Target" pill)
+// ── Flip digit animation — slides down on change ──
+function FlipDigit({ value, className }: { value: string; className?: string }) {
+  const [display, setDisplay] = useState(value)
+  const [prev, setPrev] = useState(value)
+  const [animating, setAnimating] = useState(false)
+
+  useEffect(() => {
+    if (value !== display) {
+      setPrev(display)
+      setAnimating(true)
+      const t = setTimeout(() => {
+        setDisplay(value)
+        setAnimating(false)
+      }, 200)
+      return () => clearTimeout(t)
+    }
+  }, [value, display])
+
+  return (
+    <span className={cn('relative inline-block overflow-hidden', className)} style={{ width: '0.65em', height: '1.2em', lineHeight: '1.2em' }}>
+      <span
+        className="absolute inset-x-0 transition-transform duration-200 ease-in-out"
+        style={{ transform: animating ? 'translateY(-100%)' : 'translateY(0)' }}
+      >
+        {prev}
+      </span>
+      <span
+        className="absolute inset-x-0 transition-transform duration-200 ease-in-out"
+        style={{ transform: animating ? 'translateY(0)' : 'translateY(100%)' }}
+      >
+        {display}
+      </span>
+    </span>
+  )
+}
+
+function FlipNumber({ value, className }: { value: string; className?: string }) {
+  return (
+    <span className={cn('inline-flex', className)}>
+      {value.split('').map((digit, i) => (
+        <FlipDigit key={i} value={digit} className={className} />
+      ))}
+    </span>
+  )
+}
+
 function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -832,14 +878,10 @@ export function TurboMarketPanel({
             'flex items-baseline gap-1 tabular-nums',
             hideChart && 'self-start',
           )}>
-            <span className="text-2xl font-black text-rose-400">
-              {String(mins).padStart(2, '0')}
-            </span>
-            <span className="text-[10px] text-surface-500">MIN</span>
-            <span className="text-2xl font-black text-rose-400 ml-1">
-              {String(secs).padStart(2, '0')}
-            </span>
-            <span className="text-[10px] text-surface-500">SECS</span>
+            <FlipNumber value={String(mins).padStart(2, '0')} className="text-2xl font-black text-rose-400" />
+            <span className="text-[10px] text-surface-500 ml-0.5">MIN</span>
+            <FlipNumber value={String(secs).padStart(2, '0')} className="text-2xl font-black text-rose-400 ml-1" />
+            <span className="text-[10px] text-surface-500 ml-0.5">SECS</span>
           </div>
         )}
         {/* LOCKED + Final price label removed from header — the price
