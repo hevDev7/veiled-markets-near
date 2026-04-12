@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
-import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, APIDocs, BrandKit, BugBounty } from './pages'
+import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, Docs, BrandKit, BugBounty } from './pages'
 import { MyParlays } from './pages/MyParlays'
+import { VerifyTurbo } from './pages/VerifyTurbo'
+import { Turbo } from './pages/Turbo'
+import { TurboDetail } from './pages/TurboDetail'
 import { useWalletStore } from './lib/store'
 import { initializeMarketIds } from './lib/aleo-client'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -132,9 +135,17 @@ function App() {
         {/* Resource Pages */}
         <Route path="/how-it-works" element={<HowItWorks />} />
         <Route path="/faq" element={<FAQ />} />
-        <Route path="/api-docs" element={<APIDocs />} />
+        {/* Docs — new comprehensive page (replaces /api-docs). /api-docs
+            still redirects here so existing links keep working. */}
+        <Route path="/docs" element={<Docs />} />
+        <Route path="/api-docs" element={<Navigate to="/docs" replace />} />
         <Route path="/brand-kit" element={<BrandKit />} />
         <Route path="/bug-bounty" element={<BugBounty />} />
+
+        {/* Veiled Turbo — rolling market detail + index + verify */}
+        <Route path="/turbo" element={<Turbo />} />
+        <Route path="/turbo/:symbol" element={<TurboDetail />} />
+        <Route path="/verify/turbo/:marketId" element={<VerifyTurbo />} />
 
         {/* Legal Pages */}
         <Route path="/terms" element={<TermsOfService />} />

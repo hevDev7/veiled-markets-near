@@ -124,9 +124,88 @@ export {
   calculatePotentialPayout,
 } from './utils';
 
+// Turbo (veiled_turbo_v8.aleo) — rolling 5-min UP/DOWN markets
+export {
+  TurboClient,
+  createTurboClient,
+  quoteBuyUpDown,
+  quoteTurboPayout,
+  parseTurboShareRecord,
+} from './turbo-client';
+export type {
+  TurboClientConfig,
+  TurboCall,
+} from './turbo-client';
+export {
+  TURBO_OUTCOME,
+  TurboMarketStatus,
+  TURBO_SYMBOL_IDS,
+  TURBO_PROTOCOL_FEE_BPS,
+  TURBO_FEE_DENOMINATOR,
+  TURBO_MIN_TRADE_AMOUNT,
+  TURBO_DURATION_BLOCKS,
+  TURBO_RESOLUTION_WINDOW_BLOCKS,
+  TURBO_RESOLUTION_GRACE_BLOCKS,
+} from './types';
+export type {
+  TurboSide,
+  TurboSymbol,
+  TurboMarket,
+  TurboPool,
+  TurboShare,
+  TurboBuyParams,
+  TurboBuyQuote,
+  TurboClaimWinningsParams,
+  TurboClaimRefundParams,
+} from './types';
+
 // Parlay
 export { ParlayClient, createParlayClient, PARLAY_PROGRAM_ID } from './parlay-client';
 export type { ParlayClientConfig, ParlayTransactionInputs } from './parlay-client';
+
+// Indexer (Supabase off-chain query layer)
+export { IndexerClient, createIndexerClient } from './indexer';
+export type {
+  IndexerConfig,
+  ListOptions,
+  MarketRegistryRow,
+  TurboAuditRow,
+} from './indexer';
+
+// Pyth Hermes client (price verification for Turbo markets)
+export {
+  PythHermesClient,
+  createPythHermesClient,
+  PYTH_FEED_IDS,
+} from './pyth-client';
+export type {
+  PythHermesConfig,
+  PythQuote,
+  TurboVerificationResult,
+} from './pyth-client';
+
+// Wallet adapters (browser only — safe to re-export; classes throw on construct
+// if the wallet isn't installed, so importing doesn't itself break Node.js)
+export {
+  ShieldWalletAdapter,
+  PuzzleWalletAdapter,
+  LeoWalletAdapter,
+  detectShield,
+  detectPuzzle,
+  detectLeo,
+  detectWallet,
+  listInstalledWallets,
+  AVAILABLE_WALLETS,
+} from './wallets';
+export type { WalletName } from './wallets/detect';
+
+// Node.js transaction executor (backend bots / schedulers)
+// IMPORTANT: this imports node:child_process at module scope, so importing
+// the SDK from a browser bundle will trigger a bundler warning. If you're
+// building for the browser only, import from '@veiled-markets/sdk/wallets'
+// instead (NOT available yet, but can be added as a sub-entrypoint).
+export { NodeExecutor, createNodeExecutor } from './executor';
+export type { NodeExecutorConfig, NodeExecResult } from './executor';
 
 export {
   ParlayStatus,

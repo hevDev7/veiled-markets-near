@@ -57,6 +57,11 @@ const faqs: FAQItem[] = [
     question: 'Can I sell my shares before the market resolves?',
     answer: 'Yes. You can sell your outcome shares back to the AMM at any time while the market is active. The amount of tokens you receive depends on the current reserves and the FPMM formula. Sell transactions also incur protocol and creator fees.',
   },
+  {
+    category: 'Trading',
+    question: 'Can I combine multiple markets into a parlay?',
+    answer: 'Yes. The veiled_parlay_v3.aleo contract lets you build multi-leg parlays where the payout requires every leg to resolve in your favor. Click an outcome chip on the dashboard while parlay mode is on to add a leg to your slip; the parlay client computes combined odds and stake before submission. Parlays use the same private record settlement as single-market trades.',
+  },
   // Markets
   {
     category: 'Markets',
@@ -131,9 +136,45 @@ const faqs: FAQItem[] = [
     question: 'What are the quorum requirements?',
     answer: 'Quorum varies by proposal type: Emergency Pause needs only 5%, Dispute Resolution and Parameter changes need 10-15%, Fee Changes need 20%, and Treasury proposals need 30%. After passing, proposals enter a timelock (0-72 hours) before execution.',
   },
+  // Turbo Markets
+  {
+    category: 'Turbo Markets',
+    question: 'What are Turbo Markets?',
+    answer: 'Turbo Markets are rolling 5-minute UP/DOWN prediction markets powered by the Pyth Network oracle. Every 5 minutes, a new market opens for 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT). You predict whether the price will be higher or lower at the end of the round compared to the baseline set at round start. Resolution is fully automatic — no voting, no disputes. Deployed contract: veiled_turbo_v8.aleo.',
+  },
+  {
+    category: 'Turbo Markets',
+    question: 'How do I bet on a Turbo market?',
+    answer: 'Open the Dashboard or navigate to /market/<turbo_market_id>. Pick a side (Yes Up or Yes Down), enter your bet amount in ALEO, and click "Buy X Shares". Minimum bet is 0.001 ALEO. Your stake is encrypted on-chain via Aleo private records — only you can see your position. The chart shows live Pyth price updates relative to the baseline until the countdown hits 00:00.',
+  },
+  {
+    category: 'Turbo Markets',
+    question: 'How is the payout calculated for Turbo?',
+    answer: 'Turbo markets use parimutuel math: payout = (your_share_quantity × total_pool) / total_winning_shares. Winners split the entire pool (both UP and DOWN sides) proportionally to their bet size. If you\'re the sole winner against losers, you can collect up to ~3× your stake. If you\'re the only bettor on a side with no counterparty, you get back your net stake (0.5% protocol fee). There\'s no FPMM curve — it\'s straight pool sharing.',
+  },
+  {
+    category: 'Turbo Markets',
+    question: 'What happens when the round ends?',
+    answer: 'At the exact deadline, the operator backend captures the frozen Pyth price and immediately broadcasts a resolve_turbo_market transaction to the contract. This typically confirms within 15–30 seconds. Once status flips to RESOLVED on-chain, winners can claim via the Portfolio page. If the resolve tx fails for 60+ blocks (operator downtime, endpoint failure), anyone can call emergency_cancel to let all bettors claim a full refund.',
+  },
+  {
+    category: 'Turbo Markets',
+    question: 'Who operates the Turbo markets?',
+    answer: 'A trusted operator wallet (hardcoded as ORACLE_OPERATOR in veiled_turbo_v8.aleo) runs the backend service that subscribes to Pyth Hermes, creates new markets every 5 minutes, and resolves them at deadline. Users do NOT create turbo markets manually — the operator handles everything. The operator can be audited: every create and resolve transaction is logged to Supabase (turbo_oracle_audit) and cross-checkable against Pyth Hermes historical data at /verify/turbo/:marketId.',
+  },
+  {
+    category: 'Turbo Markets',
+    question: 'How do I verify the operator isn\'t cheating?',
+    answer: 'Navigate to /verify/turbo/<market_id> for any turbo market. The page shows the operator\'s on-chain claim (baseline and closing price committed on-chain) side-by-side with Pyth Hermes historical data at the exact same timestamp. If prices match (within 0.1%), the round is verified. If they don\'t match, it\'s potential operator misbehavior — report via /bug-bounty. The contract also enforces sanity rails: max price move per round, confidence interval checks, and baseline/closing block windows.',
+  },
+  {
+    category: 'Turbo Markets',
+    question: 'Are Turbo markets available for governance disputes?',
+    answer: 'No. Turbo markets resolve automatically via the Pyth oracle and are not eligible for the veiled_governance_v6.aleo dispute system. If you believe a round was resolved incorrectly, your only recourse is the public audit trail at /verify/turbo/:marketId and the bug bounty program. This is a deliberate trade-off: fast 5-minute rounds don\'t have time for a Multi-Voter Quorum, so trust shifts to oracle transparency.',
+  },
 ]
 
-const categories = ['General', 'Trading', 'Markets', 'Liquidity', 'Privacy & Security', 'Governance']
+const categories = ['General', 'Trading', 'Markets', 'Liquidity', 'Privacy & Security', 'Governance', 'Turbo Markets']
 
 function FAQAccordion({ item }: { item: FAQItem }) {
   const [open, setOpen] = useState(false)

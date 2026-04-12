@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Wallet, Target, Lock, Zap, Shield, BarChart3, Users, ArrowRight, GitBranch, Vote, Coins } from 'lucide-react'
+import { ArrowLeft, Wallet, Target, Lock, Zap, Shield, BarChart3, Users, ArrowRight, GitBranch, Vote, Coins, Radio } from 'lucide-react'
 import { Footer } from '../components/Footer'
 
 const steps = [
@@ -99,6 +99,31 @@ const mechanisms = [
       'USDCX — Test stablecoin via veiled_markets_usdcx_v7.aleo (25 transitions)',
       'USAD — Stablecoin via veiled_markets_usad_v14.aleo (25 transitions)',
       'ALEO uses private credits records; USDCX/USAD use Token records + MerkleProof for private trading',
+    ],
+  },
+  {
+    icon: GitBranch,
+    title: 'Multi-Leg Parlays',
+    description: 'Combine multiple market outcomes into a single parlay via veiled_parlay_v3.aleo:',
+    items: [
+      'Toggle parlay mode on the dashboard and click outcome chips to add legs to your slip',
+      'Combined odds and stake are computed client-side before submission',
+      'A parlay pays out only when every leg resolves in your favor',
+      'Settles using the same private record flow as single-market trades',
+    ],
+  },
+  {
+    icon: Radio,
+    title: 'Turbo Markets (rolling 5-minute rounds)',
+    description: 'Fast-paced parimutuel UP/DOWN markets via veiled_turbo_v8.aleo, backed by the Pyth Network oracle:',
+    items: [
+      'Predict whether BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, or DOT will be up or down 5 minutes from now',
+      'New rounds are created automatically every 5 minutes by the operator backend — no manual market creation needed',
+      'Baseline price is snapshotted from Pyth Hermes at round start; closing price is captured at the exact deadline moment and committed on-chain',
+      'Parimutuel payouts: winners split the entire pool (minus 0.5% protocol fee) proportionally to their bet size',
+      'All markets share a single vault for liquidity — no per-round seed capital required',
+      'Resolution is fully automatic via the Pyth oracle — no Multi-Voter Quorum, no dispute window',
+      'Every round is publicly verifiable: audit log at /verify/turbo/:marketId cross-checks the operator\'s on-chain claim against Pyth Hermes historical data',
     ],
   },
 ]

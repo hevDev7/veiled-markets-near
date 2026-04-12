@@ -16,6 +16,7 @@ import { type Bet, useBetsStore, useWalletStore, outcomeToIndex } from '@/lib/st
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { diagnoseTransaction, getMarketCredits, getRedeemFunction, getRefundFunction, getProgramIdForToken } from '@/lib/aleo-client'
+import { fetchTurboShareRecords, TURBO_PROGRAM_ID, fetchMarketCredits as fetchTurboMarketCredits, fetchTurboPool } from '@/lib/turbo-client'
 import { getMarketOutcomeLabels } from '@/lib/market-outcomes'
 import { fetchOutcomeShareRecords, type ParsedOutcomeShare } from '@/lib/credits-record'
 import { TransactionLink } from './TransactionLink'
@@ -37,7 +38,8 @@ interface InspectedOutcomeShareInput {
 }
 
 function inspectOutcomeShareInput(text: string): InspectedOutcomeShareInput {
-  const outcomeMatch = text.match(/outcome:\s*(\d+)u8/)
+  // v37 uses `outcome:`, v8 turbo uses `side:` — accept both
+  const outcomeMatch = text.match(/outcome:\s*(\d+)u8/) || text.match(/side:\s*(\d+)u8/)
   const qtyMatch = text.match(/quantity:\s*(\d+)u128/)
   const marketMatch = text.match(/market_id:\s*(\d+field)/)
   const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/)
@@ -99,14 +101,30 @@ export function ClaimWinningsModal({
     })
   }, [bet, expectedQuantity])
 
+  const isTurboBet = bet?.marketQuestion?.includes('Up or Down') || bet?.outcome === 'up' || bet?.outcome === 'down'
+
   // Fetch records when modal opens
   const fetchRecords = useCallback(async () => {
     if (!bet) return
     setIsFetchingRecords(true)
     setFetchError(null)
     try {
-      const betTokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
-      const records = await fetchOutcomeShareRecords(getProgramIdForToken(betTokenType), bet.marketId)
+      let records: ParsedOutcomeShare[]
+
+      if (isTurboBet) {
+        // Turbo markets: fetch TurboShare records and convert to ParsedOutcomeShare format
+        const turboRecords = await fetchTurboShareRecords(bet.marketId)
+        records = turboRecords.map(tr => ({
+          plaintext: tr.plaintext,
+          outcome: tr.side === 'UP' ? 1 : 2,
+          quantity: tr.quantity,
+          marketId: tr.marketId,
+          owner: tr.owner,
+        }))
+      } else {
+        const betTokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+        records = await fetchOutcomeShareRecords(getProgramIdForToken(betTokenType), bet.marketId)
+      }
       const matchingRecords = sortRecordsForBet(records.filter(matchesCurrentBet))
 
       setShareRecords(matchingRecords)
@@ -205,7 +223,8 @@ export function ClaimWinningsModal({
       }
 
       const tokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
-      if (inspectedRecord.quantity != null) {
+      // Collateral check — skip for turbo (handled differently in turbo claim)
+      if (!isTurboBet && inspectedRecord.quantity != null) {
         try {
           const remainingCollateral = await getMarketCredits(bet.marketId, getProgramIdForToken(tokenType))
           if (remainingCollateral !== null && remainingCollateral < inspectedRecord.quantity) {
@@ -222,16 +241,113 @@ export function ClaimWinningsModal({
         }
       }
 
-      const functionName = isRefund
-        ? getRefundFunction(tokenType)
-        : getRedeemFunction(tokenType)
+      let txProgram: string
+      let txFunction: string
+      let txInputs: string[]
+
+      if (isTurboBet) {
+        // Turbo claim: claim_winnings(market_id, share_record, declared_payout)
+        // or claim_refund(market_id, share_record, expected_amount)
+        txProgram = TURBO_PROGRAM_ID
+        if (isRefund) {
+          txFunction = 'claim_refund'
+          txInputs = [bet.marketId, recordPlaintext, `${inspectedRecord.quantity}u128`]
+        } else {
+          // Fetch EVERY piece of on-chain state the contract will assert on,
+          // so we can fail fast with a clear error instead of sending a tx
+          // that just gets rejected on-chain with an opaque "assert failed".
+          const { fetchTurboMarket } = await import('@/lib/turbo-client')
+          const [pool, credits, turboMarket] = await Promise.all([
+            fetchTurboPool(bet.marketId),
+            fetchTurboMarketCredits(bet.marketId),
+            fetchTurboMarket(bet.marketId),
+          ])
+          if (!pool || credits == null || !turboMarket) {
+            throw new Error('Could not load turbo market state. Try again in a moment.')
+          }
+
+          // Pre-flight 1: market must be resolved (status 2)
+          if (turboMarket.status !== 'resolved') {
+            throw new Error(
+              `Turbo market is not yet resolved on-chain (status=${turboMarket.status}). ` +
+              `Wait for the oracle to post the closing price.`
+            )
+          }
+
+          // Pre-flight 2: user's share side must equal the winning side.
+          // Contract asserts `share_side == m.winning_outcome` — if the
+          // bet store was synced incorrectly the user might try to claim
+          // on a losing share, which would just get rejected.
+          const userSide = inspectedRecord.outcome === 1 ? 'UP' : 'DOWN'
+          if (turboMarket.winningOutcome !== userSide) {
+            throw new Error(
+              `This share is on ${userSide} but the market resolved ${turboMarket.winningOutcome}. ` +
+              `The bet status in your portfolio is stale — refresh and it should show as Lost.`
+            )
+          }
+
+          const totalWinning = (inspectedRecord.outcome === 1)
+            ? pool.totalUpShares : pool.totalDownShares
+          if (totalWinning === 0n) {
+            throw new Error(
+              `Winning-side shares total is 0 in turbo_pools — contract will reject. ` +
+              `This usually means every winner has already claimed, or the pool state is stale.`
+            )
+          }
+          if (credits === 0n) {
+            throw new Error(
+              `market_payouts is 0 — the pool has already been fully drained by previous claims.`
+            )
+          }
+
+          const shareQty = inspectedRecord.quantity ?? 0n
+          if (shareQty === 0n) {
+            throw new Error('Share record has quantity 0 — cannot claim.')
+          }
+          // Match the contract formula EXACTLY:
+          //   payout = (share_quantity * total_pool) / total_winning
+          // Using BigInt truncating division so we agree with u128 integer
+          // division in Leo. Any mismatch here will fail `declared_payout
+          // == payout` in claim_winnings_fin.
+          const declaredPayout = (shareQty * credits) / totalWinning
+          if (declaredPayout === 0n) {
+            throw new Error(
+              `Computed payout is 0 — shareQty=${shareQty} × credits=${credits} / totalWinning=${totalWinning}. ` +
+              `Contract asserts payout > 0 so this would be rejected.`
+            )
+          }
+
+          console.log('[turbo-claim] preflight OK', {
+            programId: TURBO_PROGRAM_ID,
+            marketId: bet.marketId,
+            recordOwner: inspectedRecord.owner,
+            recordSide: userSide,
+            walletAddress: wallet.address,
+            marketStatus: turboMarket.status,
+            marketWinningOutcome: turboMarket.winningOutcome,
+            shareQty: shareQty.toString(),
+            totalUpShares: pool.totalUpShares.toString(),
+            totalDownShares: pool.totalDownShares.toString(),
+            totalWinning: totalWinning.toString(),
+            marketPayouts: credits.toString(),
+            declaredPayout: declaredPayout.toString(),
+            plaintextPreview: recordPlaintext.slice(0, 120) + '…',
+          })
+          txFunction = 'claim_winnings'
+          txInputs = [bet.marketId, recordPlaintext, `${declaredPayout}u128`]
+        }
+      } else {
+        txProgram = getProgramIdForToken(tokenType)
+        txFunction = isRefund ? getRefundFunction(tokenType) : getRedeemFunction(tokenType)
+        txInputs = [recordPlaintext]
+      }
 
       const result = await executeTransaction({
-        program: getProgramIdForToken(tokenType),
-        function: functionName,
-        inputs: [recordPlaintext],
+        program: txProgram,
+        function: txFunction,
+        inputs: txInputs,
         fee: 1.5,
-        recordIndices: [0],
+        recordIndices: isTurboBet ? [1] : [0], // turbo: share record at index 1 (after market_id)
       })
 
       if (result?.transactionId) {

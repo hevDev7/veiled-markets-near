@@ -32,10 +32,12 @@ export function APIDocs() {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="flex items-center gap-3 mb-3">
           <h1 className="font-display text-3xl sm:text-4xl text-white">API Documentation</h1>
-          <span className="px-2.5 py-1 rounded-lg bg-brand-500/15 text-brand-400 text-xs font-medium">v0.2.0</span>
+          <span className="px-2.5 py-1 rounded-lg bg-brand-500/15 text-brand-400 text-xs font-medium">v0.4.0</span>
         </div>
         <p className="text-surface-400 mb-12">
           TypeScript SDK for interacting with the Veiled Markets prediction protocol on Aleo.
+          Covers FAMM markets (ALEO / USDCX / USAD), on-chain governance, multi-leg parlays, and
+          rolling 5-minute Turbo markets.
         </p>
 
         <div className="space-y-16 text-sm leading-relaxed">
@@ -333,7 +335,102 @@ interface DisputeData {
                   STATUS_DISPUTED markets to RESOLVED with the governance-chosen outcome.
                 </p>
               </div>
+              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                <h3 className="font-mono text-sm text-white mb-1">veiled_parlay_v3.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">Multi-leg parlay contract</p>
+                <p className="text-sm text-surface-400">
+                  Composes multiple market outcomes into a single parlay slip. A parlay pays out only when
+                  every leg resolves in favor of the better. Settles using the same private record flow
+                  as single-market trades and is exposed in the SDK via the parlay client.
+                </p>
+              </div>
+              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+                <h3 className="font-mono text-sm text-white mb-1">veiled_turbo_v8.aleo</h3>
+                <p className="text-xs text-surface-500 mb-3">Rolling 5-minute Turbo market contract — 10 transitions</p>
+                <p className="text-sm text-surface-400">
+                  Parimutuel UP/DOWN prediction markets for 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP,
+                  BNB, ADA, AVAX, LINK, DOT), backed by Pyth Network oracle. Shared vault across all
+                  markets. Operator backend (ORACLE_OPERATOR wallet) creates new rounds every 5 minutes
+                  and resolves at deadline using the frozen Pyth quote. Exposed in the SDK via
+                  <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">TurboClient</code>
+                  with builders for the 4 user-callable transitions (buy_up_down, claim_winnings,
+                  claim_refund, emergency_cancel).
+                </p>
+              </div>
             </div>
+          </section>
+
+          {/* Turbo Markets */}
+          <section>
+            <div className="flex items-center gap-2 mb-4">
+              <Terminal className="w-5 h-5 text-brand-400" />
+              <h2 className="text-lg font-semibold text-white">Turbo Markets (v0.4.0+)</h2>
+            </div>
+            <p className="text-surface-400 mb-4">
+              Rolling 5-minute parimutuel UP/DOWN markets backed by Pyth Network. Unlike FAMM markets,
+              turbo markets have fixed duration, single-asset pricing, and use a shared vault across
+              all rounds. Only <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">buy_up_down</code>,
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">claim_winnings</code>,
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">claim_refund</code>, and
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">emergency_cancel</code>
+              are user-callable. Create/resolve are operator-only.
+            </p>
+
+            <CodeBlock title="typescript">{`import {
+  createTurboClient,
+  quoteBuyUpDown,
+  quoteTurboPayout,
+  parseTurboShareRecord,
+} from '@veiled-markets/sdk'
+
+const turbo = createTurboClient({ network: 'testnet' })
+
+// Quote a 1 ALEO bet on UP
+const quote = quoteBuyUpDown(1_000_000n)
+// → { amountIn, protocolFee: 5000n, amountToPool: 995000n, expectedShares: 995000n }
+
+// Build buy tx (pass creditsRecord plaintext from wallet)
+const buyCall = turbo.buildBuyUpDownInputs({
+  marketId: '12345field',
+  side: 'UP',                                 // or 'DOWN'
+  amountIn: quote.amountIn,
+  expectedShares: quote.expectedShares,
+  creditsRecord: '<record plaintext>',
+})
+// → { programId, functionName: 'buy_up_down', inputs: [...], shareNonce }
+// Submit via wallet adapter; persist shareNonce for later claim
+
+// After market resolves, fetch on-chain state
+const market = await turbo.getMarket('12345field')       // TurboMarket | null
+const pool = await turbo.getPool('12345field')           // TurboPool | null
+const payouts = await turbo.getMarketPayouts('12345field') // bigint | null
+
+// Compute exact claim_winnings payout
+if (market?.status === 2 /* Resolved */ && pool && payouts) {
+  const winningShares = market.winningOutcome === 1
+    ? pool.totalUpShares : pool.totalDownShares
+  const declaredPayout = quoteTurboPayout(
+    myShareQuantity,
+    payouts,
+    winningShares,
+  )
+
+  const claimCall = turbo.buildClaimWinningsInputs({
+    marketId: '12345field',
+    shareRecord: '<TurboShare plaintext from wallet>',
+    declaredPayout,
+  })
+}`}</CodeBlock>
+
+            <p className="mt-4 text-surface-400">
+              Turbo quote math exactly mirrors the contract's{' '}
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">buy_up_down_fin</code> and
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">claim_winnings_fin</code>
+              arithmetic — the contract asserts{' '}
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">declared_payout == payout</code>
+              exactly, so any off-by-one will be rejected at finalize. Always use the SDK helpers to
+              derive these values.
+            </p>
           </section>
 
           {/* Network Config */}

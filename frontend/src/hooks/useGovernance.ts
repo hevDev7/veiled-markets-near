@@ -47,15 +47,40 @@ import {
 } from '../lib/aleo-client';
 import { findVoteLocks } from '../lib/record-scanner';
 
-const POLL_INTERVAL = 30_000; // 30s
+// 60s poll instead of 30s — heavy fetch (block height + supply + config +
+// proposals + rewards + vote locks + escalations + committee members + all
+// market mappings × N markets) shouldn't run more often than necessary.
+const POLL_INTERVAL = 60_000; // 60s
 
 export function useGovernance() {
   const { wallet } = useWalletStore();
   const store = useGovernanceStore();
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  // Track whether we've completed at least one fetch. Subsequent polls run
+  // "silently" — data still refreshes in the store but isLoading stays false
+  // so the loading skeletons in GovernanceHeader / RewardClaimPanel /
+  // ProposalList don't flicker every 60 seconds.
+  const isFirstLoadRef = useRef(true);
+  // Track in-flight transaction actions so background polls can defer until
+  // the user finishes their current button click — prevents the data from
+  // refreshing mid-interaction and resetting the optimistic UI state.
+  const isFetchingRef = useRef(false);
 
-  const fetchGovernanceData = useCallback(async () => {
-    store.setIsLoading(true);
+  const fetchGovernanceData = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (isFetchingRef.current) {
+      // Already a fetch in progress — drop this poll trigger to avoid
+      // overlapping requests that double the perceived "refresh".
+      return;
+    }
+    isFetchingRef.current = true;
+
+    // Only show loading skeletons on the very first load. Subsequent
+    // background polls update the store invisibly. Pass `silent: false` to
+    // force a loading state (e.g. for an explicit "Refresh" button later).
+    const showLoading = isFirstLoadRef.current && !options.silent;
+    if (showLoading) {
+      store.setIsLoading(true);
+    }
     try {
       // Each fetch is wrapped in .catch() so a single failure (e.g. record
       // scanner CORS error on api.provable.com/scanner/* breaking
@@ -176,16 +201,56 @@ export function useGovernance() {
     } catch (error) {
       console.error('[governance] Failed to fetch data:', error);
     } finally {
-      store.setIsLoading(false);
+      // Always clear loading + first-load flag + in-flight guard, even if
+      // the fetch failed. The user can manually retry via the refetch
+      // function returned by the hook.
+      if (showLoading) {
+        store.setIsLoading(false);
+      }
+      isFirstLoadRef.current = false;
+      isFetchingRef.current = false;
     }
   }, [wallet.connected, wallet.address, wallet.isDemoMode]);
 
-  // Auto-poll
+  // Auto-poll with visibility awareness — pauses while the tab is hidden
+  // and resumes (with an immediate fetch) when the user returns. Avoids
+  // wasting RPC + Supabase quota when the tab is in the background.
   useEffect(() => {
     fetchGovernanceData();
-    intervalRef.current = setInterval(fetchGovernanceData, POLL_INTERVAL);
+
+    const startInterval = () => {
+      if (intervalRef.current) return;
+      intervalRef.current = setInterval(() => {
+        fetchGovernanceData();
+      }, POLL_INTERVAL);
+    };
+
+    const stopInterval = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = undefined;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopInterval();
+      } else {
+        // Tab back in focus — refresh once immediately so user sees fresh
+        // data, then resume the interval.
+        fetchGovernanceData();
+        startInterval();
+      }
+    };
+
+    if (!document.hidden) {
+      startInterval();
+    }
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      stopInterval();
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [fetchGovernanceData]);
 
@@ -285,6 +350,11 @@ async function fetchGovernanceEscalations(
 ): Promise<GovernanceEscalationMarket[]> {
   try {
     const chainMarkets = await fetchAllMarkets();
+    // Active escalations: markets in voting / pre-finalize / disputed states.
+    // Note: RESOLVED markets are added below ONLY if they have a non-zero
+    // escalation tier (i.e. they passed through governance), so the Disputes
+    // tab can show a history of resolved-via-governance markets without
+    // polluting it with regular non-disputed resolved markets.
     const candidateMap = new Map(chainMarkets
       .filter(({ market }) =>
         market.status === MARKET_STATUS.PENDING_RESOLUTION
@@ -292,6 +362,24 @@ async function fetchGovernanceEscalations(
         || market.status === MARKET_STATUS.DISPUTED
       )
       .map((entry) => [entry.market.id, entry]));
+
+    // History inclusion: also pull in RESOLVED markets that have governance
+    // escalation history (escalation tier > 0). We probe market_escalation_tier
+    // for every chain market — cheap mapping reads, parallelized — and only
+    // add the market as a candidate if the tier is non-zero.
+    const resolvedCandidates = chainMarkets.filter(
+      ({ market }) => market.status === MARKET_STATUS.RESOLVED && !candidateMap.has(market.id),
+    );
+    const resolvedTiers = await Promise.all(
+      resolvedCandidates.map((entry) =>
+        getMarketEscalationTier(entry.market.id).catch(() => 0).then((tier) => ({ entry, tier })),
+      ),
+    );
+    for (const { entry, tier } of resolvedTiers) {
+      if (tier > 0) {
+        candidateMap.set(entry.market.id, entry);
+      }
+    }
 
     const communityProposalByMarket = new Map<string, GovernanceProposal>();
     for (const proposal of proposals) {
@@ -331,36 +419,44 @@ async function fetchGovernanceEscalations(
         // Stage detection — determines which UI badge + which action buttons
         // are rendered in EscalationPanel for the market.
         //
-        // v6 IMPORTANT: 'committee' stage covers EVERYTHING under tier 2:
-        //   - tier 2 + no votes yet (just escalated)        ← waiting for committee
-        //   - tier 2 + votes in progress (1/3, 2/3)        ← waiting for quorum
-        //   - tier 2 + committeeDecision.finalized = true  ← ready to apply
-        // The old logic only checked `committeeDecision` which meant the UI
-        // showed stage='disputed' (with "Initiate Escalation" button still
-        // visible) even AFTER initiate_escalation was called. The fix is to
-        // also use `escalationTier` from market_escalation_tier mapping —
-        // if tier === 2 (or 3), the market has already been escalated.
+        // v6 IMPORTANT: terminal market states (CANCELLED, RESOLVED) MUST be
+        // checked first. After governance_resolve_aleo flips status to
+        // MARKET_STATUS_RESOLVED, the market_escalation_tier mapping still
+        // holds the historical tier value (2 for committee path, 3 for
+        // community), and committee_decisions still contains the finalized
+        // record. Without checking RESOLVED first, the tier check would
+        // win and the market would forever appear in 'committee' stage even
+        // though it's actually finished.
+        //
+        // Order of priority:
+        //   1. CANCELLED  → cancelled (terminal)
+        //   2. RESOLVED   → resolved  (terminal — covers all governance-resolved markets)
+        //   3. community proposal active OR tier 3 → community
+        //   4. committee finalize OR tier 2 → committee
+        //   5. STATUS_DISPUTED → disputed (tier 0, awaiting initiate_escalation)
+        //   6. PENDING_FINALIZATION → dispute_window
+        //   7. PENDING_RESOLUTION → voting
         let stage: GovernanceEscalationMarket['stage'] = 'resolved';
         if (market.status === MARKET_STATUS.CANCELLED) {
           stage = 'cancelled';
+        } else if (market.status === MARKET_STATUS.RESOLVED) {
+          // Terminal state — market lifecycle complete. Could have arrived
+          // here either via confirm_resolution (no dispute, tier 0) OR via
+          // governance_resolve_aleo/usdcx/usad (tier 2 or 3). Either way the
+          // market is done, so stage='resolved' regardless of escalationTier.
+          stage = 'resolved';
         } else if (communityProposal && communityProposal.status !== PROPOSAL_STATUS.REJECTED && communityProposal.status !== PROPOSAL_STATUS.VETOED && communityProposal.status !== PROPOSAL_STATUS.EXPIRED) {
           stage = 'community';
         } else if (escalationTier === 3) {
-          // Tier 3 = community override path (governance proposal active)
           stage = 'community';
         } else if (committeeDecision || escalationTier === 2) {
-          // Tier 2 = committee review (with or without finalized decision yet)
           stage = 'committee';
         } else if (market.status === MARKET_STATUS.DISPUTED || dispute || disputeStateOnChain) {
-          // v6: STATUS_DISPUTED markets at tier 0 (not yet escalated). Show
-          // the "Initiate Escalation" button to move them to tier 2.
           stage = 'disputed';
         } else if (market.status === MARKET_STATUS.PENDING_FINALIZATION) {
           stage = 'dispute_window';
         } else if (market.status === MARKET_STATUS.PENDING_RESOLUTION) {
           stage = 'voting';
-        } else if (market.status === MARKET_STATUS.RESOLVED) {
-          stage = 'resolved';
         }
 
         return {

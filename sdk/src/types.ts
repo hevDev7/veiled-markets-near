@@ -373,13 +373,15 @@ export const NETWORK_CONFIG = {
 } as const;
 
 /**
- * Deployed program IDs (post-audit hardening, 2026-04-08)
+ * Deployed program IDs (post-audit hardening, 2026-04-08; turbo 2026-04-10)
  */
 export const PROGRAM_IDS = {
   ALEO_MARKET: 'veiled_markets_v37.aleo',
   USDCX_MARKET: 'veiled_markets_usdcx_v7.aleo',
   USAD_MARKET: 'veiled_markets_usad_v14.aleo',
   GOVERNANCE: 'veiled_governance_v6.aleo',
+  PARLAY: 'veiled_parlay_v3.aleo',
+  TURBO: 'veiled_turbo_v8.aleo',
 } as const;
 
 /**
@@ -390,3 +392,177 @@ export const MARKET_PROGRAM_BY_TOKEN: Record<TokenType, string> = {
   [TokenType.USDCX]: PROGRAM_IDS.USDCX_MARKET,
   [TokenType.USAD]: PROGRAM_IDS.USAD_MARKET,
 };
+
+// ============================================================================
+// TURBO MARKET TYPES (veiled_turbo_v8.aleo)
+// ============================================================================
+// Rolling 5-minute UP/DOWN prediction markets backed by Pyth Network oracle.
+// Operator (ORACLE_OPERATOR hardcoded in the contract) creates markets every
+// 5 min with a baseline price, freezes at deadline with a closing price, and
+// winners claim a parimutuel payout from the combined pool.
+//
+// Only `buy_up_down`, `claim_winnings`, `claim_refund`, and `emergency_cancel`
+// are user-callable. `create_turbo_market` / `resolve_turbo_market` are
+// operator-only (see backend/src/pyth-oracle.ts for the operator flow).
+// ============================================================================
+
+/**
+ * Turbo market side (UP or DOWN). Maps to the u8 side field the contract
+ * uses — 1 = UP, 2 = DOWN. Matches `OUTCOME_UP` / `OUTCOME_DOWN` constants
+ * in contracts-turbo-v1/src/main.leo.
+ */
+export type TurboSide = 'UP' | 'DOWN';
+
+/**
+ * Contract-level u8 values for sides, exported so callers can compare
+ * parsed records without re-deriving the mapping.
+ */
+export const TURBO_OUTCOME = {
+  UP: 1,
+  DOWN: 2,
+} as const;
+
+/**
+ * Turbo market status (matches contract u8 values):
+ *   1 = STATUS_ACTIVE      — accepting bets, pre-deadline
+ *   2 = STATUS_RESOLVED    — oracle posted closing_price, winners can claim
+ *   3 = STATUS_CANCELLED   — emergency_cancel fired, bettors can refund
+ */
+export enum TurboMarketStatus {
+  Active = 1,
+  Resolved = 2,
+  Cancelled = 3,
+}
+
+/**
+ * Symbol ids the turbo contract whitelists. Same order as
+ * `SYMBOL_*` constants in contracts-turbo-v1/src/main.leo.
+ */
+export const TURBO_SYMBOL_IDS = {
+  BTC: 1,
+  ETH: 2,
+  SOL: 3,
+  DOGE: 4,
+  XRP: 5,
+  BNB: 6,
+  ADA: 7,
+  AVAX: 8,
+  LINK: 9,
+  DOT: 10,
+} as const;
+
+export type TurboSymbol = keyof typeof TURBO_SYMBOL_IDS;
+
+/**
+ * On-chain `TurboMarket` struct (mapped by `turbo_markets[market_id]`).
+ * All u128/u64 fields decoded to JS bigint.
+ */
+export interface TurboMarket {
+  id: string;                    // field - market_id (= BHP256 hash of TurboSeed)
+  creator: string;               // address - always the operator wallet
+  symbolId: number;              // u8 - see TURBO_SYMBOL_IDS
+  baselinePrice: bigint;         // u128 - price at create time (Pyth micro, 6 decimals)
+  baselineBlock: bigint;         // u64 - block height of baseline snapshot
+  deadline: bigint;              // u64 - trading deadline (block height)
+  resolutionDeadline: bigint;    // u64 - deadline + RESOLUTION_GRACE_BLOCKS (300 blocks)
+  closingPrice: bigint;          // u128 - 0 while active, Pyth micro at resolve
+  winningOutcome: number;        // u8 - 0 while active, 1=UP, 2=DOWN after resolve
+  status: TurboMarketStatus;     // u8 - see TurboMarketStatus
+  createdAt: bigint;             // u64 - create-time block height
+}
+
+/**
+ * On-chain `TurboPool` struct (mapped by `turbo_pools[market_id]`).
+ * Tracks parimutuel totals — no FPMM curve.
+ */
+export interface TurboPool {
+  marketId: string;              // field
+  totalUpAmount: bigint;         // u128 - ALEO staked on UP (net, after fees)
+  totalDownAmount: bigint;       // u128 - ALEO staked on DOWN (net, after fees)
+  totalUpShares: bigint;         // u128 - redeemable shares if UP wins
+  totalDownShares: bigint;       // u128 - redeemable shares if DOWN wins
+  totalVolume: bigint;           // u128 - sum of all raw amount_in values
+}
+
+/**
+ * Private TurboShare record issued by `buy_up_down`. User's wallet stores
+ * this encrypted — pass the plaintext back to `claim_winnings` /
+ * `claim_refund` to burn it and collect payout / refund.
+ */
+export interface TurboShare {
+  owner: string;                 // address - bet placer
+  marketId: string;              // field - which market this share belongs to
+  side: TurboSide;               // derived from u8 (1=UP, 2=DOWN)
+  quantity: bigint;              // u128 - net stake (amount_in - protocol fee)
+  shareNonce: string;            // field - random anchor (unique per share)
+  /** Raw plaintext string wallet adapters return. Pass back to claim txs
+   *  verbatim — record literal parsing happens on-chain, not here. */
+  plaintext?: string;
+}
+
+/**
+ * `buy_up_down` parameters. The contract expects the user to supply
+ * `expected_shares` computed off-chain — use `quoteBuyUpDown` to derive it
+ * so the value exactly matches what `buy_up_down_fin` will compute.
+ */
+export interface TurboBuyParams {
+  marketId: string;              // field - must include "field" suffix
+  side: TurboSide;               // UP or DOWN
+  amountIn: bigint;              // u128 - gross bet amount in microcredits
+  expectedShares: bigint;        // u128 - net shares = amount_in - protocol_fee
+  /** Optional caller-provided nonce (field literal). Auto-generated if omitted. */
+  shareNonce?: string;
+  /** Serialized `credits.aleo::credits` record plaintext (wallet-supplied). */
+  creditsRecord: string;
+}
+
+/**
+ * `claim_winnings` parameters. `declaredPayout` MUST match the contract's
+ * `(quantity × market_payouts) / total_winning_shares` exactly — the
+ * finalize assertion `declared_payout == payout` is strict. Use
+ * `quoteTurboPayout()` to compute.
+ */
+export interface TurboClaimWinningsParams {
+  marketId: string;              // field
+  shareRecord: string;           // TurboShare record plaintext
+  declaredPayout: bigint;        // u128 - must match on-chain payout formula
+}
+
+/**
+ * `claim_refund` parameters. `expectedAmount` == the share's original net
+ * quantity (no fee on refund, the whole stake comes back).
+ */
+export interface TurboClaimRefundParams {
+  marketId: string;              // field
+  shareRecord: string;           // TurboShare record plaintext
+  expectedAmount: bigint;        // u128 - = TurboShare.quantity
+}
+
+/**
+ * Quote result for `buy_up_down`. Exactly mirrors the arithmetic
+ * `buy_up_down_fin` performs on-chain:
+ *   protocol_fee = amount_in × 50 / 10_000        (0.5%)
+ *   amount_to_pool = amount_in - protocol_fee
+ *   shares_out = amount_to_pool                    (parimutuel: 1:1)
+ */
+export interface TurboBuyQuote {
+  amountIn: bigint;              // echoed input
+  protocolFee: bigint;           // deducted from amount_in
+  amountToPool: bigint;          // amount_in - protocolFee
+  expectedShares: bigint;        // == amountToPool (parimutuel 1:1)
+}
+
+/**
+ * Turbo fee constants. 0.5% protocol fee, no LP fee (no liquidity
+ * providers), no creator fee (creator == operator).
+ */
+export const TURBO_PROTOCOL_FEE_BPS = 50n;
+export const TURBO_FEE_DENOMINATOR = 10000n;
+/** Minimum bet: 0.001 ALEO (matches `MIN_TRADE_AMOUNT` in main.leo). */
+export const TURBO_MIN_TRADE_AMOUNT = 1000n;
+/** Market lifetime in blocks on testnet (~5 minutes at 4s/block). */
+export const TURBO_DURATION_BLOCKS = 75n;
+/** How long after deadline the operator can still submit resolve. */
+export const TURBO_RESOLUTION_WINDOW_BLOCKS = 60n;
+/** Total grace before `emergency_cancel` becomes available. */
+export const TURBO_RESOLUTION_GRACE_BLOCKS = 300n;

@@ -379,50 +379,101 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                       <p className="text-surface-400 text-sm mb-4">Select an outcome to buy shares</p>
 
                       {/* Multi-outcome selector */}
-                      <div className={cn(
-                        'grid gap-3 mb-6',
-                        numOutcomes <= 2 ? 'grid-cols-2' : numOutcomes === 3 ? 'grid-cols-3' : 'grid-cols-2'
-                      )}>
-                        {Array.from({ length: numOutcomes }, (_, i) => i + 1).map((outcome) => {
-                          const color = getOutcomeColor(outcome)
-                          const price = outcomePrices[outcome - 1] || 0
-                          const isSelected = selectedOutcome === outcome
+                      {numOutcomes >= 4 ? (
+                        /* 4-outcome: stacked rows with progress bars */
+                        <div className="space-y-2 mb-6">
+                          {Array.from({ length: numOutcomes }, (_, i) => i + 1).map((outcome) => {
+                            const color = getOutcomeColor(outcome)
+                            const price = outcomePrices[outcome - 1] || 0
+                            const pct = Math.round(price * 100)
+                            const isSelected = selectedOutcome === outcome
+                            const colorHex = color === 'yes' ? '#4ade80' : color === 'no' ? '#f87171' : color === 'brand' ? '#a78bfa' : '#fbbf24'
+                            const colorBg = color === 'yes' ? 'rgba(34,197,94,' : color === 'no' ? 'rgba(239,68,68,' : color === 'brand' ? 'rgba(139,92,246,' : 'rgba(234,179,8,'
 
-                          return (
-                            <button
-                              key={outcome}
-                              onClick={() => setSelectedOutcome(outcome)}
-                              className={cn(
-                                'relative p-4 rounded-xl border-2 transition-all duration-200',
-                                isSelected
-                                  ? `border-${color}-500 bg-${color}-500/10`
-                                  : `border-surface-700 hover:border-${color}-500/50 hover:bg-${color}-500/5`
-                              )}
-                              style={isSelected ? {
-                                borderColor: color === 'yes' ? '#22c55e' : color === 'no' ? '#ef4444' : color === 'brand' ? '#9171f8' : '#eab308',
-                                backgroundColor: color === 'yes' ? 'rgba(34,197,94,0.1)' : color === 'no' ? 'rgba(239,68,68,0.1)' : color === 'brand' ? 'rgba(139,92,246,0.1)' : 'rgba(234,179,8,0.1)',
-                              } : {}}
-                            >
-                              {isSelected && (
-                                <div className="absolute top-2 right-2">
-                                  <Check className="w-4 h-4" style={{
-                                    color: color === 'yes' ? '#4ade80' : color === 'no' ? '#f87171' : color === 'brand' ? '#a78bfa' : '#fbbf24'
-                                  }} />
+                            return (
+                              <button
+                                key={outcome}
+                                onClick={() => setSelectedOutcome(outcome)}
+                                className={cn(
+                                  'relative w-full rounded-xl border-2 transition-all duration-200 overflow-hidden',
+                                  'flex items-center gap-3 px-4 py-3 text-left',
+                                )}
+                                style={{
+                                  borderColor: isSelected ? colorHex : 'rgba(255,255,255,0.08)',
+                                  backgroundColor: isSelected ? `${colorBg}0.1)` : 'transparent',
+                                }}
+                              >
+                                {/* Progress bar */}
+                                <div
+                                  className="absolute inset-y-0 left-0 transition-all duration-500"
+                                  style={{ width: `${Math.max(pct, 4)}%`, backgroundColor: `${colorBg}0.08)` }}
+                                />
+                                <div
+                                  className="absolute bottom-0 left-0 h-0.5 transition-all duration-500"
+                                  style={{ width: `${Math.max(pct, 4)}%`, backgroundColor: colorHex }}
+                                />
+
+                                <div className="relative flex items-center justify-between w-full z-10">
+                                  <div className="flex items-center gap-2.5">
+                                    {isSelected && <Check className="w-4 h-4 flex-shrink-0" style={{ color: colorHex }} />}
+                                    <span className="font-semibold text-white text-sm">{outcomeLabels[outcome - 1]}</span>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <span className="font-bold text-base tabular-nums" style={{ color: colorHex }}>{pct}%</span>
+                                    <span className="text-xs tabular-nums opacity-60" style={{ color: colorHex }}>${price.toFixed(3)}</span>
+                                  </div>
                                 </div>
-                              )}
-                              <div className="text-2xl font-bold mb-1" style={{
-                                color: color === 'yes' ? '#4ade80' : color === 'no' ? '#f87171' : color === 'brand' ? '#a78bfa' : '#fbbf24'
-                              }}>
-                                {(price * 100).toFixed(1)}%
-                              </div>
-                              <div className="text-sm font-semibold text-white">{outcomeLabels[outcome - 1]}</div>
-                              <div className="text-xs text-surface-400 mt-1">
-                                ${price.toFixed(3)}/share
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        /* 2-3 outcomes: grid layout */
+                        <div className={cn(
+                          'grid gap-3 mb-6',
+                          numOutcomes <= 2 ? 'grid-cols-2' : 'grid-cols-3'
+                        )}>
+                          {Array.from({ length: numOutcomes }, (_, i) => i + 1).map((outcome) => {
+                            const color = getOutcomeColor(outcome)
+                            const price = outcomePrices[outcome - 1] || 0
+                            const isSelected = selectedOutcome === outcome
+
+                            return (
+                              <button
+                                key={outcome}
+                                onClick={() => setSelectedOutcome(outcome)}
+                                className={cn(
+                                  'relative p-4 rounded-xl border-2 transition-all duration-200',
+                                  isSelected
+                                    ? `border-${color}-500 bg-${color}-500/10`
+                                    : `border-surface-700 hover:border-${color}-500/50 hover:bg-${color}-500/5`
+                                )}
+                                style={isSelected ? {
+                                  borderColor: color === 'yes' ? '#22c55e' : color === 'no' ? '#ef4444' : color === 'brand' ? '#9171f8' : '#eab308',
+                                  backgroundColor: color === 'yes' ? 'rgba(34,197,94,0.1)' : color === 'no' ? 'rgba(239,68,68,0.1)' : color === 'brand' ? 'rgba(139,92,246,0.1)' : 'rgba(234,179,8,0.1)',
+                                } : {}}
+                              >
+                                {isSelected && (
+                                  <div className="absolute top-2 right-2">
+                                    <Check className="w-4 h-4" style={{
+                                      color: color === 'yes' ? '#4ade80' : color === 'no' ? '#f87171' : color === 'brand' ? '#a78bfa' : '#fbbf24'
+                                    }} />
+                                  </div>
+                                )}
+                                <div className="text-2xl font-bold mb-1" style={{
+                                  color: color === 'yes' ? '#4ade80' : color === 'no' ? '#f87171' : color === 'brand' ? '#a78bfa' : '#fbbf24'
+                                }}>
+                                  {(price * 100).toFixed(1)}%
+                                </div>
+                                <div className="text-sm font-semibold text-white">{outcomeLabels[outcome - 1]}</div>
+                                <div className="text-xs text-surface-400 mt-1">
+                                  ${price.toFixed(3)}/share
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
 
                       {/* Amount input (combined step) */}
                       {selectedOutcome && !isExpired && (

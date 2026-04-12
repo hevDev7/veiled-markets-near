@@ -41,7 +41,11 @@ export function BugBounty() {
               {[
                 {
                   title: 'Smart Contract Scope',
-                  desc: 'veiled_markets_v37.aleo (25 transitions), veiled_markets_usdcx_v7.aleo (25 transitions), veiled_markets_usad_v14.aleo (25 transitions), and veiled_governance_v6.aleo (31 transitions)',
+                  desc: 'veiled_markets_v37.aleo (25 transitions), veiled_markets_usdcx_v7.aleo (25 transitions), veiled_markets_usad_v14.aleo (25 transitions), veiled_governance_v6.aleo (31 transitions), veiled_parlay_v3.aleo (multi-leg parlays), and veiled_turbo_v8.aleo (rolling 5-min Pyth-backed markets, 10 transitions)',
+                },
+                {
+                  title: 'Oracle & Operator Scope',
+                  desc: 'Pyth Hermes integration for Turbo markets, operator backend (create/resolve flow), audit log integrity at /verify/turbo/:marketId, price manipulation or snapshot divergence between on-chain commitment and Pyth historical data',
                 },
                 {
                   title: 'Frontend Scope',

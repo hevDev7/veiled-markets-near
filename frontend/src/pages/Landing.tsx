@@ -557,9 +557,11 @@ export function Landing() {
                 viewport={{ once: true }} transition={{ delay: i * 0.1 }}
                 className="group relative p-8 rounded-2xl transition-all duration-300 hover:border-white/[0.08]"
                 style={{
-                  background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)',
+                  background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.25) 0%, rgba(13, 15, 20, 0.3) 100%)',
                   border: '1px solid rgba(255, 255, 255, 0.04)',
                   boxShadow: '0 1px 0 0 rgba(255, 255, 255, 0.02) inset, 0 4px 20px -4px rgba(0, 0, 0, 0.4)',
+                  backdropFilter: 'blur(14px)',
+                  WebkitBackdropFilter: 'blur(14px)',
                 }}>
                 <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-5 transition-transform group-hover:scale-110"
                   style={{ background: `${f.color}10`, border: `1px solid ${f.color}20`, color: f.color }}>
@@ -621,9 +623,11 @@ export function Landing() {
                   )}
                   <div className="rounded-2xl p-6 h-full"
                     style={{
-                      background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.8) 0%, rgba(13, 15, 20, 0.9) 100%)',
+                      background: 'linear-gradient(135deg, rgba(22, 26, 36, 0.25) 0%, rgba(13, 15, 20, 0.3) 100%)',
                       border: '1px solid rgba(255, 255, 255, 0.04)',
                       boxShadow: '0 1px 0 0 rgba(255, 255, 255, 0.02) inset, 0 4px 20px -4px rgba(0, 0, 0, 0.4)',
+                      backdropFilter: 'blur(14px)',
+                      WebkitBackdropFilter: 'blur(14px)',
                     }}>
                     <div className="flex items-center gap-3 mb-5">
                       <span className="text-xs font-mono text-brand-400/50">{s.step}</span>
@@ -646,9 +650,11 @@ export function Landing() {
         <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
           className="relative rounded-3xl p-12 lg:p-16 text-center overflow-hidden"
           style={{
-            background: 'linear-gradient(135deg, rgba(28, 33, 48, 0.9) 0%, rgba(17, 20, 27, 0.95) 100%)',
+            background: 'linear-gradient(135deg, rgba(28, 33, 48, 0.3) 0%, rgba(17, 20, 27, 0.35) 100%)',
             border: '1px solid rgba(255, 255, 255, 0.06)',
             boxShadow: '0 8px 32px -8px rgba(0,0,0,0.5), 0 4px 8px -4px rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
           }}>
           <div className="absolute inset-0 bg-gradient-to-br from-brand-400/[0.04] via-transparent to-yes-400/[0.02]" />
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[500px] h-px bg-gradient-to-r from-transparent via-brand-400/30 to-transparent" />

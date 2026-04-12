@@ -84,6 +84,9 @@ import { fetchBetCountByMarket } from '@/lib/supabase'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { devWarn } from '../lib/logger'
+import { getTurboSymbolFromMarketId } from '@/lib/turbo-client'
+import { TurboDetail } from './TurboDetail'
+import type { TurboSymbol } from '@/components/TurboMarketPanel'
 
 const categoryNames: Record<number, string> = {
   1: 'Politics',
@@ -252,6 +255,26 @@ export function MarketDetail() {
   const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
   const { markets, fetchMarkets, isLoading: marketsLoading } = useRealMarketsStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
+
+  // Turbo dispatch — /market/:marketId should transparently render the
+  // TurboDetail view when the id belongs to the turbo contract. We probe
+  // the turbo_markets mapping on mount (no wasted work for FAMM markets
+  // since markets.find(…) also runs in parallel — whichever resolves
+  // first wins). The probe is cheap: a single HTTP GET.
+  const [turboSymbol, setTurboSymbol] = useState<string | null | 'loading'>('loading')
+  useEffect(() => {
+    if (!marketId) { setTurboSymbol(null); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const sym = await getTurboSymbolFromMarketId(marketId)
+        if (!cancelled) setTurboSymbol(sym)
+      } catch {
+        if (!cancelled) setTurboSymbol(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [marketId])
 
   const [market, setMarket] = useState<Market | null>(null)
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
@@ -647,7 +670,28 @@ export function MarketDetail() {
     }
   }, [tradeMode, market?.id, isWalletConnected])
 
+  // Turbo dispatch: if the probe resolved a turbo symbol for this market_id,
+  // render TurboDetail transparently. The /market/:marketId URL stays in the
+  // browser bar — this is what unifies turbo + FAMM market links.
+  if (turboSymbol && turboSymbol !== 'loading') {
+    return <TurboDetail symbolOverride={turboSymbol as TurboSymbol} />
+  }
+
   if (!market) {
+    // If the turbo probe is still in flight, wait for it before deciding
+    // "Market Not Found". Otherwise a turbo market_id briefly flashes the
+    // not-found screen while the probe resolves.
+    if (turboSymbol === 'loading') {
+      return (
+        <div className="min-h-screen bg-surface-950 flex flex-col">
+          <DashboardHeader />
+          <main className="flex-1 pt-20 flex items-center justify-center">
+            <div className="skeleton h-6 w-48 rounded" />
+          </main>
+          <Footer />
+        </div>
+      )
+    }
     // Still loading markets — show skeleton instead of "Not Found"
     if (marketsLoading || markets.length === 0) {
       return (

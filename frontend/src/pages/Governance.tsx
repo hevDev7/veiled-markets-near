@@ -724,7 +724,16 @@ export function Governance() {
                   // count badge turns red when there are active escalations
                   // so disputed markets are immediately visible without the
                   // user having to discover the sidebar.
-                  { key: 'disputes' as const, label: 'Disputes', count: governance.escalations.length, alert: governance.escalations.length > 0 },
+                  // Count only ACTIVE escalations (excludes resolved/cancelled
+                  // history) so the red alert badge clears once all live
+                  // disputes have been settled. The History bucket inside the
+                  // panel still surfaces past escalations.
+                  { key: 'disputes' as const, label: 'Disputes', count: (() => {
+                    const active = governance.escalations.filter(
+                      (e) => e.stage !== 'resolved' && e.stage !== 'cancelled',
+                    ).length;
+                    return active;
+                  })(), alert: governance.escalations.some((e) => e.stage !== 'resolved' && e.stage !== 'cancelled') },
                   { key: 'resolver' as const, label: 'Resolvers', count: governance.stats.totalResolvers || 0, alert: false },
                 ].map((tab) => (
                   <button

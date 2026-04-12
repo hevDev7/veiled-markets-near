@@ -124,8 +124,8 @@ export function outcomeToString(outcomeNum: number): string {
 
 /** Convert outcome string key to 1-indexed number */
 export function outcomeToIndex(outcome: string): number {
-  if (outcome === 'yes') return 1
-  if (outcome === 'no') return 2
+  if (outcome === 'yes' || outcome === 'up') return 1
+  if (outcome === 'no' || outcome === 'down') return 2
   const match = outcome.match(/^outcome_(\d+)$/)
   return match ? parseInt(match[1]) : 1
 }

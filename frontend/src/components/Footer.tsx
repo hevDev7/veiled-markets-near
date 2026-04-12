@@ -2,10 +2,14 @@ import { Github, Twitter, MessageCircle, Globe, ArrowUpRight } from 'lucide-reac
 import { Link } from 'react-router-dom'
 
 const footerRoutes: Record<string, string> = {
+  // Protocol (wired to in-app routes where they exist)
+  'Markets': '/dashboard',
+  'Turbo': '/turbo',
+  'Governance': '/governance',
   // Resources
   'How It Works': '/how-it-works',
   'FAQ': '/faq',
-  'API Docs': '/api-docs',
+  'Docs': '/docs',
   'Brand Kit': '/brand-kit',
   'Bug Bounty': '/bug-bounty',
   // Legal
@@ -59,11 +63,11 @@ export function Footer() {
           {[
             {
               title: 'Protocol',
-              links: ['Markets', 'Governance', 'Treasury', 'Docs', 'Audits'],
+              links: ['Markets', 'Turbo', 'Governance'],
             },
             {
               title: 'Resources',
-              links: ['How It Works', 'FAQ', 'API Docs', 'Brand Kit', 'Bug Bounty'],
+              links: ['How It Works', 'FAQ', 'Docs', 'Brand Kit', 'Bug Bounty'],
             },
             {
               title: 'Company',

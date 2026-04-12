@@ -18,7 +18,7 @@ export function RiskDisclosure() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Risk Disclosure</h1>
-        <p className="text-sm text-surface-500 mb-8">Last updated: March 26, 2026</p>
+        <p className="text-sm text-surface-500 mb-8">Last updated: April 9, 2026</p>
 
         {/* Warning Banner */}
         <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/[0.06] border border-yellow-500/[0.12] mb-12">
@@ -48,8 +48,24 @@ export function RiskDisclosure() {
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Code Vulnerabilities:</strong> Despite testing and review, smart contracts may contain undiscovered bugs or vulnerabilities that could result in loss of funds.</li>
               <li><strong className="text-surface-300">Immutability:</strong> Once deployed, smart contract code cannot be easily modified. Fixes may require deploying new contracts and migrating state.</li>
-              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v37.aleo for ALEO markets, veiled_markets_usdcx_v7.aleo for USDCX markets, veiled_markets_usad_v14.aleo for USAD markets, and veiled_governance_v6.aleo for governance). Issues in any component could affect the entire system.</li>
-              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses up to 25 transitions and the governance contract uses 31 transitions.</li>
+              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v37.aleo for ALEO markets, veiled_markets_usdcx_v7.aleo for USDCX markets, veiled_markets_usad_v14.aleo for USAD markets, veiled_governance_v6.aleo for governance, veiled_parlay_v3.aleo for multi-leg parlays, and veiled_turbo_v8.aleo for rolling 5-minute oracle markets). Issues in any component could affect the entire system.</li>
+              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses up to 25 transitions, the governance contract uses 31 transitions (at the limit), and the turbo contract uses 10 transitions.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-white mb-4">2a. Turbo Market & Oracle Risk</h2>
+            <p className="mb-3">
+              Turbo markets (veiled_turbo_v8.aleo) introduce additional risks beyond the main FAMM markets:
+            </p>
+            <ul className="list-disc list-inside space-y-2 text-surface-400">
+              <li><strong className="text-surface-300">Operator Trust:</strong> Turbo markets are created and resolved by a single trusted operator wallet (ORACLE_OPERATOR hardcoded in the contract) that subscribes to Pyth Network and pushes price snapshots on-chain. If the operator is offline, compromised, or malicious, rounds may fail to resolve, resolve to incorrect outcomes, or get stuck requiring emergency_cancel.</li>
+              <li><strong className="text-surface-300">Oracle Dependency:</strong> Price data comes from the Pyth Network Hermes stream. A Pyth outage, manipulation, or mispricing affects every turbo round in that window. Pyth confidence intervals are checked on-chain but don't guarantee correctness.</li>
+              <li><strong className="text-surface-300">No Dispute Window:</strong> Unlike FAMM markets, turbo markets have NO Multi-Voter Quorum and NO dispute period. Resolution is fully automated — once the operator submits resolve_turbo_market, the outcome is final. Your only recourse for suspected misbehavior is the public audit trail at /verify/turbo/:marketId and the bug bounty program.</li>
+              <li><strong className="text-surface-300">Shared Vault Exposure:</strong> All turbo markets share a single vault. A bug or exploit affecting one round could potentially drain funds committed to other rounds. Contract sanity rails (max price move, vault balance checks) mitigate but do not eliminate this risk.</li>
+              <li><strong className="text-surface-300">Short Resolution Window:</strong> Turbo rounds run every 5 minutes on testnet (75 blocks). If the operator fails to resolve within RESOLUTION_WINDOW_BLOCKS (60 blocks ≈ 4 minutes past deadline), the round becomes eligible for emergency_cancel and all bettors refund. This is permissionless — anyone can call it — but there is a window during which funds are locked.</li>
+              <li><strong className="text-surface-300">Price Snapshot Divergence:</strong> The frontend chart displays live Pyth prices streaming through the backend. The "frozen price" captured at deadline is the last broadcast value, but there can be a small gap (sub-second) between the on-chain committed closing price and what a user last saw on their screen. The value written on-chain is authoritative — NOT the dot on your chart.</li>
+              <li><strong className="text-surface-300">Operator Fee Runway:</strong> The operator pays ~1 ALEO gas per create and per resolve. If the operator wallet runs out of ALEO, new rounds stop. Existing active rounds will still be resolvable as long as there's gas.</li>
             </ul>
           </section>
 

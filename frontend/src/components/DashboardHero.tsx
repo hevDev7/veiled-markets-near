@@ -14,6 +14,8 @@ import { cn, formatCredits, formatPercentage, getCategoryEmoji, getCategoryName 
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
+import { TurboRollingView } from './TurboRollingView'
+import type { TurboSymbol } from './TurboMarketPanel'
 
 const CATEGORY_GRADIENTS: Record<number, string> = {
   1: 'linear-gradient(135deg, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.06) 100%)',
@@ -334,15 +336,25 @@ const slideVariants = {
 
 interface ActivityItem { id: string; message: string; time: number; marketId: string }
 
+// Re-export for backward compat (Dashboard.tsx imports this type)
+export interface TurboHeroMarket {
+  marketId: string
+  symbol: TurboSymbol
+  baselinePrice: number
+  deadlineMs: number
+}
+
 interface DashboardHeroProps {
   markets: Market[]
   activityFeed: ActivityItem[]
   onCreateMarket: () => void
   onMarketClick: (market: Market) => void
+  /** If provided (non-null), renders TurboRollingView as the hero left panel */
+  turboMarket?: TurboHeroMarket | null
 }
 
 export function DashboardHero({
-  markets, activityFeed, onCreateMarket, onMarketClick,
+  markets, activityFeed, onCreateMarket, onMarketClick, turboMarket,
 }: DashboardHeroProps) {
   const [currentSlide, setCurrentSlide] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(true)
@@ -409,7 +421,7 @@ export function DashboardHero({
     [recentActivity]
   )
 
-  const activityItemHeight = 44
+  const activityItemHeight = 32
   const activityTotalHeight = recentActivity.length * activityItemHeight
   const activityVisibleHeight = Math.min(activityItemHeight * 3, activityTotalHeight)
 
@@ -545,7 +557,15 @@ export function DashboardHero({
           />
         </div>
 
-        {activeMarkets.length === 0 ? (
+        {/* Turbo hero — locked mode: stays on current market, shows Live Market button when ended */}
+        {turboMarket ? (
+          <TurboRollingView
+            symbol={turboMarket.symbol || 'BTC'}
+            className="absolute inset-0 h-full rounded-none border-0 bg-transparent"
+            compact
+            lockedMode
+          />
+        ) : activeMarkets.length === 0 ? (
           <div className="relative flex h-full flex-col items-center justify-center p-10 text-center">
             <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl border border-brand-400/14 bg-brand-400/[0.08]">
               <TrendingUp className="h-8 w-8 text-brand-400" />
@@ -685,14 +705,14 @@ export function DashboardHero({
                       const market = markets.find(entry => entry.id === item.marketId)
                       if (market) onMarketClick(market)
                     }}
-                    className="flex w-full items-center gap-3 px-3 text-left transition-colors hover:bg-white/[0.03]"
+                    className="flex w-full items-center gap-2 px-2.5 text-left transition-colors hover:bg-white/[0.03]"
                     style={{ height: activityItemHeight }}
                   >
-                    <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-400" />
-                    <p className="flex-1 truncate text-sm text-surface-400">
+                    <div className="h-1 w-1 shrink-0 rounded-full bg-brand-400" />
+                    <p className="flex-1 truncate text-[11px] text-surface-400">
                       {item.message}
                     </p>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-surface-600" />
+                    <ChevronRight className="h-3 w-3 shrink-0 text-surface-600" />
                   </button>
                 ))}
               </div>

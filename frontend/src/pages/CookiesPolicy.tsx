@@ -18,7 +18,7 @@ export function CookiesPolicy() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Cookie Policy</h1>
-        <p className="text-sm text-surface-500 mb-12">Last updated: March 26, 2026</p>
+        <p className="text-sm text-surface-500 mb-12">Last updated: April 9, 2026</p>
 
         <div className="space-y-10 text-sm leading-relaxed">
           <section>

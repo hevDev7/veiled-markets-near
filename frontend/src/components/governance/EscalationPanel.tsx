@@ -95,6 +95,8 @@ interface EscalationPanelProps {
 // Admin (deployer) address that holds slash_resolver authority on-chain.
 const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8';
 
+type EscalationFilterMode = 'active' | 'history' | 'all';
+
 export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLane }: EscalationPanelProps) {
   const navigate = useNavigate();
   const { escalations, currentBlockHeight, actorFocusAddress, actorFocusRole, clearProposalContext, committeeMembers } = useGovernanceStore();
@@ -102,11 +104,29 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
   const { wallet } = useWalletStore();
   const [actionError, setActionError] = useState<string | null>(null);
   const [activeAction, setActiveAction] = useState<string | null>(null);
+  // v6: history toggle so users can see markets that already passed through
+  // governance escalation (resolved with escalationTier > 0). Defaults to
+  // 'active' so the most actionable markets render first.
+  const [filterMode, setFilterMode] = useState<EscalationFilterMode>('active');
   const isAdmin = wallet.address === ADMIN_ADDRESS;
 
+  // Categorize for the toggle counts.
+  const activeEscalations = escalations.filter(
+    (item) => item.stage !== 'resolved' && item.stage !== 'cancelled',
+  );
+  const historyEscalations = escalations.filter(
+    (item) => (item.stage === 'resolved' || item.stage === 'cancelled') && (item.escalationTier ?? 0) > 0,
+  );
+
+  const baseEscalations = filterMode === 'active'
+    ? activeEscalations
+    : filterMode === 'history'
+      ? historyEscalations
+      : escalations;
+
   const filteredEscalations = actorFocusAddress && actorFocusRole
-    ? escalations.filter((item) => escalationMatchesActorFocus(item, actorFocusAddress, actorFocusRole))
-    : escalations;
+    ? baseEscalations.filter((item) => escalationMatchesActorFocus(item, actorFocusAddress, actorFocusRole))
+    : baseEscalations;
 
   const handleInitiateEscalation = async (marketId: string, tokenType: string | undefined) => {
     setActionError(null);
@@ -244,14 +264,53 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-white flex items-center gap-2">
-        <Scale className="w-5 h-5 text-brand-400" />
-        Market Escalations
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <Scale className="w-5 h-5 text-brand-400" />
+          Market Escalations
+        </h2>
+
+        {/* v6: filter toggle so users can switch between active escalations
+            and the history of markets that already passed through governance.
+            Counts shown inline on each chip so users immediately know how
+            many items are in each bucket. */}
+        <div className="inline-flex items-center gap-1 rounded-xl border border-white/[0.06] bg-white/[0.02] p-1">
+          {([
+            { key: 'active' as const, label: 'Active', count: activeEscalations.length },
+            { key: 'history' as const, label: 'History', count: historyEscalations.length },
+            { key: 'all' as const, label: 'All', count: escalations.length },
+          ]).map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => setFilterMode(opt.key)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                filterMode === opt.key
+                  ? 'bg-brand-500/15 text-brand-200'
+                  : 'text-surface-400 hover:text-white hover:bg-white/[0.04]',
+              )}
+            >
+              {opt.label}
+              <span className={cn(
+                'rounded-full px-1.5 py-0.5 text-[10px]',
+                filterMode === opt.key
+                  ? 'bg-brand-500/15 text-brand-100'
+                  : 'bg-white/[0.05] text-surface-500',
+              )}>
+                {opt.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
         <p className="text-xs text-surface-400">
-          Live on-chain escalation state for markets moving through voter quorum, dispute bonds, committee review, or governance override.
+          {filterMode === 'history'
+            ? 'Markets that already passed through governance escalation. Read-only audit trail — no further actions available.'
+            : filterMode === 'all'
+              ? 'All escalation candidates including active disputes and resolved-via-governance history.'
+              : 'Live on-chain escalation state for markets moving through voter quorum, dispute bonds, committee review, or governance override.'}
         </p>
       </div>
 
@@ -277,7 +336,11 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
         <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-5 text-sm text-surface-500">
           {actorFocusAddress
             ? 'No market escalations match the current actor focus.'
-            : 'No active market escalations found on-chain right now.'}
+            : filterMode === 'history'
+              ? 'No governance-resolved markets in history yet. Once a disputed market completes the committee/community resolve flow, it will appear here.'
+              : filterMode === 'all'
+                ? 'No escalation candidates found on-chain.'
+                : 'No active market escalations found on-chain right now.'}
         </div>
       ) : (
         <div className="space-y-3">
@@ -547,7 +610,15 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
                         </button>
                       )}
 
-                      {item.committeeOutcome && item.committeeDecisionFinalized && (
+                      {/* Apply Resolution — only show when committee decision
+                          is finalized AND market is still in DISPUTED state.
+                          Hide for terminal states (resolved/cancelled) so the
+                          History view doesn't display a stale action button
+                          that would revert if clicked. */}
+                      {item.committeeOutcome
+                        && item.committeeDecisionFinalized
+                        && item.stage !== 'resolved'
+                        && item.stage !== 'cancelled' && (
                         <button
                           onClick={() =>
                             handleGovernanceResolve(

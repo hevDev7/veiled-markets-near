@@ -312,6 +312,7 @@ export function getAvailableWallets(): string[] {
 }
 
 function getAllowedProgramIds(): string[] {
+  const turboProgramId = (import.meta as any).env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v8.aleo'
   return Array.from(new Set([
     config.programId,
     config.usdcxMarketProgramId,
@@ -325,6 +326,7 @@ function getAllowedProgramIds(): string[] {
     'test_usdcx_freezelist.aleo',
     'test_usad_multisig_core.aleo',
     'test_usad_freezelist.aleo',
+    turboProgramId,
   ]));
 }
 

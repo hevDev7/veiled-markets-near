@@ -40,6 +40,7 @@ import {
   formatTimeRemaining,
 } from './utils';
 import { calculateContractAllPrices } from './contract-math';
+import type { IndexerClient, MarketRegistryRow } from './indexer';
 
 /**
  * Default configuration for testnet
@@ -127,9 +128,31 @@ export class VeiledMarketsClient {
   private config: VeiledMarketsConfig;
   private cachedMarkets: Map<string, MarketWithStats> = new Map();
   private currentBlockHeight: bigint = 0n;
+  private indexer: IndexerClient | null = null;
 
   constructor(config: Partial<VeiledMarketsConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /**
+   * Attach a Supabase indexer for `getActiveMarkets()` / `searchMarkets()` /
+   * `getMarketsByCategory()` / `getTrendingMarkets()`. Without an indexer
+   * those methods return empty arrays since the Aleo RPC doesn't support
+   * mapping enumeration — `market_registry` in Supabase is the only
+   * authoritative source of "all markets" data.
+   *
+   * Import `createIndexerClient` from the SDK and pass the resulting
+   * instance here:
+   *
+   *   import { createClient, createIndexerClient } from '@veiled-markets/sdk'
+   *   const client = createClient()
+   *   client.setIndexer(createIndexerClient({
+   *     supabaseUrl: process.env.SUPABASE_URL!,
+   *     supabaseKey: process.env.SUPABASE_ANON_KEY!,
+   *   }))
+   */
+  setIndexer(indexer: IndexerClient): void {
+    this.indexer = indexer;
   }
 
   get programId(): string {
@@ -260,29 +283,70 @@ export class VeiledMarketsClient {
     };
   }
 
-  async getActiveMarkets(): Promise<MarketWithStats[]> {
-    // In production, this would use an indexer
-    return [];
+  /**
+   * Fetch all markets from the indexer and enrich each with live on-chain
+   * pool state. Requires `setIndexer(...)` to have been called — otherwise
+   * returns an empty array.
+   *
+   * This makes one indexer query (cheap) followed by one RPC query per
+   * market (for the pool). For large catalogs you may want to use the
+   * indexer directly and only fetch pools on demand.
+   */
+  async getActiveMarkets(limit: number = 50): Promise<MarketWithStats[]> {
+    if (!this.indexer) return [];
+    const rows = await this.indexer.listMarkets({ limit });
+    return this.enrichRegistryRows(rows);
   }
 
-  async getMarketsByCategory(category: number): Promise<MarketWithStats[]> {
-    const markets = await this.getActiveMarkets();
-    return markets.filter(m => m.category === category);
+  async getMarketsByCategory(category: number, limit: number = 50): Promise<MarketWithStats[]> {
+    if (!this.indexer) return [];
+    const rows = await this.indexer.listMarkets({ category: category as never, limit });
+    return this.enrichRegistryRows(rows);
   }
 
+  /**
+   * Get top markets by on-chain volume. Pulls a wider indexer window
+   * (3× limit) then sorts by pool.totalVolume after enrichment.
+   */
   async getTrendingMarkets(limit: number = 10): Promise<MarketWithStats[]> {
-    const markets = await this.getActiveMarkets();
-    return markets
+    if (!this.indexer) return [];
+    const rows = await this.indexer.listMarkets({ limit: limit * 3 });
+    const enriched = await this.enrichRegistryRows(rows);
+    return enriched
       .sort((a, b) => Number(b.totalVolume - a.totalVolume))
       .slice(0, limit);
   }
 
-  async searchMarkets(query: string): Promise<MarketWithStats[]> {
-    const markets = await this.getActiveMarkets();
-    const lowerQuery = query.toLowerCase();
-    return markets.filter(m =>
-      m.question?.toLowerCase().includes(lowerQuery)
+  /**
+   * Full-text search over market question text (case-insensitive). Uses
+   * PostgREST `ilike` on the indexer, NOT client-side filtering, so it
+   * scales to large catalogs.
+   */
+  async searchMarkets(query: string, limit: number = 50): Promise<MarketWithStats[]> {
+    if (!this.indexer) return [];
+    const rows = await this.indexer.listMarkets({ query, limit });
+    return this.enrichRegistryRows(rows);
+  }
+
+  /**
+   * Convert indexer rows to MarketWithStats by fetching live pool state
+   * for each. Rows without a matching on-chain pool are dropped (market
+   * was deleted or never finalized on-chain).
+   */
+  private async enrichRegistryRows(rows: MarketRegistryRow[]): Promise<MarketWithStats[]> {
+    const results = await Promise.all(
+      rows.map(async (row) => {
+        const market = await this.getMarket(row.marketId);
+        if (!market) return null;
+        // Merge question text and off-chain metadata from indexer
+        const enriched: MarketWithStats = {
+          ...market,
+          question: row.questionText ?? market.question,
+        };
+        return enriched;
+      }),
     );
+    return results.filter((m): m is MarketWithStats => m !== null);
   }
 
   // ========================================================================
