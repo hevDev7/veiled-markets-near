@@ -169,7 +169,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
           ),
         ])
         if (!resolveRes.ok || !createRes.ok) {
-          // console.error(
+          console.error(
             `[turbo-history] supabase fetch failed — resolve=${resolveRes.status} create=${createRes.status}`,
             !resolveRes.ok ? await resolveRes.text() : '',
             !createRes.ok ? await createRes.text() : '',
