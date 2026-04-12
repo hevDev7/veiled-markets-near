@@ -578,6 +578,20 @@ export class VeiledMarketsClient {
   private parseAleoValue(value: string): unknown {
     if (!value) return null;
 
+    // Handle struct strings: "{ key1: val1, key2: val2, ... }"
+    if (typeof value === 'string' && value.trim().startsWith('{')) {
+      const result: Record<string, unknown> = {};
+      const clean = value.replace(/^\{|\}$/g, '').trim();
+      for (const part of clean.split(',')) {
+        const colonIdx = part.indexOf(':');
+        if (colonIdx < 0) continue;
+        const k = part.slice(0, colonIdx).trim();
+        const v = part.slice(colonIdx + 1).trim();
+        if (k && v) result[k] = this.parseAleoValue(v);
+      }
+      return result;
+    }
+
     if (value.endsWith('field')) return value;
     if (value.endsWith('u8') || value.endsWith('u16') || value.endsWith('u32')) {
       return parseInt(value);

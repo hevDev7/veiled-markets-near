@@ -349,7 +349,22 @@ function parseAleoStruct(structStr: string): Record<string, unknown> {
   const clean = structStr.replace(/^\{|\}$/g, '').trim();
   for (const part of clean.split(',')) {
     const [key, value] = part.split(':').map((s) => s.trim());
-    if (key && value) result[key] = value;
+    if (key && value) result[key] = parseAleoFieldValue(value);
   }
   return result;
+}
+
+function parseAleoFieldValue(value: string): unknown {
+  if (!value) return null;
+  if (value.endsWith('field')) return value;
+  if (value.endsWith('u8') || value.endsWith('u16') || value.endsWith('u32')) {
+    return parseInt(value);
+  }
+  if (value.endsWith('u64') || value.endsWith('u128')) {
+    return BigInt(value.replace(/u\d+$/, ''));
+  }
+  if (value.startsWith('aleo1')) return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
 }
