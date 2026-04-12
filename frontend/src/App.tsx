@@ -40,11 +40,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isConnected) {
-    // Always redirect to main domain landing page for wallet connect
-    if (window.location.hostname === 'app.veiledmarkets.xyz') {
-      window.location.href = 'https://veiledmarkets.xyz'
-      return null
-    }
+    // On any domain, redirect to landing page on same domain
     return <Navigate to="/" replace />
   }
 
@@ -61,15 +57,9 @@ function App() {
     <ErrorBoundary>
       <Routes>
         {/* Landing Page - shown when not connected */}
-        {/* On app.veiledmarkets.xyz subdomain, "/" redirects to dashboard */}
-        <Route
-          path="/"
-          element={
-            window.location.hostname === 'app.veiledmarkets.xyz'
-              ? <Navigate to="/dashboard" replace />
-              : <Landing />
-          }
-        />
+        {/* On app.veiledmarkets.xyz: shows Landing with connect wallet flow */}
+        {/* On veiledmarkets.xyz: shows Landing with Launch App link to subdomain */}
+        <Route path="/" element={<Landing />} />
 
         {/* Dashboard - requires wallet connection */}
         <Route
