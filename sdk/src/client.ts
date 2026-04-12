@@ -341,6 +341,7 @@ export class VeiledMarketsClient {
         // Merge on-chain data with off-chain metadata from indexer
         const enriched: MarketWithStats = {
           ...market,
+          marketId: row.marketId,
           question: row.questionText ?? market.question,
           questionText: row.questionText,
           outcomeLabels: row.outcomeLabels,
