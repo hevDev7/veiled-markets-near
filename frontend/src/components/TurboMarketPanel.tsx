@@ -247,10 +247,10 @@ function PriceFlip({ value, prevValue, className }: { value: string; prevValue?:
   const padded = value.padStart(maxLen)
 
   return (
-    <span className={cn('inline-flex items-baseline', className)}>
+    <span className={cn('inline-flex items-center', className)}>
       {padded.split('').map((digit, i) => (
         digit === ',' || digit === '.' || digit === '$' || digit === ' '
-          ? <span key={i} style={{ lineHeight: '1.2em' }}>{digit}</span>
+          ? <span key={i} className="inline-block" style={{ height: '1.2em', lineHeight: '1.2em' }}>{digit}</span>
           : <PriceFlipDigit key={i} value={digit} direction={dir} />
       ))}
     </span>
