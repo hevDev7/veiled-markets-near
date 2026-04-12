@@ -1485,16 +1485,12 @@ function BetCard({
             </button>
           )}
 
-          {!isSell && bet.claimed && (isWon || isRefunded) && (
-            <button
-              onClick={onRestoreClaim}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/[0.03] border border-white/[0.08] hover:bg-white/[0.06] text-surface-300 transition-colors flex items-center gap-1.5"
-              title="Use this if your redemption was rejected but this bet still shows claimed"
-            >
-              <RefreshCcw className="w-3.5 h-3.5" />
-              Restore Claim
-            </button>
-          )}
+          {/* "Restore Claim" removed from default view — it confused users
+              when their claim was actually successful (claimed=true + won)
+              since the button showed regardless. If a user gets stuck with
+              a rejected claim but claimed=true in localStorage, they can
+              run markBetUnclaimed(betId) from the browser DevTools console
+              or clear localStorage to reset. */}
 
           {bet.id.startsWith('at1') ? (
             <a
