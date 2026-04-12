@@ -199,6 +199,64 @@ function FlipDigit({ value, className }: { value: string; className?: string }) 
   )
 }
 
+// ── Price flip — direction-aware: up = slide up, down = slide down ──
+function PriceFlipDigit({ value, direction }: { value: string; direction: 'up' | 'down' | 'none' }) {
+  const prevRef = useRef(value)
+  const [digits, setDigits] = useState<{ current: string; previous: string; key: number; dir: 'up' | 'down' | 'none' }>({
+    current: value, previous: value, key: 0, dir: 'none',
+  })
+
+  useEffect(() => {
+    if (value !== prevRef.current) {
+      setDigits(d => ({ current: value, previous: prevRef.current, key: d.key + 1, dir: direction }))
+      prevRef.current = value
+    }
+  }, [value, direction])
+
+  const outAnim = digits.dir === 'up' ? 'priceFlipOutUp' : digits.dir === 'down' ? 'priceFlipOutDown' : undefined
+  const inAnim = digits.dir === 'up' ? 'priceFlipInUp' : digits.dir === 'down' ? 'priceFlipInDown' : undefined
+
+  return (
+    <span className="relative inline-block overflow-hidden text-center" style={{ width: '0.6em', height: '1.2em', lineHeight: '1.2em' }}>
+      <span key={`o-${digits.key}`} className="absolute inset-x-0"
+        style={{ animation: outAnim ? `${outAnim} 200ms ease-in forwards` : undefined }}>
+        {digits.previous}
+      </span>
+      <span key={`i-${digits.key}`} className="absolute inset-x-0"
+        style={{ animation: inAnim ? `${inAnim} 200ms ease-out forwards` : undefined }}>
+        {digits.current}
+      </span>
+      <style>{`
+        @keyframes priceFlipOutUp { 0% { transform: translateY(0); opacity:1; } 100% { transform: translateY(-100%); opacity:0; } }
+        @keyframes priceFlipInUp { 0% { transform: translateY(100%); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+        @keyframes priceFlipOutDown { 0% { transform: translateY(0); opacity:1; } 100% { transform: translateY(100%); opacity:0; } }
+        @keyframes priceFlipInDown { 0% { transform: translateY(-100%); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+      `}</style>
+    </span>
+  )
+}
+
+function PriceFlip({ value, prevValue, className }: { value: string; prevValue?: string; className?: string }) {
+  // Determine direction by comparing numeric values
+  const numCur = parseFloat(value.replace(/[^0-9.]/g, '')) || 0
+  const numPrev = parseFloat((prevValue ?? value).replace(/[^0-9.]/g, '')) || 0
+  const dir: 'up' | 'down' | 'none' = numCur > numPrev ? 'up' : numCur < numPrev ? 'down' : 'none'
+
+  // Pad both to same length for stable digit positions
+  const maxLen = Math.max(value.length, (prevValue ?? value).length)
+  const padded = value.padStart(maxLen)
+
+  return (
+    <span className={cn('inline-flex', className)}>
+      {padded.split('').map((digit, i) => (
+        digit === ',' || digit === '.' || digit === '$' || digit === ' '
+          ? <span key={i}>{digit}</span>
+          : <PriceFlipDigit key={i} value={digit} direction={dir} />
+      ))}
+    </span>
+  )
+}
+
 function FlipNumber({ value, className }: { value: string; className?: string }) {
   return (
     <span className={cn('inline-flex', className)}>
@@ -1015,14 +1073,12 @@ export function TurboMarketPanel({
             {/* Price stays at the dot-chart value once frozen — same value
                 backend uses in the resolve tx, so no "waiting for oracle" UI. */}
             {(() => {
-              // Use latest tick price for display to stay in sync with chart dot
               const displayPrice = ticks.length > 0 ? ticks[ticks.length - 1].price : currentPrice
-              return displayPrice != null
-                ? `$${displayPrice.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`
-                : '—'
+              const prevPrice = ticks.length > 1 ? ticks[ticks.length - 2].price : displayPrice
+              if (displayPrice == null) return '—'
+              const formatted = `$${displayPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              const prevFormatted = `$${(prevPrice ?? displayPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              return <PriceFlip value={formatted} prevValue={prevFormatted} />
             })()}
           </div>
         </div>
