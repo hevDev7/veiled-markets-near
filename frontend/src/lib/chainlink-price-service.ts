@@ -137,18 +137,56 @@ class ChainlinkPriceService {
     const coinId = COINGECKO_IDS[symbol.toUpperCase()]
     if (!coinId) throw new Error(`Unknown symbol: ${symbol}`)
 
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`
-    )
-    if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`)
-    const data = await res.json()
+    try {
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`
+      )
+      if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`)
+      const data = await res.json()
 
+      return {
+        price: data[coinId]?.usd ?? 0,
+        change24h: data[coinId]?.usd_24h_change ?? 0,
+        timestamp: Date.now(),
+        source: 'coingecko',
+        feedId: CHAINLINK_FEED_IDS[symbol.toUpperCase()],
+      }
+    } catch {
+      // Fallback to Pyth Hermes if CoinGecko rate-limited
+      return this.fetchPythPrice(symbol)
+    }
+  }
+
+  private async fetchPythPrice(symbol: string): Promise<PriceWithChange> {
+    const PYTH_IDS: Record<string, string> = {
+      BTC: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43',
+      ETH: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace',
+      SOL: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d',
+      BNB: '0x2f95862b045670cd22bee3114c39763a4a08beeb663b145d283c31d7d1101c4f',
+      XRP: '0xec5d399846a9209f3fe5881d70aae9268c94339ff9817e8d18ff19fa05eea1c8',
+      DOGE: '0xdcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c',
+      ADA: '0x2a01deaec9e51a579277b34b122399984d0bbf57e2458a7e42fecd2829867a0d',
+      AVAX: '0x93da3352f9f1d105fdfe4971cfa80e9dd777bfc5d0f683ebb6e1294b92137bb7',
+      DOT: '0xca3eed9b267293f6595901c734c7525ce8ef49adafe8284606ceb307afa2ca5b',
+      LINK: '0x8ac0c70fff57e9aefdf5edf44b51d62c2d433653cbb2cf5cc06bb115af04d221',
+    }
+    const feedId = PYTH_IDS[symbol.toUpperCase()]
+    if (!feedId) throw new Error(`No Pyth feed for ${symbol}`)
+
+    const res = await fetch(
+      `https://hermes.pyth.network/v2/updates/price/latest?ids[]=${feedId}&parsed=true`
+    )
+    if (!res.ok) throw new Error(`Pyth error: ${res.status}`)
+    const data = await res.json()
+    const parsed = data?.parsed?.[0]?.price
+    if (!parsed) throw new Error('No Pyth price data')
+
+    const price = Number(parsed.price) * Math.pow(10, Number(parsed.expo))
     return {
-      price: data[coinId]?.usd ?? 0,
-      change24h: data[coinId]?.usd_24h_change ?? 0,
+      price,
+      change24h: 0, // Pyth doesn't provide 24h change
       timestamp: Date.now(),
-      source: 'coingecko',
-      feedId: CHAINLINK_FEED_IDS[symbol.toUpperCase()],
+      source: 'coingecko' as PriceSource, // keep type compat
     }
   }
 
@@ -181,15 +219,24 @@ class ChainlinkPriceService {
     const coinId = COINGECKO_IDS[symbol.toUpperCase()]
     if (!coinId) throw new Error(`Unknown symbol: ${symbol}`)
 
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&precision=2`
-    )
-    if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`)
-    const data = await res.json()
+    try {
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&precision=2`
+      )
+      if (!res.ok) throw new Error(`CoinGecko error: ${res.status}`)
+      const data = await res.json()
 
-    return {
-      points: (data.prices || []).map(([t, p]: [number, number]) => ({ time: t, price: p })),
-      source: 'coingecko',
+      return {
+        points: (data.prices || []).map(([t, p]: [number, number]) => ({ time: t, price: p })),
+        source: 'coingecko',
+      }
+    } catch {
+      // Fallback: get current price from Pyth and return single-point history
+      const current = await this.fetchPythPrice(symbol)
+      return {
+        points: [{ time: Date.now(), price: current.price }],
+        source: 'coingecko',
+      }
     }
   }
 
