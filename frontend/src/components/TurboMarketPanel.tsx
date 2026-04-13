@@ -812,6 +812,13 @@ export function TurboMarketPanel({
         throw new Error('Share is not eligible for claim')
       }
 
+      console.log('[turbo] claim tx:', JSON.stringify({
+        program: tx.programId,
+        function: tx.functionName,
+        inputs: tx.inputs,
+        fee: 1.5,
+      }, (_, v) => typeof v === 'bigint' ? v.toString() : v))
+
       const result = await executeTransaction({
         program: tx.programId,
         function: tx.functionName,
@@ -822,6 +829,7 @@ export function TurboMarketPanel({
       setLastTxId((result as any)?.transactionId || null)
     } catch (err: any) {
       console.error('[turbo] claim failed:', err)
+      console.error('[turbo] share plaintext was:', share.plaintext)
       setErrorMsg(err?.message || String(err))
     } finally {
       setClaimBusy(false)

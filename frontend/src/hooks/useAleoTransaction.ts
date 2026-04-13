@@ -76,6 +76,7 @@ function isShieldReconnectableError(message: string): boolean {
     || msg.includes('connection expired')
     || msg.includes('dapp not connected')
     || msg.includes('not connected')
+    || msg.includes('no valid aleo address')
   )
 }
 
