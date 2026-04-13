@@ -795,12 +795,17 @@ export function TurboMarketPanel({
         // For turbo we refund the share quantity directly (matches market_credits split).
         tx = buildClaimRefundInputs(marketId, share.plaintext, share.quantity)
       } else if (status === 'resolved' && winningOutcome === share.side) {
-        if (marketCredits == null || pool == null) {
+        // Refresh pool + payouts state right before claim to ensure exact match
+        const [freshPool, freshCredits] = await Promise.all([
+          fetchTurboPool(marketId),
+          fetchMarketCredits(marketId),
+        ])
+        if (freshCredits == null || freshPool == null) {
           throw new Error('Pool state not loaded yet — try again in a moment')
         }
         const totalWinning =
-          winningOutcome === 'UP' ? pool.totalUpShares : pool.totalDownShares
-        const payout = quotePayout(marketCredits, totalWinning, share.quantity)
+          winningOutcome === 'UP' ? freshPool.totalUpShares : freshPool.totalDownShares
+        const payout = quotePayout(freshCredits, totalWinning, share.quantity)
         if (payout === 0n) throw new Error('Computed payout is zero')
         tx = buildClaimWinningsInputs(marketId, share.plaintext, payout)
       } else {
@@ -811,7 +816,7 @@ export function TurboMarketPanel({
         program: tx.programId,
         function: tx.functionName,
         inputs: tx.inputs,
-        fee: 0.3,
+        fee: 1.5,
         recordIndices: [1],
       } as any)
       setLastTxId((result as any)?.transactionId || null)
