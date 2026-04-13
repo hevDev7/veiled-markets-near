@@ -906,7 +906,14 @@ export function TurboMarketPanel({
         fee: 1.5,
         recordIndices: [1],
       } as any)
-      setLastTxId((result as any)?.transactionId || null)
+      const claimTxId = (result as any)?.transactionId || null
+      setLastTxId(claimTxId)
+
+      // Mark bet as claimed in portfolio store so it moves out of Unredeemed tab
+      const bets = useBetsStore.getState().userBets.filter(b => b.marketId === marketId && !b.claimed)
+      for (const bet of bets) {
+        useBetsStore.getState().markBetClaimed(bet.id)
+      }
     } catch (err: any) {
       console.error('[turbo] claim failed:', err)
       console.error('[turbo] share plaintext was:', share.plaintext)
