@@ -147,20 +147,89 @@ export function useAleoTransaction() {
         const feeMicrocredits = Math.round(feeAleo * 1_000_000)
 
         const privateFeeFlag = options.privateFee ?? false
-        const submitViaDirectShield = async (forceReconnect = false): Promise<string> => {
-          const directShield = new DirectShieldWalletAdapter()
 
-          if (forceReconnect) {
-            try {
-              await directShield.disconnect()
-            } catch {
-              // Ignore disconnect failures before forced reconnect.
+        // ── Shield direct extension helper ─────────────────────────────────
+        // Calls the raw window.shield API. Probes address first to SKIP
+        // connect() (which triggers "Connect Site" popup). Only falls back
+        // to full connect() when the session is genuinely dead.
+        const submitViaShieldExtension = async (): Promise<string> => {
+          const sw = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
+          if (!sw) throw new Error('Shield Wallet extension not found')
+
+          // Probe for live session without calling connect()
+          let liveAddr: string | null = null
+          try {
+            if (typeof sw.publicKey === 'string' && sw.publicKey.startsWith('aleo1')) {
+              liveAddr = sw.publicKey
             }
-            await directShield.connect({ forceReconnect: true, refreshPrograms: true })
-          } else {
-            await directShield.connect()
+          } catch { /* ignore */ }
+          if (!liveAddr) {
+            try {
+              if (typeof sw.getAccount === 'function') {
+                const acc = await sw.getAccount()
+                const a = acc?.address || acc?.publicKey || acc
+                if (typeof a === 'string' && a.startsWith('aleo1')) liveAddr = a
+              }
+            } catch { /* ignore */ }
+          }
+          if (!liveAddr) {
+            // Session dead — must fall through to adapter or full reconnect
+            throw new Error('Shield session not available')
           }
 
+          devWarn('[TX] Shield session alive (' + liveAddr.slice(0, 12) + '…), sending tx directly')
+          const feeInMicro = Math.round(feeAleo * 1_000_000)
+          const txPayload = {
+            address: liveAddr,
+            chainId: 'testnet',
+            network: 'testnet',
+            program: options.program,
+            function: options.function,
+            programId: options.program,
+            functionName: options.function,
+            inputs: options.inputs,
+            fee: feeInMicro,
+            feePrivate: false,
+            privateFee: false,
+            recordIndices: options.recordIndices,
+            transitions: [{
+              program: options.program,
+              functionName: options.function,
+              inputs: options.inputs,
+            }],
+          }
+
+          let result: any = null
+          if (typeof sw.executeTransaction === 'function') {
+            try { result = await sw.executeTransaction(txPayload) } catch (e: any) {
+              devWarn('[TX] Shield executeTransaction failed:', e?.message)
+            }
+          }
+          if (!result && typeof sw.requestExecution === 'function') {
+            try { result = await sw.requestExecution(txPayload) } catch (e: any) {
+              devWarn('[TX] Shield requestExecution failed:', e?.message)
+            }
+          }
+          if (!result && typeof sw.requestTransaction === 'function') {
+            try { result = await sw.requestTransaction(txPayload) } catch (e: any) {
+              devWarn('[TX] Shield requestTransaction failed:', e?.message)
+            }
+          }
+
+          if (!result) throw new Error('Shield Wallet: all transaction methods failed')
+
+          const id = typeof result === 'string' ? result
+            : result?.transactionId || result?.txId || result?.id || result?.transaction_id || result?.eventId
+          if (id) return id
+          throw new Error('No transaction ID returned from Shield Wallet')
+        }
+
+        // Full reconnect fallback — only used when both direct extension
+        // and adapter have failed. Will show "Connect Site" popup.
+        const submitViaDirectShieldReconnect = async (): Promise<string> => {
+          const directShield = new DirectShieldWalletAdapter()
+          try { await directShield.disconnect() } catch { /* ignore */ }
+          await directShield.connect({ forceReconnect: true, refreshPrograms: true })
           return directShield.requestTransaction({
             programId: options.program,
             functionName: options.function,
@@ -171,7 +240,7 @@ export function useAleoTransaction() {
           })
         }
 
-        devWarn('[TX] Calling adapter executeTransaction:', {
+        devWarn('[TX] Calling executeTransaction:', {
           program: options.program,
           function: options.function,
           fee: `${feeAleo} ALEO = ${feeMicrocredits} microcredits`,
@@ -181,38 +250,24 @@ export function useAleoTransaction() {
           inputs: options.inputs,
         })
 
-        // Shield Wallet is still flaky through the shared adapter for some
-        // complex transitions. When we know the active wallet is Shield, use
-        // the direct Shield API first so we can avoid adapter-specific errors.
+        // ── Shield: try direct extension API first (no popup) ──────────
+        // The direct API handles private records (TurboShare, OutcomeShare)
+        // better than the adapter, which may fail to locate records that
+        // were pasted/restored rather than fetched from wallet storage.
+        // We probe the address first to skip connect() and avoid the popup.
         if (isShield) {
           try {
-            devWarn('[TX] Shield detected — trying direct Shield API first')
-            const txId = await submitViaDirectShield(false)
-
+            devWarn('[TX] Shield — trying direct extension API (no connect)')
+            const txId = await submitViaShieldExtension()
             return { transactionId: txId }
           } catch (directErr: any) {
             const directMsg = directErr?.message || directErr?.data?.message || String(directErr)
-            if (isShieldReconnectableError(directMsg)) {
-              try {
-                devWarn('[TX] Direct Shield API failed with reconnectable error, forcing reconnect and retrying once:', directMsg)
-                const retriedTxId = await submitViaDirectShield(true)
-                return { transactionId: retriedTxId }
-              } catch (retryErr: any) {
-                const retryMsg = retryErr?.message || retryErr?.data?.message || String(retryErr)
-                devWarn('[TX] Forced Shield reconnect retry failed:', retryMsg)
-              }
-            }
-            devWarn('[TX] Direct Shield API failed, falling back to adapter:', directMsg)
+            devWarn('[TX] Shield direct extension failed:', directMsg, '— falling through to adapter')
           }
         }
 
-        // === Non-Shield wallets: use ProvableHQ adapter ===
-        // Previously we had a Leo Wallet direct path (requestTransaction),
-        // but this caused bugs when Shield was misdetected as Leo (both
-        // extensions installed → walletType defaults to 'leo' → Shield
-        // transactions routed to Leo Wallet which can't handle v12).
-        // Leo Wallet can't handle v12 anyway (4-level import chain), so
-        // the direct path is removed. All non-Shield wallets go through the adapter.
+        // ── All wallets: ProvableHQ adapter ────────────────────────────
+        // Already connected via AleoWalletProvider (autoConnect).
         const adapterPayload: Record<string, unknown> = {
           program: options.program,
           function: options.function,
@@ -220,7 +275,6 @@ export function useAleoTransaction() {
           fee: feeMicrocredits,
           privateFee: options.privateFee ?? false,
         }
-        // recordIndices tells wallets (especially Shield) which inputs are records
         if (options.recordIndices && options.recordIndices.length > 0) {
           adapterPayload.recordIndices = options.recordIndices
         }
@@ -230,14 +284,24 @@ export function useAleoTransaction() {
         } catch (adapterErr: any) {
           const adapterMsg = adapterErr?.message || adapterErr?.data?.message || String(adapterErr)
 
-          if (isShield && isShieldProgramFetchError(adapterMsg)) {
-            devWarn(
-              '[TX] Shield adapter failed to fetch program, retrying via direct Shield API:',
-              adapterMsg,
-            )
-            const txId = await submitViaDirectShield(true)
-
-            return { transactionId: txId }
+          // Shield last-resort: full reconnect (will show popup)
+          if (isShield && (isShieldProgramFetchError(adapterMsg) || isShieldReconnectableError(adapterMsg))) {
+            devWarn('[TX] Shield adapter failed, last resort reconnect:', adapterMsg)
+            try {
+              const txId = await submitViaDirectShieldReconnect()
+              return { transactionId: txId }
+            } catch (retryErr: any) {
+              const retryMsg = retryErr?.message || retryErr?.data?.message || String(retryErr)
+              devWarn('[TX] Shield reconnect fallback also failed:', retryMsg)
+              if (retryMsg.toLowerCase().includes('no valid aleo address') ||
+                  retryMsg.toLowerCase().includes('not connected')) {
+                useWalletStore.getState().disconnect()
+                throw new Error(
+                  'Shield Wallet lost connection. Please: 1) Click the Shield Wallet extension icon, ' +
+                  '2) Make sure you are on Testnet, 3) Disconnect and reconnect, then try again.'
+                )
+              }
+            }
           }
 
           throw adapterErr

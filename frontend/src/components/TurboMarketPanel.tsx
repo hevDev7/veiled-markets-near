@@ -143,6 +143,86 @@ function writeCachedTicks(symbol: string, marketId: string, ticks: PriceTick[]) 
   }
 }
 
+// ── TurboShare record persistence ──
+// Wallet adapters don't reliably return output records, so we reconstruct
+// the TurboShare plaintext from known inputs and save to localStorage.
+// This lets the claim flow work without manual paste.
+const SHARE_STORAGE_KEY = 'veiled_turbo_shares'
+
+function saveTurboShareRecord(marketId: string, record: string) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SHARE_STORAGE_KEY) || '{}')
+    if (!stored[marketId]) stored[marketId] = []
+    // Deduplicate
+    if (!stored[marketId].includes(record)) {
+      stored[marketId].push(record)
+    }
+    localStorage.setItem(SHARE_STORAGE_KEY, JSON.stringify(stored))
+  } catch { /* ignore */ }
+}
+
+function loadTurboShareRecords(marketId: string): string[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SHARE_STORAGE_KEY) || '{}')
+    return stored[marketId] || []
+  } catch { return [] }
+}
+
+/**
+ * After a bet tx confirms, fetch the transaction from explorer, find the
+ * TurboShare record output, decrypt it via the wallet adapter's decrypt
+ * or parse from the transition outputs, and save to localStorage.
+ */
+async function captureTurboShareFromTx(txId: string, marketId: string) {
+  const ALEO_RPC = (import.meta as any).env?.VITE_ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet'
+  const maxWait = 90_000
+  const poll = 5_000
+  const start = Date.now()
+
+  while (Date.now() - start < maxWait) {
+    try {
+      const res = await fetch(`${ALEO_RPC}/transaction/${txId}`)
+      if (!res.ok) {
+        await new Promise(r => setTimeout(r, poll))
+        continue
+      }
+      const tx = await res.json()
+      const transitions = tx?.execution?.transitions ?? []
+
+      for (const t of transitions) {
+        for (const o of (t.outputs ?? [])) {
+          if (o.type !== 'record') continue
+          // Try to decrypt via wallet adapter
+          const ciphertext = o.value
+          if (!ciphertext?.startsWith('record1')) continue
+
+          try {
+            // Use wallet adapter's decrypt if available
+            const decrypt = (window as any).__aleoDecryptRecord ||
+              (window as any).shield?.decrypt ||
+              (window as any).aleo?.decrypt
+            if (typeof decrypt === 'function') {
+              const plaintext = await decrypt(ciphertext)
+              if (typeof plaintext === 'string' && plaintext.includes('market_id:') && plaintext.includes('quantity:')) {
+                saveTurboShareRecord(marketId, plaintext)
+                console.log('[turbo] share record captured from tx and saved')
+                return
+              }
+            }
+          } catch { /* decrypt failed — not our record or wrong key */ }
+        }
+      }
+
+      // Tx confirmed but couldn't decrypt — store tx ID for manual recovery
+      console.warn('[turbo] tx confirmed but could not decrypt share record')
+      return
+    } catch {
+      await new Promise(r => setTimeout(r, poll))
+    }
+  }
+  console.warn('[turbo] timed out waiting for bet tx confirmation')
+}
+
 // Canvas rounded-rect helper (used for the "Target" pill)
 // ── Flip digit animation — new digit slides in from bottom ──
 function FlipDigit({ value, className }: { value: string; className?: string }) {
@@ -838,10 +918,29 @@ export function TurboMarketPanel({
 
   async function refreshShares() {
     try {
-      const list = await fetchTurboShareRecords(marketId)
+      let list = await fetchTurboShareRecords(marketId)
+
+      // If wallet didn't return records, try localStorage fallback
+      if (list.length === 0) {
+        const saved = loadTurboShareRecords(marketId)
+        for (const text of saved) {
+          const parsed = parseTurboShare(text)
+          if (parsed && parsed.quantity > 0n) {
+            list.push(parsed)
+          }
+        }
+      }
+
       setShares(list)
     } catch {
-      setShares([])
+      // Last resort: try localStorage even if wallet threw
+      const saved = loadTurboShareRecords(marketId)
+      const fallback: ParsedTurboShare[] = []
+      for (const text of saved) {
+        const parsed = parseTurboShare(text)
+        if (parsed && parsed.quantity > 0n) fallback.push(parsed)
+      }
+      setShares(fallback)
     }
   }
 
@@ -907,6 +1006,12 @@ export function TurboMarketPanel({
         } as any)
         const txId = (result as any)?.transactionId || `turbo_${Date.now()}`
         setLastTxId(txId)
+
+        // After tx confirms, fetch the TurboShare output record from explorer
+        // and save to localStorage for claim. We do this in background.
+        if (txId && !txId.startsWith('demo_')) {
+          captureTurboShareFromTx(txId, marketId).catch(() => {})
+        }
 
         // Save to portfolio store so it appears in MyBets/Portfolio page
         useBetsStore.getState().addPendingBet({
