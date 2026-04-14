@@ -64,7 +64,7 @@ export function ClaimWinningsModal({
   const [txId, setTxId] = useState<string | null>(null)
   const [txPhase, setTxPhase] = useState<'idle' | 'pending' | 'confirmed'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const { markBetClaimed } = useBetsStore()
+  const { markBetClaimed, markBetUnclaimed } = useBetsStore()
   const { wallet } = useWalletStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
@@ -371,6 +371,12 @@ export function ClaimWinningsModal({
         setTxId(submittedTxId)
         setTxPhase('pending')
 
+        // Optimistically mark claimed right after broadcast so the bet moves
+        // out of Unredeemed tab immediately. If the tx is later rejected,
+        // user can manually un-claim from portfolio to re-attempt.
+        markBetClaimed(bet.id)
+        onClaimSuccess?.()
+
         const onChainVerify = submittedTxId.startsWith('at1')
           ? async () => {
               const diagnosis = await diagnoseTransaction(submittedTxId)
@@ -388,8 +394,6 @@ export function ClaimWinningsModal({
 
             if (status === 'confirmed') {
               setTxPhase('confirmed')
-              markBetClaimed(bet.id)
-              onClaimSuccess?.()
               return
             }
 
@@ -397,28 +401,33 @@ export function ClaimWinningsModal({
             setTxId(null)
 
             if (status === 'failed') {
-              let message = `${isRefund ? 'Refund' : 'Redemption'} failed. Your portfolio was not marked as claimed.`
+              // Revert the optimistic claimed flag so user can retry
+              markBetUnclaimed(bet.id)
+              let message = `${isRefund ? 'Refund' : 'Redemption'} failed.`
               try {
                 if (finalTxId.startsWith('at1')) {
                   const diagnosis = await diagnoseTransaction(finalTxId)
                   const suffix = diagnosis.message ? ` ${diagnosis.message}` : ''
                   if (diagnosis.status === 'rejected') {
-                    message = `Transaction was rejected on-chain.${suffix} Your portfolio was not marked as claimed.`
+                    message = `Transaction was rejected on-chain.${suffix}`
                   } else if (diagnosis.status === 'accepted') {
-                    message = `Transaction was accepted on-chain, but wallet status reported a failure. Please refresh and verify your claim manually.`
+                    // Tx actually succeeded — keep claimed flag
+                    markBetClaimed(bet.id)
+                    setTxPhase('confirmed')
+                    return
                   }
                 }
               } catch {
                 // keep fallback message
               }
-              setError(message)
+              setError(message + ' You can retry from the Unredeemed tab.')
               return
             }
 
+            // Timeout — keep the optimistic claimed flag since tx was broadcast
             setError(
-              `Transaction was submitted, but final confirmation could not be verified yet. ` +
-              `Your portfolio was not marked as claimed. ` +
-              `Check the explorer or reopen this modal later to verify the result.`
+              `Transaction was submitted but final confirmation is taking longer than expected. ` +
+              `Check the explorer for status.`
             )
           },
           30,
