@@ -172,58 +172,28 @@ function loadTurboShareRecords(marketId: string): string[] {
 }
 
 /**
- * After a bet tx confirms, fetch the transaction from explorer, find the
- * TurboShare record output, decrypt it via the wallet adapter's decrypt
- * or parse from the transition outputs, and save to localStorage.
+ * After a bet tx confirms, poll the wallet adapter's requestRecords API
+ * until the new TurboShare record appears, then save plaintext to localStorage.
  */
-async function captureTurboShareFromTx(txId: string, marketId: string) {
-  const ALEO_RPC = (import.meta as any).env?.VITE_ALEO_RPC_URL || 'https://api.explorer.provable.com/v1/testnet'
-  const maxWait = 90_000
-  const poll = 5_000
+async function captureTurboShareFromTx(_txId: string, marketId: string) {
+  const maxWait = 120_000 // 2 min — give wallet time to sync after tx confirm
+  const pollInterval = 5_000
   const start = Date.now()
 
   while (Date.now() - start < maxWait) {
     try {
-      const res = await fetch(`${ALEO_RPC}/transaction/${txId}`)
-      if (!res.ok) {
-        await new Promise(r => setTimeout(r, poll))
-        continue
+      const records = await fetchTurboShareRecords(marketId)
+      // Look for a record matching this marketId
+      const match = records.find(r => r.marketId === marketId && r.quantity > 0n)
+      if (match) {
+        saveTurboShareRecord(marketId, match.plaintext)
+        console.log('[turbo] share record captured from wallet and saved')
+        return
       }
-      const tx = await res.json()
-      const transitions = tx?.execution?.transitions ?? []
-
-      for (const t of transitions) {
-        for (const o of (t.outputs ?? [])) {
-          if (o.type !== 'record') continue
-          // Try to decrypt via wallet adapter
-          const ciphertext = o.value
-          if (!ciphertext?.startsWith('record1')) continue
-
-          try {
-            // Use wallet adapter's decrypt if available
-            const decrypt = (window as any).__aleoDecryptRecord ||
-              (window as any).shield?.decrypt ||
-              (window as any).aleo?.decrypt
-            if (typeof decrypt === 'function') {
-              const plaintext = await decrypt(ciphertext)
-              if (typeof plaintext === 'string' && plaintext.includes('market_id:') && plaintext.includes('quantity:')) {
-                saveTurboShareRecord(marketId, plaintext)
-                console.log('[turbo] share record captured from tx and saved')
-                return
-              }
-            }
-          } catch { /* decrypt failed — not our record or wrong key */ }
-        }
-      }
-
-      // Tx confirmed but couldn't decrypt — store tx ID for manual recovery
-      console.warn('[turbo] tx confirmed but could not decrypt share record')
-      return
-    } catch {
-      await new Promise(r => setTimeout(r, poll))
-    }
+    } catch { /* wallet not ready yet */ }
+    await new Promise(r => setTimeout(r, pollInterval))
   }
-  console.warn('[turbo] timed out waiting for bet tx confirmation')
+  console.warn('[turbo] could not capture share record — wallet may not have synced the bet tx yet')
 }
 
 // Canvas rounded-rect helper (used for the "Target" pill)
