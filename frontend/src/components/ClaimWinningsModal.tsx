@@ -445,10 +445,25 @@ export function ClaimWinningsModal({
               return
             }
 
-            // Timeout — keep the optimistic claimed flag since tx was broadcast
+            // Timeout — verify on-chain status before deciding
+            if (finalTxId.startsWith('at1')) {
+              try {
+                const diagnosis = await diagnoseTransaction(finalTxId)
+                if (diagnosis.status === 'rejected') {
+                  markBetUnclaimed(bet.id)
+                  setError('Transaction was rejected on-chain. You can retry from the Unredeemed tab.')
+                  return
+                }
+                if (diagnosis.status === 'accepted') {
+                  setTxPhase('confirmed')
+                  return
+                }
+              } catch { /* fall through */ }
+            }
+            // Unknown status — revert to be safe (user can retry)
+            markBetUnclaimed(bet.id)
             setError(
-              `Transaction was submitted but final confirmation is taking longer than expected. ` +
-              `Check the explorer for status.`
+              `Transaction status unknown. If it succeeded on-chain, the bet will show as claimed after page refresh.`
             )
           },
           30,
