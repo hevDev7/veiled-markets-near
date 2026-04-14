@@ -25,7 +25,10 @@ export function formatNumber(num: number): string {
  * Format credits (microcredits to credits)
  */
 export function formatCredits(microcredits: bigint, decimals: number = 2): string {
-  const credits = Number(microcredits) / 1_000_000
+  // Truncate instead of round so 995000 micro (0.995 ALEO) displays as
+  // "0.99" not "1.00" — matches actual spendable amount after 0.5% fee.
+  const factor = Math.pow(10, decimals)
+  const credits = Math.trunc((Number(microcredits) / 1_000_000) * factor) / factor
   return credits.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
