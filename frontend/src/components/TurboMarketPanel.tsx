@@ -996,37 +996,39 @@ export function TurboMarketPanel({
         txSucceeded = true
         setTxPhase('pending')
 
-        // Fast polling: check Shield Wallet adapter status (fast, ~1s)
-        // AND explorer (authoritative, slower due to indexing lag).
-        // First one to return accepted wins.
-        if (txId.startsWith('at1')) {
-          (async () => {
-            const { diagnoseTransaction } = await import('@/lib/aleo-client')
-            const walletApi: any = (window as any).shield || (window as any).shieldWallet
-            const maxChecks = 30 // 30 × 2s = 60s max
-            for (let i = 0; i < maxChecks; i++) {
-              if (i > 0) await new Promise(r => setTimeout(r, 2000))
+        // Poll for tx status. Handles BOTH at1... (direct explorer query)
+        // and UUID formats (query wallet to resolve to at1 first).
+        void (async () => {
+          const { diagnoseTransaction } = await import('@/lib/aleo-client')
+          const { lookupWalletTransactionStatus } = await import('@/lib/wallet')
+          const maxChecks = 40 // 40 × 1.5s = 60s
+          let resolvedTxId = txId.startsWith('at1') ? txId : null
 
-              // Check Shield Wallet's tx status API (fast)
-              if (walletApi?.getTransactionStatus) {
-                try {
-                  const st = await walletApi.getTransactionStatus(txId)
-                  const s = (st?.status || st || '').toString().toLowerCase()
-                  if (s.includes('accepted') || s.includes('finalized') || s.includes('settled')) {
-                    setTxPhase('confirmed')
-                    return
-                  }
-                  if (s.includes('rejected') || s.includes('failed')) {
-                    setTxPhase('failed')
-                    setErrorMsg('Transaction was rejected on-chain.')
-                    return
-                  }
-                } catch { /* ignore */ }
+          for (let i = 0; i < maxChecks; i++) {
+            if (i > 0) await new Promise(r => setTimeout(r, 1500))
+
+            // Ask wallet for status — works for both at1 and UUID IDs.
+            // Returns { status, transactionId } — resolve UUID to at1.
+            try {
+              const ws = await lookupWalletTransactionStatus(txId)
+              if (ws) {
+                if (ws.transactionId && ws.transactionId.startsWith('at1')) {
+                  resolvedTxId = ws.transactionId
+                  if (resolvedTxId) setLastTxId(resolvedTxId)
+                }
+                if (ws.status === 'accepted') { setTxPhase('confirmed'); return }
+                if (ws.status === 'rejected') {
+                  setTxPhase('failed')
+                  setErrorMsg('Transaction was rejected on-chain.')
+                  return
+                }
               }
+            } catch { /* ignore */ }
 
-              // Check explorer diagnosis
+            // Also query explorer if we have an at1 ID
+            if (resolvedTxId) {
               try {
-                const result = await diagnoseTransaction(txId)
+                const result = await diagnoseTransaction(resolvedTxId)
                 if (result.status === 'accepted') { setTxPhase('confirmed'); return }
                 if (result.status === 'rejected') {
                   setTxPhase('failed')
@@ -1035,8 +1037,8 @@ export function TurboMarketPanel({
                 }
               } catch { /* keep polling */ }
             }
-          })()
-        }
+          }
+        })()
 
         // After tx confirms, fetch the TurboShare output record from explorer
         // and save to localStorage for claim. We do this in background.
