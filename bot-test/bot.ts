@@ -795,9 +795,15 @@ bot.onText(/^\/result$/, async (msg) => {
 
         if (won) {
           const pool = await turbo.getPool(bet.marketId)
-          const totalPool = (pool?.totalUpAmount ?? 0n) + (pool?.totalDownAmount ?? 0n)
-          const winningShares = market.winningOutcome === 1 ? (pool?.totalUpAmount ?? 0n) : (pool?.totalDownAmount ?? 0n)
-          const shareQty = bet.amountMicro - bet.amountMicro / 200n // approximate shares
+          const marketPayouts = await turbo.getMarketPayouts(bet.marketId)
+          const totalPool = marketPayouts ?? 0n
+          const winningShares = market.winningOutcome === 1
+            ? (pool?.totalUpShares ?? 0n)
+            : (pool?.totalDownShares ?? 0n)
+          const qtyMatch = bet.shareRecord?.match(/quantity:\s*(\d+)u128/)
+          const shareQty = qtyMatch
+            ? BigInt(qtyMatch[1])
+            : bet.amountMicro - bet.amountMicro / 200n // fallback when record capture failed
           const payout = winningShares > 0n ? quoteTurboPayout(shareQty, totalPool, winningShares) : 0n
           text += `🏆 ${escapeMd(bet.symbol)} ${escapeMd(bet.side)} ${escapeMd(amount)} — *WON* \\(~${escapeMd(fmtAleo(payout))} ALEO\\)${bet.shareRecord ? '' : ' ⚠️ no share record'}\n`
         } else {
@@ -866,9 +872,17 @@ bot.onText(/^\/claim$/, async (msg) => {
         if (!qtyMatch) continue
         const shareQty = BigInt(qtyMatch[1])
 
-        const totalPool = (pool?.totalUpAmount ?? 0n) + (pool?.totalDownAmount ?? 0n)
-        const winningShares = market.winningOutcome === 1 ? (pool?.totalUpAmount ?? 0n) : (pool?.totalDownAmount ?? 0n)
+        const marketPayouts = await turbo.getMarketPayouts(bet.marketId)
+        const totalPool = marketPayouts ?? 0n
+        const winningShares = market.winningOutcome === 1
+          ? (pool?.totalUpShares ?? 0n)
+          : (pool?.totalDownShares ?? 0n)
         const payout = quoteTurboPayout(shareQty, totalPool, winningShares)
+        if (totalPool === 0n || winningShares === 0n || payout === 0n) {
+          throw new Error(
+            `claim quote invalid (market_payouts=${totalPool}, winning_shares=${winningShares}, payout=${payout})`
+          )
+        }
 
         const call = turbo.buildClaimWinningsInputs({
           marketId: bet.marketId,
