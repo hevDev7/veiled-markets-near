@@ -1637,35 +1637,30 @@ export async function diagnoseTransaction(txId: string): Promise<{
     return { found: false, status: 'unknown', message: 'Not an on-chain transaction ID (UUID from wallet)' };
   }
   try {
-    const resp = await fetch(`${config.rpcUrl}/transaction/${txId}`);
+    // Use /transaction/confirmed/{id} — returns status for BOTH accepted
+    // and rejected txs. The plain /transaction/{id} returns 404 for
+    // rejected txs (since they're stripped to fee-only).
+    const resp = await fetch(`${config.rpcUrl}/transaction/confirmed/${txId}`);
     if (!resp.ok) {
       return { found: false, status: 'unknown', message: `API returned ${resp.status}` };
     }
     const data = await resp.json();
-    const txType = data?.type;
+    const status = data?.status;
 
-    // Check for rejected status — Aleo marks failed finalize as "rejected" type
-    if (txType === 'rejected') {
-      const functions: string[] = [];
-      const transitions = data?.execution?.transitions || [];
-      for (const t of transitions) {
-        if (t.program && t.function) functions.push(`${t.program}/${t.function}`);
-      }
+    if (status === 'accepted') {
+      return { found: true, status: 'accepted', type: data?.type };
+    }
+    if (status === 'rejected') {
       return {
         found: true,
         status: 'rejected',
-        type: txType,
-        functions,
+        type: data?.type,
         message: 'Transaction was included on-chain but finalize ABORTED. ' +
-          'Most likely cause: transfer_public_as_signer failed (insufficient public balance after fee deduction).',
+          'Most likely cause: assert failed (e.g. share.owner != self.caller, record already spent).',
       };
     }
 
-    if (txType === 'execute') {
-      return { found: true, status: 'accepted', type: txType };
-    }
-
-    return { found: true, status: 'unknown', type: txType };
+    return { found: true, status: 'unknown', type: data?.type };
   } catch (err) {
     return { found: false, status: 'unknown', message: String(err) };
   }
