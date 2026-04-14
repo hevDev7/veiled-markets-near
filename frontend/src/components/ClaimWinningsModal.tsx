@@ -392,10 +392,16 @@ export function ClaimWinningsModal({
         setTxId(submittedTxId)
         setTxPhase('pending')
 
-        // Optimistically mark claimed right after broadcast so the bet moves
-        // out of Unredeemed tab immediately. If the tx is later rejected,
-        // user can manually un-claim from portfolio to re-attempt.
+        // Optimistically mark claimed and store the claim tx ID so we can
+        // later verify on-chain and auto-revert if it was rejected.
         markBetClaimed(bet.id)
+        try {
+          const store = useBetsStore.getState()
+          const updated = store.userBets.map(b =>
+            b.id === bet.id ? { ...b, claimTxId: submittedTxId } : b
+          )
+          useBetsStore.setState({ userBets: updated })
+        } catch { /* ignore */ }
         onClaimSuccess?.()
 
         const onChainVerify = submittedTxId.startsWith('at1')

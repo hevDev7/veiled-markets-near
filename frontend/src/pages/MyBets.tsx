@@ -462,6 +462,31 @@ export function MyBets() {
         fetchUserBets(),
       ])
       await syncBetStatuses()
+
+      // Auto-unclaim turbo bets whose claim tx was rejected on-chain.
+      // This fixes the case where optimistic marking stuck but tx failed.
+      try {
+        const { diagnoseTransaction } = await import('@/lib/aleo-client')
+        const storeStateCheck = useBetsStore.getState()
+        const turboClaimed = storeStateCheck.userBets.filter(b =>
+          b.claimed &&
+          b.status === 'won' &&
+          b.marketQuestion?.includes('Up or Down') // turbo bets
+        )
+        for (const bet of turboClaimed) {
+          // Check most recent claim tx (stored as lastClaimTxId if available)
+          const claimTxId = (bet as any).claimTxId
+          if (!claimTxId || !claimTxId.startsWith('at1')) continue
+          try {
+            const diag = await diagnoseTransaction(claimTxId)
+            if (diag.status === 'rejected') {
+              useBetsStore.getState().markBetUnclaimed(bet.id)
+              devWarn(`[MyBets] Auto-unclaimed bet ${bet.id.slice(0,20)} — tx rejected`)
+            }
+          } catch { /* ignore */ }
+        }
+      } catch { /* ignore */ }
+
       const restoredClaims = await reconcileClaimedBets()
       setClaimRepairNotice(
         restoredClaims > 0
