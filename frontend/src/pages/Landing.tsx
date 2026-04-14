@@ -364,10 +364,13 @@ export function Landing() {
   const handleConnectClick = useCallback(async () => {
     setConnectError(null)
     try {
-      // Always show wallet selection modal so users can pick Shield, Leo,
-      // Puzzle, Fox, or Soter. Auto-select was forcing Shield even when
-      // users wanted another wallet.
-      setVisible(true)
+      const hasShield = !!(window as any).shield
+      if (hasShield) {
+        selectWallet('Shield Wallet')
+        await connect(Network.TESTNET)
+      } else {
+        setVisible(true)
+      }
     } catch (err: any) {
       console.error('[Landing] Connect failed:', err)
       setConnectError(err?.message || 'Connection failed')
