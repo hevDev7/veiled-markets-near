@@ -354,7 +354,7 @@ export function TurboMarketPanel({
   hideChart = false,
   hideBetUI = false,
 }: TurboMarketPanelProps) {
-  const { executeTransaction } = useAleoTransaction()
+  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
   const [pool, setPool] = useState<TurboPoolView | null>(null)
   const [marketCredits, setMarketCredits] = useState<bigint | null>(null)
   const [shares, setShares] = useState<ParsedTurboShare[] | null>(null)
@@ -363,6 +363,8 @@ export function TurboMarketPanel({
   const [claimBusy, setClaimBusy] = useState(false)
   const [lastTxId, setLastTxId] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [txPhase, setTxPhase] = useState<'idle' | 'building' | 'submitting' | 'pending' | 'confirmed' | 'failed'>('idle')
+  const [txSide, setTxSide] = useState<TurboSide | null>(null)
   // Hydrate from localStorage on mount so a refresh during LOCKED doesn't
   // reset the chart to a flat synthetic line. readCachedTicks verifies the
   // stored marketId matches ours — stale cache from a previous round is
@@ -950,7 +952,10 @@ export function TurboMarketPanel({
     if (!Number.isFinite(amountAleo) || amountAleo <= 0) return
     const amountMicro = BigInt(Math.round(amountAleo * 1_000_000))
     setBusy(side)
+    setTxSide(side)
+    setTxPhase('building')
     setErrorMsg(null)
+    setLastTxId(null)
     try {
       // Test override path
       if (onBuy) {
@@ -977,6 +982,7 @@ export function TurboMarketPanel({
       // v8 parimutuel: expectedShares already computed above
       const tx = buildBuyUpDownInputs(marketId, side, amountMicro, expectedShares, creditsRecord)
       let txSucceeded = false
+      setTxPhase('submitting')
       try {
         const result = await executeTransaction({
           program: tx.programId,
@@ -988,6 +994,18 @@ export function TurboMarketPanel({
         const txId = (result as any)?.transactionId || `turbo_${Date.now()}`
         setLastTxId(txId)
         txSucceeded = true
+        setTxPhase('pending')
+
+        // Poll on-chain status for inline confirmation/rejection feedback
+        if (txId.startsWith('at1')) {
+          pollTransactionStatus(txId, (status) => {
+            if (status === 'confirmed') setTxPhase('confirmed')
+            else if (status === 'failed') {
+              setTxPhase('failed')
+              setErrorMsg('Transaction was rejected on-chain.')
+            }
+          }, 20, 5_000).catch(() => {})
+        }
 
         // After tx confirms, fetch the TurboShare output record from explorer
         // and save to localStorage for claim. We do this in background.
@@ -1017,6 +1035,7 @@ export function TurboMarketPanel({
     } catch (err: any) {
       console.error('[turbo] bet failed:', err)
       setErrorMsg(err?.message || String(err))
+      setTxPhase('failed')
     } finally {
       setBusy(null)
     }
@@ -1410,6 +1429,41 @@ export function TurboMarketPanel({
           {totalPool > 0 && (
             <div className="text-[10px] text-surface-500 text-center tabular-nums">
               Pool: {(totalPool / 1_000_000).toFixed(2)} ALEO
+            </div>
+          )}
+
+          {/* TX status banner */}
+          {txPhase !== 'idle' && (
+            <div className={cn(
+              'rounded-lg px-3 py-2 text-xs flex items-center gap-2 border',
+              txPhase === 'building' && 'bg-surface-800/60 border-surface-700/40 text-surface-300',
+              txPhase === 'submitting' && 'bg-amber-500/10 border-amber-500/20 text-amber-300',
+              txPhase === 'pending' && 'bg-blue-500/10 border-blue-500/20 text-blue-300',
+              txPhase === 'confirmed' && 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300',
+              txPhase === 'failed' && 'bg-rose-500/10 border-rose-500/20 text-rose-300',
+            )}>
+              {(txPhase === 'building' || txPhase === 'submitting' || txPhase === 'pending') && (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              )}
+              {txPhase === 'confirmed' && <CheckCircle2 className="w-3.5 h-3.5" />}
+              {txPhase === 'failed' && <span className="text-sm">✕</span>}
+              <span className="flex-1">
+                {txPhase === 'building' && `Preparing ${txSide} bet…`}
+                {txPhase === 'submitting' && `Signing & broadcasting ${txSide} bet…`}
+                {txPhase === 'pending' && `Bet submitted! Waiting for on-chain confirmation…`}
+                {txPhase === 'confirmed' && `${txSide} bet confirmed on-chain ✓`}
+                {txPhase === 'failed' && (errorMsg || 'Transaction failed')}
+              </span>
+              {lastTxId && lastTxId.startsWith('at1') && (
+                <a
+                  href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:opacity-80"
+                >
+                  View
+                </a>
+              )}
             </div>
           )}
 
