@@ -1252,8 +1252,41 @@ export function TurboMarketPanel({
         if (hideChart) {
           const activeSide = selectedSide
           const selectedPayout = activeSide === 'UP' ? upPayout : activeSide === 'DOWN' ? dnPayout : 0
+          const showPendingOverlay = txPhase === 'submitting' || txPhase === 'pending'
           return (
-            <div className="px-4 pb-5 pt-3 space-y-4">
+            <div className="relative px-4 pb-5 pt-3 space-y-4">
+              {/* Transaction Pending overlay */}
+              {showPendingOverlay && (
+                <div className="absolute inset-0 z-20 bg-surface-950/85 backdrop-blur-sm rounded-lg flex flex-col items-center justify-center p-6 gap-4">
+                  <Loader2 className="w-10 h-10 animate-spin text-brand-400" />
+                  <div className="text-center space-y-1">
+                    <p className="text-base font-bold text-white">Transaction Pending</p>
+                    <p className="text-sm text-surface-400">
+                      Your {txSide} bet of {parseFloat(betAmount || '0').toFixed(2)} ALEO has been submitted.
+                    </p>
+                    <p className="text-xs text-surface-500">
+                      Waiting for on-chain confirmation. This may take 30s - 3min.
+                    </p>
+                  </div>
+                  {lastTxId && lastTxId.startsWith('at1') && (
+                    <a
+                      href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-brand-300 hover:text-brand-200 underline"
+                    >
+                      View on explorer
+                    </a>
+                  )}
+                  <button
+                    onClick={() => setTxPhase('idle')}
+                    className="mt-2 px-4 py-2 rounded-lg bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors"
+                  >
+                    Close & Continue
+                  </button>
+                </div>
+              )}
+
               {/* TX status banner */}
               {txPhase !== 'idle' && (
                 <div className={cn(
@@ -1295,12 +1328,14 @@ export function TurboMarketPanel({
                 <div className="grid grid-cols-2 gap-2">
                   {/* UP card */}
                   <button
+                    disabled={busy != null || txPhase === 'submitting' || txPhase === 'pending'}
                     onClick={() => setSelectedSide('UP')}
                     className={cn(
                       'relative flex flex-col items-center justify-center py-3 rounded-xl font-bold transition-all overflow-hidden border',
                       selectedSide === 'UP'
                         ? 'bg-emerald-500/20 border-emerald-500/60 ring-2 ring-emerald-500/30'
                         : 'bg-emerald-500/[0.06] border-emerald-500/25 hover:bg-emerald-500/10',
+                      (busy != null || txPhase === 'submitting' || txPhase === 'pending') && 'opacity-50 cursor-not-allowed pointer-events-none',
                     )}
                   >
                     {totalPool > 0 && (
@@ -1322,12 +1357,14 @@ export function TurboMarketPanel({
 
                   {/* DOWN card */}
                   <button
+                    disabled={busy != null || txPhase === 'submitting' || txPhase === 'pending'}
                     onClick={() => setSelectedSide('DOWN')}
                     className={cn(
                       'relative flex flex-col items-center justify-center py-3 rounded-xl font-bold transition-all overflow-hidden border',
                       selectedSide === 'DOWN'
                         ? 'bg-rose-500/20 border-rose-500/60 ring-2 ring-rose-500/30'
                         : 'bg-rose-500/[0.06] border-rose-500/25 hover:bg-rose-500/10',
+                      (busy != null || txPhase === 'submitting' || txPhase === 'pending') && 'opacity-50 cursor-not-allowed pointer-events-none',
                     )}
                   >
                     {totalPool > 0 && (
