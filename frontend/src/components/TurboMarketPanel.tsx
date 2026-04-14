@@ -996,21 +996,38 @@ export function TurboMarketPanel({
         txSucceeded = true
         setTxPhase('pending')
 
-        // Fast polling for inline confirmation — try every 2s for 60s.
-        // diagnoseTransaction is cheap (1 API call), so we can poll aggressively.
+        // Fast polling: check Shield Wallet adapter status (fast, ~1s)
+        // AND explorer (authoritative, slower due to indexing lag).
+        // First one to return accepted wins.
         if (txId.startsWith('at1')) {
           (async () => {
             const { diagnoseTransaction } = await import('@/lib/aleo-client')
+            const walletApi: any = (window as any).shield || (window as any).shieldWallet
             const maxChecks = 30 // 30 × 2s = 60s max
             for (let i = 0; i < maxChecks; i++) {
-              // Don't wait before first check — tx may already be indexed
               if (i > 0) await new Promise(r => setTimeout(r, 2000))
+
+              // Check Shield Wallet's tx status API (fast)
+              if (walletApi?.getTransactionStatus) {
+                try {
+                  const st = await walletApi.getTransactionStatus(txId)
+                  const s = (st?.status || st || '').toString().toLowerCase()
+                  if (s.includes('accepted') || s.includes('finalized') || s.includes('settled')) {
+                    setTxPhase('confirmed')
+                    return
+                  }
+                  if (s.includes('rejected') || s.includes('failed')) {
+                    setTxPhase('failed')
+                    setErrorMsg('Transaction was rejected on-chain.')
+                    return
+                  }
+                } catch { /* ignore */ }
+              }
+
+              // Check explorer diagnosis
               try {
                 const result = await diagnoseTransaction(txId)
-                if (result.status === 'accepted') {
-                  setTxPhase('confirmed')
-                  return
-                }
+                if (result.status === 'accepted') { setTxPhase('confirmed'); return }
                 if (result.status === 'rejected') {
                   setTxPhase('failed')
                   setErrorMsg('Transaction was rejected on-chain.')
@@ -1018,7 +1035,6 @@ export function TurboMarketPanel({
                 }
               } catch { /* keep polling */ }
             }
-            // Timeout — leave phase as 'pending', user can close manually
           })()
         }
 
