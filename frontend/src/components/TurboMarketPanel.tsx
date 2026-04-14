@@ -1240,6 +1240,41 @@ export function TurboMarketPanel({
           const selectedPayout = activeSide === 'UP' ? upPayout : activeSide === 'DOWN' ? dnPayout : 0
           return (
             <div className="px-4 pb-5 pt-3 space-y-4">
+              {/* TX status banner */}
+              {txPhase !== 'idle' && (
+                <div className={cn(
+                  'rounded-lg px-3 py-2 text-xs flex items-center gap-2 border',
+                  txPhase === 'building' && 'bg-surface-800/60 border-surface-700/40 text-surface-300',
+                  txPhase === 'submitting' && 'bg-amber-500/10 border-amber-500/20 text-amber-300',
+                  txPhase === 'pending' && 'bg-blue-500/10 border-blue-500/20 text-blue-300',
+                  txPhase === 'confirmed' && 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300',
+                  txPhase === 'failed' && 'bg-rose-500/10 border-rose-500/20 text-rose-300',
+                )}>
+                  {(txPhase === 'building' || txPhase === 'submitting' || txPhase === 'pending') && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                  )}
+                  {txPhase === 'confirmed' && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+                  {txPhase === 'failed' && <span className="text-sm flex-shrink-0">✕</span>}
+                  <span className="flex-1 min-w-0">
+                    {txPhase === 'building' && `Preparing ${txSide} bet…`}
+                    {txPhase === 'submitting' && `Signing ${txSide} bet…`}
+                    {txPhase === 'pending' && `Waiting for on-chain confirmation…`}
+                    {txPhase === 'confirmed' && `${txSide} bet confirmed ✓`}
+                    {txPhase === 'failed' && (errorMsg || 'Transaction failed')}
+                  </span>
+                  {lastTxId && lastTxId.startsWith('at1') && (
+                    <a
+                      href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:opacity-80 flex-shrink-0"
+                    >
+                      View
+                    </a>
+                  )}
+                </div>
+              )}
+
               {/* Select Outcome */}
               <div>
                 <label className="text-sm text-surface-400 mb-2 block">Select Outcome</label>
