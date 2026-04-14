@@ -153,6 +153,21 @@ export function ClaimWinningsModal({
         setSelectedRecord(exactMatch || (matchingRecords.length === 1 ? matchingRecords[0] : null))
       } else if (records.length === 0) {
         setSelectedRecord(null)
+        // If this is a turbo bet and the market's payout pool is already
+        // drained (market_payouts == 0), the bet has almost certainly been
+        // claimed (by this user in a different session or via another path).
+        // Auto-mark as claimed to avoid stuck "Unredeemed" entries.
+        if (isTurboBet) {
+          try {
+            const pool = await fetchTurboMarketCredits(bet.marketId)
+            if (pool === 0n) {
+              markBetClaimed(bet.id)
+              onClaimSuccess?.()
+              setFetchError('This bet was already claimed (market payout pool is empty). Marked as claimed.')
+              return
+            }
+          } catch { /* ignore */ }
+        }
         setFetchError('No OutcomeShare records found. Your wallet may not support record fetching, or records may be spent.')
       } else {
         setSelectedRecord(null)
@@ -168,7 +183,7 @@ export function ClaimWinningsModal({
     } finally {
       setIsFetchingRecords(false)
     }
-  }, [bet, expectedQuantity, isRefund, matchesCurrentBet, sortRecordsForBet])
+  }, [bet, expectedQuantity, isRefund, matchesCurrentBet, sortRecordsForBet, isTurboBet, markBetClaimed, onClaimSuccess, wallet.address])
 
   useEffect(() => {
     if (isOpen && bet && wallet.connected) {
