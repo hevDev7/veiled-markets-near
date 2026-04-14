@@ -354,7 +354,7 @@ export function TurboMarketPanel({
   hideChart = false,
   hideBetUI = false,
 }: TurboMarketPanelProps) {
-  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
+  const { executeTransaction } = useAleoTransaction()
   const [pool, setPool] = useState<TurboPoolView | null>(null)
   const [marketCredits, setMarketCredits] = useState<bigint | null>(null)
   const [shares, setShares] = useState<ParsedTurboShare[] | null>(null)
@@ -996,28 +996,29 @@ export function TurboMarketPanel({
         txSucceeded = true
         setTxPhase('pending')
 
-        // Poll on-chain status for inline confirmation/rejection feedback.
-        // Do an immediate first check (tx may already be in explorer by the
-        // time wallet returns), then poll every 3s for up to 90s.
+        // Fast polling for inline confirmation — try every 2s for 60s.
+        // diagnoseTransaction is cheap (1 API call), so we can poll aggressively.
         if (txId.startsWith('at1')) {
           (async () => {
-            try {
-              const { diagnoseTransaction } = await import('@/lib/aleo-client')
-              const first = await diagnoseTransaction(txId)
-              if (first.status === 'accepted') { setTxPhase('confirmed'); return }
-              if (first.status === 'rejected') {
-                setTxPhase('failed')
-                setErrorMsg('Transaction was rejected on-chain.')
-                return
-              }
-            } catch { /* fall through to polling */ }
-            pollTransactionStatus(txId, (status) => {
-              if (status === 'confirmed') setTxPhase('confirmed')
-              else if (status === 'failed') {
-                setTxPhase('failed')
-                setErrorMsg('Transaction was rejected on-chain.')
-              }
-            }, 30, 3_000).catch(() => {})
+            const { diagnoseTransaction } = await import('@/lib/aleo-client')
+            const maxChecks = 30 // 30 × 2s = 60s max
+            for (let i = 0; i < maxChecks; i++) {
+              // Don't wait before first check — tx may already be indexed
+              if (i > 0) await new Promise(r => setTimeout(r, 2000))
+              try {
+                const result = await diagnoseTransaction(txId)
+                if (result.status === 'accepted') {
+                  setTxPhase('confirmed')
+                  return
+                }
+                if (result.status === 'rejected') {
+                  setTxPhase('failed')
+                  setErrorMsg('Transaction was rejected on-chain.')
+                  return
+                }
+              } catch { /* keep polling */ }
+            }
+            // Timeout — leave phase as 'pending', user can close manually
           })()
         }
 
