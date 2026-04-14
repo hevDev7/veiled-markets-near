@@ -5,7 +5,10 @@ import { devLog } from './logger'
  */
 
 const RESERVED_CREDITS_RECORDS = new Map<string, number>()
-const RESERVED_CREDITS_TTL_MS = 3 * 60 * 1000
+// 30 minutes — enough time for the wallet to refresh its record list after
+// a spent record is consumed on-chain. Too short and user could reuse a
+// spent record that wallet still thinks is unspent.
+const RESERVED_CREDITS_TTL_MS = 30 * 60 * 1000
 
 function cleanupReservedCreditsRecords(): void {
   const now = Date.now()

@@ -976,6 +976,7 @@ export function TurboMarketPanel({
 
       // v8 parimutuel: expectedShares already computed above
       const tx = buildBuyUpDownInputs(marketId, side, amountMicro, expectedShares, creditsRecord)
+      let txSucceeded = false
       try {
         const result = await executeTransaction({
           program: tx.programId,
@@ -986,6 +987,7 @@ export function TurboMarketPanel({
         } as any)
         const txId = (result as any)?.transactionId || `turbo_${Date.now()}`
         setLastTxId(txId)
+        txSucceeded = true
 
         // After tx confirms, fetch the TurboShare output record from explorer
         // and save to localStorage for claim. We do this in background.
@@ -1008,7 +1010,9 @@ export function TurboMarketPanel({
           claimed: false,
         })
       } finally {
-        releaseCreditsRecord(creditsRecord)
+        // Only release reservation on failure. On success, record is SPENT
+        // and must stay reserved so the next bet doesn't reuse it.
+        if (!txSucceeded) releaseCreditsRecord(creditsRecord)
       }
     } catch (err: any) {
       console.error('[turbo] bet failed:', err)
