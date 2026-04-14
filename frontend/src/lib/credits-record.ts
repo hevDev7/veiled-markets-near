@@ -4,19 +4,37 @@ import { devLog } from './logger'
  * Used by BettingModal and MarketDetail for private trading (buy_shares_private).
  */
 
-const RESERVED_CREDITS_RECORDS = new Map<string, number>()
+const STORAGE_KEY = 'veiled_reserved_credits'
 // 30 minutes — enough time for the wallet to refresh its record list after
-// a spent record is consumed on-chain. Too short and user could reuse a
-// spent record that wallet still thinks is unspent.
+// a spent record is consumed on-chain.
 const RESERVED_CREDITS_TTL_MS = 30 * 60 * 1000
 
-function cleanupReservedCreditsRecords(): void {
+function loadReserved(): Map<string, number> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return new Map()
+    const obj = JSON.parse(raw) as Record<string, number>
+    return new Map(Object.entries(obj))
+  } catch { return new Map() }
+}
+
+function saveReserved(map: Map<string, number>): void {
+  try {
+    const obj: Record<string, number> = {}
+    for (const [k, v] of map.entries()) obj[k] = v
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj))
+  } catch { /* quota / privacy — ignore */ }
+}
+
+function cleanupReservedCreditsRecords(): Map<string, number> {
+  const map = loadReserved()
   const now = Date.now()
-  for (const [key, expiresAt] of RESERVED_CREDITS_RECORDS.entries()) {
-    if (expiresAt <= now) {
-      RESERVED_CREDITS_RECORDS.delete(key)
-    }
+  let changed = false
+  for (const [key, expiresAt] of map.entries()) {
+    if (expiresAt <= now) { map.delete(key); changed = true }
   }
+  if (changed) saveReserved(map)
+  return map
 }
 
 function makeCreditsRecordKey(record: string): string {
@@ -24,17 +42,19 @@ function makeCreditsRecordKey(record: string): string {
 }
 
 export function reserveCreditsRecord(record: string, ttlMs: number = RESERVED_CREDITS_TTL_MS): void {
-  cleanupReservedCreditsRecords()
-  RESERVED_CREDITS_RECORDS.set(makeCreditsRecordKey(record), Date.now() + ttlMs)
+  const map = cleanupReservedCreditsRecords()
+  map.set(makeCreditsRecordKey(record), Date.now() + ttlMs)
+  saveReserved(map)
 }
 
 export function releaseCreditsRecord(record: string): void {
-  RESERVED_CREDITS_RECORDS.delete(makeCreditsRecordKey(record))
+  const map = loadReserved()
+  if (map.delete(makeCreditsRecordKey(record))) saveReserved(map)
 }
 
 function isCreditsRecordReserved(record: string): boolean {
-  cleanupReservedCreditsRecords()
-  const expiresAt = RESERVED_CREDITS_RECORDS.get(makeCreditsRecordKey(record))
+  const map = cleanupReservedCreditsRecords()
+  const expiresAt = map.get(makeCreditsRecordKey(record))
   return typeof expiresAt === 'number' && expiresAt > Date.now()
 }
 
