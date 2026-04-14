@@ -404,7 +404,7 @@ export function useAleoTransaction() {
           }
         }
 
-        if (txId.startsWith('at1') && i > 0 && i % 3 === 0) {
+        if (txId.startsWith('at1')) {
           try {
             const diagnosis = await diagnoseTransaction(txId)
             if (diagnosis.status === 'accepted') {

@@ -996,15 +996,29 @@ export function TurboMarketPanel({
         txSucceeded = true
         setTxPhase('pending')
 
-        // Poll on-chain status for inline confirmation/rejection feedback
+        // Poll on-chain status for inline confirmation/rejection feedback.
+        // Do an immediate first check (tx may already be in explorer by the
+        // time wallet returns), then poll every 3s for up to 90s.
         if (txId.startsWith('at1')) {
-          pollTransactionStatus(txId, (status) => {
-            if (status === 'confirmed') setTxPhase('confirmed')
-            else if (status === 'failed') {
-              setTxPhase('failed')
-              setErrorMsg('Transaction was rejected on-chain.')
-            }
-          }, 20, 5_000).catch(() => {})
+          (async () => {
+            try {
+              const { diagnoseTransaction } = await import('@/lib/aleo-client')
+              const first = await diagnoseTransaction(txId)
+              if (first.status === 'accepted') { setTxPhase('confirmed'); return }
+              if (first.status === 'rejected') {
+                setTxPhase('failed')
+                setErrorMsg('Transaction was rejected on-chain.')
+                return
+              }
+            } catch { /* fall through to polling */ }
+            pollTransactionStatus(txId, (status) => {
+              if (status === 'confirmed') setTxPhase('confirmed')
+              else if (status === 'failed') {
+                setTxPhase('failed')
+                setErrorMsg('Transaction was rejected on-chain.')
+              }
+            }, 30, 3_000).catch(() => {})
+          })()
         }
 
         // After tx confirms, fetch the TurboShare output record from explorer
