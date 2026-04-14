@@ -1468,18 +1468,39 @@ function BetCard({
                     isRefunded && "text-orange-400"
                   )}>
                     {isWon
-                      ? `+${formatCredits(bet.payoutAmount || bet.sharesReceived || bet.amount)} ${tokenSymbol}`
+                      ? (() => {
+                          // Prefer actual on-chain payout; fallback to shares (= amount - 0.5% fee);
+                          // last resort: apply 0.5% fee deduction so display matches contract.
+                          const shown = bet.payoutAmount
+                            ?? bet.sharesReceived
+                            ?? (bet.amount - bet.amount / 200n)
+                          return `+${formatCredits(shown)} ${tokenSymbol}`
+                        })()
                       : isRefunded
                         ? `${formatCredits(bet.amount)} ${tokenSymbol}`
                         : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
                   {isWon && (() => {
-                    const payout = bet.payoutAmount || bet.sharesReceived
-                    return payout != null && payout > bet.amount ? (
-                      <p className="text-[10px] text-yes-400/60 tabular-nums">
-                        profit +{formatCredits(payout - bet.amount)} {tokenSymbol}
-                      </p>
-                    ) : null
+                    const payout = bet.payoutAmount
+                      ?? bet.sharesReceived
+                      ?? (bet.amount - bet.amount / 200n)
+                    if (payout == null) return null
+                    const diff = payout - bet.amount
+                    if (diff > 0n) {
+                      return (
+                        <p className="text-[10px] text-yes-400/60 tabular-nums">
+                          profit +{formatCredits(diff)} {tokenSymbol}
+                        </p>
+                      )
+                    }
+                    if (diff < 0n) {
+                      return (
+                        <p className="text-[10px] text-surface-500 tabular-nums">
+                          after 0.5% fee
+                        </p>
+                      )
+                    }
+                    return null
                   })()}
                 </div>
               )}
