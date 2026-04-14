@@ -326,16 +326,15 @@ export function ClaimWinningsModal({
 
           const totalWinning = (inspectedRecord.outcome === 1)
             ? pool.totalUpShares : pool.totalDownShares
-          if (totalWinning === 0n) {
-            throw new Error(
-              `Winning-side shares total is 0 in turbo_pools — contract will reject. ` +
-              `This usually means every winner has already claimed, or the pool state is stale.`
-            )
-          }
-          if (credits === 0n) {
-            throw new Error(
-              `market_payouts is 0 — the pool has already been fully drained by previous claims.`
-            )
+          // If pool is fully drained, this bet has already been claimed by
+          // someone else (or by a different session). Auto-mark as claimed
+          // instead of failing — the user's bet accounting is stale.
+          if (totalWinning === 0n || credits === 0n) {
+            markBetClaimed(bet.id)
+            onClaimSuccess?.()
+            setError('This bet was already claimed (pool is empty). Marked as claimed in your portfolio.')
+            setIsSubmitting(false)
+            return
           }
 
           const shareQty = inspectedRecord.quantity ?? 0n
