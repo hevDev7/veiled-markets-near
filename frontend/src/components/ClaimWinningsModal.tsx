@@ -113,7 +113,23 @@ export function ClaimWinningsModal({
 
       if (isTurboBet) {
         // Turbo markets: fetch TurboShare records and convert to ParsedOutcomeShare format
-        const turboRecords = await fetchTurboShareRecords(bet.marketId)
+        let turboRecords = await fetchTurboShareRecords(bet.marketId)
+
+        // Fallback: localStorage records saved at bet time (TurboMarketPanel)
+        if (turboRecords.length === 0) {
+          try {
+            const stored = JSON.parse(localStorage.getItem('veiled_turbo_shares') || '{}')
+            const saved: string[] = (stored[bet.marketId] || [])
+              // Skip synthetic records with invalid commitments
+              .filter((r: string) => !r.includes('_nonce: 0group'))
+            const { parseTurboShare } = await import('@/lib/turbo-client')
+            for (const text of saved) {
+              const parsed = parseTurboShare(text)
+              if (parsed && parsed.quantity > 0n) turboRecords.push(parsed)
+            }
+          } catch { /* ignore */ }
+        }
+
         records = turboRecords.map(tr => ({
           plaintext: tr.plaintext,
           outcome: tr.side === 'UP' ? 1 : 2,

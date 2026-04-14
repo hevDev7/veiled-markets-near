@@ -164,7 +164,10 @@ function saveTurboShareRecord(marketId: string, record: string) {
 function loadTurboShareRecords(marketId: string): string[] {
   try {
     const stored = JSON.parse(localStorage.getItem(SHARE_STORAGE_KEY) || '{}')
-    return stored[marketId] || []
+    const records: string[] = stored[marketId] || []
+    // Filter out synthetic records (with _nonce: 0group) — those have invalid
+    // commitments and snarkos rejects claims that use them.
+    return records.filter(r => !r.includes('_nonce: 0group'))
   } catch { return [] }
 }
 
