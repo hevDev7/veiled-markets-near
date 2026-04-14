@@ -141,7 +141,13 @@ export function ClaimWinningsModal({
         const betTokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
         records = await fetchOutcomeShareRecords(getProgramIdForToken(betTokenType), bet.marketId)
       }
-      const matchingRecords = sortRecordsForBet(records.filter(matchesCurrentBet))
+      // Filter out records that don't belong to the current wallet — claim
+      // would be rejected by `assert(share.owner == self.caller)` otherwise.
+      const walletAddr = wallet.address
+      const ownedRecords = walletAddr
+        ? records.filter(r => !r.owner || r.owner === walletAddr)
+        : records
+      const matchingRecords = sortRecordsForBet(ownedRecords.filter(matchesCurrentBet))
 
       setShareRecords(matchingRecords)
 
@@ -228,8 +234,17 @@ export function ClaimWinningsModal({
       if (inspectedRecord.marketId && inspectedRecord.marketId !== bet.marketId) {
         throw new Error('The selected OutcomeShare record belongs to a different market.')
       }
-      if (inspectedRecord.owner && wallet.address && inspectedRecord.owner !== wallet.address) {
-        throw new Error('The selected OutcomeShare record belongs to a different wallet address.')
+      if (!inspectedRecord.owner) {
+        throw new Error('Could not parse owner from share record. The record may be malformed or missing the owner field.')
+      }
+      if (!wallet.address) {
+        throw new Error('No wallet connected. Please connect your wallet before claiming.')
+      }
+      if (inspectedRecord.owner !== wallet.address) {
+        throw new Error(
+          `This share record belongs to wallet ${inspectedRecord.owner.slice(0, 20)}… but you are connected as ${wallet.address.slice(0, 20)}…. ` +
+          `Switch to the correct wallet (the one that placed the bet) to claim.`
+        )
       }
       if (inspectedRecord.outcome != null && inspectedRecord.outcome !== expectedOutcome) {
         throw new Error(
