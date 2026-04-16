@@ -17,6 +17,7 @@
         "dev": "tsx watch src/index-markets.ts"
     },
     "dependencies": {
+        "@provablehq/sdk": "^0.6.0",
         "eventsource": "^3.0.7",
         "node-fetch": "^3.3.2"
     },

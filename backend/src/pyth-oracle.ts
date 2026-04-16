@@ -33,6 +33,12 @@
 // ============================================================================
 
 import { EventSource } from 'eventsource'
+import {
+  startRecordScan,
+  takeCreditsRecord,
+  pushRecord,
+  captureChangeRecord,
+} from './oracle-records.js'
 // node-fetch is already a dep; native fetch is fine on Node 18+ but we
 // import to keep parity with the rest of backend/.
 // import fetch from 'node-fetch'
@@ -193,6 +199,192 @@ export async function getAleoBlockHeight(): Promise<bigint> {
   if (!res.ok) throw new Error(`aleo rpc ${res.status}`)
   const text = await res.text()
   return BigInt(text.trim())
+}
+
+// ----------------------------------------------------------------------------
+// Sole-bettor dust injection
+// ----------------------------------------------------------------------------
+// Workaround for a snarkVM edge case where `claim_winnings_fin` aborts when
+// only one side of a turbo market has bets (payout == share_quantity). By
+// seeding 0.001 ALEO (MIN_TRADE_AMOUNT) on the empty side ~90s before
+// deadline, the pool becomes multi-bettor and claims succeed normally.
+//
+// Uses the SAME operator wallet that signs create/resolve. Private credits
+// records are scanned once at startup via `oracle-records.ts` and rotated
+// automatically on each injection — no extra env vars required beyond the
+// OPERATOR_PRIVATE_KEY the oracle already needs.
+// ----------------------------------------------------------------------------
+
+const DUST_AMOUNT_MICRO = 1000n
+const DUST_EXPECTED_SHARES =
+  DUST_AMOUNT_MICRO - (DUST_AMOUNT_MICRO * 50n) / 10000n
+// Credits record must cover the bet + a buffer for the tx fee.
+const DUST_MIN_RECORD_BALANCE = DUST_AMOUNT_MICRO + 100_000n
+
+interface TurboPoolView {
+  totalUpAmount: bigint
+  totalDownAmount: bigint
+  totalUpShares: bigint
+  totalDownShares: bigint
+}
+
+async function fetchTurboPool(marketId: string): Promise<TurboPoolView | null> {
+  try {
+    const url = `${ALEO_RPC_URL}/program/${TURBO_PROGRAM_ID_LIVE}/mapping/turbo_pools/${marketId}`
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const text = (await res.text()).replace(/^"|"$/g, '')
+    if (!text || text === 'null') return null
+    const pick = (re: RegExp): bigint => {
+      const m = text.match(re)
+      return m ? BigInt(m[1]) : 0n
+    }
+    return {
+      totalUpAmount: pick(/total_up_amount:\s*(\d+)u128/),
+      totalDownAmount: pick(/total_down_amount:\s*(\d+)u128/),
+      totalUpShares: pick(/total_up_shares:\s*(\d+)u128/),
+      totalDownShares: pick(/total_down_shares:\s*(\d+)u128/),
+    }
+  } catch {
+    return null
+  }
+}
+
+function randomFieldNonce(): string {
+  const bytes = new Uint8Array(8)
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  let hex = ''
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+  return `${BigInt('0x' + hex)}field`
+}
+
+/**
+ * Core buy_up_down helper used by both automatic sole-bettor detection and
+ * the `/debug/dust/force` endpoint. Returns the submitted tx id on success,
+ * or an error code describing why the inject was skipped.
+ */
+interface DustInjectResult {
+  ok: boolean
+  txId?: string
+  code:
+    | 'ok'
+    | 'no_private_key'
+    | 'no_record'
+    | 'too_late'
+    | 'broadcast_failed'
+    | 'post_broadcast_failed'
+  reason?: string
+}
+
+async function performDustInject(
+  marketId: string,
+  side: 'UP' | 'DOWN',
+  deadline: bigint,
+): Promise<DustInjectResult> {
+  const privateKey = process.env.OPERATOR_PRIVATE_KEY || process.env.ALEO_PRIVATE_KEY || process.env.PRIVATE_KEY
+  if (!privateKey) {
+    return { ok: false, code: 'no_private_key', reason: 'OPERATOR_PRIVATE_KEY not set' }
+  }
+
+  let currentBlock: bigint
+  try {
+    currentBlock = await getAleoBlockHeight()
+  } catch (err) {
+    return { ok: false, code: 'too_late', reason: `block-height fetch failed: ${(err as Error)?.message}` }
+  }
+  const blocksLeft = deadline - currentBlock
+  if (blocksLeft < 20n) {
+    return {
+      ok: false,
+      code: 'too_late',
+      reason: `only ${blocksLeft} blocks until deadline — need >= 20 for prove+broadcast+inclusion`,
+    }
+  }
+
+  const record = await takeCreditsRecord(privateKey, DUST_MIN_RECORD_BALANCE)
+  if (!record) {
+    return {
+      ok: false,
+      code: 'no_record',
+      reason: `no operator credits record >= ${DUST_MIN_RECORD_BALANCE} micro; fund the wallet via credits.aleo::transfer_public_to_private`,
+    }
+  }
+
+  const sideCode = side === 'UP' ? 1 : 2
+  const shareNonce = randomFieldNonce()
+  const inputs = [
+    marketId,
+    `${sideCode}u8`,
+    `${DUST_AMOUNT_MICRO}u128`,
+    `${DUST_EXPECTED_SHARES}u128`,
+    shareNonce,
+    record,
+  ]
+
+  let result: SnarkosExecResult
+  try {
+    result = await snarkosExecute(TURBO_PROGRAM_ID_LIVE, 'buy_up_down', inputs)
+  } catch (err) {
+    const msg = (err as Error)?.message ?? String(err)
+    const neverBroadcast =
+      msg.includes('Failed to broadcast') ||
+      msg.includes('VM failed to execute') ||
+      msg.includes('Failed to fetch')
+    if (neverBroadcast) {
+      pushRecord(record)
+      return { ok: false, code: 'broadcast_failed', reason: msg.slice(0, 300) }
+    }
+    return { ok: false, code: 'post_broadcast_failed', reason: msg.slice(0, 300) }
+  }
+
+  // Capture change record in background — don't block caller.
+  captureChangeRecord(result.txId, privateKey).then((change) => {
+    if (!change) {
+      console.warn(
+        `[dust] could not decrypt change record for ${result.txId.slice(0, 24)}… — ` +
+        `next injection may need a fresh scan or CREDITS_RECORD_PLAINTEXT bootstrap`,
+      )
+    }
+  }).catch(() => {})
+
+  return { ok: true, txId: result.txId, code: 'ok' }
+}
+
+/**
+ * Detect sole-bettor state on `marketId`; if present, inject a 0.001 ALEO
+ * bet on the empty side. Must be called with enough block headroom before
+ * `deadline` — buy_up_down_fin asserts `current_height < m.deadline`.
+ *
+ * Idempotent: safe to call repeatedly (second call sees multi-bettor state
+ * and no-ops).
+ */
+async function injectDustIfSoleBettor(marketId: string, deadline: bigint): Promise<void> {
+  const pool = await fetchTurboPool(marketId)
+  if (!pool) return
+
+  const soleUp = pool.totalUpAmount > 0n && pool.totalDownAmount === 0n
+  const soleDown = pool.totalDownAmount > 0n && pool.totalUpAmount === 0n
+  if (!soleUp && !soleDown) return // balanced or empty — no action
+
+  const emptySide: 'UP' | 'DOWN' = soleUp ? 'DOWN' : 'UP'
+  const soleSide = soleUp ? 'UP' : 'DOWN'
+
+  console.log(
+    `[dust] ${marketId.slice(0, 16)}... sole-bettor ${soleSide} detected → ` +
+    `injecting ${DUST_AMOUNT_MICRO} micro ALEO on ${emptySide}`,
+  )
+
+  const r = await performDustInject(marketId, emptySide, deadline)
+  if (r.ok) {
+    console.log(`[dust] ${marketId.slice(0, 16)}... injected tx=${r.txId!.slice(0, 24)}…`)
+  } else {
+    const fn = r.code === 'broadcast_failed' ? console.error : console.warn
+    fn(`[dust] ${marketId.slice(0, 16)}... skip (${r.code}): ${r.reason ?? ''}`)
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -407,6 +599,109 @@ export function startServer(stream: PythStream): void {
           return
         }
         res.end(JSON.stringify({ ...m, deadline: m.deadline.toString() }))
+        return
+      }
+
+      // ─────────────────────────────────────────────────────────────────
+      // DEBUG ENDPOINTS — sole-bettor dust injection testing.
+      //
+      // Disabled unless DEBUG_TOKEN env var is set. Clients must send the
+      // same token via `Authorization: Bearer <token>` header. Never
+      // enable these in production without a strong token — they can
+      // spend operator funds and broadcast on-chain txs.
+      // ─────────────────────────────────────────────────────────────────
+      if (path.startsWith('/debug/dust')) {
+        const debugToken = process.env.DEBUG_TOKEN
+        if (!debugToken) {
+          res.statusCode = 404
+          res.end(JSON.stringify({ error: 'debug endpoints disabled (set DEBUG_TOKEN)' }))
+          return
+        }
+        const auth = req.headers.authorization || ''
+        const presented = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+        if (presented !== debugToken) {
+          res.statusCode = 401
+          res.end(JSON.stringify({ error: 'bad or missing DEBUG_TOKEN' }))
+          return
+        }
+
+        // GET /debug/dust/status?marketId=<field>
+        // Returns current pool state and whether sole-bettor condition holds.
+        if (path === '/debug/dust/status' && req.method === 'GET') {
+          const marketId = url.searchParams.get('marketId')
+          if (!marketId) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'marketId query param required' }))
+            return
+          }
+          const pool = await fetchTurboPool(marketId)
+          if (!pool) {
+            res.statusCode = 404
+            res.end(JSON.stringify({ error: 'pool not found on-chain' }))
+            return
+          }
+          const soleUp = pool.totalUpAmount > 0n && pool.totalDownAmount === 0n
+          const soleDown = pool.totalDownAmount > 0n && pool.totalUpAmount === 0n
+          res.end(JSON.stringify({
+            marketId,
+            pool: {
+              totalUpAmount: pool.totalUpAmount.toString(),
+              totalDownAmount: pool.totalDownAmount.toString(),
+              totalUpShares: pool.totalUpShares.toString(),
+              totalDownShares: pool.totalDownShares.toString(),
+            },
+            soleBettor: soleUp || soleDown,
+            soleSide: soleUp ? 'UP' : soleDown ? 'DOWN' : null,
+            emptySide: soleUp ? 'DOWN' : soleDown ? 'UP' : null,
+          }))
+          return
+        }
+
+        // POST /debug/dust/check
+        // Body: { marketId, deadline } (deadline = block height as string)
+        // Runs the production sole-bettor check path — only fires if the
+        // market is actually sole-bettor. Use this to skip the 150s timer.
+        if (path === '/debug/dust/check' && req.method === 'POST') {
+          const body = (await readJsonBody(req)) as { marketId?: string; deadline?: string }
+          if (!body.marketId || !body.deadline) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: 'body: { marketId, deadline }' }))
+            return
+          }
+          // Fire-and-forget — injection takes tens of seconds.
+          injectDustIfSoleBettor(body.marketId, BigInt(body.deadline)).catch((err) => {
+            console.error('[debug] /dust/check error:', (err as Error)?.message)
+          })
+          res.end(JSON.stringify({ ok: true, note: 'check dispatched; watch oracle logs' }))
+          return
+        }
+
+        // POST /debug/dust/force
+        // Body: { marketId, side: 'UP'|'DOWN', deadline }
+        // Injects 0.001 ALEO on the given side UNCONDITIONALLY (ignores pool
+        // state). Waits for the tx to submit before responding so test
+        // scripts can grab the txId.
+        if (path === '/debug/dust/force' && req.method === 'POST') {
+          const body = (await readJsonBody(req)) as {
+            marketId?: string
+            side?: 'UP' | 'DOWN'
+            deadline?: string
+          }
+          if (!body.marketId || !body.deadline || (body.side !== 'UP' && body.side !== 'DOWN')) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: `body: { marketId, side: 'UP'|'DOWN', deadline }` }))
+            return
+          }
+          const result = await performDustInject(body.marketId, body.side, BigInt(body.deadline))
+          if (!result.ok) {
+            res.statusCode = 409
+          }
+          res.end(JSON.stringify(result))
+          return
+        }
+
+        res.statusCode = 404
+        res.end(JSON.stringify({ error: 'unknown /debug/dust/* path' }))
         return
       }
 
@@ -706,6 +1001,30 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
       })
 
       const msUntilFreeze = Math.max(0, absoluteDeadlineMs - Date.now())
+
+      // ────────────────────────────────────────────────────────────
+      // DUST INJECTION GUARD — fires ~120s before deadline to protect
+      // against sole-bettor state (which causes claim_winnings to reject).
+      // If the pool has bets on only one side at this check, seed the
+      // empty side with MIN_TRADE_AMOUNT (0.001 ALEO) so the market
+      // becomes multi-bettor before resolve.
+      //
+      // Scheduled well before the deadline setTimeout so the buy_up_down
+      // tx has time to prove + broadcast + land in a block while
+      // `current_height < m.deadline` still holds.
+      // ────────────────────────────────────────────────────────────
+      const DUST_LEAD_TIME_MS = Math.max(60_000, Math.floor(msUntilFreeze / 2))
+      const msUntilDustCheck = Math.max(0, msUntilFreeze - DUST_LEAD_TIME_MS)
+      setTimeout(() => {
+        const cur = chainState.get(symbol)
+        if (!cur || cur.market_id !== capturedMarketId) return // superseded
+        if (cur.status !== 'active') return // already resolving/resolved
+        // Fire-and-forget: dust injection must not delay the freeze timer.
+        injectDustIfSoleBettor(capturedMarketId, deadline).catch((err) => {
+          console.error(`[dust] unhandled error for ${capturedMarketId.slice(0, 16)}...:`, (err as Error)?.message)
+        })
+      }, msUntilDustCheck)
+
       setTimeout(async () => {
         const cur = chainState.get(symbol)
         if (!cur || cur.market_id !== capturedMarketId) return // superseded
@@ -1350,6 +1669,19 @@ const args = {
 }
 
 async function main() {
+  // Kick off the operator record scan early — runs in the background so
+  // create/resolve flows aren't blocked. Records are only needed once a
+  // sole-bettor market appears, which is rarer than market creation.
+  const operatorPrivateKey =
+    process.env.OPERATOR_PRIVATE_KEY ||
+    process.env.ALEO_PRIVATE_KEY ||
+    process.env.PRIVATE_KEY
+  if (operatorPrivateKey) {
+    startRecordScan(operatorPrivateKey)
+  } else {
+    console.warn('[main] OPERATOR_PRIVATE_KEY not set — sole-bettor dust injection disabled')
+  }
+
   const stream = new PythStream()
   stream.start(Object.keys(PYTH_FEED_IDS) as Symbol[])
 
