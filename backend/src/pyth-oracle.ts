@@ -1003,27 +1003,36 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
       const msUntilFreeze = Math.max(0, absoluteDeadlineMs - Date.now())
 
       // ────────────────────────────────────────────────────────────
-      // DUST INJECTION GUARD — fires ~120s before deadline to protect
+      // DUST INJECTION GUARD — recurring checks before deadline to protect
       // against sole-bettor state (which causes claim_winnings to reject).
-      // If the pool has bets on only one side at this check, seed the
-      // empty side with MIN_TRADE_AMOUNT (0.001 ALEO) so the market
-      // becomes multi-bettor before resolve.
+      // Fires repeatedly from (deadline - leadTime) down to (deadline -
+      // minSafety) every `intervalMs`, so late-bet users are still covered.
+      // Once a successful inject happens (or pool becomes multi-bettor),
+      // subsequent checks detect that and no-op.
       //
-      // Scheduled well before the deadline setTimeout so the buy_up_down
-      // tx has time to prove + broadcast + land in a block while
-      // `current_height < m.deadline` still holds.
+      // Example (5-min round):
+      //   T-180s, T-150s, T-120s, T-90s, T-60s  → 5 check opportunities
+      // Buys between any two checks get protected on the next check.
       // ────────────────────────────────────────────────────────────
-      const DUST_LEAD_TIME_MS = Math.max(60_000, Math.floor(msUntilFreeze / 2))
-      const msUntilDustCheck = Math.max(0, msUntilFreeze - DUST_LEAD_TIME_MS)
-      setTimeout(() => {
-        const cur = chainState.get(symbol)
-        if (!cur || cur.market_id !== capturedMarketId) return // superseded
-        if (cur.status !== 'active') return // already resolving/resolved
-        // Fire-and-forget: dust injection must not delay the freeze timer.
-        injectDustIfSoleBettor(capturedMarketId, deadline).catch((err) => {
-          console.error(`[dust] unhandled error for ${capturedMarketId.slice(0, 16)}...:`, (err as Error)?.message)
-        })
-      }, msUntilDustCheck)
+      const DUST_CHECK_INTERVAL_MS = 30_000
+      const DUST_MIN_SAFETY_MS = 60_000 // stop checking once < 60s remain
+      const DUST_START_LEAD_MS = Math.min(180_000, Math.max(60_000, Math.floor(msUntilFreeze / 2)))
+      for (
+        let lead = DUST_START_LEAD_MS;
+        lead >= DUST_MIN_SAFETY_MS;
+        lead -= DUST_CHECK_INTERVAL_MS
+      ) {
+        const fireAt = Math.max(0, msUntilFreeze - lead)
+        setTimeout(() => {
+          const cur = chainState.get(symbol)
+          if (!cur || cur.market_id !== capturedMarketId) return // superseded
+          if (cur.status !== 'active') return // already resolving/resolved
+          // Fire-and-forget: dust injection must not delay the freeze timer.
+          injectDustIfSoleBettor(capturedMarketId, deadline).catch((err) => {
+            console.error(`[dust] unhandled error for ${capturedMarketId.slice(0, 16)}...:`, (err as Error)?.message)
+          })
+        }, fireAt)
+      }
 
       setTimeout(async () => {
         const cur = chainState.get(symbol)
