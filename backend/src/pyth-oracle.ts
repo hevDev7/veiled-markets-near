@@ -275,16 +275,27 @@ interface DustInjectResult {
     | 'no_private_key'
     | 'no_record'
     | 'too_late'
+    | 'in_flight'
     | 'broadcast_failed'
     | 'post_broadcast_failed'
   reason?: string
 }
+
+// Prevents concurrent dust injections (each takes 30-60s to prove). Without
+// this, overlapping scheduled checks pop the sole cached record, then
+// subsequent checks find an empty cache and skip with 'no_record' while the
+// first inject is still in-flight.
+let dustInjectInFlight = false
 
 async function performDustInject(
   marketId: string,
   side: 'UP' | 'DOWN',
   deadline: bigint,
 ): Promise<DustInjectResult> {
+  if (dustInjectInFlight) {
+    return { ok: false, code: 'in_flight', reason: 'another dust inject still proving/broadcasting' }
+  }
+
   const privateKey = process.env.OPERATOR_PRIVATE_KEY || process.env.ALEO_PRIVATE_KEY || process.env.PRIVATE_KEY
   if (!privateKey) {
     return { ok: false, code: 'no_private_key', reason: 'OPERATOR_PRIVATE_KEY not set' }
@@ -314,6 +325,10 @@ async function performDustInject(
     }
   }
 
+  // Lock acquired AFTER we successfully popped a record — this way, a retry
+  // that fails at takeCreditsRecord doesn't block follow-up checks.
+  dustInjectInFlight = true
+
   const sideCode = side === 'UP' ? 1 : 2
   const shareNonce = randomFieldNonce()
   const inputs = [
@@ -329,6 +344,7 @@ async function performDustInject(
   try {
     result = await snarkosExecute(TURBO_PROGRAM_ID_LIVE, 'buy_up_down', inputs)
   } catch (err) {
+    dustInjectInFlight = false
     const msg = (err as Error)?.message ?? String(err)
     const neverBroadcast =
       msg.includes('Failed to broadcast') ||
@@ -342,14 +358,22 @@ async function performDustInject(
   }
 
   // Capture change record in background — don't block caller.
-  captureChangeRecord(result.txId, privateKey).then((change) => {
-    if (!change) {
-      console.warn(
-        `[dust] could not decrypt change record for ${result.txId.slice(0, 24)}… — ` +
-        `next injection may need a fresh scan or CREDITS_RECORD_PLAINTEXT bootstrap`,
-      )
-    }
-  }).catch(() => {})
+  // Hold the in-flight lock until capture finishes so the next dust check
+  // waits for a fresh record before trying to inject (otherwise it'd see
+  // the empty cache and skip with 'no_record').
+  captureChangeRecord(result.txId, privateKey)
+    .then((change) => {
+      if (!change) {
+        console.warn(
+          `[dust] could not decrypt change record for ${result.txId.slice(0, 24)}… — ` +
+          `next injection may need a fresh scan or CREDITS_RECORD_PLAINTEXT bootstrap`,
+        )
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      dustInjectInFlight = false
+    })
 
   return { ok: true, txId: result.txId, code: 'ok' }
 }
@@ -373,6 +397,14 @@ async function injectDustIfSoleBettor(marketId: string, deadline: bigint): Promi
   const emptySide: 'UP' | 'DOWN' = soleUp ? 'DOWN' : 'UP'
   const soleSide = soleUp ? 'UP' : 'DOWN'
 
+  // Skip quietly if another inject is still proving — no need to log the
+  // "detected → injecting" line, since we're about to bail out. The
+  // in-flight inject will either succeed (next check sees multi-bettor
+  // and no-ops) or fail (next check retries with fresh record).
+  if (dustInjectInFlight) {
+    return
+  }
+
   console.log(
     `[dust] ${marketId.slice(0, 16)}... sole-bettor ${soleSide} detected → ` +
     `injecting ${DUST_AMOUNT_MICRO} micro ALEO on ${emptySide}`,
@@ -381,6 +413,9 @@ async function injectDustIfSoleBettor(marketId: string, deadline: bigint): Promi
   const r = await performDustInject(marketId, emptySide, deadline)
   if (r.ok) {
     console.log(`[dust] ${marketId.slice(0, 16)}... injected tx=${r.txId!.slice(0, 24)}…`)
+  } else if (r.code === 'in_flight') {
+    // Race: in-flight became true between the outer check and performDustInject.
+    // Silently skip — the in-flight run will handle it.
   } else {
     const fn = r.code === 'broadcast_failed' ? console.error : console.warn
     fn(`[dust] ${marketId.slice(0, 16)}... skip (${r.code}): ${r.reason ?? ''}`)
