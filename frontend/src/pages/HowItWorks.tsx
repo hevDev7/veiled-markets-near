@@ -115,7 +115,7 @@ const mechanisms = [
   {
     icon: Radio,
     title: 'Turbo Markets (rolling 5-minute rounds)',
-    description: 'Fast-paced parimutuel UP/DOWN markets via veiled_turbo_v8.aleo, backed by the Pyth Network oracle:',
+    description: 'Fast-paced parimutuel UP/DOWN markets via veiled_turbo_v9.aleo, backed by the Pyth Network oracle:',
     items: [
       'Predict whether BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, or DOT will be up or down 5 minutes from now',
       'New rounds are created automatically every 5 minutes by the operator backend — no manual market creation needed',

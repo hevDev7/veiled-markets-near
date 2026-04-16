@@ -877,12 +877,12 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-surface-500">Contract</span>
                       <a
-                        href="https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo"
+                        href="https://testnet.explorer.provable.com/program/veiled_turbo_v9.aleo"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 font-mono"
                       >
-                        veiled_turbo_v8.aleo <ExternalLink className="w-3 h-3" />
+                        veiled_turbo_v9.aleo <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
                   </div>

@@ -39,7 +39,7 @@ export interface MarketRegistryRow {
 /**
  * Turbo oracle audit row — matches `turbo_oracle_audit` table
  * (supabase/create_turbo_audit_table.sql). Append-only log of every
- * operator action against `veiled_turbo_v8.aleo`.
+ * operator action against `veiled_turbo_v9.aleo`.
  */
 export interface TurboAuditRow {
   id: number;

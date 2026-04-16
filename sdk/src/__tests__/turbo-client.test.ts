@@ -59,25 +59,25 @@ describe('quoteBuyUpDown', () => {
 describe('quoteTurboPayout', () => {
   it('sole winner gets back their own net stake minus protocol fee', () => {
     // 1 user bet 1 ALEO on UP, no one on DOWN, UP wins:
-    // pool.total_up_shares = 995_000, market_payouts = 995_000
-    const payout = quoteTurboPayout(995_000n, 995_000n, 995_000n);
+    // pool.total_up_claim_units = 1_990_000, market_payouts = 995_000
+    const payout = quoteTurboPayout(1_990_000n, 995_000n, 1_990_000n);
     expect(payout).toBe(995_000n);
   });
 
   it('splits pool across multiple winners proportionally', () => {
     // 2 winners each bet 1 ALEO on UP, loser bet 1 ALEO on DOWN:
-    // total_up_shares = 1_990_000, market_payouts = 2_985_000
-    // Each winner's share = 995_000
-    // payout = (995_000 × 2_985_000) / 1_990_000 = 1_492_500
-    const payout = quoteTurboPayout(995_000n, 2_985_000n, 1_990_000n);
+    // total_up_claim_units = 3_980_000, market_payouts = 2_985_000
+    // Each winner's claim units = 1_990_000
+    // payout = (1_990_000 × 2_985_000) / 3_980_000 = 1_492_500
+    const payout = quoteTurboPayout(1_990_000n, 2_985_000n, 3_980_000n);
     expect(payout).toBe(1_492_500n);
   });
 
   it('sole winner against 2 losers wins 3× stake', () => {
     // 1 winner bet 1 ALEO, 2 losers bet 1 ALEO each:
-    // total_up_shares = 995_000, market_payouts = 2_985_000
-    // payout = (995_000 × 2_985_000) / 995_000 = 2_985_000
-    const payout = quoteTurboPayout(995_000n, 2_985_000n, 995_000n);
+    // total_up_claim_units = 1_990_000, market_payouts = 2_985_000
+    // payout = (1_990_000 × 2_985_000) / 1_990_000 = 2_985_000
+    const payout = quoteTurboPayout(1_990_000n, 2_985_000n, 1_990_000n);
     expect(payout).toBe(2_985_000n);
   });
 
@@ -99,7 +99,8 @@ describe('parseTurboShareRecord', () => {
   owner: aleo1xaytw2vtvhz2szhgjzqetadzjd92w2fdx233vq4fq3jdfd9ety8sna28t3.private,
   market_id: 7967815297976394251750780106871590127186163035743844152665110178164624084746field.private,
   side: 2u8.private,
-  quantity: 995000u128.private,
+  claim_units: 1990000u128.private,
+  refund_amount: 995000u128.private,
   share_nonce: 1234567890field.private,
   _nonce: 5555555555555555555555555555555555555555555555555555555555555555group.public
 }`;
@@ -109,16 +110,18 @@ describe('parseTurboShareRecord', () => {
     expect(parsed!.marketId).toBe('7967815297976394251750780106871590127186163035743844152665110178164624084746field');
     expect(parsed!.side).toBe('DOWN');
     expect(parsed!.quantity).toBe(995_000n);
+    expect(parsed!.claimUnits).toBe(1_990_000n);
     expect(parsed!.shareNonce).toBe('1234567890field');
     expect(parsed!.plaintext).toBe(text);
   });
 
   it('parses a plain Leo record literal (no annotations)', () => {
-    const text = `{ owner: aleo1abc, market_id: 555field, side: 1u8, quantity: 100000u128, share_nonce: 789field }`;
+    const text = `{ owner: aleo1abc, market_id: 555field, side: 1u8, claim_units: 200000u128, refund_amount: 100000u128, share_nonce: 789field }`;
     const parsed = parseTurboShareRecord(text);
     expect(parsed).not.toBeNull();
     expect(parsed!.side).toBe('UP');
     expect(parsed!.quantity).toBe(100_000n);
+    expect(parsed!.claimUnits).toBe(200_000n);
   });
 
   it('returns null for malformed or non-TurboShare records', () => {
@@ -213,7 +216,7 @@ describe('TurboClient.buildClaimWinningsInputs', () => {
     const client = createTurboClient();
     const call = client.buildClaimWinningsInputs({
       marketId: '12345field',
-      shareRecord: '{ owner: aleo1xxx, market_id: 12345field, side: 1u8, quantity: 995000u128, share_nonce: 99field }',
+      shareRecord: '{ owner: aleo1xxx, market_id: 12345field, side: 1u8, claim_units: 1990000u128, refund_amount: 995000u128, share_nonce: 99field }',
       declaredPayout: 1_492_500n,
     });
     expect(call.functionName).toBe('claim_winnings');
@@ -287,7 +290,7 @@ describe('TurboClient.getPool', () => {
   afterEach(() => { vi.clearAllMocks(); });
 
   it('parses a pool struct with bets on both sides', async () => {
-    const mockResponse = `"{\\n  market_id: 12345field,\\n  total_up_amount: 1990000u128,\\n  total_down_amount: 995000u128,\\n  total_up_shares: 1990000u128,\\n  total_down_shares: 995000u128,\\n  total_volume: 3000000u128\\n}"`;
+    const mockResponse = `"{\\n  market_id: 12345field,\\n  total_up_amount: 1990000u128,\\n  total_down_amount: 995000u128,\\n  total_up_claim_units: 3980000u128,\\n  total_down_claim_units: 1990000u128,\\n  total_volume: 3000000u128\\n}"`;
     (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       text: async () => mockResponse,
@@ -297,8 +300,8 @@ describe('TurboClient.getPool', () => {
     expect(pool).not.toBeNull();
     expect(pool!.totalUpAmount).toBe(1_990_000n);
     expect(pool!.totalDownAmount).toBe(995_000n);
-    expect(pool!.totalUpShares).toBe(1_990_000n);
-    expect(pool!.totalDownShares).toBe(995_000n);
+    expect(pool!.totalUpShares).toBe(3_980_000n);
+    expect(pool!.totalDownShares).toBe(1_990_000n);
     expect(pool!.totalVolume).toBe(3_000_000n);
   });
 });

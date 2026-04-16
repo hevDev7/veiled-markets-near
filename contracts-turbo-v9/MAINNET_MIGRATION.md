@@ -72,11 +72,11 @@ Total ~30 MB/yr on-chain storage growth — well within Aleo limits.
 The contract has `@noupgrade` constructor, so every change requires a **fresh
 deploy** with a new program id. For mainnet:
 
-- **Source of truth**: the current testnet-validated source is `veiled_turbo_v8.aleo`
+- **Source of truth**: the current testnet-validated source is `veiled_turbo_v9.aleo`
   (shared vault + all bug fixes consolidated — see [README.md](README.md#status)
   for the full testnet iteration history).
 - **Mainnet program id**: TBD. Options:
-  - Mirror testnet versioning → deploy as `veiled_turbo_v8.aleo` on mainnet
+  - Mirror testnet versioning → deploy as `veiled_turbo_v9.aleo` on mainnet
   - Clean slate → deploy as `veiled_turbo_mainnet_v1.aleo` (or similar)
   The choice should be finalized before the external audit so the audited
   program id matches what goes live.

@@ -36,6 +36,7 @@ import {
   PYTH_FEED_IDS,
   TURBO_MIN_TRADE_AMOUNT,
   quoteTurboPayout,
+  parseTurboShareRecord,
   quoteContractBuy,
   TurboMarketStatus,
   type TurboSide,
@@ -800,11 +801,10 @@ bot.onText(/^\/result$/, async (msg) => {
           const winningShares = market.winningOutcome === 1
             ? (pool?.totalUpShares ?? 0n)
             : (pool?.totalDownShares ?? 0n)
-          const qtyMatch = bet.shareRecord?.match(/quantity:\s*(\d+)u128/)
-          const shareQty = qtyMatch
-            ? BigInt(qtyMatch[1])
-            : bet.amountMicro - bet.amountMicro / 200n // fallback when record capture failed
-          const payout = winningShares > 0n ? quoteTurboPayout(shareQty, totalPool, winningShares) : 0n
+          const parsedShare = bet.shareRecord ? parseTurboShareRecord(bet.shareRecord) : null
+          const refundableAmount = bet.amountMicro - bet.amountMicro / 200n
+          const shareClaimUnits = parsedShare?.claimUnits ?? (refundableAmount * 2n)
+          const payout = winningShares > 0n ? quoteTurboPayout(shareClaimUnits, totalPool, winningShares) : 0n
           text += `🏆 ${escapeMd(bet.symbol)} ${escapeMd(bet.side)} ${escapeMd(amount)} — *WON* \\(~${escapeMd(fmtAleo(payout))} ALEO\\)${bet.shareRecord ? '' : ' ⚠️ no share record'}\n`
         } else {
           text += `💀 ${escapeMd(bet.symbol)} ${escapeMd(bet.side)} ${escapeMd(amount)} — LOST \\(winner: ${escapeMd(winner)}\\)\n`
@@ -867,17 +867,15 @@ bot.onText(/^\/claim$/, async (msg) => {
       const pool = await turbo.getPool(bet.marketId)
 
       if (market.status === TurboMarketStatus.Resolved) {
-        // Parse share qty from record
-        const qtyMatch = bet.shareRecord!.match(/quantity:\s*(\d+)u128/)
-        if (!qtyMatch) continue
-        const shareQty = BigInt(qtyMatch[1])
+        const parsedShare = parseTurboShareRecord(bet.shareRecord!)
+        if (!parsedShare) continue
 
         const marketPayouts = await turbo.getMarketPayouts(bet.marketId)
         const totalPool = marketPayouts ?? 0n
         const winningShares = market.winningOutcome === 1
           ? (pool?.totalUpShares ?? 0n)
           : (pool?.totalDownShares ?? 0n)
-        const payout = quoteTurboPayout(shareQty, totalPool, winningShares)
+        const payout = quoteTurboPayout(parsedShare.claimUnits, totalPool, winningShares)
         if (totalPool === 0n || winningShares === 0n || payout === 0n) {
           throw new Error(
             `claim quote invalid (market_payouts=${totalPool}, winning_shares=${winningShares}, payout=${payout})`
@@ -909,8 +907,8 @@ bot.onText(/^\/claim$/, async (msg) => {
         if (idx >= 0) trackedBets.splice(idx, 1)
 
       } else if (market.status === TurboMarketStatus.Cancelled) {
-        const qtyMatch = bet.shareRecord!.match(/quantity:\s*(\d+)u128/)
-        const refundAmount = qtyMatch ? BigInt(qtyMatch[1]) : 0n
+        const parsedShare = parseTurboShareRecord(bet.shareRecord!)
+        const refundAmount = parsedShare?.quantity ?? 0n
 
         const call = turbo.buildClaimRefundInputs({
           marketId: bet.marketId,

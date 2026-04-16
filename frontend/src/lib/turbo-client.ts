@@ -1,5 +1,5 @@
 // ============================================================================
-// Turbo Client — Helpers for veiled_turbo_v8.aleo frontend integration
+// Turbo Client — Helpers for veiled_turbo_v9.aleo frontend integration
 // ============================================================================
 // Builds inputs for the 5 user-callable transitions:
 //   1. buy_up_down(market_id, side, amount_in, expected_shares, share_nonce)
@@ -10,16 +10,17 @@
 // Operator-only transitions (create_turbo_market, resolve_turbo_market) are
 // NOT exposed here — they live in backend/src/pyth-oracle.ts.
 //
-// AMM math mirrors the contract's binary FPMM (see contracts-turbo-v1/src/main.leo
+// Buy math mirrors the contract's parimutuel flow (see contracts-turbo-v9/src/main.leo
 // buy_up_down_fin):
 //   protocol_fee  = amount_in * 50 / 10000        (0.5%)
 //   to_pool       = amount_in - protocol_fee
-//   r_i_new       = (r_i * r_other) / (r_other + to_pool)
-//   shares_out    = (r_i + to_pool) - r_i_new
+//   refundable_amount = to_pool
+//   claim_units  = refundable_amount * 2
 // ============================================================================
 
 export const TURBO_PROGRAM_ID =
-  (import.meta as any).env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v8.aleo'
+  (import.meta as any).env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v9.aleo'
+export const TURBO_CLAIM_UNIT_SCALE = TURBO_PROGRAM_ID.includes('veiled_turbo_v9') ? 2n : 1n
 
 export const TURBO_OUTCOME = {
   UP: 1,
@@ -48,10 +49,10 @@ export interface QuoteResult {
 }
 
 /**
- * Quote how many shares the user gets for a given bet amount.
+ * Quote how much refundable stake the user gets for a given bet amount.
  *
  * Pure off-chain calculation that exactly mirrors `buy_up_down_fin` in
- * contracts-turbo-v1/src/main.leo. Use this to display the expected payout
+ * contracts-turbo-v9/src/main.leo. Use this to display the expected payout
  * before the user signs the tx.
  */
 export function quoteBuyUpDown(
@@ -61,15 +62,9 @@ export function quoteBuyUpDown(
 ): QuoteResult {
   const protocolFee = (amountInMicro * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR
   const amountToPool = amountInMicro - protocolFee
-
-  const rI = side === 'UP' ? pool.reserveUp : pool.reserveDown
-  const rOther = side === 'UP' ? pool.reserveDown : pool.reserveUp
-
-  const rINew = (rI * rOther) / (rOther + amountToPool)
-  const shares = rI + amountToPool - rINew
-
-  const newReserveUp = side === 'UP' ? rINew : pool.reserveUp + amountToPool
-  const newReserveDown = side === 'DOWN' ? rINew : pool.reserveDown + amountToPool
+  const shares = amountToPool
+  const newReserveUp = side === 'UP' ? pool.reserveUp + amountToPool : pool.reserveUp
+  const newReserveDown = side === 'DOWN' ? pool.reserveDown + amountToPool : pool.reserveDown
 
   return {
     amountIn: amountInMicro,
@@ -89,10 +84,18 @@ export function quoteBuyUpDown(
 export function quotePayout(
   marketCredits: bigint,
   totalWinningShares: bigint,
-  shareQuantity: bigint,
+  shareClaimUnits: bigint,
 ): bigint {
   if (totalWinningShares === 0n) return 0n
-  return (shareQuantity * marketCredits) / totalWinningShares
+  return (shareClaimUnits * marketCredits) / totalWinningShares
+}
+
+export function toTurboClaimUnits(
+  refundableAmount: bigint,
+  explicitClaimUnits?: bigint | null,
+): bigint {
+  if (explicitClaimUnits != null && explicitClaimUnits > 0n) return explicitClaimUnits
+  return refundableAmount * TURBO_CLAIM_UNIT_SCALE
 }
 
 // ----------------------------------------------------------------------------
@@ -225,31 +228,38 @@ export interface ParsedTurboShare {
   plaintext: string         // raw record literal — pass as-is to executeTransaction
   marketId: string          // "...field"
   side: TurboSide
-  quantity: bigint
+  quantity: bigint          // refundable net stake
+  claimUnits: bigint        // internal v9 payout units
+  refundAmount: bigint
   owner: string | null
 }
 
 /**
  * Parse a TurboShare record plaintext.
- * Accepts the raw `{ owner: ..., market_id: ..., side: ..., quantity: ..., share_nonce: ... }`
- * literal that wallets return.
+ * Accepts either the v9 raw
+ * `{ owner: ..., market_id: ..., side: ..., claim_units: ..., refund_amount: ..., share_nonce: ... }`
+ * record or the legacy v8 `{ ..., quantity: ... }` form.
  */
 export function parseTurboShare(text: string): ParsedTurboShare | null {
   // Handle .private/.public suffixes from wallet plaintext format
   const marketMatch = text.match(/market_id:\s*([0-9]+field)/)
   const sideMatch = text.match(/side:\s*(\d+)u8/)
-  const qtyMatch = text.match(/quantity:\s*(\d+)u128/)
+  const claimUnitsMatch = text.match(/claim_units:\s*(\d+)u128/) || text.match(/quantity:\s*(\d+)u128/)
+  const refundAmountMatch = text.match(/refund_amount:\s*(\d+)u128/) || text.match(/quantity:\s*(\d+)u128/)
   const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/)
-  if (!marketMatch || !sideMatch || !qtyMatch) return null
+  if (!marketMatch || !sideMatch || !claimUnitsMatch || !refundAmountMatch) return null
   const sideNum = Number(sideMatch[1])
   const side: TurboSide | null =
     sideNum === TURBO_OUTCOME.UP ? 'UP' : sideNum === TURBO_OUTCOME.DOWN ? 'DOWN' : null
   if (!side) return null
+  const refundAmount = BigInt(refundAmountMatch[1])
   return {
     plaintext: text,
     marketId: marketMatch[1],
     side,
-    quantity: BigInt(qtyMatch[1]),
+    quantity: refundAmount,
+    claimUnits: BigInt(claimUnitsMatch[1]),
+    refundAmount,
     owner: ownerMatch ? ownerMatch[1] : null,
   }
 }
@@ -264,6 +274,11 @@ export async function fetchTurboShareRecords(
 ): Promise<ParsedTurboShare[]> {
   const collected: ParsedTurboShare[] = []
   const seen = new Set<string>()
+  const looksLikeTurboShare = (value: string) =>
+    value.includes('side:') && (
+      (value.includes('claim_units:') && value.includes('refund_amount:')) ||
+      value.includes('quantity:')
+    )
 
   const collect = (records: any[]) => {
     for (const r of records) {
@@ -278,17 +293,17 @@ export async function fetchTurboShareRecords(
         }
         for (const key of Object.keys(r)) {
           const v = r[key]
-          if (typeof v === 'string' && v.includes('side:') && v.includes('quantity:')) {
+          if (typeof v === 'string' && looksLikeTurboShare(v)) {
             candidates.push(v)
           }
         }
       }
 
       for (const text of candidates) {
-        if (!text.includes('side:') || !text.includes('quantity:')) continue
+        if (!looksLikeTurboShare(text)) continue
         const parsed = parseTurboShare(text)
         if (!parsed) continue
-        if (parsed.quantity === 0n) continue
+        if (parsed.refundAmount === 0n || parsed.claimUnits === 0n) continue
         if (marketId && parsed.marketId !== marketId) continue
         if (seen.has(parsed.plaintext)) continue
         seen.add(parsed.plaintext)
@@ -342,8 +357,8 @@ export async function fetchTurboPool(marketId: string): Promise<TurboPoolView | 
   // Parse Leo struct literal — supports both v6 (reserve_up/down) and v7 (total_up/down_amount)
   const upMatch = text.match(/(?:reserve_up|total_up_amount):\s*(\d+)u128/)
   const dnMatch = text.match(/(?:reserve_down|total_down_amount):\s*(\d+)u128/)
-  const totUpMatch = text.match(/total_up_shares:\s*(\d+)u128/)
-  const totDnMatch = text.match(/total_down_shares:\s*(\d+)u128/)
+  const totUpMatch = text.match(/total_up_claim_units:\s*(\d+)u128/) || text.match(/total_up_shares:\s*(\d+)u128/)
+  const totDnMatch = text.match(/total_down_claim_units:\s*(\d+)u128/) || text.match(/total_down_shares:\s*(\d+)u128/)
   if (!upMatch || !dnMatch) return null
   return {
     reserveUp: BigInt(upMatch[1]),

@@ -3,8 +3,8 @@
 # Veiled Turbo — Testnet Deployment Script
 # ============================================================================
 # Deploys the current veiled_turbo program (read from program.json) to Aleo
-# testnet using the operator wallet. Currently: veiled_turbo_v8.aleo.
-# Run from contracts-turbo-v1/ directory.
+# testnet using the operator wallet. Currently: veiled_turbo_v9.aleo.
+# Run from contracts-turbo-v9/ directory.
 #
 # Prerequisites:
 #   - leo 4.0.0+ in PATH
@@ -34,7 +34,7 @@ BROADCAST_URL="${ALEO_BROADCAST_URL:-https://api.explorer.provable.com/v1/testne
 PRIORITY_FEE="${ALEO_PRIORITY_FEE:-1000000}"
 
 if [ ! -f "program.json" ]; then
-    echo "❌ Run from contracts-turbo-v1/ directory"
+    echo "❌ Run from contracts-turbo-v9/ directory"
     exit 1
 fi
 

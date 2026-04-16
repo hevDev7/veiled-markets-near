@@ -35,7 +35,7 @@ All trading is **fully private** via Aleo zero-knowledge proofs.
 | **USDCX** | [`veiled_markets_usdcx_v7.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_usdcx_v7.aleo) | 25/31 | USDCX stablecoin markets |
 | **USAD** | [`veiled_markets_usad_v14.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_usad_v14.aleo) | 25/31 | USAD stablecoin markets |
 | **Governance** | [`veiled_governance_v6.aleo`](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo) | 31/31 | Proposals, tiered escalation, committee panel, cross-program resolve |
-| **Turbo** | [`veiled_turbo_v8.aleo`](https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo) | 10/31 | 5-min UP/DOWN markets, shared vault, Pyth-resolved, 10 crypto symbols |
+| **Turbo** | [`veiled_turbo_v9.aleo`](https://testnet.explorer.provable.com/program/veiled_turbo_v9.aleo) | 10/31 | 5-min UP/DOWN markets, shared vault, Pyth-resolved, 10 crypto symbols |
 | **Parlay** | [`veiled_parlay_v3.aleo`](https://testnet.explorer.provable.com/program/veiled_parlay_v3.aleo) | — | Multi-leg parlay betting |
 
 **Turbo deployment date:** 2026-04-10 (v8 shared vault architecture)
@@ -70,9 +70,9 @@ T+6:00  New market auto-created (baseline = $72,180)
 
 BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT — all with Pyth Hermes real-time feeds.
 
-### Shared vault architecture (v8)
+### Shared vault architecture (v9)
 
-| Aspect | Standard Markets (v37) | Turbo Markets (v8) |
+| Aspect | Standard Markets (v37) | Turbo Markets (v9) |
 |--------|----------------------|-------------------|
 | Liquidity | Per-market FPMM pool | **Shared vault** — deposit once |
 | Create cost | ~10+ ALEO per market | **~1 ALEO gas only** |
@@ -104,7 +104,7 @@ BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT — all with Pyth Hermes rea
 - **Escape hatch:** `emergency_cancel` permissionless after grace period → full refund
 - **Audit trail:** All on-chain, cross-checkable against Pyth Hermes historical data
 
-See [contracts-turbo-v1/THREAT_MODEL.md](contracts-turbo-v1/THREAT_MODEL.md) for the full 23-threat catalog.
+See [contracts-turbo-v9/THREAT_MODEL.md](contracts-turbo-v9/THREAT_MODEL.md) for the full 23-threat catalog.
 
 ### Running turbo markets
 
@@ -218,7 +218,7 @@ Dispute window (~3.2h)
 │   Tailwind CSS     │     └──────────────────┘     │  veiled_markets_usdcx_v7.aleo   │
 │                    │                              │  veiled_markets_usad_v14.aleo    │
 │  Pages:            │     ┌──────────────────┐     │  veiled_governance_v6.aleo       │
-│  - Dashboard       │────▶│  Pyth Hermes SSE │     │  veiled_turbo_v8.aleo           │
+│  - Dashboard       │────▶│  Pyth Hermes SSE │     │  veiled_turbo_v9.aleo           │
 │  - /turbo/:symbol  │     │  (10 crypto feeds)│     │  veiled_parlay_v3.aleo          │
 │  - MarketDetail    │     └──────────────────┘     │                                │
 │  - Portfolio       │                              │  Dependencies:                  │
@@ -252,8 +252,8 @@ veiled-markets/
 ├── contracts-usdcx-v7/         # USDCX market (25 transitions)
 ├── contracts-usad-v14/         # USAD market (25 transitions)
 ├── contracts-governance-v6/    # Governance (31 transitions)
-├── contracts-turbo-v1/         # Turbo markets source (deployed as v8)
-│   ├── src/main.leo            # ~23 KB, 10 transitions, shared vault (veiled_turbo_v8.aleo)
+├── contracts-turbo-v9/         # Turbo markets source (deployed as v8)
+│   ├── src/main.leo            # ~23 KB, 10 transitions, shared vault (veiled_turbo_v9.aleo)
 │   ├── tests/                  # 16 logic tests
 │   ├── THREAT_MODEL.md         # 23 threats + testnet validation log
 │   ├── MAINNET_MIGRATION.md    # Block-time retuning guide
@@ -328,7 +328,7 @@ cd contracts-v37 && leo test
 cd contracts-governance-v6 && leo test --no-local
 
 # Turbo market tests (16)
-cd contracts-turbo-v1 && leo test
+cd contracts-turbo-v9 && leo test
 
 # SDK tests (191)
 cd sdk && npm test
@@ -390,7 +390,7 @@ VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 # USAD token program is built into the market contract
 
 # Turbo markets
-VITE_TURBO_PROGRAM_ID=veiled_turbo_v8.aleo
+VITE_TURBO_PROGRAM_ID=veiled_turbo_v9.aleo
 # URL of the Pyth oracle backend (pyth-oracle.ts) — frontend subscribes to
 # SSE price stream and polls /chain/symbol from here. Point this at your
 # local backend in dev; production deploys a public endpoint.
@@ -428,7 +428,7 @@ The turbo contract went through 8 iterative deploys to fix bugs discovered durin
 | v7 | Shared vault + 10 symbols + claim refund validation |
 | **v8** | **`deposit_vault_public` + all bug fixes consolidated** |
 
-See [contracts-turbo-v1/THREAT_MODEL.md](contracts-turbo-v1/THREAT_MODEL.md) for the full threat catalog and testnet validation log.
+See [contracts-turbo-v9/THREAT_MODEL.md](contracts-turbo-v9/THREAT_MODEL.md) for the full threat catalog and testnet validation log.
 
 ## Tech Stack
 
@@ -471,6 +471,6 @@ MIT License — see [LICENSE](./LICENSE)
 
 **Built on Aleo**
 
-[Live Demo](https://veiledmarkets.xyz) · [Telegram Bot](https://t.me/veiledmarkets_bot) · [SDK on npm](https://www.npmjs.com/package/@veiled-markets/sdk) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v8.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
+[Live Demo](https://veiledmarkets.xyz) · [Telegram Bot](https://t.me/veiledmarkets_bot) · [SDK on npm](https://www.npmjs.com/package/@veiled-markets/sdk) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v9.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
 
 </div>

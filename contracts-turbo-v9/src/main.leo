@@ -1,16 +1,18 @@
 // ============================================================================
-// VEILED TURBO MARKETS v7 — Shared Vault Architecture
+// VEILED TURBO MARKETS v9 — Shared Vault Architecture
 // ============================================================================
 // Short-duration (1–60 min) BTC/ETH/SOL UP/DOWN prediction markets.
 // Resolved by Pyth oracle via caller-based authorization.
 //
-// v7 changes from v6:
+// v9 changes from v8:
 //   - SHARED VAULT: operator deposits ALEO once into a vault. All markets
 //     draw from and pay into this single pool. No per-market LP lock.
 //   - create_turbo_market no longer requires initial_liquidity transfer.
 //     Market creation is fee-only (~0.01 ALEO gas), not 2+ ALEO per market.
 //   - buy_up_down: user credits go into vault. Vault backs all payouts.
-//   - claim_winnings: payout drawn from vault balance.
+//   - claim_winnings: payout drawn from vault balance using immutable
+//     resolve-time snapshots plus internal claim-units that avoid the
+//     solo-bettor equality edge case from v8.
 //   - New: deposit_vault / withdraw_vault for operator to manage vault size.
 //   - Removed: withdraw_liquidity (replaced by withdraw_vault).
 //
@@ -39,6 +41,10 @@ const BASELINE_LAG_TOLERANCE: u64 = 60u64;
 
 const PROTOCOL_FEE_BPS: u128 = 50u128;
 const FEE_DENOMINATOR: u128  = 10000u128;
+// Internal claim-unit scaling keeps solo-bettor payouts from matching the
+// raw refundable stake exactly, which avoids the snarkVM edge case observed
+// in v8 when `declared_payout == share_quantity`.
+const CLAIM_UNIT_SCALE: u128 = 2u128;
 
 const MIN_TRADE_AMOUNT: u128 = 1000u128;
 
@@ -150,8 +156,8 @@ final fn create_turbo_market_fin(
         market_id: market_id,
         total_up_amount: 0u128,
         total_down_amount: 0u128,
-        total_up_shares: 0u128,
-        total_down_shares: 0u128,
+        total_up_claim_units: 0u128,
+        total_down_claim_units: 0u128,
         total_volume: 0u128,
     };
 
@@ -165,7 +171,7 @@ final fn buy_up_down_fin(
     market_id: field,
     side: u8,
     amount_in: u128,
-    expected_shares: u128,
+    share_refund_amount: u128,
 ) {
     transfer_future.run();
 
@@ -191,12 +197,15 @@ final fn buy_up_down_fin(
 
     let pool: TurboPool = turbo_pools.get(market_id);
 
-    // Simple share calculation: 1 ALEO bet = 1 share (no FPMM curve needed
-    // with shared vault — odds are determined purely by total_up vs total_down
-    // amounts at resolution time).
+    // Simple share calculation: 1 ALEO bet = 1 refundable stake unit.
+    // Claims use a separately-scaled internal unit so a sole winner's
+    // `declared_payout` no longer equals the stake field stored in the
+    // consumed TurboShare record.
     let shares_out: u128 = amount_to_pool;
-    assert(shares_out >= expected_shares);
+    assert(shares_out == share_refund_amount);
     assert(shares_out > 0u128);
+    let claim_units_out: u128 = shares_out * CLAIM_UNIT_SCALE;
+    assert(claim_units_out > 0u128);
 
     let new_up_amount: u128 = side == OUTCOME_UP
         ? pool.total_up_amount + amount_to_pool
@@ -204,19 +213,19 @@ final fn buy_up_down_fin(
     let new_down_amount: u128 = side == OUTCOME_DOWN
         ? pool.total_down_amount + amount_to_pool
         : pool.total_down_amount;
-    let new_up_shares: u128 = side == OUTCOME_UP
-        ? pool.total_up_shares + shares_out
-        : pool.total_up_shares;
-    let new_down_shares: u128 = side == OUTCOME_DOWN
-        ? pool.total_down_shares + shares_out
-        : pool.total_down_shares;
+    let new_up_claim_units: u128 = side == OUTCOME_UP
+        ? pool.total_up_claim_units + claim_units_out
+        : pool.total_up_claim_units;
+    let new_down_claim_units: u128 = side == OUTCOME_DOWN
+        ? pool.total_down_claim_units + claim_units_out
+        : pool.total_down_claim_units;
 
     turbo_pools.set(market_id, TurboPool {
         market_id: market_id,
         total_up_amount: new_up_amount,
         total_down_amount: new_down_amount,
-        total_up_shares: new_up_shares,
-        total_down_shares: new_down_shares,
+        total_up_claim_units: new_up_claim_units,
+        total_down_claim_units: new_down_claim_units,
         total_volume: pool.total_volume + amount_in,
     });
 }
@@ -262,7 +271,7 @@ final fn resolve_turbo_market_fin(
     let pool: TurboPool = turbo_pools.get(market_id);
     let total_pool: u128 = pool.total_up_amount + pool.total_down_amount;
 
-    // Store total_payout_pool in market_payouts mapping so claim can compute
+    // Store an immutable resolve-time payout snapshot for claim math.
     market_payouts.set(market_id, total_pool);
 
     turbo_markets.set(market_id, TurboMarket {
@@ -306,7 +315,7 @@ final fn claim_winnings_fin(
     transfer_future: Final,
     market_id: field,
     share_side: u8,
-    share_quantity: u128,
+    share_claim_units: u128,
     declared_payout: u128,
     share_id: field,
 ) {
@@ -320,15 +329,16 @@ final fn claim_winnings_fin(
     assert(!already);
     share_redeemed.set(share_id, true);
 
-    // Payout = (share_quantity / total_winning_shares) × total_pool
+    // Payout = (share_claim_units / total_winning_claim_units) × total_pool
     let pool: TurboPool = turbo_pools.get(market_id);
-    let total_winning: u128 = m.winning_outcome == OUTCOME_UP
-        ? pool.total_up_shares
-        : pool.total_down_shares;
-    assert(total_winning > 0u128);
+    let total_winning_claim_units: u128 = m.winning_outcome == OUTCOME_UP
+        ? pool.total_up_claim_units
+        : pool.total_down_claim_units;
+    assert(total_winning_claim_units > 0u128);
+    assert(total_winning_claim_units >= share_claim_units);
 
     let total_pool: u128 = market_payouts.get(market_id);
-    let payout: u128 = (share_quantity * total_pool) / total_winning;
+    let payout: u128 = (share_claim_units * total_pool) / total_winning_claim_units;
 
     assert(declared_payout == payout);
     assert(payout > 0u128);
@@ -337,26 +347,6 @@ final fn claim_winnings_fin(
     let vault_current: u128 = vault_balance.get_or_use(VAULT_ALEO, 0u128);
     assert(vault_current >= payout);
     vault_balance.set(VAULT_ALEO, vault_current - payout);
-
-    // Decrement winning shares for subsequent claims
-    let new_up: u128 = m.winning_outcome == OUTCOME_UP
-        ? pool.total_up_shares - share_quantity
-        : pool.total_up_shares;
-    let new_dn: u128 = m.winning_outcome == OUTCOME_DOWN
-        ? pool.total_down_shares - share_quantity
-        : pool.total_down_shares;
-    turbo_pools.set(market_id, TurboPool {
-        market_id: pool.market_id,
-        total_up_amount: pool.total_up_amount,
-        total_down_amount: pool.total_down_amount,
-        total_up_shares: new_up,
-        total_down_shares: new_dn,
-        total_volume: pool.total_volume,
-    });
-
-    // Decrement remaining payout pool
-    let remaining: u128 = total_pool - payout;
-    market_payouts.set(market_id, remaining);
 }
 
 final fn claim_refund_fin(
@@ -410,7 +400,7 @@ final fn withdraw_fees_fin(
 // PROGRAM BLOCK
 // ============================================================================
 
-program veiled_turbo_v8.aleo {
+program veiled_turbo_v9.aleo {
 
     // ------------------------------------------------------------------------
     // STRUCTS
@@ -437,13 +427,13 @@ program veiled_turbo_v8.aleo {
         created_at: u64,
     }
 
-    // Pool tracks total bet amounts and shares per side (no FPMM reserves)
+    // Pool tracks total bet amounts plus internal claim units per side.
     struct TurboPool {
         market_id: field,
         total_up_amount: u128,    // total ALEO bet on UP
         total_down_amount: u128,  // total ALEO bet on DOWN
-        total_up_shares: u128,
-        total_down_shares: u128,
+        total_up_claim_units: u128,
+        total_down_claim_units: u128,
         total_volume: u128,
     }
 
@@ -455,7 +445,8 @@ program veiled_turbo_v8.aleo {
         owner: address,
         market_id: field,
         side: u8,
-        quantity: u128,
+        claim_units: u128,
+        refund_amount: u128,
         share_nonce: field,
     }
 
@@ -467,7 +458,7 @@ program veiled_turbo_v8.aleo {
     mapping turbo_pools: field => TurboPool;
     mapping vault_balance: u8 => u128;          // VAULT_ALEO(0) => total ALEO in vault
     mapping protocol_treasury: field => u128;   // market_id => accumulated fees
-    mapping market_payouts: field => u128;       // market_id => total payout pool (set at resolve)
+    mapping market_payouts: field => u128;       // market_id => immutable resolve-time payout snapshot
     mapping share_redeemed: field => bool;
 
     // ------------------------------------------------------------------------
@@ -566,12 +557,19 @@ program veiled_turbo_v8.aleo {
     ) -> (TurboShare, credits.aleo::credits, Final) {
         assert(side == OUTCOME_UP || side == OUTCOME_DOWN);
         assert(amount_in >= MIN_TRADE_AMOUNT);
+        let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let shares_out: u128 = amount_in - protocol_fee;
+        assert(expected_shares == shares_out);
+        assert(shares_out > 0u128);
+        let claim_units_out: u128 = shares_out * CLAIM_UNIT_SCALE;
+        assert(claim_units_out > 0u128);
 
         let share: TurboShare = TurboShare {
             owner: credits_in.owner,
             market_id: market_id,
             side: side,
-            quantity: expected_shares,
+            claim_units: claim_units_out,
+            refund_amount: shares_out,
             share_nonce: share_nonce,
         };
 
@@ -580,7 +578,7 @@ program veiled_turbo_v8.aleo {
             credits.aleo::transfer_private_to_public(credits_in, self.address, amount_u64);
 
         return (share, change, final {
-            buy_up_down_fin(transfer_future, market_id, side, amount_in, expected_shares);
+            buy_up_down_fin(transfer_future, market_id, side, amount_in, shares_out);
         });
     }
 
@@ -621,13 +619,13 @@ program veiled_turbo_v8.aleo {
 
         let share_id: field = BHP256::hash_to_field(share);
         let side_local: u8 = share.side;
-        let qty_local: u128 = share.quantity;
+        let claim_units_local: u128 = share.claim_units;
         let payout_u64: u64 = declared_payout as u64;
         let (payout_record, transfer_future): (credits.aleo::credits, Final) =
             credits.aleo::transfer_public_to_private(self.caller, payout_u64);
 
         return (payout_record, final {
-            claim_winnings_fin(transfer_future, market_id, side_local, qty_local, declared_payout, share_id);
+            claim_winnings_fin(transfer_future, market_id, side_local, claim_units_local, declared_payout, share_id);
         });
     }
 
@@ -643,14 +641,14 @@ program veiled_turbo_v8.aleo {
         assert(share.owner == self.caller);
 
         let refund_id: field = BHP256::hash_to_field(share);
-        let qty_local: u128 = share.quantity;
+        let refund_amount_local: u128 = share.refund_amount;
 
         let amount_u64: u64 = declared_refund as u64;
         let (refund_record, transfer_future): (credits.aleo::credits, Final) =
             credits.aleo::transfer_public_to_private(self.caller, amount_u64);
 
         return (refund_record, final {
-            claim_refund_fin(transfer_future, market_id, qty_local, declared_refund, refund_id);
+            claim_refund_fin(transfer_future, market_id, refund_amount_local, declared_refund, refund_id);
         });
     }
 

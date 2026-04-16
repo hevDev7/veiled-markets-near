@@ -345,7 +345,7 @@ interface DisputeData {
                 </p>
               </div>
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                <h3 className="font-mono text-sm text-white mb-1">veiled_turbo_v8.aleo</h3>
+                <h3 className="font-mono text-sm text-white mb-1">veiled_turbo_v9.aleo</h3>
                 <p className="text-xs text-surface-500 mb-3">Rolling 5-minute Turbo market contract — 10 transitions</p>
                 <p className="text-sm text-surface-400">
                   Parimutuel UP/DOWN prediction markets for 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP,
@@ -410,7 +410,7 @@ if (market?.status === 2 /* Resolved */ && pool && payouts) {
   const winningShares = market.winningOutcome === 1
     ? pool.totalUpShares : pool.totalDownShares
   const declaredPayout = quoteTurboPayout(
-    myShareQuantity,
+    myShareClaimUnits,
     payouts,
     winningShares,
   )

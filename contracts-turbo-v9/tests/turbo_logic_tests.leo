@@ -1,9 +1,10 @@
 // ============================================================================
-// Veiled Turbo v8 — Logic Tests
+// Veiled Turbo v9 — Logic Tests
 // ============================================================================
-// Pure-logic tests for the critical math in veiled_turbo_v8.aleo:
-//   - Binary FPMM share calculation
+// Pure-logic tests for the critical math in veiled_turbo_v9.aleo:
+//   - Parimutuel buy calculation
 //   - Payout proration on claim
+//   - Solo-bettor-safe internal claim-unit scaling
 //   - Sanity check thresholds (window, conf, max-move)
 //   - Winner selection (UP/DOWN tiebreak)
 //
@@ -22,6 +23,7 @@ program turbo_logic_tests.aleo {
 
     const PROTOCOL_FEE_BPS: u128 = 50u128;
     const FEE_DENOMINATOR: u128  = 10000u128;
+    const CLAIM_UNIT_SCALE: u128 = 2u128;
 
     const MIN_DURATION_BLOCKS: u64 = 15u64;
     const MAX_DURATION_BLOCKS: u64 = 900u64;
@@ -32,60 +34,58 @@ program turbo_logic_tests.aleo {
     const MAX_MOVE_FRAC: u128 = 2u128;
 
     // ------------------------------------------------------------------------
-    // FPMM binary share calculation — basic round trip
+    // Parimutuel buy calculation — basic round trip
     // ------------------------------------------------------------------------
-    // Pool starts at 50/50 with 100 liquidity. User buys 10 UP.
+    // User buys 10 UP.
     //   protocol_fee = 10 * 50 / 10000 = 0
-    //   amount_to_pool = 10
-    //   r_i_new = (50 * 50) / (50 + 10) = 2500 / 60 = 41
-    //   shares_out = (50 + 10) - 41 = 19
-    //   new_up = 41, new_down = 60
+    //   refundable_amount = 10
+    //   claim_units = 20
     @test
-    fn test_fpmm_binary_buy() {
-        let r_up: u128 = 50u128;
-        let r_dn: u128 = 50u128;
+    fn test_parimutuel_buy() {
         let amount_in: u128 = 10u128;
 
         let protocol_fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let amount_to_pool: u128 = amount_in - protocol_fee;
-
-        let r_i: u128 = r_up;
-        let r_oth: u128 = r_dn;
-        let r_i_new: u128 = (r_i * r_oth) / (r_oth + amount_to_pool);
-        let shares_out: u128 = (r_i + amount_to_pool) - r_i_new;
+        let refundable_amount: u128 = amount_in - protocol_fee;
+        let claim_units: u128 = refundable_amount * CLAIM_UNIT_SCALE;
 
         assert_eq(protocol_fee, 0u128);
-        assert_eq(amount_to_pool, 10u128);
-        assert_eq(r_i_new, 41u128);
-        assert_eq(shares_out, 19u128);
+        assert_eq(refundable_amount, 10u128);
+        assert_eq(claim_units, 20u128);
     }
 
     // ------------------------------------------------------------------------
-    // FPMM with realistic numbers + non-zero protocol fee
+    // Parimutuel with realistic numbers + non-zero protocol fee
     // ------------------------------------------------------------------------
-    // Liquidity: 10,000,000 microcredits seeded equally → r_up = r_dn = 5_000_000
     // Buy 1_000_000 UP.
-    //   fee = 5000, to_pool = 995_000
-    //   r_i_new = (5_000_000 * 5_000_000) / 5_995_000 ≈ 4_170_141
-    //   shares ≈ 5_995_000 - 4_170_141 = 1_824_859
+    //   fee = 5000, refundable_amount = 995_000, claim_units = 1_990_000
     @test
-    fn test_fpmm_with_fee() {
-        let r_up: u128 = 5_000_000u128;
-        let r_dn: u128 = 5_000_000u128;
+    fn test_parimutuel_with_fee() {
         let amount_in: u128 = 1_000_000u128;
 
         let fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
-        let to_pool: u128 = amount_in - fee;
-
-        let r_i_new: u128 = (r_up * r_dn) / (r_dn + to_pool);
-        let shares_out: u128 = (r_up + to_pool) - r_i_new;
+        let refundable_amount: u128 = amount_in - fee;
+        let claim_units: u128 = refundable_amount * CLAIM_UNIT_SCALE;
 
         assert_eq(fee, 5000u128);
-        assert_eq(to_pool, 995_000u128);
-        assert(shares_out > 0u128);
-        // Strictly greater than amount_in (FPMM gives discounted shares only
-        // when other side is heavy; here it's symmetric so shares ≈ to_pool)
-        assert(shares_out >= to_pool);
+        assert_eq(refundable_amount, 995_000u128);
+        assert_eq(claim_units, 1_990_000u128);
+    }
+
+    // ------------------------------------------------------------------------
+    // Client quote must match the contract's exact refundable amount.
+    // ------------------------------------------------------------------------
+    @test
+    fn test_expected_shares_exact() {
+        let amount_in: u128 = 1_000_000u128;
+        let fee: u128 = (amount_in * PROTOCOL_FEE_BPS) / FEE_DENOMINATOR;
+        let shares_out: u128 = amount_in - fee;
+
+        let correct_quote: u128 = 995_000u128;
+        let stale_quote: u128 = 994_999u128;
+
+        assert_eq(shares_out, correct_quote);
+        assert(shares_out == correct_quote);
+        assert(shares_out != stale_quote);
     }
 
     // ------------------------------------------------------------------------
@@ -110,13 +110,61 @@ program turbo_logic_tests.aleo {
     @test
     fn test_payout_sole_winner() {
         let market_credits: u128 = 9_995_000u128;
-        let total_winning: u128 = 1_824_859u128;
-        let qty: u128 = 1_824_859u128;
+        let total_winning: u128 = 1_990_000u128;
+        let claim_units: u128 = 1_990_000u128;
 
-        let payout: u128 = (qty * market_credits) / total_winning;
+        let payout: u128 = (claim_units * market_credits) / total_winning;
         // Sole winner takes the whole pool (within rounding)
         assert(payout >= market_credits - 1u128);
         assert(payout <= market_credits);
+    }
+
+    // ------------------------------------------------------------------------
+    // Solo bettor safety — payout remains the refundable stake, but the
+    // internal claim units are different from that stake.
+    // ------------------------------------------------------------------------
+    @test
+    fn test_solo_claim_units() {
+        let refundable_amount: u128 = 995_000u128;
+        let claim_units: u128 = refundable_amount * CLAIM_UNIT_SCALE;
+        let total_pool: u128 = refundable_amount;
+        let total_winning_claim_units: u128 = claim_units;
+        let payout: u128 = (claim_units * total_pool) / total_winning_claim_units;
+
+        assert_eq(payout, refundable_amount);
+        assert(claim_units != refundable_amount);
+    }
+
+    // ------------------------------------------------------------------------
+    // Payout snapshots keep integer rounding independent from claim order.
+    // ------------------------------------------------------------------------
+    @test
+    fn test_payouts_order_independent() {
+        let total_pool: u128 = 10u128;
+        let total_winning_claim_units: u128 = 3u128;
+
+        let claimer_a_units: u128 = 1u128;
+        let claimer_b_units: u128 = 2u128;
+
+        let payout_a_snapshot: u128 = (claimer_a_units * total_pool) / total_winning_claim_units;
+        let payout_b_snapshot: u128 = (claimer_b_units * total_pool) / total_winning_claim_units;
+
+        let remaining_after_a: u128 = total_pool - payout_a_snapshot;
+        let remaining_units_after_a: u128 = total_winning_claim_units - claimer_a_units;
+        let payout_b_residual: u128 = (claimer_b_units * remaining_after_a) / remaining_units_after_a;
+
+        let remaining_after_b: u128 = total_pool - payout_b_snapshot;
+        let remaining_units_after_b: u128 = total_winning_claim_units - claimer_b_units;
+        let payout_a_residual: u128 = (claimer_a_units * remaining_after_b) / remaining_units_after_b;
+
+        assert_eq(payout_a_snapshot, 3u128);
+        assert_eq(payout_b_snapshot, 6u128);
+        assert_eq(payout_a_snapshot + payout_b_snapshot, 9u128);
+
+        assert_eq(payout_b_residual, 7u128);
+        assert_eq(payout_a_residual, 4u128);
+        assert(payout_b_residual != payout_b_snapshot);
+        assert(payout_a_residual != payout_a_snapshot);
     }
 
     // ------------------------------------------------------------------------

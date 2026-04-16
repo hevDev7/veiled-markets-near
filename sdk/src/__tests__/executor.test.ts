@@ -42,7 +42,7 @@ describe('NodeExecutor dry-run mode', () => {
       dryRun: true,
     });
     const result = await executor.execute({
-      programId: 'veiled_turbo_v8.aleo',
+      programId: 'veiled_turbo_v9.aleo',
       functionName: 'buy_up_down',
       inputs: ['12345field', '1u8', '1000000u128', '995000u128', '1field', '{record}'],
     });

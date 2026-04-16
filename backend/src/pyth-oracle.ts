@@ -3,7 +3,7 @@
 // ============================================================================
 // Subscribes to Pyth Hermes price stream, signs PriceAttestation messages
 // with the Aleo oracle wallet, and (eventually) drives create_turbo_market /
-// resolve_turbo_market transactions on `veiled_turbo_v8.aleo`.
+// resolve_turbo_market transactions on `veiled_turbo_v9.aleo`.
 //
 // Run modes:
 //   pnpm tsx src/pyth-oracle.ts                 # standalone (subscribe + cache)
@@ -15,7 +15,7 @@
 //   PYTH_HERMES_URL                  default: https://hermes.pyth.network
 //   ORACLE_PRIVATE_KEY               Aleo APrivateKey1zk... for signing
 //   ALEO_RPC_URL                     Aleo node endpoint
-//   TURBO_PROGRAM_ID                 default: veiled_turbo_v8.aleo
+//   TURBO_PROGRAM_ID                 default: veiled_turbo_v9.aleo
 //   TURBO_OPERATOR_PORT              default: 4090
 //
 // Trust note:
@@ -56,7 +56,7 @@ export const PYTH_FEED_IDS = {
 
 export type Symbol = keyof typeof PYTH_FEED_IDS
 
-// Symbol IDs MUST match the constants compiled into veiled_turbo_v8.aleo
+// Symbol IDs MUST match the constants compiled into veiled_turbo_v9.aleo
 export const SYMBOL_IDS: Record<Symbol, number> = {
   BTC: 1,
   ETH: 2,
@@ -1328,7 +1328,7 @@ async function snarkosExecuteOnce(
 }
 
 const TURBO_PROGRAM_ID_LIVE =
-  process.env.TURBO_PROGRAM_ID || 'veiled_turbo_v8.aleo'
+  process.env.TURBO_PROGRAM_ID || 'veiled_turbo_v9.aleo'
 
 async function broadcastCreateTurboMarket(inputs: string[]): Promise<SnarkosExecResult> {
   return snarkosExecute(TURBO_PROGRAM_ID_LIVE, 'create_turbo_market', inputs)

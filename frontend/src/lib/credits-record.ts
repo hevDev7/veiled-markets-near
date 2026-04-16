@@ -457,6 +457,8 @@ export interface ParsedOutcomeShare {
   plaintext: string
   outcome: number
   quantity: bigint
+  claimUnits?: bigint
+  refundAmount?: bigint
   marketId: string | null
   owner: string | null
 }

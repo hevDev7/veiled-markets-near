@@ -140,7 +140,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Turbo Markets',
     question: 'What are Turbo Markets?',
-    answer: 'Turbo Markets are rolling 5-minute UP/DOWN prediction markets powered by the Pyth Network oracle. Every 5 minutes, a new market opens for 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT). You predict whether the price will be higher or lower at the end of the round compared to the baseline set at round start. Resolution is fully automatic — no voting, no disputes. Deployed contract: veiled_turbo_v8.aleo.',
+    answer: 'Turbo Markets are rolling 5-minute UP/DOWN prediction markets powered by the Pyth Network oracle. Every 5 minutes, a new market opens for 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT). You predict whether the price will be higher or lower at the end of the round compared to the baseline set at round start. Resolution is fully automatic — no voting, no disputes. Deployed contract: veiled_turbo_v9.aleo.',
   },
   {
     category: 'Turbo Markets',
@@ -160,7 +160,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Turbo Markets',
     question: 'Who operates the Turbo markets?',
-    answer: 'A trusted operator wallet (hardcoded as ORACLE_OPERATOR in veiled_turbo_v8.aleo) runs the backend service that subscribes to Pyth Hermes, creates new markets every 5 minutes, and resolves them at deadline. Users do NOT create turbo markets manually — the operator handles everything. The operator can be audited: every create and resolve transaction is logged to Supabase (turbo_oracle_audit) and cross-checkable against Pyth Hermes historical data at /verify/turbo/:marketId.',
+    answer: 'A trusted operator wallet (hardcoded as ORACLE_OPERATOR in veiled_turbo_v9.aleo) runs the backend service that subscribes to Pyth Hermes, creates new markets every 5 minutes, and resolves them at deadline. Users do NOT create turbo markets manually — the operator handles everything. The operator can be audited: every create and resolve transaction is logged to Supabase (turbo_oracle_audit) and cross-checkable against Pyth Hermes historical data at /verify/turbo/:marketId.',
   },
   {
     category: 'Turbo Markets',

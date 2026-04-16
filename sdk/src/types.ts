@@ -381,7 +381,7 @@ export const PROGRAM_IDS = {
   USAD_MARKET: 'veiled_markets_usad_v14.aleo',
   GOVERNANCE: 'veiled_governance_v6.aleo',
   PARLAY: 'veiled_parlay_v3.aleo',
-  TURBO: 'veiled_turbo_v8.aleo',
+  TURBO: 'veiled_turbo_v9.aleo',
 } as const;
 
 /**
@@ -394,7 +394,7 @@ export const MARKET_PROGRAM_BY_TOKEN: Record<TokenType, string> = {
 };
 
 // ============================================================================
-// TURBO MARKET TYPES (veiled_turbo_v8.aleo)
+// TURBO MARKET TYPES (veiled_turbo_v9.aleo)
 // ============================================================================
 // Rolling 5-minute UP/DOWN prediction markets backed by Pyth Network oracle.
 // Operator (ORACLE_OPERATOR hardcoded in the contract) creates markets every
@@ -409,7 +409,7 @@ export const MARKET_PROGRAM_BY_TOKEN: Record<TokenType, string> = {
 /**
  * Turbo market side (UP or DOWN). Maps to the u8 side field the contract
  * uses — 1 = UP, 2 = DOWN. Matches `OUTCOME_UP` / `OUTCOME_DOWN` constants
- * in contracts-turbo-v1/src/main.leo.
+ * in contracts-turbo-v9/src/main.leo.
  */
 export type TurboSide = 'UP' | 'DOWN';
 
@@ -436,7 +436,7 @@ export enum TurboMarketStatus {
 
 /**
  * Symbol ids the turbo contract whitelists. Same order as
- * `SYMBOL_*` constants in contracts-turbo-v1/src/main.leo.
+ * `SYMBOL_*` constants in contracts-turbo-v9/src/main.leo.
  */
 export const TURBO_SYMBOL_IDS = {
   BTC: 1,
@@ -474,13 +474,16 @@ export interface TurboMarket {
 /**
  * On-chain `TurboPool` struct (mapped by `turbo_pools[market_id]`).
  * Tracks parimutuel totals — no FPMM curve.
+ * In v9 the `totalUpShares` / `totalDownShares` values represent internal
+ * claim units parsed from `total_up_claim_units` / `total_down_claim_units`
+ * on-chain. The SDK keeps the old property names for API continuity.
  */
 export interface TurboPool {
   marketId: string;              // field
   totalUpAmount: bigint;         // u128 - ALEO staked on UP (net, after fees)
   totalDownAmount: bigint;       // u128 - ALEO staked on DOWN (net, after fees)
-  totalUpShares: bigint;         // u128 - redeemable shares if UP wins
-  totalDownShares: bigint;       // u128 - redeemable shares if DOWN wins
+  totalUpShares: bigint;         // u128 - v9 claim units / v8 share total
+  totalDownShares: bigint;       // u128 - v9 claim units / v8 share total
   totalVolume: bigint;           // u128 - sum of all raw amount_in values
 }
 
@@ -493,7 +496,8 @@ export interface TurboShare {
   owner: string;                 // address - bet placer
   marketId: string;              // field - which market this share belongs to
   side: TurboSide;               // derived from u8 (1=UP, 2=DOWN)
-  quantity: bigint;              // u128 - net stake (amount_in - protocol fee)
+  quantity: bigint;              // u128 - refundable net stake shown to users
+  claimUnits: bigint;            // u128 - v9 internal payout units
   shareNonce: string;            // field - random anchor (unique per share)
   /** Raw plaintext string wallet adapters return. Pass back to claim txs
    *  verbatim — record literal parsing happens on-chain, not here. */

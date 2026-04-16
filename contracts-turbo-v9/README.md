@@ -2,12 +2,12 @@
 
 Pyth-backed, oracle-resolved short-duration UP/DOWN prediction markets on Aleo.
 
-**Active deployment:** `veiled_turbo_v8.aleo` (shared-vault architecture — see
+**Active deployment:** `veiled_turbo_v9.aleo` (shared-vault architecture — see
 [Status](#status) for testnet validation history v1 → v8).
 
 ## What this is
 
-A separate Aleo program (`veiled_turbo_v8.aleo`) that runs **alongside** — not
+A separate Aleo program (`veiled_turbo_v9.aleo`) that runs **alongside** — not
 replacing — `veiled_markets_v37.aleo`. Designed for 5-minute crypto price
 markets in the style of Polymarket Turbo / Kalshi short events.
 
@@ -137,7 +137,7 @@ These are tracked as TODO comments in `src/main.leo` and need design before audi
 
 ## Files
 
-- `program.json` — Leo manifest (currently declares `veiled_turbo_v8.aleo`)
+- `program.json` — Leo manifest (currently declares `veiled_turbo_v9.aleo`)
 - `src/main.leo` — contract source (~23 KB, 10 transitions, shared vault)
 - `tests/turbo_logic_tests.leo` — 16 logic tests, all passing
 - `THREAT_MODEL.md` — 23 threats catalogued + testnet validation log
@@ -151,9 +151,9 @@ These are tracked as TODO comments in `src/main.leo` and need design before audi
 
 The canonical source in `src/main.leo` has been validated end-to-end on
 testnet through 8 progressive deploy iterations. The currently deployed
-program id is **`veiled_turbo_v8.aleo`** (frontend `VITE_TURBO_PROGRAM_ID`
+program id is **`veiled_turbo_v9.aleo`** (frontend `VITE_TURBO_PROGRAM_ID`
 and backend `TURBO_PROGRAM_ID` env vars default to this). The folder name
-is kept as `contracts-turbo-v1` for git history continuity; the source
+is `contracts-turbo-v9` matching the deploy target; the source
 matches v8.
 
 ### Testnet validation history

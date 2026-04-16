@@ -1,7 +1,7 @@
 # Veiled Turbo — 24-Hour Shadow Run Runbook
 
 End-to-end production-style test of the operator backend running against
-the live `veiled_turbo_v8.aleo` testnet deployment. Goal: validate cron
+the live `veiled_turbo_v9.aleo` testnet deployment. Goal: validate cron
 loops, audit log, error rates, and operator wallet drain over a 24-hour
 window before promoting to a wider rollout.
 
@@ -17,9 +17,9 @@ window before promoting to a wider rollout.
   ```bash
   curl -s "https://api.explorer.provable.com/v1/testnet/program/credits.aleo/mapping/account/$ALEO_ADDRESS"
   ```
-- [ ] `veiled_turbo_v8.aleo` exists on testnet
+- [ ] `veiled_turbo_v9.aleo` exists on testnet
   ```bash
-  curl -s "https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v8.aleo/latest_edition"
+  curl -s "https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v9.aleo/latest_edition"
   # → 0
   ```
 - [ ] `ORACLE_OPERATOR` constant in `src/main.leo` matches the wallet you'll
@@ -66,7 +66,7 @@ export ALEO_RPC_URL=https://api.explorer.provable.com/v1
 # Note: backend normalizes /testnet suffix automatically (v4+)
 
 # Contract id
-export TURBO_PROGRAM_ID=veiled_turbo_v8.aleo
+export TURBO_PROGRAM_ID=veiled_turbo_v9.aleo
 
 # Liquidity per market (defaults to 10 ALEO)
 export TURBO_INITIAL_LIQUIDITY=10000000
@@ -97,7 +97,7 @@ Expected output within ~5 seconds:
 [pyth] BTC $XXXXX.XX  ±$XX.XX  @...
 [pyth] ETH $XXXX.XX   ±$X.XX   @...
 [pyth] SOL $XX.XX     ±$X.XX   @...
-[snarkos] DRY_RUN veiled_turbo_v8.aleo/create_turbo_market [...]
+[snarkos] DRY_RUN veiled_turbo_v9.aleo/create_turbo_market [...]
 [cron-create] BTC @ $XXXXX.XX → pending_BTC_<nonce> tx dryrun_<ts>
 [cron-create] ETH @ $XXXX.XX  → pending_ETH_<nonce> tx dryrun_<ts>
 [cron-create] SOL @ $XX.XX    → pending_SOL_<nonce> tx dryrun_<ts>

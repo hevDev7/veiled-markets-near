@@ -1,5 +1,5 @@
 // ============================================================================
-// VEILED MARKETS SDK - Turbo Client (veiled_turbo_v8.aleo)
+// VEILED MARKETS SDK - Turbo Client (veiled_turbo_v9.aleo)
 // ============================================================================
 // Rolling 5-minute UP/DOWN prediction markets backed by the Pyth Network
 // oracle. Unlike the main FAMM markets, turbo markets have a single shared
@@ -113,7 +113,7 @@ export function quoteBuyUpDown(amountInMicro: bigint): TurboBuyQuote {
 /**
  * Compute a winner's `claim_winnings` payout. Mirrors `claim_winnings_fin`:
  *
- *   payout = (share_quantity × total_pool) / total_winning_shares
+ *   payout = (share_claim_units × total_pool) / total_winning_claim_units
  *
  * Integer division truncating — matches Leo u128 division. The contract
  * asserts `declared_payout == payout` exactly, so pass this value directly
@@ -123,12 +123,12 @@ export function quoteBuyUpDown(amountInMicro: bigint): TurboBuyQuote {
  * with valid markets but we guard).
  */
 export function quoteTurboPayout(
-  shareQuantity: bigint,
+  shareClaimUnits: bigint,
   totalPool: bigint,             // = market_payouts[market_id]
-  totalWinningShares: bigint,    // = pool.total_up_shares OR total_down_shares
+  totalWinningShares: bigint,    // = v9 claim units in pool.total_up/down_shares
 ): bigint {
   if (totalWinningShares === 0n) return 0n;
-  return (shareQuantity * totalPool) / totalWinningShares;
+  return (shareClaimUnits * totalPool) / totalWinningShares;
 }
 
 // ============================================================================
@@ -145,16 +145,18 @@ export function quoteTurboPayout(
  *
  * Example input:
  *   `{ owner: aleo1xxx.private, market_id: 12345field.private,
- *      side: 2u8.private, quantity: 995000u128.private,
- *      share_nonce: 67890field.private, _nonce: ... }`
+ *      side: 2u8.private, claim_units: 1990000u128.private,
+ *      refund_amount: 995000u128.private, share_nonce: 67890field.private,
+ *      _nonce: ... }`
  */
 export function parseTurboShareRecord(text: string): TurboShare | null {
   const marketMatch = text.match(/market_id:\s*([0-9]+field)/);
   const sideMatch = text.match(/side:\s*(\d+)u8/);
-  const qtyMatch = text.match(/quantity:\s*(\d+)u128/);
+  const claimUnitsMatch = text.match(/claim_units:\s*(\d+)u128/) || text.match(/quantity:\s*(\d+)u128/);
+  const refundAmountMatch = text.match(/refund_amount:\s*(\d+)u128/) || text.match(/quantity:\s*(\d+)u128/);
   const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/);
   const nonceMatch = text.match(/share_nonce:\s*([0-9]+field)/);
-  if (!marketMatch || !sideMatch || !qtyMatch || !ownerMatch) return null;
+  if (!marketMatch || !sideMatch || !claimUnitsMatch || !refundAmountMatch || !ownerMatch) return null;
 
   const sideNum = Number(sideMatch[1]);
   let side: TurboSide;
@@ -166,7 +168,8 @@ export function parseTurboShareRecord(text: string): TurboShare | null {
     owner: ownerMatch[1],
     marketId: marketMatch[1],
     side,
-    quantity: BigInt(qtyMatch[1]),
+    quantity: BigInt(refundAmountMatch[1]),
+    claimUnits: BigInt(claimUnitsMatch[1]),
     shareNonce: nonceMatch?.[1] ?? '0field',
     plaintext: text,
   };
@@ -178,7 +181,7 @@ export function parseTurboShareRecord(text: string): TurboShare | null {
 
 /**
  * TurboClient — builds transactions and reads on-chain state for
- * `veiled_turbo_v8.aleo`.
+ * `veiled_turbo_v9.aleo`.
  *
  * Usage:
  *   const client = new TurboClient({ network: 'testnet' });
@@ -272,7 +275,7 @@ export class TurboClient {
   /**
    * Build inputs for `claim_refund(market_id, share, declared_refund)`.
    * Only callable after `emergency_cancel` — `expectedAmount` equals the
-   * TurboShare's `quantity` (no fee on refund).
+   * TurboShare's refundable `quantity` (no fee on refund).
    */
   buildClaimRefundInputs(params: TurboClaimRefundParams): TurboCall {
     return {
@@ -479,8 +482,8 @@ function parseTurboMarketStruct(text: string): TurboMarket | null {
 function parseTurboPoolStruct(text: string, marketId: string): TurboPool | null {
   const upAmountMatch = text.match(/total_up_amount:\s*(\d+)u128/);
   const dnAmountMatch = text.match(/total_down_amount:\s*(\d+)u128/);
-  const upSharesMatch = text.match(/total_up_shares:\s*(\d+)u128/);
-  const dnSharesMatch = text.match(/total_down_shares:\s*(\d+)u128/);
+  const upSharesMatch = text.match(/total_up_claim_units:\s*(\d+)u128/) || text.match(/total_up_shares:\s*(\d+)u128/);
+  const dnSharesMatch = text.match(/total_down_claim_units:\s*(\d+)u128/) || text.match(/total_down_shares:\s*(\d+)u128/);
   const volumeMatch = text.match(/total_volume:\s*(\d+)u128/);
   if (!upAmountMatch || !dnAmountMatch) return null;
   return {

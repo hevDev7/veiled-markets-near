@@ -35,7 +35,7 @@ import {
   type TurboSide,
 } from '@/lib/turbo-client'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
-import { useBetsStore } from '@/lib/store'
+import { useBetsStore, useWalletStore } from '@/lib/store'
 
 // Note: price data now streams from the BACKEND operator (/stream endpoint),
 // not directly from Pyth Hermes. This ensures all users see identical prices
@@ -355,6 +355,7 @@ export function TurboMarketPanel({
   hideBetUI = false,
 }: TurboMarketPanelProps) {
   const { executeTransaction } = useAleoTransaction()
+  const { wallet } = useWalletStore()
   const [pool, setPool] = useState<TurboPoolView | null>(null)
   const [marketCredits, setMarketCredits] = useState<bigint | null>(null)
   const [shares, setShares] = useState<ParsedTurboShare[] | null>(null)
@@ -846,9 +847,7 @@ export function TurboMarketPanel({
     try {
       let tx: { programId: string; functionName: string; inputs: string[] }
       if (status === 'cancelled') {
-        // Refund: 1:1 of original stake (which equals share.quantity * weighted price).
-        // For turbo we refund the share quantity directly (matches market_credits split).
-        tx = buildClaimRefundInputs(marketId, share.plaintext, share.quantity)
+        tx = buildClaimRefundInputs(marketId, share.plaintext, share.refundAmount)
       } else if (status === 'resolved' && winningOutcome === share.side) {
         // Refresh pool + payouts state right before claim to ensure exact match
         const [freshPool, freshCredits] = await Promise.all([
@@ -860,7 +859,7 @@ export function TurboMarketPanel({
         }
         const totalWinning =
           winningOutcome === 'UP' ? freshPool.totalUpShares : freshPool.totalDownShares
-        const payout = quotePayout(freshCredits, totalWinning, share.quantity)
+        const payout = quotePayout(freshCredits, totalWinning, share.claimUnits)
         if (payout === 0n) throw new Error('Computed payout is zero')
         tx = buildClaimWinningsInputs(marketId, share.plaintext, payout)
       } else {
@@ -962,24 +961,35 @@ export function TurboMarketPanel({
         await onBuy(side, amountMicro)
         return
       }
-      // v8 parimutuel: shares = amount_to_pool = amount_in - fee
-      // No FPMM pool needed — just compute expected shares directly
+      // v9 parimutuel: refundable stake = amount_to_pool = amount_in - fee
       const protocolFee = (amountMicro * 50n) / 10000n
       const expectedShares = amountMicro - protocolFee
 
       // Fetch a private credits record for the bet amount
       const { fetchCreditsRecord, reserveCreditsRecord, releaseCreditsRecord } =
         await import('@/lib/credits-record')
-      const creditsRecord = await fetchCreditsRecord(Number(amountMicro), undefined)
+      const { resolveTransactionCallerAddress } = await import('@/lib/wallet')
+      const liveSigner = await resolveTransactionCallerAddress(wallet.walletType)
+      const expectedOwner = liveSigner || wallet.address || null
+      if (!expectedOwner) {
+        throw new Error('Could not determine the active signer address for this wallet.')
+      }
+      const creditsRecord = await fetchCreditsRecord(Number(amountMicro), expectedOwner)
       if (!creditsRecord) {
         throw new Error(
           `No Credits record with at least ${amountAleo.toFixed(2)} ALEO found. ` +
-          `Private betting requires an unspent Credits record (not just public balance).`
+          `Private betting requires an unspent Credits record owned by the active signer (not just public balance).`
         )
       }
       reserveCreditsRecord(creditsRecord)
 
-      // v8 parimutuel: expectedShares already computed above
+      if (wallet.address && liveSigner && wallet.address !== liveSigner) {
+        console.warn('[turbo] store address differs from live signer', {
+          storeAddress: wallet.address,
+          liveSigner,
+        })
+      }
+
       const tx = buildBuyUpDownInputs(marketId, side, amountMicro, expectedShares, creditsRecord)
       let txSucceeded = false
       setTxPhase('submitting')
@@ -1247,8 +1257,8 @@ export function TurboMarketPanel({
         const toPool = amountMicro - fee
 
         // Pool state for odds calculation
-        const upTotal = Number(pool?.reserveUp ?? 0n) // total_up_amount in v8
-        const dnTotal = Number(pool?.reserveDown ?? 0n) // total_down_amount in v8
+        const upTotal = Number(pool?.reserveUp ?? 0n) // total_up_amount in turbo pool
+        const dnTotal = Number(pool?.reserveDown ?? 0n) // total_down_amount in turbo pool
         const totalPool = upTotal + dnTotal
 
         // Implied odds (what you'd get per share if you're sole winner)
@@ -1791,7 +1801,7 @@ export function TurboMarketPanel({
               <textarea
                 value={pastedRecord}
                 onChange={(e) => setPastedRecord(e.target.value)}
-                placeholder="{ owner: aleo1..., market_id: ...field, side: 1u8, quantity: ...u128, share_nonce: ...field }"
+                placeholder="{ owner: aleo1..., market_id: ...field, side: 1u8, claim_units: ...u128, refund_amount: ...u128, share_nonce: ...field }"
                 className="w-full bg-surface-800/60 border border-surface-700/40 rounded-lg px-2 py-1 text-[10px] text-white font-mono h-20 focus:outline-none focus:border-surface-600"
               />
               <div className="flex gap-2">
@@ -1819,10 +1829,10 @@ export function TurboMarketPanel({
                 ? quotePayout(
                     marketCredits,
                     winningOutcome === 'UP' ? pool.totalUpShares : pool.totalDownShares,
-                    s.quantity,
+                    s.claimUnits,
                   )
                 : isRefundable
-                  ? s.quantity
+                  ? s.refundAmount
                   : 0n
             return (
               <div
@@ -1839,7 +1849,7 @@ export function TurboMarketPanel({
                     {s.side}
                   </span>{' '}
                   <span className="text-surface-300">
-                    {(Number(s.quantity) / 1_000_000).toFixed(3)} shares
+                    {(Number(s.refundAmount) / 1_000_000).toFixed(3)} stake
                   </span>
                   {eligible && (
                     <span className="text-emerald-300 ml-2">

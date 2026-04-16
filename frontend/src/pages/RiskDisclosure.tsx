@@ -48,7 +48,7 @@ export function RiskDisclosure() {
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Code Vulnerabilities:</strong> Despite testing and review, smart contracts may contain undiscovered bugs or vulnerabilities that could result in loss of funds.</li>
               <li><strong className="text-surface-300">Immutability:</strong> Once deployed, smart contract code cannot be easily modified. Fixes may require deploying new contracts and migrating state.</li>
-              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v37.aleo for ALEO markets, veiled_markets_usdcx_v7.aleo for USDCX markets, veiled_markets_usad_v14.aleo for USAD markets, veiled_governance_v6.aleo for governance, veiled_parlay_v3.aleo for multi-leg parlays, and veiled_turbo_v8.aleo for rolling 5-minute oracle markets). Issues in any component could affect the entire system.</li>
+              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v37.aleo for ALEO markets, veiled_markets_usdcx_v7.aleo for USDCX markets, veiled_markets_usad_v14.aleo for USAD markets, veiled_governance_v6.aleo for governance, veiled_parlay_v3.aleo for multi-leg parlays, and veiled_turbo_v9.aleo for rolling 5-minute oracle markets). Issues in any component could affect the entire system.</li>
               <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses up to 25 transitions, the governance contract uses 31 transitions (at the limit), and the turbo contract uses 10 transitions.</li>
             </ul>
           </section>
@@ -56,7 +56,7 @@ export function RiskDisclosure() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">2a. Turbo Market & Oracle Risk</h2>
             <p className="mb-3">
-              Turbo markets (veiled_turbo_v8.aleo) introduce additional risks beyond the main FAMM markets:
+              Turbo markets (veiled_turbo_v9.aleo) introduce additional risks beyond the main FAMM markets:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Operator Trust:</strong> Turbo markets are created and resolved by a single trusted operator wallet (ORACLE_OPERATOR hardcoded in the contract) that subscribes to Pyth Network and pushes price snapshots on-chain. If the operator is offline, compromised, or malicious, rounds may fail to resolve, resolve to incorrect outcomes, or get stuck requiring emergency_cancel.</li>

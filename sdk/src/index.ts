@@ -124,7 +124,7 @@ export {
   calculatePotentialPayout,
 } from './utils';
 
-// Turbo (veiled_turbo_v8.aleo) — rolling 5-min UP/DOWN markets
+// Turbo (veiled_turbo_v9.aleo) — rolling 5-min UP/DOWN markets
 export {
   TurboClient,
   createTurboClient,

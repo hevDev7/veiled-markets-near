@@ -312,7 +312,7 @@ export function getAvailableWallets(): string[] {
 }
 
 function getAllowedProgramIds(): string[] {
-  const turboProgramId = (import.meta as any).env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v8.aleo'
+  const turboProgramId = (import.meta as any).env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v9.aleo'
   return Array.from(new Set([
     config.programId,
     config.usdcxMarketProgramId,
@@ -328,6 +328,39 @@ function getAllowedProgramIds(): string[] {
     'test_usad_freezelist.aleo',
     turboProgramId,
   ]));
+}
+
+export async function resolveTransactionCallerAddress(
+  walletType?: WalletType | null,
+): Promise<string | null> {
+  if (walletType === 'shield') {
+    const shieldWallet =
+      (window as any)?.shield ||
+      (window as any)?.shieldWallet ||
+      (window as any)?.shieldAleo
+
+    try {
+      if (typeof shieldWallet?.getAccount === 'function') {
+        const acc = await shieldWallet.getAccount()
+        const address = acc?.address || acc?.publicKey || acc
+        if (typeof address === 'string' && address.startsWith('aleo1')) return address
+      }
+    } catch {
+      // Fall through to the next best source.
+    }
+
+    try {
+      if (typeof shieldWallet?.getAddress === 'function') {
+        const address = await shieldWallet.getAddress()
+        if (typeof address === 'string' && address.startsWith('aleo1')) return address
+      }
+    } catch {
+      // Fall through to the wallet manager account cache.
+    }
+  }
+
+  const account = walletManager.getAccount()
+  return account?.address ?? null
 }
 
 

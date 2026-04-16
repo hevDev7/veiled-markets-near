@@ -348,7 +348,7 @@ export function MyBets() {
           let payoutAmount: bigint | undefined
           if (result.status === 'won') {
             try {
-              const { fetchTurboPool, fetchMarketCredits, quotePayout } =
+              const { fetchTurboPool, fetchMarketCredits, quotePayout, toTurboClaimUnits } =
                 await import('@/lib/turbo-client')
               const [pool, credits] = await Promise.all([
                 fetchTurboPool(bet.marketId),
@@ -359,8 +359,9 @@ export function MyBets() {
                 const totalWinning = betSide === 'UP'
                   ? pool.totalUpShares : pool.totalDownShares
                 if (totalWinning > 0n) {
-                  const shareQty = bet.sharesReceived || bet.amount
-                  payoutAmount = quotePayout(credits, totalWinning, shareQty)
+                  const refundableAmount = bet.sharesReceived || bet.amount
+                  const shareClaimUnits = toTurboClaimUnits(refundableAmount)
+                  payoutAmount = quotePayout(credits, totalWinning, shareClaimUnits)
                 }
               }
             } catch {

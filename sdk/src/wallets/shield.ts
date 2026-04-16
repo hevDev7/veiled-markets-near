@@ -57,7 +57,7 @@ export function detectShield(): ShieldWindowGlobal | null {
  *   const wallet = new ShieldWalletAdapter();
  *   const { address, network } = await wallet.connect();
  *   const result = await wallet.requestTransaction({
- *     programId: 'veiled_turbo_v8.aleo',
+ *     programId: 'veiled_turbo_v9.aleo',
  *     functionName: 'buy_up_down',
  *     inputs: [marketId, '1u8', '1000000u128', '995000u128', nonce, creditsRecord],
  *     fee: 1_500_000n,   // 1.5 ALEO priority fee

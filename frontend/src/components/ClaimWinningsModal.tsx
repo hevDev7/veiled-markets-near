@@ -35,12 +35,16 @@ interface InspectedOutcomeShareInput {
   owner: string | null
   outcome: number | null
   quantity: bigint | null
+  claimUnits: bigint | null
+  refundAmount: bigint | null
 }
 
 function inspectOutcomeShareInput(text: string): InspectedOutcomeShareInput {
-  // v37 uses `outcome:`, v8 turbo uses `side:` — accept both
+  // v37 uses `outcome:`, turbo uses `side:` — accept both
   const outcomeMatch = text.match(/outcome:\s*(\d+)u8/) || text.match(/side:\s*(\d+)u8/)
   const qtyMatch = text.match(/quantity:\s*(\d+)u128/)
+  const claimUnitsMatch = text.match(/claim_units:\s*(\d+)u128/) || qtyMatch
+  const refundAmountMatch = text.match(/refund_amount:\s*(\d+)u128/) || qtyMatch
   const marketMatch = text.match(/market_id:\s*(\d+field)/)
   const ownerMatch = text.match(/owner:\s*(aleo1[a-z0-9]+)/)
 
@@ -48,7 +52,9 @@ function inspectOutcomeShareInput(text: string): InspectedOutcomeShareInput {
     marketId: marketMatch ? marketMatch[1] : null,
     owner: ownerMatch ? ownerMatch[1] : null,
     outcome: outcomeMatch ? parseInt(outcomeMatch[1]) : null,
-    quantity: qtyMatch ? BigInt(qtyMatch[1]) : null,
+    quantity: refundAmountMatch ? BigInt(refundAmountMatch[1]) : null,
+    claimUnits: claimUnitsMatch ? BigInt(claimUnitsMatch[1]) : null,
+    refundAmount: refundAmountMatch ? BigInt(refundAmountMatch[1]) : null,
   }
 }
 
@@ -134,6 +140,8 @@ export function ClaimWinningsModal({
           plaintext: tr.plaintext,
           outcome: tr.side === 'UP' ? 1 : 2,
           quantity: tr.quantity,
+          claimUnits: tr.claimUnits,
+          refundAmount: tr.refundAmount,
           marketId: tr.marketId,
           owner: tr.owner,
         }))
@@ -153,21 +161,6 @@ export function ClaimWinningsModal({
         setSelectedRecord(exactMatch || (matchingRecords.length === 1 ? matchingRecords[0] : null))
       } else if (records.length === 0) {
         setSelectedRecord(null)
-        // If this is a turbo bet and the market's payout pool is already
-        // drained (market_payouts == 0), the bet has almost certainly been
-        // claimed (by this user in a different session or via another path).
-        // Auto-mark as claimed to avoid stuck "Unredeemed" entries.
-        if (isTurboBet) {
-          try {
-            const pool = await fetchTurboMarketCredits(bet.marketId)
-            if (pool === 0n) {
-              markBetClaimed(bet.id)
-              onClaimSuccess?.()
-              setFetchError('This bet was already claimed (market payout pool is empty). Marked as claimed.')
-              return
-            }
-          } catch { /* ignore */ }
-        }
         setFetchError('No OutcomeShare records found. Your wallet may not support record fetching, or records may be spent.')
       } else {
         setSelectedRecord(null)
@@ -289,7 +282,11 @@ export function ClaimWinningsModal({
         txProgram = TURBO_PROGRAM_ID
         if (isRefund) {
           txFunction = 'claim_refund'
-          txInputs = [bet.marketId, recordPlaintext, `${inspectedRecord.quantity}u128`]
+          const refundAmount = inspectedRecord.refundAmount ?? inspectedRecord.quantity
+          if (refundAmount == null || refundAmount === 0n) {
+            throw new Error('Share record has refund amount 0 — cannot claim refund.')
+          }
+          txInputs = [bet.marketId, recordPlaintext, `${refundAmount}u128`]
         } else {
           // Fetch EVERY piece of on-chain state the contract will assert on,
           // so we can fail fast with a clear error instead of sending a tx
@@ -326,30 +323,32 @@ export function ClaimWinningsModal({
 
           const totalWinning = (inspectedRecord.outcome === 1)
             ? pool.totalUpShares : pool.totalDownShares
-          // If pool is fully drained, this bet has already been claimed by
-          // someone else (or by a different session). Auto-mark as claimed
-          // instead of failing — the user's bet accounting is stale.
-          if (totalWinning === 0n || credits === 0n) {
-            markBetClaimed(bet.id)
-            onClaimSuccess?.()
-            setError('This bet was already claimed (pool is empty). Marked as claimed in your portfolio.')
-            setIsSubmitting(false)
-            return
+          if (totalWinning === 0n) {
+            throw new Error(
+              'Turbo market resolved with 0 winning claim units on-chain. ' +
+              'Claim would be rejected until the market state is repaired.'
+            )
+          }
+          if (credits === 0n) {
+            throw new Error(
+              'Turbo market payout snapshot is 0 on-chain. ' +
+              'This share cannot redeem from an empty payout pool.'
+            )
           }
 
-          const shareQty = inspectedRecord.quantity ?? 0n
-          if (shareQty === 0n) {
-            throw new Error('Share record has quantity 0 — cannot claim.')
+          const shareClaimUnits = inspectedRecord.claimUnits ?? inspectedRecord.quantity ?? 0n
+          if (shareClaimUnits === 0n) {
+            throw new Error('Share record has claim units 0 — cannot claim.')
           }
           // Match the contract formula EXACTLY:
-          //   payout = (share_quantity * total_pool) / total_winning
+          //   payout = (share_claim_units * total_pool) / total_winning_claim_units
           // Using BigInt truncating division so we agree with u128 integer
           // division in Leo. Any mismatch here will fail `declared_payout
           // == payout` in claim_winnings_fin.
-          const declaredPayout = (shareQty * credits) / totalWinning
+          const declaredPayout = (shareClaimUnits * credits) / totalWinning
           if (declaredPayout === 0n) {
             throw new Error(
-              `Computed payout is 0 — shareQty=${shareQty} × credits=${credits} / totalWinning=${totalWinning}. ` +
+              `Computed payout is 0 — shareClaimUnits=${shareClaimUnits} × credits=${credits} / totalWinning=${totalWinning}. ` +
               `Contract asserts payout > 0 so this would be rejected.`
             )
           }
@@ -362,7 +361,8 @@ export function ClaimWinningsModal({
             walletAddress: wallet.address,
             marketStatus: turboMarket.status,
             marketWinningOutcome: turboMarket.winningOutcome,
-            shareQty: shareQty.toString(),
+            shareClaimUnits: shareClaimUnits.toString(),
+            shareRefundAmount: (inspectedRecord.refundAmount ?? inspectedRecord.quantity ?? 0n).toString(),
             totalUpShares: pool.totalUpShares.toString(),
             totalDownShares: pool.totalDownShares.toString(),
             totalWinning: totalWinning.toString(),

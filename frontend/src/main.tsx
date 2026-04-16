@@ -51,7 +51,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         config.governanceProgramId,
         config.parlayProgramId,
         // Turbo markets (Pyth-resolved 5-min UP/DOWN)
-        import.meta.env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v8.aleo',
+        import.meta.env?.VITE_TURBO_PROGRAM_ID || 'veiled_turbo_v9.aleo',
         // Token + utility programs
         'credits.aleo',
         config.usdcxProgramId,

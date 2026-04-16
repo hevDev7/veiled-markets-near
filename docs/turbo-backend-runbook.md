@@ -1,6 +1,6 @@
 # Turbo Backend Runbook
 
-Panduan menjalankan operator backend untuk rolling turbo markets (`veiled_turbo_v8.aleo`), dari environment setup sampai monitoring market yang sudah berjalan.
+Panduan menjalankan operator backend untuk rolling turbo markets (`veiled_turbo_v9.aleo`), dari environment setup sampai monitoring market yang sudah berjalan.
 
 ## 1. Gambaran arsitektur
 
@@ -27,7 +27,7 @@ Frontend subscribe ke backend's SSE stream di `http://localhost:4090/stream?symb
 
 ### Credentials yang dibutuhkan
 
-1. **Operator wallet Aleo** — wallet yang harus match dengan `ORACLE_OPERATOR` hardcoded di contract `veiled_turbo_v8.aleo`. Default backend fallback address:
+1. **Operator wallet Aleo** — wallet yang harus match dengan `ORACLE_OPERATOR` hardcoded di contract `veiled_turbo_v9.aleo`. Default backend fallback address:
    ```
    aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8
    ```
@@ -128,7 +128,7 @@ cd veiled-markets/backend
 set -a && source ../.env && set +a && TURBO_SYMBOLS=BTC DRY_RUN=1 pnpm tsx src/pyth-oracle.ts --serve --auto-create
 ```
 
-Output akan show `[snarkos] DRY_RUN veiled_turbo_v8.aleo/create_turbo_market [...]` tanpa benar-benar kirim tx.
+Output akan show `[snarkos] DRY_RUN veiled_turbo_v9.aleo/create_turbo_market [...]` tanpa benar-benar kirim tx.
 
 ### Verifikasi env loaded
 
@@ -246,12 +246,12 @@ Harus return array berisi event `create` dan `resolve` bergantian. Kalau return 
 
 ```bash
 # Check turbo program vault balance
-curl -s 'https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v8.aleo/mapping/vault_balance/0u8'
+curl -s 'https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v9.aleo/mapping/vault_balance/0u8'
 # Output: "62015000u128" (62 ALEO total in vault)
 
 # Check specific market state
 MID="<market_id>field"
-curl -s "https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v8.aleo/mapping/turbo_markets/$MID"
+curl -s "https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v9.aleo/mapping/turbo_markets/$MID"
 ```
 
 ## 7. Common issues
@@ -301,8 +301,8 @@ Kalau > 60 blocks past deadline (~4 menit), backend akan skip market itu (`past 
 Normally market creation handled otomatis oleh rolling chain loop. Untuk debug/test, bisa create market langsung lewat `snarkos`:
 
 ```bash
-cd veiled-markets/contracts-turbo-v1
-snarkos developer execute veiled_turbo_v8.aleo create_turbo_market \
+cd veiled-markets/contracts-turbo-v9
+snarkos developer execute veiled_turbo_v9.aleo create_turbo_market \
   1u8 \                                    # symbol_id (1=BTC, 2=ETH, 3=SOL, ...)
   15720000u64 \                            # deadline (block height)
   $(date +%s)u64 \                         # nonce (unique per market)
@@ -323,7 +323,7 @@ Pasca create, cek on-chain:
 
 ```bash
 MARKET_ID=$(curl -s "https://api.explorer.provable.com/v1/testnet/transaction/confirmed/<tx_id>" | jq -r '.transaction.execution.transitions[0].outputs[0].value')
-curl -s "https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v8.aleo/mapping/turbo_markets/$MARKET_ID"
+curl -s "https://api.explorer.provable.com/v1/testnet/program/veiled_turbo_v9.aleo/mapping/turbo_markets/$MARKET_ID"
 ```
 
 Output JSON harus show status `1u8` (ACTIVE) dengan baseline_price yang di-commit.
@@ -349,7 +349,7 @@ Sebelum deploy ke production (mainnet atau testnet public-facing):
 - [ ] `.env` tidak ter-commit ke git (cek `git check-ignore .env`)
 - [ ] `SUPABASE_SERVICE_KEY` pakai dedicated service_role key, rotate secara berkala
 - [ ] Operator wallet punya cukup ALEO untuk minimal 24 jam runtime (~288 create + 288 resolve = 576 × 1 ALEO fee = 576 ALEO)
-- [ ] Vault funding: operator deposit minimal **X ALEO** ke `veiled_turbo_v8.aleo` via `deposit_vault_public()` untuk liquidity buffer
+- [ ] Vault funding: operator deposit minimal **X ALEO** ke `veiled_turbo_v9.aleo` via `deposit_vault_public()` untuk liquidity buffer
 - [ ] Monitoring / alerting untuk backend crash (systemd restart, pm2, supervisord, dll)
 - [ ] Backup audit log dari Supabase secara berkala (untuk verifiability kalau Supabase down)
 - [ ] Run process under non-root user (systemd service, tmux, atau docker)
@@ -378,7 +378,7 @@ WantedBy=multi-user.target
 
 ## Referensi
 
-- Contract source: [`contracts-turbo-v1/src/main.leo`](../contracts-turbo-v1/src/main.leo)
+- Contract source: [`contracts-turbo-v9/src/main.leo`](../contracts-turbo-v9/src/main.leo)
 - Backend source: [`backend/src/pyth-oracle.ts`](../backend/src/pyth-oracle.ts)
 - Supabase schema: [`supabase/create_turbo_audit_table.sql`](../supabase/create_turbo_audit_table.sql)
 - Frontend turbo client: [`frontend/src/lib/turbo-client.ts`](../frontend/src/lib/turbo-client.ts)

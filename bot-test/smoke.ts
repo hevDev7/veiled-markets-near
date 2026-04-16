@@ -59,7 +59,7 @@ console.log()
 // ── 1. Constants exported correctly ──────────────────────────────────────────
 check('PROGRAM_IDS exported', typeof PROGRAM_IDS === 'object')
 check('PROGRAM_IDS.ALEO_MARKET correct', PROGRAM_IDS.ALEO_MARKET === 'veiled_markets_v37.aleo')
-check('PROGRAM_IDS.TURBO correct', PROGRAM_IDS.TURBO === 'veiled_turbo_v8.aleo')
+check('PROGRAM_IDS.TURBO correct', PROGRAM_IDS.TURBO === 'veiled_turbo_v9.aleo')
 check('PROGRAM_IDS.GOVERNANCE correct', PROGRAM_IDS.GOVERNANCE === 'veiled_governance_v6.aleo')
 
 check('PROTOCOL_FEE_BPS = 50 (0.5%)', Number(PROTOCOL_FEE_BPS) === 50)

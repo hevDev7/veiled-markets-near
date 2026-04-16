@@ -186,7 +186,7 @@ await wallet.executeTransaction(call)
 | Class | Contract | Purpose |
 |---|---|---|
 | `VeiledMarketsClient` | `veiled_markets_v37/_usdcx_v7/_usad_v14` | FPMM AMM markets — create, buy/sell shares, add/remove LP, dispute, claim |
-| `TurboClient` | `veiled_turbo_v8.aleo` | 5-min UP/DOWN markets — buy, claim winnings, claim refund, off-chain quote |
+| `TurboClient` | `veiled_turbo_v9.aleo` | 5-min UP/DOWN markets — buy, claim winnings, claim refund, off-chain quote |
 | `VeiledGovernanceClient` | `veiled_governance_v6.aleo` | Proposals (fee/param/pause/treasury/resolver), voting, escalation, finalization |
 | `ParlayClient` | `veiled_parlay_v3.aleo` | Multi-leg parlay bets across all 3 token markets |
 | `IndexerClient` | Supabase REST | Off-chain queries: market list, volumes, governance feed, turbo audit trail |
@@ -298,7 +298,7 @@ The SDK targets these deployed contracts on Aleo testnet:
 | USDCX market | `veiled_markets_usdcx_v7.aleo` | FPMM AMM, USDCX stablecoin |
 | USAD market | `veiled_markets_usad_v14.aleo` | FPMM AMM, USAD stablecoin |
 | Governance | `veiled_governance_v6.aleo` | Proposals, escalation, cross-program exec |
-| Turbo | `veiled_turbo_v8.aleo` | 5-min UP/DOWN, shared vault, Pyth oracle |
+| Turbo | `veiled_turbo_v9.aleo` | 5-min UP/DOWN, shared vault, Pyth oracle |
 | Parlay | `veiled_parlay_v3.aleo` | Multi-leg parlay bets |
 
 All program IDs are exported as constants from `@veiled-markets/sdk`:
@@ -310,7 +310,7 @@ PROGRAM_IDS.ALEO_MARKET    // 'veiled_markets_v37.aleo'
 PROGRAM_IDS.USDCX_MARKET   // 'veiled_markets_usdcx_v7.aleo'
 PROGRAM_IDS.USAD_MARKET    // 'veiled_markets_usad_v14.aleo'
 PROGRAM_IDS.GOVERNANCE     // 'veiled_governance_v6.aleo'
-PROGRAM_IDS.TURBO          // 'veiled_turbo_v8.aleo'
+PROGRAM_IDS.TURBO          // 'veiled_turbo_v9.aleo'
 PROGRAM_IDS.PARLAY         // 'veiled_parlay_v3.aleo'
 ```
 

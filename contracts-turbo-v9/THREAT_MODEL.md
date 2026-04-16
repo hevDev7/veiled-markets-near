@@ -1,7 +1,7 @@
 # Veiled Turbo — Threat Model & Security Spec
 
-**Status:** Post-testnet validation · 2026-04-10 (8 iterative testnet deploys; active: `veiled_turbo_v8.aleo`)
-**Scope:** `veiled_turbo_v8.aleo` + `backend/src/pyth-oracle.ts` + `frontend/src/components/TurboMarketPanel.tsx`
+**Status:** Post-testnet validation · 2026-04-10 (9 iterative testnet deploys; active: `veiled_turbo_v9.aleo`)
+**Scope:** `veiled_turbo_v9.aleo` + `backend/src/pyth-oracle.ts` + `frontend/src/components/TurboMarketPanel.tsx`
 **Out of scope:** General Veiled Markets v37 contract, governance v6, USDCX/USAD markets
 
 ---
@@ -426,7 +426,7 @@ External reviewer should verify:
 - [ ] All sanity rails in §4 are present and reachable in `src/main.leo`
 - [ ] `claim_winnings_fin` payout math matches the formula in `quotePayout`
 - [ ] `share_redeemed` mapping is set BEFORE the transfer (anti-reentrancy via order)
-- [ ] `pool.total_up_shares + pool.total_down_shares` invariant holds (no minting bug)
+- [ ] `pool.total_up_claim_units + pool.total_down_claim_units` invariant holds (no minting bug)
 - [ ] `market_credits + protocol_treasury` accounting matches `program_credits[0u8]`
 - [ ] `ORACLE_OPERATOR` const matches the actual deployer/operator wallet
 - [ ] `MarketSeed`-style namespace check: turbo market_id cannot collide with v37

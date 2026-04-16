@@ -208,7 +208,7 @@ export function Docs() {
 │                    @veiled-markets/sdk                       │
 │                                                              │
 │  • VeiledMarketsClient   — FAMM markets (v37/usdcx/usad)    │
-│  • TurboClient           — rolling 5-min markets (v8)        │
+│  • TurboClient           — rolling 5-min markets (v9)        │
 │  • VeiledGovernanceClient — disputes + committee (v6)        │
 │  • ParlayClient          — multi-leg parlays (v3)            │
 │  • IndexerClient         — Supabase off-chain query layer    │
@@ -234,7 +234,7 @@ export function Docs() {
 │  • veiled_markets_usad_v14.aleo  (USAD FAMM)                  │
 │  • veiled_governance_v6.aleo     (disputes + multisig)        │
 │  • veiled_parlay_v3.aleo         (multi-leg parlays)          │
-│  • veiled_turbo_v8.aleo          (rolling 5-min markets)      │
+│  • veiled_turbo_v9.aleo          (rolling 5-min markets)      │
 └───────────────────────────────────────────────────────────┘`}</CodeBlock>
             <p className="text-sm text-surface-400 leading-relaxed mt-4">
               On-chain data (markets, pools, votes) lives in contract mappings and is queried
@@ -458,7 +458,7 @@ console.log(\`Broadcast \${result.txId}\`)  // at1...`}</CodeBlock>
                 { id: 'veiled_markets_usad_v14.aleo', tag: '25 transitions', desc: 'USAD-denominated variant. Same mechanism as USDCX.' },
                 { id: 'veiled_governance_v6.aleo', tag: '31 transitions (at limit)', desc: 'Disputes, committee votes, multisig treasury, emergency pause.' },
                 { id: 'veiled_parlay_v3.aleo', tag: 'multi-leg', desc: 'Composes multiple market outcomes into a single parlay slip.' },
-                { id: 'veiled_turbo_v8.aleo', tag: '10 transitions', desc: 'Rolling 5-min Pyth-backed UP/DOWN markets. Single shared vault.' },
+                { id: 'veiled_turbo_v9.aleo', tag: '10 transitions', desc: 'Rolling 5-min Pyth-backed UP/DOWN markets. Single shared vault.' },
               ].map((p) => (
                 <div key={p.id} className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                   <div className="flex items-center justify-between mb-2">
@@ -533,14 +533,14 @@ const search = await client.searchMarkets('bitcoin')`}</CodeBlock>
             <SectionHeader id="sdk-turbo" icon={Radio} title="TurboClient" />
             <p className="text-sm leading-relaxed mb-4">
               Builds transactions and reads state for{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_turbo_v8.aleo</code>.
+              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_turbo_v9.aleo</code>.
               Only user-callable transitions are exposed — create/resolve are operator-only.
             </p>
             <div className="space-y-3 mb-4">
               {[
                 { name: 'buildBuyUpDownInputs(params)', desc: 'Bet on UP or DOWN. Returns shareNonce — persist it alongside the resulting TurboShare.' },
                 { name: 'buildClaimWinningsInputs(params)', desc: 'Claim payout on a winning share. declaredPayout must match the contract formula EXACTLY.' },
-                { name: 'buildClaimRefundInputs(params)', desc: 'Refund after emergency_cancel. expectedAmount = TurboShare.quantity.' },
+                { name: 'buildClaimRefundInputs(params)', desc: 'Refund after emergency_cancel. expectedAmount = TurboShare.refund amount.' },
                 { name: 'buildEmergencyCancelInputs(marketId)', desc: 'Permissionless cancel after resolution_deadline (300 blocks past deadline).' },
                 { name: 'getMarket(marketId)', desc: 'Fetch the on-chain TurboMarket struct.' },
                 { name: 'getPool(marketId)', desc: 'Fetch the TurboPool with total_up/down_shares and total_up/down_amount.' },
@@ -565,9 +565,9 @@ const quote = quoteBuyUpDown(1_000_000n)  // 1 ALEO
 
 // Quote a claim_winnings payout — mirrors claim_winnings_fin exactly
 const payout = quoteTurboPayout(
-  shareQty,             // your TurboShare.quantity
+  shareClaimUnits,      // your TurboShare.claimUnits
   marketPayouts,        // from getMarketPayouts()
-  totalWinningShares,   // pool.totalUpShares OR totalDownShares
+  totalWinningShares,   // pool.totalUpShares OR totalDownShares (claim units)
 )
 // Contract asserts declaredPayout == payout strictly — use this value.`}</CodeBlock>
           </section>
@@ -804,7 +804,7 @@ interface DisputeData { marketId: string; disputer: string; proposedOutcome: num
 // Turbo
 interface TurboMarket { id: string; creator: string; symbolId: number; baselinePrice: bigint; baselineBlock: bigint; deadline: bigint; resolutionDeadline: bigint; closingPrice: bigint; winningOutcome: number; status: TurboMarketStatus; createdAt: bigint }
 interface TurboPool { marketId: string; totalUpAmount: bigint; totalDownAmount: bigint; totalUpShares: bigint; totalDownShares: bigint; totalVolume: bigint }
-interface TurboShare { owner: string; marketId: string; side: TurboSide; quantity: bigint; shareNonce: string; plaintext?: string }
+interface TurboShare { owner: string; marketId: string; side: TurboSide; quantity: bigint; claimUnits: bigint; shareNonce: string; plaintext?: string }
 interface TurboBuyQuote { amountIn: bigint; protocolFee: bigint; amountToPool: bigint; expectedShares: bigint }
 
 // Indexer
