@@ -76,3 +76,16 @@ WAVE_5_SUBMISSION.md
 # Backend runtime state
 backend/public/indexer-checkpoint.json
 bot-test/wallets.json
+
+# NEAR turbo oracle runtime files (audit trail, prune cursor)
+backend/turbo-audit.jsonl
+backend/turbo-prune.json
+
+# NEAR demo seeding: LP note secrets of the seeded markets
+backend/.seed-lp-notes.json
+
+# node_modules symlinked to the external build cache (the node_modules/ rule above does not match a symlink)
+node_modules
+
+# Circuit build output, symlinked to the external build cache
+near/circuits/build

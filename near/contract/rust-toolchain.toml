@@ -1,0 +1,8 @@
+# Pinned for the Verdict spike (2026-11-06).
+# near-sdk 5.30.x and near-workspaces 0.24.x both declare rust-version = 1.95,
+# so the machine default (1.92.0) cannot build this workspace.
+# 1.95.0 emits bulk-memory / nontrapping-fptoint opcodes; nearcore accepts them from
+# protocol version 84 (nearcore 2.12+). Sandbox 2.14.0 = PV 88; testnet PV 88; mainnet PV 87.
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]
