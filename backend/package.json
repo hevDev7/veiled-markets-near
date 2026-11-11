@@ -14,11 +14,14 @@
         "oracle:watch": "tsx watch src/pyth-oracle.ts --serve",
         "oracle:dev": "tsx src/pyth-oracle.ts",
         "build": "tsc",
-        "dev": "tsx watch src/index-markets.ts"
+        "dev": "tsx watch src/index-markets.ts",
+        "relayer": "tsx src/near-relayer.ts",
+        "turbo-oracle": "tsx src/near-turbo-oracle.ts"
     },
     "dependencies": {
         "eventsource": "^3.0.7",
-        "node-fetch": "^3.3.2"
+        "node-fetch": "^3.3.2",
+        "near-api-js": "7.3.1"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",
