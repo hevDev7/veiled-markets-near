@@ -1,476 +1,163 @@
-# Veiled Markets
+# Veiled Markets on NEAR
 
 <div align="center">
 
-<img src="./logo-veiled-markets.png" alt="Veiled Markets Logo" width="200"/>
+<img src="./logo-veiled-markets.png" alt="Veiled Markets logo" width="160"/>
 
-### **Predict Freely. Bet Privately.**
+### Predict freely. Bet privately.
 
-Privacy-preserving prediction market + turbo markets on Aleo blockchain
-
-[![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiledmarkets.xyz)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo)
-[![npm](https://img.shields.io/badge/SDK-npm-CB3837?style=for-the-badge)](https://www.npmjs.com/package/@veiled-markets/sdk)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
+Private prediction markets and 5-minute turbo markets on NEAR testnet.
 
 </div>
 
----
+- **Event:** NEAR HACKATHON 2026
+- **Network:** NEAR testnet. Contract [`v1.veiled-markets.testnet`](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet)
+- **Demo:** run it locally (see [Run it](#run-it)). Video: TODO, the X post tagging @NEARProtocol and #NEARHackathon goes here.
+- **Design:** [docs/near/DESIGN.md](docs/near/DESIGN.md) · **License:** [MIT](LICENSE)
+- **Sister project:** Verdict (see [below](#sister-project-verdict))
 
-## Overview
+## Built before the hackathon, and what is new
 
-Veiled Markets is a dual-mode prediction market protocol on Aleo:
+Veiled Markets already exists as a product on **Aleo**. It was built before this hackathon. Its original README is
+kept at [docs/README-aleo.md](docs/README-aleo.md).
 
-1. **Standard Markets** — Long-duration prediction markets (hours to months) with FPMM AMM, multi-voter quorum resolution, and tiered governance escalation. Supports ALEO, USDCX, and USAD tokens.
+For the hackathon we ported it to NEAR. The pages and components stay the same. NEAR now supplies the data, the
+wallet and the private trading that Aleo supplied before.
 
-2. **Turbo Markets** — Short-duration (5-minute) UP/DOWN crypto price markets resolved automatically by Pyth Network oracle. Shared vault architecture — operator deposits ALEO once, all markets draw from a single pool. Rolling chain: each market's closing price becomes the next market's baseline.
+| | Where |
+|---|---|
+| **New: zero-knowledge circuit** (Groth16 note pool) | `near/circuits/` |
+| **New: NEAR smart contract** (note pool, markets, AMM, resolution, turbo) | `near/contract/` |
+| **New: relayer and turbo oracle** | `backend/src/near-relayer.ts`, `backend/src/near-turbo-oracle.ts` |
+| **New: NEAR data layer** (wallet, chain reads, prover, notes) | `frontend/src/lib/near/` |
+| **New: private balance panel** and NEAR wording in the UI | `frontend/src/components/PrivateBalancePanel.tsx` and small edits |
+| Pre-existing: React pages and components, AMM math, Aleo programs, SDK | everything else |
 
-All trading is **fully private** via Aleo zero-knowledge proofs.
+The work is separated in git: tag `pre-hackathon` is the Aleo product before the hackathon, and tag
+`hackathon-submission` is this submission. The full diff:
+[compare pre-hackathon...hackathon-submission](https://github.com/hevDev7/veiled-markets-near/compare/pre-hackathon...hackathon-submission)
+(locally: `git diff pre-hackathon hackathon-submission`).
 
-## Deployed Contracts
+## How bets stay private
 
-| Contract | Program ID | Transitions | Purpose |
-|----------|-----------|-------------|---------|
-| **Main** | [`veiled_markets_v37.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) | 25/31 | ALEO standard markets, multi-voter resolution, multisig treasury |
-| **USDCX** | [`veiled_markets_usdcx_v7.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_usdcx_v7.aleo) | 25/31 | USDCX stablecoin markets |
-| **USAD** | [`veiled_markets_usad_v14.aleo`](https://testnet.explorer.provable.com/program/veiled_markets_usad_v14.aleo) | 25/31 | USAD stablecoin markets |
-| **Governance** | [`veiled_governance_v6.aleo`](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo) | 31/31 | Proposals, tiered escalation, committee panel, cross-program resolve |
-| **Turbo** | [`veiled_turbo_v9.aleo`](https://testnet.explorer.provable.com/program/veiled_turbo_v9.aleo) | 10/31 | 5-min UP/DOWN markets, shared vault, Pyth-resolved, 10 crypto symbols |
-| **Parlay** | [`veiled_parlay_v3.aleo`](https://testnet.explorer.provable.com/program/veiled_parlay_v3.aleo) | — | Multi-leg parlay betting |
+Your private balance and your positions are **notes**: hidden entries in a Merkle tree inside the contract. Only
+your browser can read them.
 
-**Turbo deployment date:** 2026-04-10 (v8 shared vault architecture)
-**Standard deployment date:** 2026-04-08 (post-audit hardening)
+1. **Deposit.** You move NEAR (or USDCX/USAD) from your wallet into your private balance. This step is public.
+2. **Trade.** Your browser builds a zero-knowledge proof that you own enough notes. A **relayer** submits the proof.
+   The trade is not signed by your account, so nobody can see which account bought which position.
+3. **Withdraw.** You move funds back to any NEAR account. This step is public.
 
-## Turbo Markets
+| Public on NEAR | Private |
+|---|---|
+| Deposits and withdrawals (account and amount) | Which account holds which position |
+| Market prices and pool sizes (the AMM is public, as on Aleo) | Your balance inside the pool |
+| Each trade's market, outcome and amount | Who placed each trade |
+| Resolution votes and bonds | Your trading history |
 
-5-minute UP/DOWN crypto price prediction markets powered by Pyth Network oracle with automatic resolution and rolling chain architecture.
+Tip: deposit before you trade. If your private balance is too small, the app tops it up from your wallet in the same
+moment as the trade, and that timing links the trade to you.
 
-### How it works
-
-```
-T+0:00  Backend creates BTC market (baseline = $72,150)
-        ├─ No per-market LP needed — shared vault backs all payouts
-        ├─ Users bet UP or DOWN with private ALEO credits
-        └─ Live Pyth price chart streams in browser
-
-T+5:00  Deadline reached → chart freezes → "RESOLVING..."
-        ├─ Backend snapshots Pyth closing price ($72,180)
-        ├─ Submits resolve_turbo_market tx to Aleo
-        └─ Contract: $72,180 > $72,150 → UP wins
-
-T+5:45  Resolved → "↑ UP" result splash (5 seconds)
-        ├─ Winners can claim from Portfolio page
-        └─ Closing price ($72,180) becomes next market's baseline
-
-T+6:00  New market auto-created (baseline = $72,180)
-        └─ Continuous rolling chain — no operator intervention
-```
-
-### Supported symbols (10)
-
-BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT — all with Pyth Hermes real-time feeds.
-
-### Shared vault architecture (v9)
-
-| Aspect | Standard Markets (v37) | Turbo Markets (v9) |
-|--------|----------------------|-------------------|
-| Liquidity | Per-market FPMM pool | **Shared vault** — deposit once |
-| Create cost | ~10+ ALEO per market | **~1 ALEO gas only** |
-| Pool model | Constant product AMM | **Parimutuel** (1:1 shares) |
-| Resolution | Multi-voter quorum (24h) | **Pyth oracle (~1 min)** |
-| Duration | Hours → months | **5 minutes** |
-| Token | ALEO / USDCX / USAD | **ALEO** (multi-token planned) |
-| Privacy | Full private trading | **Full private trading** |
-
-### Turbo transitions
-
-| Transition | Purpose |
-|-----------|---------|
-| `deposit_vault` / `deposit_vault_public` | Operator funds shared vault |
-| `withdraw_vault` | Operator reclaims from vault |
-| `create_turbo_market` | Create 5-min market (no LP needed) |
-| `buy_up_down` | Private bet with credits record |
-| `resolve_turbo_market` | Oracle resolves with Pyth closing price |
-| `emergency_cancel` | Permissionless refund if oracle offline |
-| `claim_winnings` | Winner claims from vault (private payout) |
-| `claim_refund` | Refund after cancel (private payout) |
-| `withdraw_fees` | Operator withdraws protocol fees |
-
-### Trust model
-
-- **Data source:** Pyth Network (90+ publishers, publicly verifiable)
-- **Authorization:** Caller-based — only `ORACLE_OPERATOR` wallet can create/resolve
-- **On-chain enforcement:** Window (60 blocks), range, confidence (0.5%), max-move (50%) sanity checks
-- **Escape hatch:** `emergency_cancel` permissionless after grace period → full refund
-- **Audit trail:** All on-chain, cross-checkable against Pyth Hermes historical data
-
-See [contracts-turbo-v9/THREAT_MODEL.md](contracts-turbo-v9/THREAT_MODEL.md) for the full 23-threat catalog.
-
-### Running turbo markets
-
-```bash
-# 1. Start operator backend (creates + resolves markets automatically)
-cd backend
-set -a && source ../.env && set +a
-TURBO_SYMBOLS=BTC npx tsx src/pyth-oracle.ts --serve --auto-create
-
-# 2. Frontend (turbo markets appear in dashboard hero + /turbo/btc page)
-cd frontend
-npm run dev
-# Open http://localhost:3000/dashboard or http://localhost:3000/turbo/btc
-```
-
-## SDK
-
-Published on npm: [`@veiled-markets/sdk@0.5.4`](https://www.npmjs.com/package/@veiled-markets/sdk)
-
-```bash
-npm install @veiled-markets/sdk @provablehq/sdk
-```
-
-Full TypeScript SDK for building on the Veiled Markets protocol:
-
-- **6 typed clients** — `VeiledMarketsClient`, `TurboClient`, `VeiledGovernanceClient`, `ParlayClient`, `IndexerClient`, `PythHermesClient`
-- **3 wallet adapters** — Shield, Puzzle, Leo (browser) + auto-detection
-- **Node.js executor** — `NodeExecutor` wraps `snarkos developer execute` for backend bots
-- **Off-chain quoting** — exact mirrors of on-chain `*_fin` math (FPMM, parimutuel, fees, LP, disputes)
-- **191 unit tests** — math, executor, indexer, parlay, turbo, governance, wallets
-- **Dual ESM + CJS** — works in Vite, Next.js, esbuild, and legacy Node CommonJS
-
-Quick example:
-
-```ts
-import { createTurboClient, quoteBuyUpDown } from '@veiled-markets/sdk'
-
-const turbo = createTurboClient({ network: 'testnet' })
-const market = await turbo.getCurrentMarket('BTC')
-const quote = quoteBuyUpDown({ pool: await turbo.getPool(market.market_id), side: 'UP', amountMicro: 1_000_000n })
-```
-
-See [sdk/README.md](sdk/README.md) for full API docs, 6 usage examples, and configuration.
-
-### Telegram bot (SDK integration test)
-
-Live bot: [@veiledmarkets_bot](https://t.me/veiledmarkets_bot)
-
-The [`bot-test/`](bot-test/) folder contains a multi-user Telegram bot that exercises the SDK end-to-end — both Turbo and FPMM markets. Auto-generates encrypted wallets per user, no setup required for end users.
-
-```bash
-cd bot-test && npm install && npx tsx smoke.ts  # 24/24 SDK checks pass
-cp .env.example .env                             # fill TELEGRAM_BOT_TOKEN + WALLET_ENCRYPTION_KEY
-npx tsx bot.ts                                   # start bot
-```
-
-**Turbo commands:** `/price BTC`, `/market BTC`, `/quote BTC UP 1`, `/bet BTC UP 0.5`, `/watch BTC`
-**FPMM commands:** `/markets`, `/marketinfo <ID>`, `/buy <ID> <1-4> <AMT>`, `/redeem <ID>`
-**Wallet commands:** `/wallet`, `/fund <AMT>`, `/mybets`, `/result`, `/claim`
-
-Features:
-- Multi-user: auto-generates encrypted Aleo wallet per Telegram user (AES-256-GCM)
-- Auto-capture: share records + change records saved automatically after each bet
-- Both market types: Turbo (5-min UP/DOWN) and FPMM (prediction markets) in one bot
-
-See [bot-test/README.md](bot-test/README.md) for full setup instructions.
-
-## Standard Markets
-
-Long-duration prediction markets with FPMM AMM, multi-voter quorum resolution, tri-token support, and tiered governance escalation. Full details below.
-
-### Key features
-- **Fully Private Trading** — All buy/sell/redeem use private records
-- **Tri-Token Support** — ALEO, USDCX, USAD stablecoins
-- **Multi-Outcome Markets** — 2-, 3-, and 4-outcome with custom labels
-- **FPMM AMM** — Constant product invariant (0.5% protocol + 0.5% creator + 1% LP = 2% total)
-- **Multi-Voter Quorum Resolution** — Min 3 voters with ALEO bond, dispute window, slashing
-- **Tiered Dispute Escalation** — Committee (tier 2) → community (tier 3) → cross-program governance
-- **Multi-Sig Treasury** — 2-of-3 or 3-of-3 multisig (configurable threshold) for protocol fund withdrawals
-
-### Market resolution flow
-
-```
-Market Deadline → close_market → CLOSED
-        ↓
-Anyone: vote_outcome(outcome, 1 ALEO bond)  →  PENDING_RESOLUTION
-        ↓  (min 3 voters, ~3.2h voting window)
-Anyone: finalize_votes()  →  PENDING_FINALIZATION
-        ↓
-Dispute window (~3.2h)
-        │
-        ├─── No dispute → confirm_resolution() → RESOLVED
-        │    Winners: bond back + share of loser bonds
-        │
-        └─── Dispute filed (3× bond) → STATUS_DISPUTED
-                      ↓
-              Tier 2 (Committee) or Tier 3 (Community)
-                      ↓
-              governance_resolve_* → apply_governance_resolution
-                      ↓
-              STATUS_RESOLVED (claims unlocked)
-```
+Your note keys come from one wallet signature (NEP-413 `signMessage`), so the same wallet finds its notes again on any
+device. If the wallet declines to sign, the app keeps a random key in this browser instead, and the notes it owns can
+only be spent from this browser.
 
 ## Architecture
 
 ```
-┌────────────────────┐     ┌──────────────────┐     ┌────────────────────────────────┐
-│   Frontend         │────▶│  Aleo Wallets    │────▶│   Aleo Testnet                  │
-│   React 18 / Vite  │     │  Shield · Puzzle │     │                                │
-│   TypeScript       │     │  Leo · Fox       │     │  veiled_markets_v37.aleo        │
-│   Tailwind CSS     │     └──────────────────┘     │  veiled_markets_usdcx_v7.aleo   │
-│                    │                              │  veiled_markets_usad_v14.aleo    │
-│  Pages:            │     ┌──────────────────┐     │  veiled_governance_v6.aleo       │
-│  - Dashboard       │────▶│  Pyth Hermes SSE │     │  veiled_turbo_v9.aleo           │
-│  - /turbo/:symbol  │     │  (10 crypto feeds)│     │  veiled_parlay_v3.aleo          │
-│  - MarketDetail    │     └──────────────────┘     │                                │
-│  - Portfolio       │                              │  Dependencies:                  │
-│  - Governance      │     ┌──────────────────┐     │  ├─ credits.aleo               │
-│  - Create Market   │────▶│  Supabase        │     │  ├─ test_usdcx_stablecoin      │
-│  - Verify Turbo    │     │  (encrypted)     │     │  └─ test_usad_stablecoin       │
-│                    │     └──────────────────┘     │                                │
-│                    │                              └────────────────────────────────┘
-│                    │     ┌──────────────────┐
-│                    │     │  Backend Services │
-│                    │────▶│  - pyth-oracle.ts │  ← Turbo rolling chain + Pyth SSE
-│                    │     │  - indexer.ts     │  ← Market discovery
-│                    │     │  - dispute-idx.ts │  ← Dispute scanner
-│                    │     │  - gov-indexer.ts │  ← Governance scanner
-│                    │     └──────────────────┘
-└────────────────────┘
-┌────────────────────┐     ┌──────────────────┐
-│ @veiled-markets/sdk│────▶│  npm registry    │  ← v0.5.4 published
-│ 6 clients, 191 tests     │  npmjs.com       │
-├────────────────────┤     └──────────────────┘
-│ bot-test/          │
-│ Telegram bot       │────▶ SDK integration test via chat commands
-└────────────────────┘
+Browser (React, same pages as the Aleo app)
+  └─ frontend/src/lib/near/
+       ├─ wallet:   NEAR Wallet Selector (Meteor, MyNearWallet)
+       ├─ reads:    contract views, served to the pages in the shape they already expect
+       ├─ notes:    scan and decrypt your notes, build the Merkle path
+       └─ prover:   snarkjs Groth16 proof in a web worker
+            │ proof + action
+            ▼
+Relayer (backend/src/near-relayer.ts) ── transact ──▶ Contract v1.veiled-markets.testnet
+                                                        ├─ note pool (depth-20 Poseidon tree, nullifiers)
+Turbo oracle (backend/src/near-turbo-oracle.ts)          ├─ markets: FPMM AMM, LP, fees
+  opens and resolves 5-minute BTC/ETH/SOL rounds  ──▶   ├─ resolution: votes, disputes, committee
+                                                        └─ turbo rounds and vault
 ```
 
-## Project Structure
+One contract holds everything, so each private action is a single call with no cross-contract steps.
 
-```
-veiled-markets/
-├── contracts-v37/              # ALEO standard market (25 transitions)
-├── contracts-usdcx-v7/         # USDCX market (25 transitions)
-├── contracts-usad-v14/         # USAD market (25 transitions)
-├── contracts-governance-v6/    # Governance (31 transitions)
-├── contracts-turbo-v9/         # Turbo markets source (deployed as v8)
-│   ├── src/main.leo            # ~23 KB, 10 transitions, shared vault (veiled_turbo_v9.aleo)
-│   ├── tests/                  # 16 logic tests
-│   ├── THREAT_MODEL.md         # 23 threats + testnet validation log
-│   ├── MAINNET_MIGRATION.md    # Block-time retuning guide
-│   └── SHADOW_RUN.md           # 24h shadow run runbook
-├── contracts-parlay/           # Parlay multi-leg betting
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── TurboMarketPanel.tsx   # Live price chart + buy UP/DOWN
-│   │   │   ├── TurboRollingView.tsx   # Rolling market state machine
-│   │   │   ├── DashboardHero.tsx      # Hero section (turbo + standard)
-│   │   │   └── ClaimWinningsModal.tsx  # Claim for both standard + turbo
-│   │   ├── lib/
-│   │   │   ├── turbo-client.ts        # Turbo tx builders + RPC helpers
-│   │   │   ├── aleo-client.ts         # Standard market client
-│   │   │   └── store.ts              # Zustand stores
-│   │   └── pages/
-│   │       ├── Dashboard.tsx          # Hero with turbo + market grid
-│   │       ├── TurboDetail.tsx        # /turbo/:symbol rolling view
-│   │       ├── Turbo.tsx              # /turbo index
-│   │       ├── VerifyTurbo.tsx        # /verify/turbo/:id
-│   │       └── MyBets.tsx             # Portfolio (standard + turbo bets)
-│   └── public/
-├── backend/
-│   └── src/
-│       ├── pyth-oracle.ts        # Pyth SSE + rolling chain + vault + HTTP
-│       ├── indexer.ts            # Standard market discovery
-│       ├── dispute-indexer.ts    # Dispute scanner
-│       └── governance-indexer.ts # Governance scanner
-├── sdk/                        # TypeScript SDK (published: @veiled-markets/sdk@0.5.4)
-│   ├── src/
-│   │   ├── client.ts              # VeiledMarketsClient (FPMM markets)
-│   │   ├── turbo-client.ts        # TurboClient (5-min UP/DOWN)
-│   │   ├── governance-client.ts   # VeiledGovernanceClient (proposals)
-│   │   ├── parlay.ts + parlay-client.ts  # Parlay math + client
-│   │   ├── indexer.ts             # Supabase off-chain query layer
-│   │   ├── pyth-client.ts         # Pyth Hermes verification
-│   │   ├── executor.ts            # NodeExecutor (snarkos wrapper)
-│   │   ├── wallets/               # Shield, Puzzle, Leo adapters
-│   │   └── __tests__/             # 191 unit tests (8 files)
-│   ├── examples/                  # turbo-bot, market-dashboard, governance-monitor
-│   ├── dist/                      # ESM + CJS + .d.ts (built by tsup)
-│   └── package.json               # v0.5.4, npm published
-├── bot-test/                   # Telegram bot (multi-user, SDK integration)
-│   ├── bot.ts                     # Turbo + FPMM commands, multi-user wallets
-│   ├── wallets.ts                 # Per-user wallet manager (AES-256-GCM encrypted)
-│   ├── records.ts                 # Credits record scanner + auto-capture
-│   ├── smoke.ts                   # 24-check SDK install verification
-│   └── README.md                  # Step-by-step setup guide
-├── supabase/
-│   ├── create_turbo_audit_table.sql  # Turbo oracle audit trail
-│   └── *.sql                         # Standard market schemas
-└── docs/
-```
+### Deployed on NEAR testnet
 
-## Privacy Model
+| Account | Role |
+|---|---|
+| `v1.veiled-markets.testnet` | The contract |
+| `veiled-relayer.testnet` | Submits private trades (fee 0 on testnet) |
+| `veiled-oracle.testnet` | Opens and resolves turbo rounds |
+| `usdcx.veiled-tokens.testnet`, `usad.veiled-tokens.testnet` | Mock 6-decimal stablecoins |
 
-| Token | Buy Method | Privacy |
-|-------|-----------|---------|
-| **ALEO** | `credits.aleo/transfer_private_to_public` | All inputs encrypted |
-| **USDCX** | `test_usdcx_stablecoin.aleo/transfer_private_to_public` | Token + MerkleProof encrypted |
-| **USAD** | `test_usad_stablecoin.aleo/transfer_private_to_public` | Token + MerkleProof encrypted |
-| **Turbo** | `credits.aleo/transfer_private_to_public` | Private bet, private payout |
+Testnet settings: the vote and dispute windows are 5 minutes each, so a demo market resolves quickly. The vote bond
+is 0.1 NEAR.
 
-## Testing
+## Run it
+
+Requirements: Node.js 20 or newer, and a NEAR testnet account in Meteor Wallet or MyNearWallet.
 
 ```bash
-# Standard market tests (15)
-cd contracts-v37 && leo test
-
-# Governance tests (28)
-cd contracts-governance-v6 && leo test --no-local
-
-# Turbo market tests (16)
-cd contracts-turbo-v9 && leo test
-
-# SDK tests (191)
-cd sdk && npm test
-
-# SDK smoke test (24 checks — verifies npm install works)
-cd bot-test && npx tsx smoke.ts
-
-# Frontend type check
-cd frontend && npx tsc --noEmit
-
-# Backend smoke test
-cd backend && DRY_RUN=1 TURBO_SYMBOLS=BTC npx tsx src/pyth-oracle.ts --auto-create
-```
-
-**Total: 250 tests** (15 standard + 28 governance + 16 turbo + 191 SDK)
-
-All contract tests use `assert_eq(actual, expected)` with exact computed values — not stubs. SDK tests mirror on-chain `*_fin` math to guarantee off-chain quote = on-chain settlement.
-
-## Quick Start
-
-```bash
-git clone https://github.com/hevDev7/veiled-markets-near.git
-cd veiled-markets-near
-
-# Frontend
-cd frontend && npm install --legacy-peer-deps && cp .env.example .env
-# Edit .env with your keys
-npm run dev
-
-# Turbo backend (separate terminal)
+# 1. Relayer (port 4100). Key: RELAYER_PRIVATE_KEY or ~/.near-credentials/testnet/veiled-relayer.testnet.json
 cd backend && npm install
-set -a && source ../.env && set +a
-TURBO_SYMBOLS=BTC npx tsx src/pyth-oracle.ts --serve --auto-create
+npx tsx src/near-relayer.ts
+
+# 2. Turbo oracle (port 4090). Key: ORACLE_PRIVATE_KEY or ~/.near-credentials/testnet/veiled-oracle.testnet.json
+#    Prices come from Pyth Hermes when backend/.env has PYTH_API_KEY=<key from app.pyth.com>, otherwise CoinGecko.
+npx tsx src/near-turbo-oracle.ts --serve --auto-create
+
+# 3. Frontend (http://localhost:3100)
+cd ../frontend && npm install
+cp .env.example .env.local   # the NEAR section at the top has working testnet defaults
+npm run dev
 ```
 
-**Wallet:** Install [Shield Wallet](https://shieldwallet.io/), switch to Testnet, get credits from [Aleo Faucet](https://faucet.aleo.org).
+The frontend works against the deployed contract without steps 1 and 2. You need the relayer for private trades and
+the oracle for turbo rounds.
 
-## Environment Variables
+To build and deploy your own contract: build the wasm, then run `near/scripts/deploy-testnet.sh v2`. To rebuild the
+circuit: `cd near/circuits && npm run build`.
 
-See [`frontend/.env.example`](frontend/.env.example) for the full list. Core values:
+For a demo of the whole market lifecycle, `cd backend && npx tsx scripts/quick-market.ts create 6` opens a NEAR
+price question that closes in 6 minutes. After it closes, `npx tsx scripts/quick-market.ts resolve <id> <1=Yes|2=No>`
+votes, finalizes and confirms the result (about ten minutes on testnet). Winners can then redeem privately in the app.
 
-```env
-# Network
-VITE_NETWORK=testnet
-VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
-VITE_EXPLORER_URL=https://testnet.explorer.provable.com
-VITE_ALEO_SECONDS_PER_BLOCK=4
+`NEAR_RPC_URL` accepts a comma-separated list for the relayer, the oracle and the scripts. Each call moves to the next
+endpoint when one times out or rate-limits.
 
-# Standard market contracts (program IDs)
-VITE_PROGRAM_ID=veiled_markets_v37.aleo                 # ALEO market
-VITE_USDCX_MARKET_PROGRAM_ID=veiled_markets_usdcx_v7.aleo
-VITE_USAD_PROGRAM_ID=veiled_markets_usad_v14.aleo
-VITE_GOVERNANCE_PROGRAM_ID=veiled_governance_v6.aleo
-VITE_PARLAY_PROGRAM_ID=veiled_parlay_v3.aleo
+### Tests
 
-# Token programs (used for private transfers)
-VITE_CREDITS_PROGRAM_ID=credits.aleo
-VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
-# USAD token program is built into the market contract
+| What | Command |
+|---|---|
+| Circuit | `node --test near/circuits/test/spend.test.mjs` |
+| Contract (near-workspaces sandbox) | `cd near/contract && cargo test -p integration-tests` |
+| Live testnet smoke test | `cd backend && npx tsx scripts/testnet-smoke.ts` |
 
-# Turbo markets
-VITE_TURBO_PROGRAM_ID=veiled_turbo_v9.aleo
-# URL of the Pyth oracle backend (pyth-oracle.ts) — frontend subscribes to
-# SSE price stream and polls /chain/symbol from here. Point this at your
-# local backend in dev; production deploys a public endpoint.
-VITE_TURBO_ORACLE_URL=http://localhost:4090
+## Not on NEAR yet
 
-# Persistence & off-chain data
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-VITE_PINATA_JWT=your-pinata-jwt
-# VITE_PINATA_GATEWAY=https://gateway.pinata.cloud
+Parlays, governance proposals, resolver staking and rewards still exist only on Aleo. The app hides their buttons on
+NEAR. Dispute escalation to the committee does work on NEAR.
 
-# Feature flags & UX
-VITE_DEFAULT_WALLET=puzzle              # puzzle | leo | fox | shield | soter
-VITE_ENABLE_DEMO_MODE=true              # mock wallet for testing without real creds
-VITE_ENABLE_CREATE_MARKET=true
-VITE_ENABLE_BETTING=true
-VITE_SHOW_TESTNET_BANNER=true
-VITE_DEBUG=false
-```
+## Known limits
 
-Backend (`backend/pyth-oracle.ts`) additionally reads: `OPERATOR_ADDRESS`, `OPERATOR_PRIVATE_KEY`, `TURBO_SYMBOLS` (comma-separated subset to enable), `DRY_RUN`, `ALEO_SECONDS_PER_BLOCK`, and `SUPABASE_URL` / `SUPABASE_ANON_KEY` for audit logging.
+- **Testnet trusted setup.** The circuit key comes from a single phase-2 contribution on top of the public
+  Perpetual Powers of Tau. A mainnet launch needs a multi-party ceremony.
+- **Turbo prices.** The oracle operator submits prices, and the contract checks the operator and the price bounds.
+  The oracle reads Pyth Hermes when it has an API key, and streams only the feeds that key is entitled to. Without
+  a key it falls back to CoinGecko spot prices, which refresh about once a minute.
+- **Relayer.** The relayer pays gas and cannot change a trade, because the proof binds the action, the recipient and the
+  fee. A production relayer would charge a fee.
 
-## Turbo Testnet Validation History
+## Sister project: Verdict
 
-The turbo contract went through 8 iterative deploys to fix bugs discovered during live testnet testing:
+Verdict is our other NEAR HACKATHON 2026 project. It is a prediction market
+that resolves itself by reading NEAR state with a view call, so no person or vote decides who won.
+The two projects answer different questions:
 
-| Version | Key Fix |
-|---------|---------|
-| v1 | Initial deploy — `baseline_block == current` impossible |
-| v2 | Baseline lag tolerance (30 blocks) |
-| v3 | Resolution window widened (10 → 60 blocks) |
-| v4 | Branch-free abs diff (ternary underflow fix) |
-| v5 | Private transfers (credits record in/out) |
-| v6 | `withdraw_liquidity` for LP recovery |
-| v7 | Shared vault + 10 symbols + claim refund validation |
-| **v8** | **`deposit_vault_public` + all bug fixes consolidated** |
-
-See [contracts-turbo-v9/THREAT_MODEL.md](contracts-turbo-v9/THREAT_MODEL.md) for the full threat catalog and testnet validation log.
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Contracts** | Leo 4.0, snarkVM, snarkOS |
-| **Frontend** | React 18, TypeScript, Vite 5, Tailwind CSS, Framer Motion |
-| **SDK** | [`@veiled-markets/sdk`](https://www.npmjs.com/package/@veiled-markets/sdk) — TypeScript, tsup (ESM+CJS), vitest (191 tests) |
-| **State** | Zustand |
-| **Charts** | Recharts + Canvas (turbo live chart) |
-| **Price Oracle** | Pyth Network Hermes SSE (turbo markets) |
-| **Wallet** | ProvableHQ Aleo Wallet Adapter (Shield, Puzzle, Leo, Fox, Soter) |
-| **Persistence** | Supabase (AES-256-GCM) + localStorage |
-| **Metadata** | IPFS via Pinata |
-| **Hosting** | Vercel (frontend), npm (SDK) |
-
-## Release History
-
-| Version | Status | Highlights |
-|---------|--------|-----------|
-| **SDK v0.5.4** (active) | Published 2026-04-13 | 6 clients, 191 tests, struct parsing fix, outcomeLabels in enriched markets |
-| **Telegram bot** (active) | Updated 2026-04-13 | Multi-user wallets (AES-256-GCM), Turbo + FPMM markets, auto-capture records, `/fund`, `/claim` |
-| **Turbo v8** (active) | Deployed 2026-04-10 | Shared vault, 10 symbols, private transfers, parimutuel model, rolling chain, Pyth oracle |
-| **v37 / v7 / v14 / v6** (active) | Deployed 2026-04-08 | Post-audit hardening: Bug A/B/C/D fixes + `assert_disputed` guard |
-| **v36 / v6 / v13 / v5** (legacy) | Replaced 2026-04-08 | First v6 dispute architecture |
-
-## Contributing
-
-1. Fork the repo
-2. Create feature branch (`git checkout -b feature/name`)
-3. Commit changes and open Pull Request
+- **Veiled Markets:** who holds a position stays private.
+- **Verdict:** who won is decided by the chain, not by a resolver.
 
 ## License
 
-MIT License — see [LICENSE](./LICENSE)
-
----
-
-<div align="center">
-
-**Built on Aleo**
-
-[Live Demo](https://veiledmarkets.xyz) · [Telegram Bot](https://t.me/veiledmarkets_bot) · [SDK on npm](https://www.npmjs.com/package/@veiled-markets/sdk) · [Standard Markets](https://testnet.explorer.provable.com/program/veiled_markets_v37.aleo) · [Turbo Markets](https://testnet.explorer.provable.com/program/veiled_turbo_v9.aleo) · [Governance](https://testnet.explorer.provable.com/program/veiled_governance_v6.aleo)
-
-</div>
+[MIT](LICENSE)
