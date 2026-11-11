@@ -78,7 +78,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
               </div>
 
               <div>
-                <label className="text-sm font-medium text-surface-300 mb-1.5 block">Amount (ALEO)</label>
+                <label className="text-sm font-medium text-surface-300 mb-1.5 block">Amount (NEAR)</label>
                 <input
                   type="text"
                   value={amount}
@@ -88,7 +88,7 @@ export function DelegateModal({ isOpen, onClose, onDelegate }: DelegateModalProp
                   className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 font-mono"
                 />
                 <div className="text-xs text-surface-500 mt-1">
-                  Available: {formatVeil(veilBalance)} ALEO
+                  Available: {formatVeil(veilBalance)} NEAR
                 </div>
               </div>
 

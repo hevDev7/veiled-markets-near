@@ -35,6 +35,8 @@ import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
 import { uploadMarketMetadata, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
 import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
+import { PUBLIC_CALL_GAS_MICRO } from '@/lib/near/config'
+import { isChainTxId } from '@/lib/near/config'
 
 interface CreateMarketModalProps {
   isOpen: boolean
@@ -56,7 +58,7 @@ interface MarketFormData {
   resolutionDeadlineDate: string
   resolutionDeadlineTime: string
   resolutionSource: string
-  tokenType: 'ALEO' | 'USDCX' | 'USAD'
+  tokenType: 'NEAR' | 'USDCX' | 'USAD'
 }
 
 const categories = [
@@ -82,7 +84,7 @@ const initialFormData: MarketFormData = {
   resolutionDeadlineDate: '',
   resolutionDeadlineTime: '23:59',
   resolutionSource: '',
-  tokenType: 'ALEO',
+  tokenType: 'NEAR',
 }
 
 const DRAFT_KEY = 'veiled_create_market_draft'
@@ -103,7 +105,7 @@ function clearDraft() {
 }
 
 function getCreateMarketBalanceError(
-  tokenType: 'ALEO' | 'USDCX' | 'USAD',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD',
   liquidityMicro: bigint,
   balances: {
     public: bigint
@@ -114,17 +116,17 @@ function getCreateMarketBalanceError(
     usadPrivate: bigint
   },
 ): string | null {
-  const feeMicro = 1_500_000n
+  const feeMicro = PUBLIC_CALL_GAS_MICRO
 
-  if (tokenType === 'ALEO') {
+  if (tokenType === 'NEAR') {
     const totalNeeded = liquidityMicro + feeMicro
     if (balances.public < totalNeeded) {
       return (
-        `Insufficient public ALEO. Market creation uses public ALEO, not private credits. ` +
-        `Need ${formatCredits(totalNeeded)} ALEO total ` +
-        `(${formatCredits(liquidityMicro)} ALEO liquidity + ${formatCredits(feeMicro)} ALEO fee), ` +
-        `but only have ${formatCredits(balances.public)} public ALEO. ` +
-        `Private ALEO available: ${formatCredits(balances.private)}.`
+        `Insufficient wallet NEAR. Market creation uses NEAR from your wallet, not your private balance. ` +
+        `Need ${formatCredits(totalNeeded)} NEAR total ` +
+        `(${formatCredits(liquidityMicro)} NEAR liquidity + ${formatCredits(feeMicro)} NEAR gas), ` +
+        `but only have ${formatCredits(balances.public)} public NEAR. ` +
+        `Private NEAR available: ${formatCredits(balances.private)}.`
       )
     }
     return null
@@ -134,19 +136,19 @@ function getCreateMarketBalanceError(
   const privateStableBalance = tokenType === 'USDCX' ? balances.usdcxPrivate : balances.usadPrivate
   if (publicStableBalance < liquidityMicro) {
     return (
-      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity via transfer_public_as_signer. ` +
+      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity (ft_transfer_call). ` +
       `Need ${formatCredits(liquidityMicro)} ${tokenType}, ` +
       `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.` +
       (privateStableBalance > 0n
-        ? ` Private ${tokenType} available: ${formatCredits(privateStableBalance)}. Unshield ${tokenType} first.`
+        ? ` Private ${tokenType} available: ${formatCredits(privateStableBalance)}. Withdraw it from your private balance (Settings) first.`
         : '')
     )
   }
 
   if (balances.public < feeMicro) {
     return (
-      `Insufficient public ALEO for network fee. Market creation also needs ${formatCredits(feeMicro)} public ALEO ` +
-      `for the transaction fee, but only have ${formatCredits(balances.public)} public ALEO.`
+      `Insufficient wallet NEAR for gas. Market creation also needs ${formatCredits(feeMicro)} NEAR ` +
+      `for gas, but only have ${formatCredits(balances.public)} NEAR in your wallet.`
     )
   }
 
@@ -176,11 +178,10 @@ async function getStablecoinCreateFundingError(
     if (livePublicBalance < liquidityMicro) {
       return (
         `On-chain public ${tokenType} is too low for market creation. ` +
-        `create_market_${tokenType.toLowerCase()} calls ${stableProgramId}/transfer_public_as_signer, ` +
-        `so only public ${tokenType} can fund the initial liquidity. ` +
+        `Market creation funds the initial liquidity from the ${tokenType} in your wallet. ` +
         `Need ${formatCredits(liquidityMicro)} ${tokenType}, but the stablecoin mapping shows ${formatCredits(livePublicBalance)} public ${tokenType}.` +
         (privateStableBalance > 0n
-          ? ` You still have ${formatCredits(privateStableBalance)} private ${tokenType}; unshield it first.`
+          ? ` You still have ${formatCredits(privateStableBalance)} private ${tokenType}; withdraw it from your private balance (Settings) first.`
           : '')
       )
     }
@@ -378,7 +379,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
 
       // Build transaction inputs for v19 create_market
       // create_market(question_hash, category, num_outcomes, deadline, res_deadline, resolver, creator_owner, initial_liquidity)
-      // Token type is determined by function name: create_market (ALEO) vs create_market_usdcx (USDCX)
+      // Token type is determined by function name: create_market (NEAR) vs create_market_usdcx (USDCX)
       const input0 = String(questionHash);
       const input1 = `${Number(formData.category)}u8`;
       const input2 = `${Number(formData.numOutcomes)}u8`;
@@ -460,7 +461,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         if (balanceError) {
           throw new Error(balanceError)
         }
-        if (formData.tokenType !== 'ALEO') {
+        if (formData.tokenType !== 'NEAR') {
           const fundingError = await getStablecoinCreateFundingError(
             formData.tokenType,
             wallet.address!,
@@ -485,7 +486,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
         program: createProgramId,
         function: createFunctionName,
         inputs,
-        fee: 1.5, // 1.5 ALEO for create_market
+        fee: 1.5, // 1.5 NEAR for create_market
       })
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(
@@ -531,7 +532,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
           resolutionSource: formData.resolutionSource || '',
           questionHash,
           creator: wallet.address!,
-          tokenType: formData.tokenType as 'ALEO' | 'USDCX' | 'USAD',
+          tokenType: formData.tokenType as 'NEAR' | 'USDCX' | 'USAD',
           createdAt: Date.now(),
         }
 
@@ -1086,9 +1087,9 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           </div>
                           <p className="text-xs text-surface-500 mt-1">
                             Seeds the AMM pool. Split equally across outcomes. Min: 0.01 {formData.tokenType}.
-                            {formData.tokenType === 'ALEO'
-                              ? ' Uses public ALEO balance; private credits cannot be used here.'
-                              : ` Uses public ${formData.tokenType} balance, plus 1.5 public ALEO for the network fee.`}
+                            {formData.tokenType === 'NEAR'
+                              ? ' Uses public NEAR balance; private credits cannot be used here.'
+                              : ` Uses public ${formData.tokenType} balance, plus 1.5 public NEAR for the network fee.`}
                           </p>
                         </div>
 
@@ -1100,15 +1101,15 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           </label>
                           <div className="grid grid-cols-3 gap-3">
                             <button
-                              onClick={() => updateForm({ tokenType: 'ALEO' })}
+                              onClick={() => updateForm({ tokenType: 'NEAR' })}
                               className={cn(
                                 "p-3 rounded-xl border-2 transition-all text-center",
-                                formData.tokenType === 'ALEO'
+                                formData.tokenType === 'NEAR'
                                   ? "border-brand-500 bg-brand-500/10"
                                   : "border-surface-700 hover:border-surface-600"
                               )}
                             >
-                              <span className="text-lg font-semibold text-white block">ALEO</span>
+                              <span className="text-lg font-semibold text-white block">NEAR</span>
                               <span className="text-xs text-surface-400">Native credits</span>
                             </button>
                             <button
@@ -1434,7 +1435,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                         </p>
 
                         <div className="p-4 rounded-xl bg-white/[0.03] mb-4 text-left">
-                          {marketId?.startsWith('at1') ? (
+                          {isChainTxId(marketId) ? (
                             <>
                               <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Transaction ID</p>
                               <p className="text-sm text-white font-mono break-all">{marketId}</p>

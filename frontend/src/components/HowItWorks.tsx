@@ -6,7 +6,7 @@ const steps = [
     num: '01',
     icon: Wallet,
     title: 'Connect Wallet',
-    description: 'Link your Shield Wallet for private transactions on the Aleo blockchain.',
+    description: 'Link your NEAR wallet (Meteor or MyNearWallet) for private transactions on NEAR.',
   },
   {
     num: '02',

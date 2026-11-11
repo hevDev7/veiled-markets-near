@@ -139,7 +139,7 @@ function HeroFeaturedCard({ market }: { market: Market }) {
         <div className="flex items-center gap-4 pt-5 text-surface-500">
           <div className="flex items-center gap-1.5 text-surface-500">
             <BarChart3 className="w-3.5 h-3.5" />
-            <span className="text-xs tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}</span>
+            <span className="text-xs tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}</span>
           </div>
           <div className="flex items-center gap-1.5 text-surface-500">
             <Users className="w-3.5 h-3.5" />
@@ -458,7 +458,7 @@ export function Landing() {
               {/* Badge */}
               <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-400/[0.06] mb-5">
                 <Sparkles className="w-3.5 h-3.5 text-brand-400" />
-                <span className="text-xs font-semibold text-brand-400">Live on Aleo Testnet</span>
+                <span className="text-xs font-semibold text-brand-400">Live on NEAR Testnet</span>
               </motion.div>
 
               <motion.h1 variants={fadeUp} className="font-display text-[3.25rem] lg:text-[4rem] leading-[1.05] tracking-tight text-white mb-6">
@@ -470,7 +470,7 @@ export function Landing() {
               <motion.p variants={fadeUp} className="text-lg text-surface-400 leading-relaxed mb-8 max-w-lg">
                 The first prediction market where your positions are{' '}
                 <span className="text-brand-300 font-semibold">cryptographically invisible</span>.
-                Built on Aleo with zero-knowledge proofs.
+                Built on NEAR with zero-knowledge proofs.
               </motion.p>
 
               <motion.div variants={fadeUp} className="flex items-center gap-4 mb-8">
@@ -577,7 +577,7 @@ export function Landing() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 lg:mt-5">
             {[
               { icon: <BarChart3 className="w-4 h-4" />, label: 'FPMM', sub: 'Market Maker' },
-              { icon: <Users className="w-4 h-4" />, label: 'Dual Token', sub: 'ALEO + USDCX' },
+              { icon: <Users className="w-4 h-4" />, label: 'Dual Token', sub: 'NEAR + USDCX' },
               { icon: <Globe className="w-4 h-4" />, label: 'Multi-Outcome', sub: 'Up to 4 options' },
               { icon: <Code className="w-4 h-4" />, label: 'Open Source', sub: 'Fully audited' },
             ].map((h) => (
@@ -611,7 +611,7 @@ export function Landing() {
 
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
               {[
-                { step: '01', icon: Wallet, title: 'Connect Wallet', desc: 'Link your Shield Wallet for private transactions on Aleo' },
+                { step: '01', icon: Wallet, title: 'Connect Wallet', desc: 'Link your NEAR wallet (Meteor or MyNearWallet) for private transactions' },
                 { step: '02', icon: Target, title: 'Browse Markets', desc: 'Explore prediction markets across crypto, politics, sports & more' },
                 { step: '03', icon: Lock, title: 'Place Encrypted Bets', desc: 'Your position is hidden with ZK proofs — no one sees your bet' },
                 { step: '04', icon: Zap, title: 'Claim Winnings', desc: 'Privately collect payouts when markets resolve. Fully on-chain.' },
@@ -700,7 +700,7 @@ export function Landing() {
                 <div className="w-1.5 h-1.5 rounded-full bg-yes-400 animate-pulse" />
                 <span className="text-xs text-surface-500">All systems operational</span>
               </div>
-              <p className="text-xs text-surface-600">© 2026 Veiled Markets · Built on Aleo</p>
+              <p className="text-xs text-surface-600">© 2026 Veiled Markets · Built on NEAR</p>
             </div>
           </div>
         </div>

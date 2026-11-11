@@ -28,7 +28,7 @@ type SellStep = 'input' | 'success'
 
 export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSharesModalProps) {
   const { executeTransaction } = useAleoTransaction()
-  const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const tokenType = (market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
   const governanceConfig = useMarketGovernanceConfig(tokenType)
 
   const [tokensDesired, setTokensDesired] = useState('')
@@ -146,7 +146,7 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
           const uiIsUsdcx = tokenType === 'USDCX'
           if (uiIsUsdcx !== onChainIsUsdcx) {
             throw new Error(
-              `Token type mismatch: UI shows ${tokenType} but on-chain market uses ${onChainIsUsdcx ? 'USDCX' : 'ALEO'}. Please refresh the page.`
+              `Token type mismatch: UI shows ${tokenType} but on-chain market uses ${onChainIsUsdcx ? 'USDCX' : 'NEAR'}. Please refresh the page.`
             )
           }
         }

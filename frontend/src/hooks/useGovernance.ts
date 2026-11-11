@@ -462,7 +462,7 @@ async function fetchGovernanceEscalations(
         return {
           marketId: market.id,
           question,
-          tokenType: (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD',
+          tokenType: (TOKEN_SYMBOLS[market.token_type] || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD',
           programId,
           resolverAddress: resolution?.proposer || resolution?.resolver || market.resolver || undefined,
           marketStatus: market.status,

@@ -53,7 +53,7 @@ export function GovernanceStats() {
         </div>
         <div className="flex justify-between">
           <span>Min proposal stake</span>
-          <span className="text-surface-300">10 ALEO</span>
+          <span className="text-surface-300">10 NEAR</span>
         </div>
         <div className="flex justify-between">
           <span>Guardian threshold</span>

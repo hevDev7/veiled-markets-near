@@ -90,7 +90,7 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
         )
       }
 
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const tokenType = (market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
       const { functionName, inputs } = buildWithdrawCreatorFeesInputs(
         market.id,
         fees.creator_fees,

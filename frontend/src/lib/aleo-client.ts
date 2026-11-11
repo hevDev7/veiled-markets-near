@@ -6,15 +6,15 @@
 // ============================================================================
 
 import { config } from './config';
-import {
-  fetchMarketRegistry,
-  isSupabaseAvailable,
-  clearAllSupabaseData,
-  registerMarketInRegistry,
-  supabase,
-  type MarketRegistryEntry,
-} from './supabase';
+import { clearAllSupabaseData } from './supabase';
 import { devLog, devWarn } from './logger'
+// NEAR: the contract is the market registry; its views replace the Aleo indexer, block scans and tx lookups.
+import { decodeMetadata, findMarketByQuestionHash, getNearVote, listNearMarkets, type NearMarket } from './near/chain'
+import { aleoId } from './near/ids'
+import { createdMarketFor, knownTxOutcome } from './near/executor'
+import { RELAYER_ACCOUNT } from './near/config'
+import { currentAccountId } from './near/near-wallet'
+import { outcomeFailure, txStatus } from './near/rpc'
 import {
   calculateAllPrices as calculateAMMAllPrices,
   type AMMReserves,
@@ -42,13 +42,13 @@ export const OUTCOME = {
 } as const;
 
 export const TOKEN_TYPE = {
-  ALEO: 1,
+  NEAR: 1,
   USDCX: 2,
   USAD: 3,
 } as const;
 
 export const TOKEN_SYMBOLS: Record<number, string> = {
-  1: 'ALEO',
+  1: 'NEAR',
   2: 'USDCX',
   3: 'USAD',
 };
@@ -94,14 +94,14 @@ const CREATE_MARKET_FUNCTIONS = new Set(['create_market', 'create_market_usdcx',
  * Get the correct program ID for a given token type.
  * USAD markets live in a separate program (veiled_markets_usad_v14.aleo).
  */
-export function getProgramIdForToken(tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO'): string {
+export function getProgramIdForToken(tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR'): string {
   if (tokenType === 'USAD') return config.usadProgramId;
   if (tokenType === 'USDCX') return config.usdcxMarketProgramId;
   return config.programId;
 }
 
 export function getProgramIdForMarket(
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
   explicitProgramId?: string | null,
 ): string {
   return explicitProgramId || getProgramIdForToken(tokenType);
@@ -131,7 +131,7 @@ export interface MarketData {
   resolution_deadline: bigint;
   status: number;
   created_at: bigint;
-  token_type: number;       // 1=ALEO, 2=USDCX
+  token_type: number;       // 1=NEAR, 2=USDCX
 }
 
 export interface AMMPoolData {
@@ -187,8 +187,8 @@ const FETCH_TIMEOUT_MS = 10_000; // 10 seconds per request
 // ============================================================================
 // In-memory cache for mapping values and block height
 // ============================================================================
-const CACHE_TTL_MS = 30_000; // 30 seconds — fresh data within this window
-const BLOCK_HEIGHT_CACHE_TTL_MS = 10_000; // 10 seconds for block height
+const CACHE_TTL_MS = 4_000; // NEAR blocks land every ~1 s; one virtual tick is 4 s
+const BLOCK_HEIGHT_CACHE_TTL_MS = 4_000;
 
 interface CacheEntry<T> {
   data: T;
@@ -522,82 +522,25 @@ function getCreateMarketProgramIds(preferredProgramId?: string): string[] {
 }
 
 /**
- * Scan recent blocks for a create_market transaction matching the given question hash.
- * Looks at the finalize arguments to find the market_id.
- *
- * Uses small parallel batches (3) to avoid API rate limiting, with retries for failed blocks.
+ * Find the market a create_market call opened, by its question hash. On NEAR every market carries its question
+ * hash on chain, so one contract view replaces the Aleo block scan.
  */
 async function scanBlockchainForMarket(
   questionHash: string,
-  blocksToScan: number = 500,
-  programId: string = PROGRAM_ID
+  _blocksToScan: number = 500,
+  _programId: string = PROGRAM_ID
 ): Promise<ScanResult | null> {
   try {
-    const latestHeight = await getCurrentBlockHeight();
-    const startHeight = Number(latestHeight);
-
-    devLog(`[scanBlockchain] Scanning blocks ${startHeight - blocksToScan} to ${startHeight} for hash ${questionHash.slice(0, 20)}...`);
-
-    let scannedCount = 0;
-    let failedCount = 0;
-
-    // Scan in parallel batches of 3 blocks (newest first) to avoid API rate limiting
-    const BATCH_SIZE = 3;
-    for (let offset = 0; offset < blocksToScan; offset += BATCH_SIZE) {
-      const heights: number[] = [];
-      for (let i = 0; i < BATCH_SIZE && offset + i < blocksToScan; i++) {
-        const height = startHeight - offset - i;
-        if (height >= 0) heights.push(height);
-      }
-
-      const results = await Promise.all(
-        heights.map(h => scanBlockForCreateMarketWithRetry(h, questionHash, programId))
-      );
-
-      scannedCount += heights.length;
-      failedCount += results.filter(r => r === undefined).length; // undefined = failed after retries
-
-      const found = results.find(r => r !== null && r !== undefined);
-      if (found) {
-        devLog(`[scanBlockchain] Found market after scanning ${scannedCount} blocks (${failedCount} failed)`);
-        return found;
-      }
-
-      // Delay between batches to avoid API rate limiting
-      if (offset + BATCH_SIZE < blocksToScan) {
-        await new Promise(r => setTimeout(r, 200));
-      }
-    }
-
-    devLog(`[scanBlockchain] Not found after ${scannedCount} blocks (${failedCount} blocks failed to fetch)`);
+    const mine = createdMarketFor(questionHash);
+    if (mine) return { marketId: mine, transactionId: MARKET_TX_MAP[questionHash] || '' };
+    const m = await findMarketByQuestionHash(questionHash);
+    if (m) return { marketId: aleoId(m.id), transactionId: MARKET_TX_MAP[questionHash] || '' };
   } catch (err) {
-    devWarn('[scanBlockchain] Error:', err);
+    devWarn('[scanBlockchain] NEAR lookup failed:', err);
   }
-
   return null;
 }
 
-/**
- * Scan a single block with 1 retry on failure.
- * Returns: ScanResult if found, null if scanned but not found, undefined if fetch failed.
- */
-async function scanBlockForCreateMarketWithRetry(
-  blockHeight: number,
-  questionHash: string,
-  programId: string = PROGRAM_ID
-): Promise<ScanResult | null | undefined> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const result = await scanBlockForCreateMarket(blockHeight, questionHash, programId);
-      return result; // null (not found) or ScanResult (found)
-    } catch {
-      if (attempt === 0) {
-        await new Promise(r => setTimeout(r, 500)); // Brief pause before retry
-      }
-    }
-  }
-  return undefined; // Both attempts failed
-}
 
 /** Result of a blockchain scan: market_id + on-chain transaction ID */
 export interface ScanResult {
@@ -605,56 +548,11 @@ export interface ScanResult {
   transactionId: string  // Real at1... on-chain TX ID
 }
 
+
+
 /**
- * Check a single block for a create_market transition matching the question hash.
- * Throws on fetch failure (caller handles retry). Returns null if block was fetched but no match.
+ * Parse Aleo struct value from API response
  */
-async function scanBlockForCreateMarket(
-  blockHeight: number,
-  questionHash: string,
-  programId: string = PROGRAM_ID
-): Promise<ScanResult | null> {
-  const url = `${API_BASE_URL}/block/${blockHeight}`;
-  const response = await fetchWithRetry(url, 3);
-  if (!response.ok) {
-    if (response.status === 404) return null; // Block doesn't exist
-    throw new Error(`Block ${blockHeight}: HTTP ${response.status}`);
-  }
-
-  const block = await response.json();
-  const transactions = block.transactions || [];
-
-  for (const txWrapper of transactions) {
-    const tx = txWrapper.transaction || txWrapper;
-    const txId = tx.id || txWrapper.id || '';  // Extract at1... transaction ID
-    const transitions = tx.execution?.transitions || [];
-
-    for (const transition of transitions) {
-      if (transition.program !== programId || !isCreateMarketFunction(transition.function)) continue;
-
-      // Check the future output for finalize arguments
-      for (const output of (transition.outputs || [])) {
-        if (output.type !== 'future') continue;
-
-        const value = output.value || '';
-        // The finalize arguments are: market_id, creator, question_hash, category, deadline, resolution_deadline, resolver, token_type
-        // question_hash is the 3rd argument (index 2)
-        const args = extractFinalizeArguments(value);
-        if (args.length >= 3) {
-          const foundQuestionHash = args[2]; // question_hash
-          const foundMarketId = args[0];     // market_id
-
-          if (foundQuestionHash === questionHash && foundMarketId) {
-            devLog(`[scanBlock] MATCH at block ${blockHeight}! market_id=${foundMarketId.slice(0, 30)}... tx=${txId.slice(0, 15)}...`);
-            return { marketId: foundMarketId, transactionId: txId };
-          }
-        }
-      }
-    }
-  }
-  return null;
-}
-
 /**
  * Extract the arguments array from a finalize/future output value.
  * The value looks like: { program_id: ..., function_name: ..., arguments: [arg0, arg1, ...] }
@@ -708,9 +606,6 @@ function extractFinalizeArguments(value: string): string[] {
   return args;
 }
 
-/**
- * Parse Aleo struct value from API response
- */
 function parseAleoStruct(value: string | any): Record<string, string> {
   if (!value) return {};
 
@@ -984,11 +879,13 @@ export async function hasUserVotedOnMarket(
   voterAddress: string,
   programId?: string,
 ): Promise<boolean> {
-  const voterKey = await computeVoterKey(marketId, voterAddress);
-  if (!voterKey) return false;
-  const value = await getMappingValue<string>('voter_participated', voterKey, programId);
-  if (value == null) return false;
-  return String(value).toLowerCase().includes('true');
+  void programId;
+  // NEAR keeps the vote under (market, account) and answers it directly: no BHP256 voter key needed.
+  try {
+    return (await getNearVote(marketId, voterAddress)) != null;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1127,7 +1024,7 @@ export function buildCreateMarketInputs(
   resolutionDeadline: bigint,
   resolverAddress: string,
   creatorAddress: string,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
   initialLiquidity: bigint,
 ): { functionName: string; inputs: string[]; programId: string } {
   const inputs = [
@@ -1154,7 +1051,7 @@ export function buildCreateMarketInputs(
 
 /**
  * Build inputs for buy_shares (v30 AMM trading)
- * ALEO: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
+ * NEAR: buy_shares_private(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce, credits_in)
  *   Uses transfer_private_to_public with credits record for privacy.
  * USDCX: buy_shares_usdcx(market_id, outcome, amount_in, expected_shares, min_shares_out, share_nonce)
  *   Caller appends Token.record + [MerkleProof; 2].
@@ -1167,7 +1064,7 @@ export function buildBuySharesInputs(
   amountIn: bigint,
   expectedShares: bigint,
   minSharesOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
   creditsRecord?: string,
 ): { functionName: string; inputs: string[]; programId: string } {
   const shareNonce = generateRandomNonce();
@@ -1200,21 +1097,21 @@ export function buildBuySharesInputs(
     };
   }
 
-  // ALEO: buy_shares_private requires credits record
+  // NEAR: buy_shares_private requires credits record
   if (!creditsRecord) {
-    throw new Error('Credits record is required for ALEO buy_shares_private. Fetch a record via fetchCreditsRecord() first.');
+    throw new Error('Credits record is required for NEAR buy_shares_private. Fetch a record via fetchCreditsRecord() first.');
   }
   baseInputs.push(creditsRecord);
   return {
     functionName: 'buy_shares_private',
     inputs: baseInputs,
-    programId: getProgramIdForToken('ALEO'),
+    programId: getProgramIdForToken('NEAR'),
   };
 }
 
 /**
- * Build inputs for buy_shares_private (v30 privacy-preserving, ALEO only)
- * Alias for buildBuySharesInputs with tokenType='ALEO'.
+ * Build inputs for buy_shares_private (v30 privacy-preserving, NEAR only)
+ * Alias for buildBuySharesInputs with tokenType='NEAR'.
  */
 export function buildBuySharesPrivateInputs(
   marketId: string,
@@ -1224,7 +1121,7 @@ export function buildBuySharesPrivateInputs(
   minSharesOut: bigint,
   creditsRecord: string,
 ): { functionName: string; inputs: string[] } {
-  return buildBuySharesInputs(marketId, outcome, amountIn, expectedShares, minSharesOut, 'ALEO', creditsRecord);
+  return buildBuySharesInputs(marketId, outcome, amountIn, expectedShares, minSharesOut, 'NEAR', creditsRecord);
 }
 
 /**
@@ -1261,41 +1158,14 @@ export function buildDefaultFlattenedMerkleProofs(): { siblings: string[]; leafI
 }
 
 /**
- * Build dynamic Merkle proofs using the Sealance SDK.
- * Generates correct non-inclusion proofs for any freeze list state.
- * Falls back to buildDefaultMerkleProofs() if SDK fails.
- *
- * @param ownerAddress - The bettor's Aleo address
- * @param freezeListAddresses - Addresses in the freeze list (default: [zero address])
+ * Stablecoin compliance proofs. The Aleo stablecoins checked a freeze-list non-inclusion proof; the NEAR
+ * stablecoins have no freeze list, so the default proof shape is returned and the executor ignores it.
  */
 export async function buildMerkleProofsForAddress(
-  ownerAddress: string,
-  freezeListAddresses: string[] = ['aleo1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq3ljyzc'],
+  _ownerAddress: string,
+  _freezeListAddresses: string[] = [],
 ): Promise<string> {
-  try {
-    const sdk = await import('@provablehq/sdk');
-    const sealance = new sdk.SealanceMerkleTree();
-
-    // Generate leaves (sorts, pads) — depth 16 gives [field; 16] siblings
-    const leaves = sealance.generateLeaves(freezeListAddresses, 16);
-    const tree = sealance.buildTree(leaves);
-
-    // Get adjacent leaf indices bounding the target address
-    const [leftIdx, rightIdx] = sealance.getLeafIndices(tree, ownerAddress);
-
-    // Generate sibling paths
-    const leftProof = sealance.getSiblingPath(tree, leftIdx, 16);
-    const rightProof = sealance.getSiblingPath(tree, rightIdx, 16);
-
-    // Format for Aleo transaction
-    return sealance.formatMerkleProof([leftProof, rightProof]);
-  } catch (error) {
-    devWarn('SDK Merkle proof generation failed:', error);
-    throw new Error(
-      'Could not generate stablecoin compliance proofs for this wallet session. ' +
-      'Please reconnect your wallet and try again.'
-    );
-  }
+  return buildDefaultMerkleProofs();
 }
 
 /**
@@ -1308,7 +1178,7 @@ export function buildSellSharesInputs(
   sharesRecord: string,
   tokensDesired: bigint,
   maxSharesUsed: bigint,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
   feeConfig: Pick<MarketGovernanceConfig, 'protocolFeeBps' | 'creatorFeeBps' | 'lpFeeBps'> = {
     protocolFeeBps: FEES.PROTOCOL_FEE_BPS,
     creatorFeeBps: FEES.CREATOR_FEE_BPS,
@@ -1344,7 +1214,7 @@ export function buildAddLiquidityInputs(
   marketId: string,
   amount: bigint,
   expectedLpShares: bigint,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
   lpOwner?: string,
 ): { functionName: string; inputs: string[]; programId: string } {
   const lpNonce = generateRandomNonce();
@@ -1378,7 +1248,7 @@ export function buildAddLiquidityInputs(
 // Use withdraw_lp_resolved (resolved markets) or claim_lp_refund (cancelled markets)
 
 /**
- * Build inputs for dispute_resolution (v30 - bond always in ALEO)
+ * Build inputs for dispute_resolution (v30 - bond always in NEAR)
  * dispute_resolution(market_id, proposed_outcome, dispute_nonce)
  * Dispute bond uses credits.aleo/transfer_public_as_signer regardless of market token type.
  */
@@ -1406,7 +1276,7 @@ export function buildPlaceBetInputs(
   amount: bigint,
   outcome: 'yes' | 'no',
   expectedShares: bigint = 0n,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
   creditsRecord?: string,
 ): { functionName: string; inputs: string[] } {
   return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, tokenType, creditsRecord);
@@ -1419,7 +1289,7 @@ export function buildPlaceBetPrivateInputs(
   expectedShares: bigint,
   creditsRecord: string,
 ): { functionName: string; inputs: string[] } {
-  return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, 'ALEO', creditsRecord);
+  return buildBuySharesInputs(marketId, outcome === 'yes' ? 1 : 2, amount, expectedShares, 0n, 'NEAR', creditsRecord);
 }
 
 function toAMMReserves(pool: AMMPoolData): AMMReserves {
@@ -1500,7 +1370,7 @@ export function buildCloseMarketInputs(marketId: string): string[] {
 
 /**
  * v33: Build inputs for submit_outcome (Open Voting + Bond)
- * Anyone can submit outcome with MIN_RESOLUTION_BOND (1 ALEO)
+ * Anyone can submit outcome with MIN_RESOLUTION_BOND (1 NEAR)
  */
 export function buildSubmitOutcomeInputs(
   marketId: string,
@@ -1557,14 +1427,14 @@ export function buildFinalizeResolutionInputs(marketId: string): string[] {
 
 /**
  * Build inputs for withdraw_creator_fees (v37)
- * withdraw_creator_fees(market_id, expected_amount) — ALEO
+ * withdraw_creator_fees(market_id, expected_amount) — NEAR
  * withdraw_fees_usdcx(market_id, expected_amount) — USDCX
  * Transition calls transfer_public with expected_amount, finalize validates.
  */
 export function buildWithdrawCreatorFeesInputs(
   marketId: string,
   expectedAmount: bigint,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
 ): { functionName: string; inputs: string[] } {
   return {
     functionName: tokenType === 'USDCX' ? 'withdraw_fees_usdcx' : 'withdraw_creator_fees',
@@ -1633,37 +1503,25 @@ export async function diagnoseTransaction(txId: string): Promise<{
   functions?: string[];
   message?: string;
 }> {
-  if (!txId.startsWith('at1')) {
-    return { found: false, status: 'unknown', message: 'Not an on-chain transaction ID (UUID from wallet)' };
+  const known = knownTxOutcome(txId);
+  if (known) return { found: true, status: known, type: 'execute' };
+  if (!/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(txId)) {
+    return { found: false, status: 'unknown', message: 'Not a NEAR transaction hash' };
   }
-  try {
-    // Use /transaction/confirmed/{id} — returns status for BOTH accepted
-    // and rejected txs. The plain /transaction/{id} returns 404 for
-    // rejected txs (since they're stripped to fee-only).
-    const resp = await fetch(`${config.rpcUrl}/transaction/confirmed/${txId}`);
-    if (!resp.ok) {
-      return { found: false, status: 'unknown', message: `API returned ${resp.status}` };
+  // Private actions are sent by the relayer, public ones by the connected account.
+  const senders = [RELAYER_ACCOUNT, await currentAccountId().catch(() => null)].filter(Boolean) as string[];
+  for (const sender of senders) {
+    try {
+      const outcome = await txStatus(txId, sender);
+      const failure = outcomeFailure(outcome);
+      return failure
+        ? { found: true, status: 'rejected', type: 'execute', message: `Transaction failed on NEAR: ${failure}` }
+        : { found: true, status: 'accepted', type: 'execute' };
+    } catch {
+      // not sent by this account; try the next one
     }
-    const data = await resp.json();
-    const status = data?.status;
-
-    if (status === 'accepted') {
-      return { found: true, status: 'accepted', type: data?.type };
-    }
-    if (status === 'rejected') {
-      return {
-        found: true,
-        status: 'rejected',
-        type: data?.type,
-        message: 'Transaction was included on-chain but finalize ABORTED. ' +
-          'Most likely cause: assert failed (e.g. share.owner != self.caller, record already spent).',
-      };
-    }
-
-    return { found: true, status: 'unknown', type: data?.type };
-  } catch (err) {
-    return { found: false, status: 'unknown', message: String(err) };
   }
+  return { found: false, status: 'unknown', message: 'Transaction not found on NEAR testnet yet' };
 }
 
 /**
@@ -1815,7 +1673,7 @@ interface PendingMarket {
   questionText: string
   transactionId: string   // wallet event ID (shield_, UUID, or at1...)
   programId?: string
-  tokenType?: 'ALEO' | 'USDCX' | 'USAD'
+  tokenType?: 'NEAR' | 'USDCX' | 'USAD'
   createdAt: number
   retryCount?: number     // number of scan attempts (auto-remove after MAX_PENDING_RETRIES)
   status?: 'pending' | 'scanning' | 'likely_failed'
@@ -2196,63 +2054,6 @@ export function registerMarketTransaction(marketId: string, transactionId: strin
   }
 }
 
-/**
- * Load market IDs from indexer service
- * Returns empty array if indexer not available (user will create markets via UI)
- * Also loads question texts from the index
- */
-async function loadMarketIdsFromIndexer(): Promise<string[]> {
-  try {
-    const response = await fetch('/markets-index.json');
-    if (!response.ok) {
-      devLog('Indexer data not found - markets will be added when created via UI');
-      return KNOWN_MARKET_IDS; // Return current list (from localStorage)
-    }
-
-    const data = await response.json();
-    const marketIds = data.marketIds || [];
-    const markets = data.markets || [];
-
-    // Load question texts and outcome labels from indexed markets
-    for (const market of markets) {
-      const questionText = market.questionText || market.question;
-      const marketId = market.marketId || market.id;
-      if (questionText && marketId) {
-        // Register question text with both marketId and questionHash
-        QUESTION_TEXT_MAP[marketId] = questionText;
-        if (market.questionHash) {
-          QUESTION_TEXT_MAP[market.questionHash] = questionText;
-        }
-        devLog(`Loaded question text for ${marketId.slice(0, 16)}...`);
-      }
-      // Load outcome labels if present
-      if (marketId && market.outcomeLabels && Array.isArray(market.outcomeLabels)) {
-        OUTCOME_LABELS_MAP[marketId] = market.outcomeLabels;
-      }
-    }
-
-    // Persist merged question texts to localStorage
-    if (typeof window !== 'undefined' && markets.length > 0) {
-      try {
-        localStorage.setItem('veiled_markets_questions', JSON.stringify(QUESTION_TEXT_MAP));
-      } catch (e) {
-        devWarn('Failed to save question texts to localStorage:', e);
-      }
-    }
-
-    if (marketIds.length > 0) {
-      devLog(`✅ Loaded ${marketIds.length} markets from indexer`);
-      // Merge with existing IDs (in case some were created locally)
-      const allIds = new Set([...KNOWN_MARKET_IDS, ...marketIds]);
-      return Array.from(allIds);
-    }
-
-    return KNOWN_MARKET_IDS;
-  } catch (error) {
-    devLog('Indexer not available - using locally stored market IDs');
-    return KNOWN_MARKET_IDS;
-  }
-}
 
 /**
  * Market metadata (description + resolution source + thumbnail) from Supabase registry.
@@ -2291,235 +2092,49 @@ export function setMarketThumbnailUrl(marketId: string, url: string): void {
   MARKET_METADATA_MAP[marketId].thumbnailUrl = url;
 }
 
+
 /**
- * Load market registry from Supabase (shared across all users/devices).
- * Also populates question text and transaction ID maps.
+ * Registers what a NEAR market carries on chain (question, outcome labels, description, resolution source,
+ * thumbnail) under the keys the pages look it up by: the market id and the question hash.
  */
-async function loadMarketIdsFromSupabase(): Promise<string[]> {
-  if (!isSupabaseAvailable()) return [];
-  try {
-    const entries = await fetchMarketRegistry();
-    if (entries.length === 0) return [];
-
-    const ids: string[] = [];
-    const pendingToResolve: MarketRegistryEntry[] = [];
-
-    for (const entry of entries) {
-      // Pending entries have placeholder IDs like "pending_shield_xxx" or "pending_at1..."
-      // Queue them for resolution even if the wallet only stored a UUID/shield ID.
-      if (entry.market_id.startsWith('pending_')) {
-        if (entry.question_hash || entry.transaction_id) pendingToResolve.push(entry);
-        continue;
-      }
-      ids.push(entry.market_id);
-      // Populate question text mappings
-      if (entry.question_text) {
-        QUESTION_TEXT_MAP[entry.market_id] = entry.question_text;
-        if (entry.question_hash) {
-          QUESTION_TEXT_MAP[entry.question_hash] = entry.question_text;
-        }
-      }
-      // Populate transaction ID mappings
-      if (entry.transaction_id) {
-        MARKET_TX_MAP[entry.market_id] = entry.transaction_id;
-      }
-      // Populate metadata (description + resolution source + thumbnail)
-      if (entry.description || entry.resolution_source || entry.thumbnail_url) {
-        const meta = {
-          description: entry.description || undefined,
-          resolutionSource: entry.resolution_source || undefined,
-          thumbnailUrl: entry.thumbnail_url || undefined,
-        };
-        MARKET_METADATA_MAP[entry.market_id] = meta;
-        if (entry.question_hash) {
-          MARKET_METADATA_MAP[entry.question_hash] = meta;
-        }
-      }
-      // Populate IPFS CID mapping
-      if (entry.ipfs_cid) {
-        IPFS_CID_MAP[entry.market_id] = entry.ipfs_cid;
-        if (entry.question_hash) {
-          IPFS_CID_MAP[entry.question_hash] = entry.ipfs_cid;
-        }
-      }
-      // Populate outcome labels from Supabase
-      if (entry.outcome_labels) {
-        try {
-          const labels = JSON.parse(entry.outcome_labels);
-          if (Array.isArray(labels)) {
-            OUTCOME_LABELS_MAP[entry.market_id] = labels;
-            if (entry.question_hash) {
-              OUTCOME_LABELS_MAP[entry.question_hash] = labels;
-            }
-          }
-        } catch { /* invalid JSON, skip */ }
-      }
-    }
-
-    const applyResolvedRegistryEntry = (
-      entry: MarketRegistryEntry,
-      marketId: string,
-      transactionId: string,
-    ) => {
-      if (!KNOWN_MARKET_IDS.includes(marketId)) {
-        addKnownMarketId(marketId);
-      }
-      if (!ids.includes(marketId)) {
-        ids.push(marketId);
-      }
-
-      if (entry.question_text) {
-        QUESTION_TEXT_MAP[marketId] = entry.question_text;
-        if (entry.question_hash) {
-          QUESTION_TEXT_MAP[entry.question_hash] = entry.question_text;
-        }
-      }
-
-      if (transactionId) {
-        MARKET_TX_MAP[marketId] = transactionId;
-      }
-
-      if (entry.description || entry.resolution_source || entry.thumbnail_url) {
-        const meta = {
-          description: entry.description || undefined,
-          resolutionSource: entry.resolution_source || undefined,
-          thumbnailUrl: entry.thumbnail_url || undefined,
-        };
-        MARKET_METADATA_MAP[marketId] = meta;
-        if (entry.question_hash) {
-          MARKET_METADATA_MAP[entry.question_hash] = meta;
-        }
-      }
-
-      if (entry.ipfs_cid) {
-        IPFS_CID_MAP[marketId] = entry.ipfs_cid;
-        if (entry.question_hash) {
-          IPFS_CID_MAP[entry.question_hash] = entry.ipfs_cid;
-        }
-      }
-
-      if (entry.outcome_labels) {
-        try {
-          const labels = JSON.parse(entry.outcome_labels);
-          if (Array.isArray(labels)) {
-            OUTCOME_LABELS_MAP[marketId] = labels;
-            if (entry.question_hash) {
-              OUTCOME_LABELS_MAP[entry.question_hash] = labels;
-            }
-          }
-        } catch { /* invalid JSON, skip */ }
-      }
-    };
-
-    const resolvePendingRegistryEntry = async (
-      entry: MarketRegistryEntry,
-    ): Promise<{ marketId: string; transactionId: string } | null> => {
-      const questionText = entry.question_text || '';
-      const txId = entry.transaction_id || '';
-
-      if (txId.startsWith('at1')) {
-        const marketId = await resolveMarketFromTransaction(txId, questionText);
-        if (marketId) return { marketId, transactionId: txId };
-      }
-
-      if (!entry.question_hash) return null;
-
-      const ageMs = entry.created_at
-        ? Math.max(0, Date.now() - entry.created_at)
-        : 0;
-      const blocksToScan = Math.min(
-        2000,
-        Math.max(500, Math.floor(ageMs / config.msPerBlock) + 200),
-      );
-
-      for (const pid of getCreateMarketProgramIds()) {
-        const scanResult = await scanBlockchainForMarket(entry.question_hash, blocksToScan, pid);
-        if (scanResult) {
-          if (questionText) {
-            registerQuestionText(scanResult.marketId, questionText);
-            registerQuestionText(entry.question_hash, questionText);
-          }
-          registerMarketTransaction(scanResult.marketId, scanResult.transactionId);
-          return scanResult;
-        }
-      }
-
-      return null;
-    };
-
-    // Resolve pending Supabase entries in the background (non-blocking).
-    // Previously this was awaited sequentially, causing the dashboard to hang
-    // for minutes while scanning blocks for each pending market.
-    if (pendingToResolve.length > 0) {
-      devLog(`[Supabase] Scheduling background resolution of ${pendingToResolve.length} pending market(s)`);
-      const resolvePendingInBackground = async () => {
-        for (const entry of pendingToResolve.sort((a, b) => (b.created_at || 0) - (a.created_at || 0))) {
-          try {
-            const resolved = await resolvePendingRegistryEntry(entry);
-            if (!resolved) continue;
-
-            const { marketId, transactionId } = resolved;
-            devLog('[Supabase] Resolved pending market:', marketId.slice(0, 20));
-            applyResolvedRegistryEntry(entry, marketId, transactionId);
-
-            await registerMarketInRegistry({
-              market_id: marketId,
-              question_hash: entry.question_hash,
-              question_text: entry.question_text,
-              description: entry.description,
-              resolution_source: entry.resolution_source,
-              thumbnail_url: entry.thumbnail_url,
-              category: entry.category,
-              creator_address: entry.creator_address,
-              transaction_id: transactionId,
-              created_at: entry.created_at,
-              ipfs_cid: entry.ipfs_cid,
-              outcome_labels: entry.outcome_labels,
-            }).catch(() => {});
-
-            if (supabase) {
-              try {
-                await supabase.from('market_registry')
-                  .delete()
-                  .eq('market_id', entry.market_id);
-              } catch {
-                // Ignore cleanup failures for stale pending entries.
-              }
-            }
-          } catch (e) {
-            const ref = entry.transaction_id || entry.question_hash || entry.market_id;
-            devWarn('[Supabase] Failed to resolve pending market:', ref.slice(0, 20), e);
-          }
-        }
-      };
-      // Fire and forget — don't block market loading
-      resolvePendingInBackground().catch(e =>
-        devWarn('[Supabase] Background pending resolution failed:', e)
-      );
-    }
-
-    devLog(`[Supabase] Loaded ${ids.length} markets from registry`);
-    return ids;
-  } catch (error) {
-    devWarn('[Supabase] Failed to load market registry:', error);
-    return [];
+function registerNearMarketMetadata(m: NearMarket): string {
+  const id = aleoId(m.id);
+  const questionHash = /^\d+$/.test(m.question_hash) ? `${m.question_hash}field` : m.question_hash;
+  const meta = decodeMetadata(m.metadata);
+  if (meta.question) {
+    QUESTION_TEXT_MAP[id] = meta.question;
+    QUESTION_TEXT_MAP[questionHash] = meta.question;
   }
+  if (meta.outcomeLabels?.length) {
+    OUTCOME_LABELS_MAP[id] = meta.outcomeLabels;
+    OUTCOME_LABELS_MAP[questionHash] = meta.outcomeLabels;
+  }
+  const known = MARKET_METADATA_MAP[id] ?? {};
+  MARKET_METADATA_MAP[id] = {
+    description: meta.description ?? known.description,
+    resolutionSource: meta.resolutionSource ?? known.resolutionSource,
+    thumbnailUrl: meta.thumbnailUrl ?? known.thumbnailUrl,
+  };
+  return id;
+}
+
+/** Every market on the NEAR contract, with its metadata registered. Replaces the Aleo indexer + Supabase registry. */
+async function loadMarketIdsFromNear(): Promise<string[]> {
+  const markets = await listNearMarkets();
+  return markets.map(registerNearMarketMetadata);
 }
 
 /**
  * Initialize market IDs (call this on app startup).
- * Merges from 3 sources: localStorage, markets-index.json, and Supabase.
+ * NEAR: the contract lists every market, so it is the only source (no indexer file, no Supabase registry).
  */
 export async function initializeMarketIds(): Promise<void> {
-  // Fetch from both sources in parallel
-  const [indexedIds, supabaseIds] = await Promise.all([
-    loadMarketIdsFromIndexer(),
-    loadMarketIdsFromSupabase(),
-  ]);
-
-  // Merge all sources: localStorage (already in KNOWN_MARKET_IDS), index file, Supabase
-  const allIds = new Set([...KNOWN_MARKET_IDS, ...indexedIds, ...supabaseIds]);
-  KNOWN_MARKET_IDS = Array.from(allIds);
+  try {
+    KNOWN_MARKET_IDS = await loadMarketIdsFromNear();
+  } catch (err) {
+    devWarn('[Markets] NEAR market list unavailable, keeping the cached ids:', err);
+    KNOWN_MARKET_IDS = KNOWN_MARKET_IDS.filter((id) => /^\d{1,19}field$/.test(id));
+  }
 
   // Persist merged data to localStorage
   if (typeof window !== 'undefined') {
@@ -2694,6 +2309,13 @@ export async function fetchAllMarkets(): Promise<Array<{
 }>> {
   devLog('fetchAllMarkets: Fetching known markets...');
 
+  // The contract lists every market (and warms the per-market cache the readers below hit).
+  try {
+    KNOWN_MARKET_IDS = await loadMarketIdsFromNear();
+  } catch (err) {
+    devWarn('[Markets] NEAR market list unavailable, using the cached ids:', err);
+  }
+
   const results = await Promise.all(
     KNOWN_MARKET_IDS.map(id => fetchMarketById(id))
   );
@@ -2775,19 +2397,19 @@ export async function fetchMarketById(marketId: string) {
 /**
  * Get the correct redeem/refund function name based on token type (v37)
  */
-export function getRedeemFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
+export function getRedeemFunction(tokenType?: 'NEAR' | 'USDCX' | 'USAD'): string {
   if (tokenType === 'USAD') return 'redeem_shares_usad';
   if (tokenType === 'USDCX') return 'redeem_shares_usdcx';
   return 'redeem_shares';
 }
 
-export function getRefundFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
+export function getRefundFunction(tokenType?: 'NEAR' | 'USDCX' | 'USAD'): string {
   if (tokenType === 'USAD') return 'claim_refund_usad';
   if (tokenType === 'USDCX') return 'claim_refund_usdcx';
   return 'claim_refund';
 }
 
-export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): string {
+export function getLpRefundFunction(tokenType?: 'NEAR' | 'USDCX' | 'USAD'): string {
   if (tokenType === 'USAD') return 'claim_lp_refund_usad';
   if (tokenType === 'USDCX') return 'claim_lp_refund_usdcx';
   return 'claim_lp_refund';
@@ -2800,7 +2422,7 @@ export function getLpRefundFunction(tokenType?: 'ALEO' | 'USDCX' | 'USAD'): stri
 export function buildClaimLpRefundInputs(
   lpTokenRecord: string,
   minTokensOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
 ): { functionName: string; inputs: string[]; programId: string } {
   return {
     functionName: getLpRefundFunction(tokenType),
@@ -2816,7 +2438,7 @@ export function buildClaimLpRefundInputs(
 export function buildWithdrawLpResolvedInputs(
   lpTokenRecord: string,
   minTokensOut: bigint,
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR',
 ): { functionName: string; inputs: string[]; programId: string } {
   const functionName = tokenType === 'USAD' ? 'withdraw_lp_resolved_usad'
     : tokenType === 'USDCX' ? 'withdraw_lp_resolved_usdcx'

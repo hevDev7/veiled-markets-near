@@ -38,7 +38,7 @@ export function DashboardHeader() {
   const navigate = useNavigate()
   const location = useLocation()
   const { wallet, refreshBalance, balanceStatus, balanceError, lastBalanceRefreshAt } = useWalletStore()
-  const { disconnect: providerDisconnect } = useWallet()
+  const { disconnect: providerDisconnect, wallet: providerWallet } = useWallet()
   const [showDropdown, setShowDropdown] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -237,7 +237,7 @@ export function DashboardHeader() {
                   </span>
                   <div className="h-4 w-px bg-white/[0.06]" />
                   <span className="text-xs text-surface-400 tabular-nums">
-                    {formatCredits(totalBalance, 1)} ALEO
+                    {formatCredits(totalBalance, 1)} NEAR
                   </span>
                   <ChevronDown className={cn(
                     'w-3.5 h-3.5 text-surface-500 transition-transform duration-200',
@@ -267,7 +267,7 @@ export function DashboardHeader() {
                           Demo Mode
                         </div>
                         <p className="text-xs text-surface-400">
-                          Connect a real wallet for actual transactions on Aleo.
+                          Connect a real wallet for actual transactions on NEAR.
                         </p>
                       </div>
                     )}
@@ -277,7 +277,7 @@ export function DashboardHeader() {
                       <div className="flex items-center justify-between mb-1.5">
                         <p className="text-2xs text-surface-500 uppercase tracking-wider font-semibold">
                           {wallet.walletType === 'puzzle' && '🧩 Puzzle'}
-                          {wallet.walletType === 'leo' && '🦁 Leo'}
+                          {wallet.walletType === 'leo' && (providerWallet?.adapter?.name || 'NEAR Wallet')}
                           {wallet.walletType === 'shield' && '🛡️ Shield'}
                           {wallet.walletType === 'fox' && '🦊 Fox'}
                           {wallet.walletType === 'soter' && '🛡️ Soter'}
@@ -308,7 +308,7 @@ export function DashboardHeader() {
                       }}>
                       <div className="flex items-center justify-between mb-2">
                         <div>
-                          <p className="text-xs text-surface-400 font-medium">Total ALEO Balance</p>
+                          <p className="text-xs text-surface-400 font-medium">Total NEAR Balance</p>
                           <p className="text-[10px] text-surface-500 mt-0.5">{balanceUpdatedLabel}</p>
                         </div>
                         <button onClick={handleRefreshBalance} disabled={isRefreshingBalance} className="p-1 rounded-md hover:bg-white/[0.04] transition-colors disabled:opacity-50">
@@ -316,7 +316,7 @@ export function DashboardHeader() {
                         </button>
                       </div>
                       <p className="text-2xl font-display font-bold text-white mb-3 tabular-nums">
-                        {formatCredits(totalBalance)} <img src="/aleo-logo.png" alt="ALEO" className="w-4 h-4 rounded-full inline-block ml-1" />
+                        {formatCredits(totalBalance)} <img src="/near-logo.svg" alt="NEAR" className="w-4 h-4 rounded-full inline-block ml-1" />
                       </p>
                       {showPartialBalanceHint && (
                         <p className="text-[10px] text-surface-400 mb-3 leading-relaxed">
@@ -331,16 +331,16 @@ export function DashboardHeader() {
                       <div className="pt-3 space-y-1.5 border-t border-white/[0.04]">
                         <div className="flex justify-between items-center">
                           <p className="text-xs text-surface-500">Public</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.public)} <img src="/aleo-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.public)} <img src="/near-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                         {wallet.balance.private > 0n ? (
                           <div className="flex justify-between items-center">
                             <p className="text-xs text-surface-500">Private</p>
-                            <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.private)} <img src="/aleo-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                            <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.private)} <img src="/near-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                           </div>
                         ) : wallet.walletType === 'shield' ? (
                           <p className="text-2xs text-surface-500 mt-1.5 leading-relaxed">
-                            Private ALEO balance has not been detected from Shield yet. Try refresh after Shield finishes syncing records.
+                            Private NEAR balance has not been detected from Shield yet. Try refresh after Shield finishes syncing records.
                           </p>
                         ) : null}
                         <div className="flex justify-between items-center">
@@ -370,7 +370,7 @@ export function DashboardHeader() {
                         Settings
                       </Link>
                       {!wallet.isDemoMode && (
-                        <a href={`https://testnet.explorer.provable.com/address/${wallet.address}`}
+                        <a href={`https://testnet.nearblocks.io/address/${wallet.address}`}
                           target="_blank" rel="noopener noreferrer"
                           className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs text-surface-300 hover:text-white hover:bg-white/[0.04] transition-colors">
                           <ExternalLink className="w-4 h-4" />

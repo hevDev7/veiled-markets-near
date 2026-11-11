@@ -140,10 +140,10 @@ export const RESOLVER_TIER_LABELS: Record<ResolverTier, string> = {
 };
 
 export const RESOLVER_STAKE_REQUIREMENTS: Record<ResolverTier, bigint> = {
-  [RESOLVER_TIERS.BRONZE]: 50_000000n,      // 50 ALEO
-  [RESOLVER_TIERS.SILVER]: 150_000000n,      // 150 ALEO
-  [RESOLVER_TIERS.GOLD]: 500_000000n,        // 500 ALEO
-  [RESOLVER_TIERS.COMMITTEE]: 100_000000n,   // 100 ALEO
+  [RESOLVER_TIERS.BRONZE]: 50_000000n,      // 50 NEAR
+  [RESOLVER_TIERS.SILVER]: 150_000000n,      // 150 NEAR
+  [RESOLVER_TIERS.GOLD]: 500_000000n,        // 500 NEAR
+  [RESOLVER_TIERS.COMMITTEE]: 100_000000n,   // 100 NEAR
 };
 
 export interface ResolverProfile {
@@ -232,7 +232,7 @@ export type GovernanceEscalationStage =
 export interface GovernanceEscalationMarket {
   marketId: string;
   question: string;
-  tokenType: 'ALEO' | 'USDCX' | 'USAD';
+  tokenType: 'NEAR' | 'USDCX' | 'USAD';
   programId?: string;
   resolverAddress?: string;
   marketStatus: number;
@@ -276,16 +276,16 @@ export type GovernanceActorRole = 'resolver' | 'guardian';
 
 // --- Governance Stats ---
 export interface GovernanceStats {
-  totalSupply: bigint;           // Total ALEO held by governance program
-  circulatingSupply: bigint;     // Not used in v3 (ALEO is native)
-  totalStakedInVotes: bigint;    // ALEO locked in active votes
+  totalSupply: bigint;           // Total NEAR held by governance program
+  circulatingSupply: bigint;     // Not used in v3 (NEAR is native)
+  totalStakedInVotes: bigint;    // NEAR locked in active votes
   totalProposals: number;
   proposalsPassed: number;
   proposalsRejected: number;
   proposalsExecuted: number;
   proposalsVetoed: number;
-  totalVeilDistributedLP: bigint;      // ALEO distributed to LPs
-  totalVeilDistributedTrading: bigint; // ALEO distributed to traders
+  totalVeilDistributedLP: bigint;      // NEAR distributed to LPs
+  totalVeilDistributedTrading: bigint; // NEAR distributed to traders
   totalResolvers: number;              // Active resolver count
   pauseState: boolean;
   protocolFeeBps: bigint;
@@ -297,14 +297,14 @@ export interface GovernanceStats {
   guardianAddresses: string[];
 }
 
-// --- Constants (v2: pure ALEO governance) ---
-export const VEIL_DECIMALS = 6; // ALEO uses 6 decimals (microcredits)
-export const MIN_PROPOSAL_STAKE = 10_000000n;            // 10 ALEO
-export const MIN_VOTE_AMOUNT = 1_000000n;                // 1 ALEO
-export const RESOLVER_STAKE_BRONZE = 50_000000n;         // 50 ALEO
+// --- Constants (v2: pure NEAR governance) ---
+export const VEIL_DECIMALS = 6; // NEAR uses 6 decimals (microcredits)
+export const MIN_PROPOSAL_STAKE = 10_000000n;            // 10 NEAR
+export const MIN_VOTE_AMOUNT = 1_000000n;                // 1 NEAR
+export const RESOLVER_STAKE_BRONZE = 50_000000n;         // 50 NEAR
 export const VOTING_PERIOD_BLOCKS = 40320n;              // ~7 days
 export const GOVERNANCE_PROGRAM_ID = 'veiled_governance_v6.aleo';
-export const VEIL_TOKEN_PROGRAM_ID = 'credits.aleo'; // v2: uses native ALEO
+export const VEIL_TOKEN_PROGRAM_ID = 'credits.aleo'; // v2: uses native NEAR
 
 // --- Parameter Registry (keys for governance parameter updates) ---
 export const GOVERNANCE_PARAMS: Record<number, { name: string; currentValue: number; unit: string }> = {

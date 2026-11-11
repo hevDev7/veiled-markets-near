@@ -76,7 +76,7 @@ import { LiquidityPanel } from '@/components/LiquidityPanel'
 // DisputePanel removed in v33 — challenge integrated in ResolvePanel
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
-import { cn, formatCredits, formatPercentage, getTokenSymbol, isValidAleoAddress } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getTokenSymbol } from '@/lib/utils'
 import { getLeadingOutcome, getOutcomeSummaryForBet } from '@/lib/market-outcomes'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
@@ -87,6 +87,8 @@ import { devWarn } from '../lib/logger'
 import { getTurboSymbolFromMarketId } from '@/lib/turbo-client'
 import { TurboDetail } from './TurboDetail'
 import type { TurboSymbol } from '@/components/TurboMarketPanel'
+import { FEATURES, isChainTxId, VEILED_CONTRACT as NEAR_CONTRACT_ID } from '@/lib/near/config'
+import { PrivateStepText } from '@/components/PrivateStepText'
 
 const categoryNames: Record<number, string> = {
   1: 'Politics',
@@ -196,7 +198,7 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
       list.push({
         id: m.id,
         text: label,
-        token: m.tokenType ?? 'ALEO',
+        token: m.tokenType ?? 'NEAR',
         leadLabel: leadingOutcome.label,
         leadPercentage: leadingOutcome.percentage,
         styles: leadingOutcome.styles,
@@ -395,9 +397,9 @@ export function MarketDetail() {
     const fetchExtras = async () => {
       try {
         const [res, feesData, disputeData] = await Promise.all([
-          getMarketResolution(market.id, getProgramIdForMarket((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD', market.programId)),
-          getMarketFees(market.id, getProgramIdForMarket((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD', market.programId)),
-          getMarketDispute(market.id, getProgramIdForMarket((market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD', market.programId)),
+          getMarketResolution(market.id, getProgramIdForMarket((market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD', market.programId)),
+          getMarketFees(market.id, getProgramIdForMarket((market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD', market.programId)),
+          getMarketDispute(market.id, getProgramIdForMarket((market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD', market.programId)),
         ])
         if (res) setResolution(res)
         if (feesData) setFees(feesData)
@@ -431,7 +433,7 @@ export function MarketDetail() {
   }, [market?.id, market?.deadline, market?.status])
 
   const isExpired = market ? (liveExpired || market.timeRemaining === 'Ended' || market.status !== 1) : false
-  const tokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const tokenType = (market?.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
   const marketProgramId = market ? getProgramIdForMarket(tokenType, market.programId) : getProgramIdForToken(tokenType)
   const governanceConfig = useMarketGovernanceConfig(tokenType)
   const totalFeePercent = Number(
@@ -563,7 +565,7 @@ export function MarketDetail() {
         )
       }
 
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const tokenType = (market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
       const sellProgramId = getProgramIdForToken(tokenType)
       const feeConfig = await getMarketGovernanceConfig(sellProgramId)
       const { functionName, inputs, programId } = buildSellSharesInputs(
@@ -598,7 +600,7 @@ export function MarketDetail() {
           marketQuestion: market.question,
           sharesSold: sellPreview.maxSharesUsed,
           tokensReceived: sellPreview.netTokens,
-          tokenType: market.tokenType || 'ALEO',
+          tokenType: market.tokenType || 'NEAR',
         })
 
         const sellTxId = result.transactionId
@@ -648,8 +650,8 @@ export function MarketDetail() {
     try {
       const { fetchOutcomeShareRecords } = await import('@/lib/credits-record')
       // Use correct program ID based on market token type
-      const tokenType = market?.tokenType || 'ALEO'
-      const programId = getProgramIdForToken(tokenType as 'ALEO' | 'USDCX' | 'USAD')
+      const tokenType = market?.tokenType || 'NEAR'
+      const programId = getProgramIdForToken(tokenType as 'NEAR' | 'USDCX' | 'USAD')
       const records = await fetchOutcomeShareRecords(programId, market?.id)
       setWalletShareRecords(records)
       if (records.length === 0) {
@@ -821,11 +823,7 @@ export function MarketDetail() {
         )
       }
 
-      // Pre-flight: Balance verification
-      const feeInMicro = 1_500_000n
-      if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-        throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
-      }
+      // Pre-flight: no public gas check. Private trades are relayed, and the relayer pays the gas.
 
       if (isStablecoin) {
         const totalStablecoin = tokenType === 'USDCX'
@@ -845,14 +843,14 @@ export function MarketDetail() {
         const expectedShares = tradePreview.minShares
         let creditsRecord: string | undefined
 
-        if (tokenType === 'ALEO') {
-          // ALEO: buy_shares_private needs credits record
+        if (tokenType === 'NEAR') {
+          // NEAR: buy_shares_private needs credits record
           const { fetchCreditsRecord, reserveCreditsRecord, releaseCreditsRecord } = await import('@/lib/credits-record')
           const totalNeeded = Number(buyAmountMicro)
           const record = await fetchCreditsRecord(totalNeeded, wallet.address)
           if (!record) {
             throw new Error(
-              `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+              `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} NEAR. ` +
               `Private betting requires an unspent Credits record.`
             )
           }
@@ -867,7 +865,7 @@ export function MarketDetail() {
           buyAmountMicro,
           expectedShares,
           tradePreview.minShares,
-          tokenType as 'ALEO' | 'USDCX' | 'USAD',
+          tokenType as 'NEAR' | 'USDCX' | 'USAD',
           creditsRecord,
         )
         functionName = result.functionName
@@ -909,8 +907,8 @@ export function MarketDetail() {
             devWarn('[Trade] USAD PRIVATE buy — Token record + MerkleProof appended')
           } else {
             throw new Error(
-              `No private USAD Token record found with at least ${Number(buyAmountMicro) / 1_000_000} USAD. ` +
-              `Please unshield USAD in Shield Wallet first.`
+              `Not enough USAD for this trade (need ${Number(buyAmountMicro) / 1_000_000} USAD). ` +
+              `Add USAD to your wallet or private balance (Settings) first.`
             )
           }
         }
@@ -944,7 +942,7 @@ export function MarketDetail() {
           marketQuestion: market.question,
           sharesReceived: tradePreview.minShares,  // matches on-chain OutcomeShare.quantity (= expected_shares)
           lockedMultiplier: tradePreview.potentialPayout / (Number(buyAmountMicro) / 1_000_000),
-          tokenType: market.tokenType || 'ALEO',
+          tokenType: market.tokenType || 'NEAR',
         })
 
         setTxId(result.transactionId)
@@ -999,7 +997,8 @@ export function MarketDetail() {
     setTxId(null)
   }
 
-  const quickAmounts = [1, 5, 10, 25, 50, 100]
+  // Testnet-sized: faucet balances are a few NEAR, and the contract's minimum trade is 0.001.
+  const quickAmounts = [0.01, 0.05, 0.1, 0.5, 1, 5]
 
   // Determine which panels to show based on market status
   const showResolve = market.status !== MARKET_STATUS.CANCELLED && (
@@ -1243,7 +1242,7 @@ export function MarketDetail() {
                       : (market.totalLiquidity ?? 0n)
                   }
                   totalVolume={market.totalVolume}
-                  tokenSymbol={market.tokenType || 'ALEO'}
+                  tokenSymbol={market.tokenType || 'NEAR'}
                 />
 
               {/* Pool Breakdown Chart */}
@@ -1409,9 +1408,9 @@ export function MarketDetail() {
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Contract</span>
-                            <a href={`https://testnet.explorer.provable.com/program/${marketProgramId}`} target="_blank" rel="noopener noreferrer"
+                            <a href={`https://testnet.nearblocks.io/address/${NEAR_CONTRACT_ID}`} target="_blank" rel="noopener noreferrer"
                               className="text-brand-400 hover:text-brand-300 flex items-center gap-1 text-xs">
-                              {marketProgramId} <ExternalLink className="w-3 h-3" />
+                              {NEAR_CONTRACT_ID} <ExternalLink className="w-3 h-3" />
                             </a>
                           </div>
                         </div>
@@ -1598,10 +1597,10 @@ export function MarketDetail() {
                     <p className="text-surface-400 mb-4">
                       You bought {outcomeLabels[(selectedOutcome ?? 1) - 1]} shares with {buyAmount} {tokenSymbol}.
                     </p>
-                    {txId && txId.startsWith('at1') ? (
+                    {isChainTxId(txId) ? (
                       <>
                         <a
-                          href={`https://testnet.explorer.provable.com/transaction/${txId}`}
+                          href={`https://testnet.nearblocks.io/txns/${txId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-2"
@@ -1610,7 +1609,7 @@ export function MarketDetail() {
                           <ExternalLink className="w-4 h-4" />
                         </a>
                         <p className="text-xs text-surface-500 mb-4">
-                          Transaction may take 30-60 seconds to appear on explorer
+                          It may take a few seconds to appear on NearBlocks
                         </p>
                       </>
                     ) : txId ? (
@@ -1646,7 +1645,7 @@ export function MarketDetail() {
                     <Loader2 className="w-12 h-12 text-brand-400 animate-spin mx-auto mb-4" />
                     <h3 className="text-xl font-display font-bold text-white mb-2">Processing...</h3>
                     <p className="text-surface-400">
-                      Please confirm the transaction in your wallet.
+                      <PrivateStepText />
                     </p>
                   </div>
                 )}
@@ -1733,11 +1732,11 @@ export function MarketDetail() {
                         </div>
 
                         <div className="mt-2 space-y-1">
-                          {isWalletConnected && wallet.balance.public === 0n && (
+                          {isWalletConnected && wallet.balance.public === 0n && wallet.balance.private === 0n && (
                             <div className="flex items-start gap-2 p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 mb-1">
                               <AlertCircle className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
                               <p className="text-xs text-yellow-300 leading-relaxed">
-                                You have <strong>0 public ALEO</strong>. Trading requires public ALEO for gas.
+                                You have <strong>0 NEAR</strong>. Add testnet NEAR to your wallet to trade.
                               </p>
                             </div>
                           )}
@@ -1745,7 +1744,7 @@ export function MarketDetail() {
                             <p className="text-xs text-surface-500">
                               {isStablecoin
                                 ? `${tokenType} Balance: ${formatCredits(tokenType === 'USDCX' ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate : wallet.balance.usadPublic + wallet.balance.usadPrivate)} ${tokenType}`
-                                : <>Public Balance: {formatCredits(wallet.balance.public)} ALEO</>
+                                : <>Private balance: {formatCredits(wallet.balance.private)} NEAR · Wallet: {formatCredits(wallet.balance.public)} NEAR</>
                               }
                             </p>
                           ) : (
@@ -1753,9 +1752,9 @@ export function MarketDetail() {
                               Connect a wallet to see your available balance and submit an encrypted trade.
                             </p>
                           )}
-                          <Tooltip content="Gas fee paid to Aleo network validators for processing your transaction" side="bottom">
+                          <Tooltip content="A relayer submits your proof and pays the NEAR gas, so your account never signs the trade" side="bottom">
                             <p className="text-xs text-surface-600 cursor-help w-fit">
-                              Transaction fee: 1.5 ALEO (from public balance)
+                              Network fee: none (the relayer pays gas)
                             </p>
                           </Tooltip>
                           <p className="text-xs text-surface-500">
@@ -1859,7 +1858,7 @@ export function MarketDetail() {
                     </button>
 
                     {/* Add to Parlay Button */}
-                    {selectedOutcome && market && market.status === 1 && (
+                    {FEATURES.parlays && selectedOutcome && market && market.status === 1 && (
                       <ParlayButton market={market} selectedOutcome={selectedOutcome} outcomeLabels={outcomeLabels} />
                     )}
 
@@ -2188,7 +2187,7 @@ export function MarketDetail() {
                         </button>
 
                         <p className="text-xs text-surface-500 text-center">
-                          Shares are burned and tokens transferred to your public balance.
+                          Shares are sold through the relayer, and the proceeds go to your private balance.
                         </p>
                       </div>
                     )}
@@ -2198,7 +2197,7 @@ export function MarketDetail() {
                       <div className="text-center py-8">
                         <Loader2 className="w-12 h-12 text-brand-400 animate-spin mx-auto mb-4" />
                         <h3 className="text-xl font-display font-bold text-white mb-2">Processing...</h3>
-                        <p className="text-surface-400">Please confirm the transaction in your wallet.</p>
+                        <p className="text-surface-400"><PrivateStepText fallback="Preparing your private trade…" /></p>
                       </div>
                     )}
 
@@ -2226,9 +2225,9 @@ export function MarketDetail() {
                         <p className="text-surface-400 mb-4">
                           You withdrew {sellTokensDesired} {tokenSymbol} from the pool.
                         </p>
-                        {sellTxId && sellTxId.startsWith('at1') && (
+                        {isChainTxId(sellTxId) && (
                           <a
-                            href={`https://testnet.explorer.provable.com/transaction/${sellTxId}`}
+                            href={`https://testnet.nearblocks.io/txns/${sellTxId}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-2 text-brand-400 hover:text-brand-300 mb-4"
@@ -2266,7 +2265,7 @@ export function MarketDetail() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Market ID</span>
-                    <CopyableText text={market.id} displayText={`${market.id.slice(0, 8)}...${market.id.slice(-6)}`} />
+                    <CopyableText text={market.id} displayText={market.id.length > 16 ? `${market.id.slice(0, 8)}...${market.id.slice(-6)}` : market.id} />
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Created</span>
@@ -2288,10 +2287,10 @@ export function MarketDetail() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Creator</span>
-                    {isValidAleoAddress(market.creator) ? (
-                      <a href={`https://testnet.explorer.provable.com/address/${market.creator}`} target="_blank" rel="noopener noreferrer"
+                    {market.creator ? (
+                      <a href={`https://testnet.nearblocks.io/address/${market.creator}`} target="_blank" rel="noopener noreferrer"
                         className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
-                        {market.creator?.slice(0, 8)}...{market.creator?.slice(-4)} <ExternalLink className="w-3 h-3" />
+                        {market.creator.length > 24 ? `${market.creator.slice(0, 8)}...${market.creator.slice(-4)}` : market.creator} <ExternalLink className="w-3 h-3" />
                       </a>
                     ) : (
                       <span className="text-xs text-surface-400">{market.creator?.slice(0, 8)}...{market.creator?.slice(-4)}</span>
@@ -2307,15 +2306,15 @@ export function MarketDetail() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Contract</span>
-                    <a href={`https://testnet.explorer.provable.com/program/${marketProgramId}`} target="_blank" rel="noopener noreferrer"
+                    <a href={`https://testnet.nearblocks.io/address/${NEAR_CONTRACT_ID}`} target="_blank" rel="noopener noreferrer"
                       className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
-                      {marketProgramId.slice(0, 20)}... <ExternalLink className="w-3 h-3" />
+                      {NEAR_CONTRACT_ID} <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
                 </div>
 
                 {/* Verify On-Chain */}
-                {market.transactionId && market.transactionId.startsWith('at1') && (
+                {isChainTxId(market.transactionId) && (
                   <a
                     href={`${config.explorerUrl}/transaction/${market.transactionId}`}
                     target="_blank"

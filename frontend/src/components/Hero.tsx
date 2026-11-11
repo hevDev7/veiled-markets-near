@@ -34,7 +34,7 @@ export function Hero() {
           >
             <Sparkles className="w-4 h-4 text-brand-400" />
             <span className="text-sm font-medium text-brand-300">
-              Built on Aleo • Zero-Knowledge Privacy
+              Built on NEAR • Zero-Knowledge Privacy
             </span>
           </motion.div>
 

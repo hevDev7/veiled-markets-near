@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED GOVERNANCE — Zustand Store
 // ============================================================================
-// Manages governance state: proposals, ALEO staking, rewards, delegation
+// Manages governance state: proposals, NEAR staking, rewards, delegation
 // ============================================================================
 
 import { create } from 'zustand';

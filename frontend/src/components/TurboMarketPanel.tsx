@@ -36,6 +36,7 @@ import {
 } from '@/lib/turbo-client'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useBetsStore, useWalletStore } from '@/lib/store'
+import { isChainTxId } from '@/lib/near/config'
 
 // Note: price data now streams from the BACKEND operator (/stream endpoint),
 // not directly from Pyth Hermes. This ensures all users see identical prices
@@ -382,7 +383,7 @@ export function TurboMarketPanel({
     Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000)),
   )
   const [chartType, setChartType] = useState<'line' | 'candle'>('line')
-  const [betAmount, setBetAmount] = useState('1')
+  const [betAmount, setBetAmount] = useState('0.1')
   const [busy, setBusy] = useState<null | 'UP' | 'DOWN'>(null)
   /**
    * Sidebar FAMM-style layout uses a 2-step flow: user picks UP/DOWN first
@@ -977,7 +978,7 @@ export function TurboMarketPanel({
       const creditsRecord = await fetchCreditsRecord(Number(amountMicro), expectedOwner)
       if (!creditsRecord) {
         throw new Error(
-          `No Credits record with at least ${amountAleo.toFixed(2)} ALEO found. ` +
+          `No Credits record with at least ${amountAleo.toFixed(2)} NEAR found. ` +
           `Private betting requires an unspent Credits record owned by the active signer (not just public balance).`
         )
       }
@@ -1067,7 +1068,7 @@ export function TurboMarketPanel({
           type: 'buy',
           marketQuestion: `${symbol} Up or Down — 5 Minutes`,
           sharesReceived: expectedShares,
-          tokenType: 'ALEO',
+          tokenType: 'NEAR',
           claimed: false,
         })
       } finally {
@@ -1291,15 +1292,15 @@ export function TurboMarketPanel({
                   <div className="text-center space-y-1">
                     <p className="text-base font-bold text-white">Transaction Pending</p>
                     <p className="text-sm text-surface-400">
-                      Your {txSide} bet of {parseFloat(betAmount || '0').toFixed(2)} ALEO has been submitted.
+                      Your {txSide} bet of {parseFloat(betAmount || '0').toFixed(2)} NEAR has been submitted.
                     </p>
                     <p className="text-xs text-surface-500">
                       Waiting for on-chain confirmation. This may take 30s - 3min.
                     </p>
                   </div>
-                  {lastTxId && lastTxId.startsWith('at1') && (
+                  {isChainTxId(lastTxId) && (
                     <a
-                      href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                      href={`https://testnet.nearblocks.io/txns/${lastTxId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-brand-300 hover:text-brand-200 underline"
@@ -1338,9 +1339,9 @@ export function TurboMarketPanel({
                     {txPhase === 'confirmed' && `${txSide} bet confirmed ✓`}
                     {txPhase === 'failed' && (errorMsg || 'Transaction failed')}
                   </span>
-                  {lastTxId && lastTxId.startsWith('at1') && (
+                  {isChainTxId(lastTxId) && (
                     <a
-                      href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                      href={`https://testnet.nearblocks.io/txns/${lastTxId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline hover:opacity-80 flex-shrink-0"
@@ -1418,25 +1419,25 @@ export function TurboMarketPanel({
               {/* Amount input */}
               {selectedSide && (
                 <div>
-                  <label className="text-sm text-surface-400 mb-2 block">Amount (ALEO)</label>
+                  <label className="text-sm text-surface-400 mb-2 block">Amount (NEAR)</label>
                   <div className="relative">
                     <input
                       type="number"
-                      min="0.01"
-                      step="0.1"
+                      min="0.001"
+                      step="0.01"
                       value={betAmount}
                       onChange={(e) => setBetAmount(e.target.value)}
                       placeholder="0.00"
                       className="w-full px-4 py-3 pr-14 rounded-lg bg-surface-800/40 border border-surface-700/30 text-white text-base font-semibold tabular-nums focus:outline-none focus:border-brand-400/50"
                     />
                     <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-surface-400 font-medium">
-                      ALEO
+                      NEAR
                     </span>
                   </div>
 
                   {/* Quick amount buttons */}
                   <div className="flex flex-wrap gap-2 mt-3">
-                    {[1, 5, 10, 25, 50, 100].map(v => (
+                    {[0.01, 0.05, 0.1, 0.25, 0.5, 1].map(v => (
                       <button
                         key={v}
                         onClick={() => setBetAmount(String(v))}
@@ -1456,11 +1457,11 @@ export function TurboMarketPanel({
                   <div className="mt-3 space-y-1 text-[11px] text-surface-500">
                     <div className="flex items-center justify-between">
                       <span>Protocol Fee (0.5%)</span>
-                      <span className="tabular-nums text-surface-400">{(fee / 1_000_000).toFixed(4)} ALEO</span>
+                      <span className="tabular-nums text-surface-400">{(fee / 1_000_000).toFixed(4)} NEAR</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Minimum trade</span>
-                      <span className="tabular-nums text-surface-400">0.001 ALEO</span>
+                      <span className="tabular-nums text-surface-400">0.001 NEAR</span>
                     </div>
                     {amountAleo > 0 && selectedPayout > 0 && (
                       <div className="flex items-center justify-between pt-1 border-t border-surface-700/30">
@@ -1471,7 +1472,7 @@ export function TurboMarketPanel({
                             activeSide === 'UP' ? 'text-emerald-400' : 'text-rose-400',
                           )}
                         >
-                          {selectedPayout.toFixed(3)} ALEO
+                          {selectedPayout.toFixed(3)} NEAR
                         </span>
                       </div>
                     )}
@@ -1524,7 +1525,7 @@ export function TurboMarketPanel({
                 <div className="text-[11px] text-emerald-400 text-center">
                   Submitted:{' '}
                   <a
-                    href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                    href={`https://testnet.nearblocks.io/txns/${lastTxId}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="underline"
@@ -1543,7 +1544,7 @@ export function TurboMarketPanel({
           {/* Total pool tiny indicator */}
           {totalPool > 0 && (
             <div className="text-[10px] text-surface-500 text-center tabular-nums">
-              Pool: {(totalPool / 1_000_000).toFixed(2)} ALEO
+              Pool: {(totalPool / 1_000_000).toFixed(2)} NEAR
             </div>
           )}
 
@@ -1569,9 +1570,9 @@ export function TurboMarketPanel({
                 {txPhase === 'confirmed' && `${txSide} bet confirmed on-chain ✓`}
                 {txPhase === 'failed' && (errorMsg || 'Transaction failed')}
               </span>
-              {lastTxId && lastTxId.startsWith('at1') && (
+              {isChainTxId(lastTxId) && (
                 <a
-                  href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                  href={`https://testnet.nearblocks.io/txns/${lastTxId}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="underline hover:opacity-80"
@@ -1661,16 +1662,16 @@ export function TurboMarketPanel({
             <div className="bg-surface-800/40 border border-surface-700/30 rounded-lg px-1.5 py-1 flex flex-col items-center justify-center gap-0.5 min-w-[78px]">
               <input
                 type="number"
-                min="0.01"
-                step="0.1"
+                min="0.001"
+                step="0.01"
                 value={betAmount}
                 onChange={(e) => setBetAmount(e.target.value)}
                 className="w-12 bg-transparent text-xs text-white font-bold tabular-nums text-center focus:outline-none leading-tight"
-                placeholder="1"
+                placeholder="0.1"
               />
-              <span className="text-[8px] text-surface-400 leading-none">ALEO</span>
+              <span className="text-[8px] text-surface-400 leading-none">NEAR</span>
               <div className="flex gap-0.5">
-                {[1, 5, 10].map(v => (
+                {[0.01, 0.1, 0.5].map(v => (
                   <button
                     key={v}
                     onClick={() => setBetAmount(String(v))}
@@ -1718,7 +1719,7 @@ export function TurboMarketPanel({
             <div className="text-[11px] text-emerald-400">
               Submitted:{' '}
               <a
-                href={`https://testnet.explorer.provable.com/transaction/${lastTxId}`}
+                href={`https://testnet.nearblocks.io/txns/${lastTxId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline"
@@ -1853,7 +1854,7 @@ export function TurboMarketPanel({
                   </span>
                   {eligible && (
                     <span className="text-emerald-300 ml-2">
-                      → {(Number(payout) / 1_000_000).toFixed(3)} ALEO
+                      → {(Number(payout) / 1_000_000).toFixed(3)} NEAR
                     </span>
                   )}
                 </div>
@@ -1881,7 +1882,7 @@ export function TurboMarketPanel({
             <div className="text-[11px] text-emerald-400">
               Submitted:{' '}
               <a
-                href={`https://explorer.provable.com/testnet/transaction/${lastTxId}`}
+                href={`https://testnet.nearblocks.io/txns/${lastTxId}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline"

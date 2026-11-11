@@ -1,5 +1,5 @@
 // ============================================================================
-// USE ALEO PROVER HOOK
+// USE NEAR PROVER HOOK
 // ============================================================================
 // React hook for in-browser ZK proving using @provablehq/sdk ProgramManager.
 // Loads SDK lazily on first use. WASM uses internal threads for parallelism.

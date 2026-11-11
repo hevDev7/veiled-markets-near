@@ -43,13 +43,13 @@ const DEFAULT_MIN_STAKE = 100000n
 const DEFAULT_MAX_SINGLE_PAYOUT = 100_000_000_000n
 const DEFAULT_MAX_COMBINED_MULTIPLIER = 10000n
 const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = {
-  ALEO: 1,
+  NEAR: 1,
   USDCX: 2,
   USAD: 3,
 }
 
 const TOKEN_ID_TO_TYPE: Record<number, ParlayTokenType> = {
-  1: 'ALEO',
+  1: 'NEAR',
   2: 'USDCX',
   3: 'USAD',
 }

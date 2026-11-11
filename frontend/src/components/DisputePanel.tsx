@@ -112,24 +112,24 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
     setError(null)
 
     try {
-      // Dispute bond is always in ALEO regardless of market token type
+      // Dispute bond is always in NEAR regardless of market token type
       const aleoBalance = wallet.balance.public
 
       if (aleoBalance < MIN_DISPUTE_BOND + 700_000n) {
         throw new Error(
-          `Insufficient ALEO balance. You need at least ${formatCredits(MIN_DISPUTE_BOND)} ALEO ` +
+          `Insufficient NEAR balance. You need at least ${formatCredits(MIN_DISPUTE_BOND)} NEAR ` +
           'as a dispute bond plus gas fees.'
         )
       }
 
-      // Dispute bond is always in ALEO regardless of market token type
+      // Dispute bond is always in NEAR regardless of market token type
       const { functionName, inputs } = buildDisputeResolutionInputs(
         market.id,
         proposedOutcome,
       )
 
-      const tokenType: 'ALEO' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
-        : market.tokenType === 'USAD' ? 'USAD' : 'ALEO'
+      const tokenType: 'NEAR' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
+        : market.tokenType === 'USAD' ? 'USAD' : 'NEAR'
       const result = await executeTransaction({
         program: getProgramIdForToken(tokenType),
         function: functionName,
@@ -225,7 +225,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
             <h4 className="text-lg font-semibold text-white mb-2">Dispute Filed</h4>
             <p className="text-sm text-surface-400 mb-4">
               Your dispute has been submitted to the network. The bond of{' '}
-              {formatCredits(MIN_DISPUTE_BOND)} ALEO has been locked.
+              {formatCredits(MIN_DISPUTE_BOND)} NEAR has been locked.
             </p>
             <TransactionLink
               transactionId={transactionId}
@@ -276,7 +276,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                   <div className="flex justify-between items-center">
                     <span className="text-surface-400 text-sm">Dispute Bond Required</span>
                     <span className="text-white font-semibold">
-                      {formatCredits(MIN_DISPUTE_BOND)} ALEO
+                      {formatCredits(MIN_DISPUTE_BOND)} NEAR
                     </span>
                   </div>
                   <p className="text-xs text-surface-500 mt-2">
@@ -292,7 +292,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                     <p className="text-sm font-medium text-yellow-300">Important</p>
                     <p className="text-xs text-surface-400 mt-1">
                       Filing a dispute triggers the resolver escalation process. Your{' '}
-                      {formatCredits(MIN_DISPUTE_BOND)} ALEO bond will be locked.
+                      {formatCredits(MIN_DISPUTE_BOND)} NEAR bond will be locked.
                       Only file a dispute if you believe the current ruling is incorrect and should advance to the next review lane.
                     </p>
                   </div>
@@ -323,7 +323,7 @@ export function DisputePanel({ market, resolution }: DisputePanelProps) {
                   ) : (
                     <>
                       <ShieldAlert className="w-5 h-5" />
-                      <span>File Dispute ({formatCredits(MIN_DISPUTE_BOND)} ALEO bond)</span>
+                      <span>File Dispute ({formatCredits(MIN_DISPUTE_BOND)} NEAR bond)</span>
                     </>
                   )}
                 </button>

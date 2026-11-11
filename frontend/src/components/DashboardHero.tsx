@@ -115,7 +115,7 @@ function MarketSlide({
           <div className="flex flex-wrap items-center gap-2 text-xs text-surface-500 lg:max-w-[30%] lg:justify-end lg:pl-4">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
               <TrendingUp className="h-3.5 w-3.5" />
-              <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}</span>
+              <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}</span>
             </span>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
               <span className="tabular-nums">{market.totalBets}</span>
@@ -406,7 +406,7 @@ export function DashboardHero({
   )
 
   const aleoVolume = useMemo(
-    () => markets.filter(m => !m.tokenType || m.tokenType === 'ALEO').reduce((sum, m) => sum + m.totalVolume, 0n),
+    () => markets.filter(m => !m.tokenType || m.tokenType === 'NEAR').reduce((sum, m) => sum + m.totalVolume, 0n),
     [markets]
   )
 
@@ -646,9 +646,9 @@ export function DashboardHero({
 
           <div className="divide-y divide-white/[0.04]">
             <StatRow
-              icon={<img src="/aleo-logo.png" alt="ALEO" className="h-4 w-4 rounded-full object-contain" />}
-              label="ALEO Volume"
-              value={`${formatCredits(aleoVolume)} ALEO`}
+              icon={<img src="/near-logo.svg" alt="NEAR" className="h-4 w-4 rounded-full object-contain" />}
+              label="NEAR Volume"
+              value={`${formatCredits(aleoVolume)} NEAR`}
               color="text-brand-400"
             />
             <StatRow
@@ -715,7 +715,7 @@ export function DashboardHero({
         <div className="mt-auto pt-3">
           <div className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.05] bg-white/[0.02] px-4 py-3 text-xs text-surface-500">
             <div className="h-1.5 w-1.5 rounded-full bg-yes-400 animate-pulse" />
-            <span>Live on Aleo Testnet</span>
+            <span>Live on NEAR Testnet</span>
           </div>
         </div>
       </div>

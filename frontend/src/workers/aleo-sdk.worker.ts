@@ -437,7 +437,7 @@ async function handleCommitBet(req: WorkerRequest) {
     if (!recordPlaintext) {
       throw new Error(
         'No private Credits record found with sufficient balance. ' +
-        'Commit-reveal requires private (shielded) ALEO credits. ' +
+        'Commit-reveal requires private (shielded) NEAR credits. ' +
         'Shield credits first using Leo Wallet → Send → Private transfer to your own address.'
       )
     }

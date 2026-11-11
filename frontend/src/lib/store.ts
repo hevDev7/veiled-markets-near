@@ -80,7 +80,7 @@ export interface Market {
   resolutionSource?: string
   tags?: string[]
   transactionId?: string
-  tokenType?: 'ALEO' | 'USDCX' | 'USAD'
+  tokenType?: 'NEAR' | 'USDCX' | 'USAD'
   thumbnailUrl?: string
 }
 
@@ -112,7 +112,7 @@ export interface Bet {
   payoutAmount?: bigint        // Calculated payout when market resolves (won bets)
   winningOutcome?: string      // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
-  tokenType?: 'ALEO' | 'USDCX' | 'USAD' // v12: token denomination
+  tokenType?: 'NEAR' | 'USDCX' | 'USAD' // v12: token denomination
 }
 
 /** Convert 1-indexed outcome number to string key */
@@ -194,7 +194,6 @@ const initialWalletState: WalletState = {
 // Track listener cleanup functions to prevent duplicate listeners on reconnect
 const _listenerCleanups: (() => void)[] = []
 const _activeBalanceRefreshIds = new Map<string, number>()
-const _privateBalanceZeroMisses = new Map<string, { private: number; usdcxPrivate: number; usadPrivate: number }>()
 let _balanceRefreshSequence = 0
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -210,38 +209,6 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
         reject(error)
       })
   })
-}
-
-function getPrivateBalanceMissState(address: string) {
-  const existing = _privateBalanceZeroMisses.get(address)
-  if (existing) return existing
-  const fresh = { private: 0, usdcxPrivate: 0, usadPrivate: 0 }
-  _privateBalanceZeroMisses.set(address, fresh)
-  return fresh
-}
-
-function stabilizeShieldPrivateBalance(
-  address: string,
-  asset: 'private' | 'usdcxPrivate' | 'usadPrivate',
-  detected: bigint,
-  previous: bigint,
-) {
-  const misses = getPrivateBalanceMissState(address)
-
-  if (detected > 0n) {
-    misses[asset] = 0
-    return { value: detected, preserved: false }
-  }
-
-  if (previous > 0n) {
-    misses[asset] += 1
-    if (misses[asset] < 2) {
-      return { value: previous, preserved: true }
-    }
-  }
-
-  misses[asset] = 0
-  return { value: detected, preserved: false }
 }
 
 export const useWalletStore = create<WalletStore>((set, get) => ({
@@ -356,7 +323,6 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     import('./record-scanner').then(({ resetScanner }) => resetScanner()).catch(() => {})
     if (disconnectAddress) {
       _activeBalanceRefreshIds.delete(disconnectAddress)
-      _privateBalanceZeroMisses.delete(disconnectAddress)
     }
     set({
       wallet: initialWalletState,
@@ -406,7 +372,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
     try {
       // Public balances are fast and reliable, so publish them immediately.
       const [publicResult, usdcxPublicResult, usadPublicResult] = await Promise.allSettled([
-        withTimeout(fetchPublicBalance(refreshAddress), 6_000, 'ALEO public balance'),
+        withTimeout(fetchPublicBalance(refreshAddress), 6_000, 'NEAR public balance'),
         withTimeout(fetchUsdcxPublicBalance(refreshAddress), 6_000, 'USDCX public balance'),
         withTimeout(fetchUsdcxPublicBalance(refreshAddress, 'test_usad_stablecoin.aleo'), 6_000, 'USAD public balance'),
       ])
@@ -416,7 +382,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       const usadPublic = usadPublicResult.status === 'fulfilled' ? usadPublicResult.value : currentBalance.usadPublic
 
       const publicErrors: string[] = []
-      if (publicResult.status === 'rejected') publicErrors.push('ALEO public balance unavailable')
+      if (publicResult.status === 'rejected') publicErrors.push('NEAR public balance unavailable')
       if (usdcxPublicResult.status === 'rejected') publicErrors.push('USDCX public balance unavailable')
       if (usadPublicResult.status === 'rejected') publicErrors.push('USAD public balance unavailable')
       const hasPublicErrors = publicErrors.length > 0
@@ -432,474 +398,29 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
         publicErrors.length > 0 ? publicErrors.join(' · ') : null,
       )
 
-      // Try to get private balance from credits records
-      let privateBalance = 0n
-
-      // Helper: parse microcredits from various record text formats
-      const parseMicrocredits = (text: string): bigint => {
-        // Try patterns: microcredits: 1000000u64, "microcredits": "1000000u64", microcredits: 1000000
-        const patterns = [
-          /microcredits["\s:]+(\d+)u64/,
-          /microcredits["\s:]+(\d+)/,
-          /"microcredits"\s*:\s*"?(\d+)/,
-        ]
-        for (const pattern of patterns) {
-          const match = text.match(pattern)
-          if (match) return BigInt(match[1])
-        }
-        return 0n
+      // NEAR: the private balance is this account's unspent notes in the shielded pool, found and decrypted in
+      // this browser with keys derived from one wallet signature (made when the wallet connects).
+      const { refreshNotes, privateBalance: notesBalance } = await import('./near/private')
+      try {
+        await withTimeout(refreshNotes(false), 20_000, 'NEAR private note sync')
+      } catch (err) {
+        devWarn('[Balance] Private note sync failed; showing the last synced notes:', err)
       }
-
-      const normalizeRecords = (records: any): any[] => (
-        Array.isArray(records) ? records : ((records as any)?.records || [])
-      )
-
-      const extractRecordText = (record: any, requiredField: 'microcredits' | 'amount'): string | null => {
-        if (!record) return null
-        if (typeof record === 'string') {
-          return record.includes(requiredField) ? record : null
-        }
-        if (typeof record !== 'object') return null
-
-        const directFields = [
-          record.plaintext,
-          record.text,
-          record.content,
-          record.recordPlaintext,
-          record.record_plaintext,
-          record.data,
-          record.record,
-        ]
-
-        for (const field of directFields) {
-          if (field == null) continue
-          const text = String(field)
-          if (text.includes(requiredField)) return text
-        }
-
-        for (const key of Object.keys(record)) {
-          const value = record[key]
-          if (value == null) continue
-          const text = String(value)
-          if (text.includes(requiredField) && text.includes('{')) return text
-        }
-
-        return null
-      }
-
-      const extractRecordCiphertext = (record: any): string | null => {
-        if (!record || typeof record !== 'object') return null
-        const candidates = [
-          record.ciphertext,
-          record.recordCiphertext,
-          record.record_ciphertext,
-        ]
-        for (const candidate of candidates) {
-          if (typeof candidate === 'string' && candidate.length > 0) {
-            return candidate
-          }
-        }
-        return null
-      }
-
-      // Helper: check if record is spent
-      const isRecordSpent = (record: any): boolean => {
-        if (typeof record === 'object' && record !== null) {
-          if (record.spent === true || record.is_spent === true) return true
-          if (record.spent === 'true' || record.is_spent === 'true') return true
-        }
-        return false
-      }
-
-      // Determine connected wallet type for prioritized detection
-      const connectedType = wallet.walletType
-      devLog('[Balance] Connected wallet type:', connectedType)
-
-      // Helper: extract private balance from records array
-      const sumRecordsBalance = (records: any, label: string): bigint => {
-        let sum = 0n
-        const recordsArr = normalizeRecords(records)
-        if (recordsArr.length === 0) {
-          devLog(`[Balance] ${label}: 0 records returned`)
-          return 0n
-        }
-        let spentCount = 0
-        let unspentCount = 0
-        for (let i = 0; i < recordsArr.length; i++) {
-          const record = recordsArr[i]
-          if (isRecordSpent(record)) {
-            spentCount++
-            continue
-          }
-          unspentCount++
-          const text = extractRecordText(record, 'microcredits') || JSON.stringify(record)
-          const mc = parseMicrocredits(String(text))
-          sum += mc
-        }
-        devLog(`[Balance] ${label}: ${recordsArr.length} records (${unspentCount} unspent, ${spentCount} spent) = ${Number(sum) / 1_000_000} ALEO`)
-        return sum
-      }
-
-      const sumDecryptedCreditsRecords = async (records: any, label: string): Promise<bigint> => {
-        const decryptFn = (window as any).__aleoDecrypt
-        if (typeof decryptFn !== 'function') return 0n
-
-        const recordsArr = normalizeRecords(records)
-        if (recordsArr.length === 0) return 0n
-
-        let sum = 0n
-        let decryptedCount = 0
-
-        for (const record of recordsArr) {
-          if (isRecordSpent(record)) continue
-
-          const plaintext = extractRecordText(record, 'microcredits')
-          if (plaintext) {
-            sum += parseMicrocredits(plaintext)
-            continue
-          }
-
-          const ciphertext = extractRecordCiphertext(record)
-          if (!ciphertext) continue
-
-          try {
-            const decrypted = await withTimeout(
-              Promise.resolve(decryptFn(ciphertext)),
-              3_500,
-              `${label} decrypt`,
-            )
-            const text = String(decrypted)
-            sum += parseMicrocredits(text)
-            decryptedCount++
-          } catch (error: any) {
-            devLog(`[Balance] ${label} decrypt failed:`, error?.message || error)
-          }
-        }
-
-        if (decryptedCount > 0) {
-          devLog(`[Balance] ${label}: decrypted ${decryptedCount} record(s) = ${Number(sum) / 1_000_000} ALEO`)
-        }
-
-        return sum
-      }
-
-      // Fetch ALEO private balance with retry (same pattern as USDCX/USAD)
-      for (let attempt = 0; attempt <= 2; attempt++) {
-        if (privateBalance > 0n) break
-        if (attempt > 0) {
-          devLog(`[Balance] ALEO private retry ${attempt}/2...`)
-          await new Promise(r => setTimeout(r, 1000))
-        }
-
-        // Try Shield wallet direct first (most reliable)
-        if (privateBalance === 0n && connectedType === 'shield') {
-          const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
-          if (shieldObj) {
-            if (typeof shieldObj.requestRecordPlaintexts === 'function') {
-              try {
-                devLog('[Balance] ALEO: Shield requestRecordPlaintexts(credits.aleo)...')
-                const result = await withTimeout(
-                  Promise.resolve(shieldObj.requestRecordPlaintexts('credits.aleo')),
-                  4_000,
-                  'Shield credits plaintext lookup',
-                )
-                privateBalance = sumRecordsBalance(result, 'ALEO-Shield-plaintexts')
-                if (privateBalance > 0n) break
-              } catch (err: any) {
-                devLog('[Balance] ALEO Shield plaintexts failed:', err?.message || err)
-              }
-            }
-            if (privateBalance === 0n && typeof shieldObj.requestRecords === 'function') {
-              try {
-                devLog('[Balance] ALEO: Shield requestRecords(credits.aleo)...')
-                const result = await withTimeout(
-                  Promise.resolve(shieldObj.requestRecords('credits.aleo')),
-                  4_000,
-                  'Shield credits record lookup',
-                )
-                privateBalance = sumRecordsBalance(result, 'ALEO-Shield-records')
-                if (privateBalance > 0n) break
-              } catch (err: any) {
-                devLog('[Balance] ALEO Shield records failed:', err?.message || err)
-              }
-            }
-          }
-        }
-
-        // Adapter API fallback
-        if (privateBalance === 0n && (window as any).__aleoRequestRecordPlaintexts) {
-          try {
-            devLog('[Balance] ALEO: adapter requestRecordPlaintexts(credits.aleo)...')
-            const records = await withTimeout(
-              Promise.resolve((window as any).__aleoRequestRecordPlaintexts('credits.aleo')),
-              4_500,
-              'Wallet adapter credits plaintext lookup',
-            )
-            privateBalance = sumRecordsBalance(records, 'ALEO-adapter-plaintexts')
-          } catch (err: any) {
-            devLog('[Balance] ALEO adapter plaintexts failed:', err?.message || err)
-          }
-        }
-
-        if (privateBalance === 0n && (window as any).__aleoRequestRecords) {
-          try {
-            devLog('[Balance] ALEO: adapter requestRecords(credits.aleo)...')
-            const records = await withTimeout(
-              Promise.resolve((window as any).__aleoRequestRecords('credits.aleo', true)),
-              4_500,
-              'Wallet adapter credits lookup',
-            )
-            privateBalance = sumRecordsBalance(records, 'ALEO-adapter')
-            if (privateBalance === 0n) {
-              const encryptedRecords = await withTimeout(
-                Promise.resolve((window as any).__aleoRequestRecords('credits.aleo', false)),
-                4_500,
-                'Wallet adapter encrypted credits lookup',
-              )
-              privateBalance = await sumDecryptedCreditsRecords(encryptedRecords, 'ALEO-adapter-decrypt')
-            }
-        } catch (err: any) {
-          devLog('[Balance] ALEO adapter failed:', err?.message || err)
-        }
-        }
-
-        // walletManager fallback
-        if (privateBalance === 0n) {
-          try {
-            devLog('[Balance] ALEO: walletManager.getRecords(credits.aleo)...')
-            const records = await withTimeout(
-              walletManager.getRecords('credits.aleo'),
-              4_500,
-              'walletManager credits lookup',
-            )
-            privateBalance = sumRecordsBalance(records, 'ALEO-walletManager')
-            if (privateBalance === 0n) {
-              privateBalance = await sumDecryptedCreditsRecords(records, 'ALEO-walletManager-decrypt')
-            }
-          } catch {
-            // Non-critical
-          }
-        }
-      }
-
-      let reusedShieldPrivate = false
-      if (connectedType === 'shield') {
-        const stabilizedAleo = stabilizeShieldPrivateBalance(refreshAddress, 'private', privateBalance, currentBalance.private)
-        privateBalance = stabilizedAleo.value
-        reusedShieldPrivate = reusedShieldPrivate || stabilizedAleo.preserved
-      }
-
-      if (privateBalance > 0n) {
-        devLog(`[Balance] ALEO private total: ${Number(privateBalance) / 1_000_000} ALEO`)
-      } else {
-        devLog('[Balance] ALEO private: 0 (records not found after 3 attempts)')
-      }
-
-      // Fetch USDCX private balance from Token records (non-blocking)
-      // USDCX Token record has `amount` field (u128), not `microcredits`
-      let usdcxPrivate = 0n
-      const usdcxProgramId = config.usdcxProgramId || 'test_usdcx_stablecoin.aleo'
-
-      // Helper: parse USDCX amount from record (looks for `amount` field)
-      const parseUsdcxAmount = (text: string): bigint => {
-        const patterns = [
-          /amount["\s:]+(\d+)u128/,
-          /amount["\s:]+(\d+)u64/,
-          /amount["\s:]+(\d+)/,
-          /"amount"\s*:\s*"?(\d+)/,
-        ]
-        for (const pattern of patterns) {
-          const match = text.match(pattern)
-          if (match) return BigInt(match[1])
-        }
-        return 0n
-      }
-
-      // Helper: sum USDCX Token records
-      const sumUsdcxRecords = (records: any, label: string): bigint => {
-        const arr = Array.isArray(records) ? records : (records?.records || [])
-        if (arr.length === 0) return 0n
-        let sum = 0n
-        devLog(`[Balance] ${label}: ${arr.length} USDCX records`)
-        for (const r of arr) {
-          if (isRecordSpent(r)) continue
-          if (r && typeof r === 'object') {
-            const amt = r.amount ?? r.data?.amount
-            if (amt !== undefined) {
-              const cleaned = String(amt).replace(/[ui]\d+\.?\w*$/i, '').trim()
-              const digits = cleaned.replace(/[^\d]/g, '')
-              if (digits) { sum += BigInt(digits); continue }
-            }
-          }
-          const text = typeof r === 'string' ? r
-            : (r?.plaintext || r?.data || r?.record || r?.content || JSON.stringify(r))
-          sum += parseUsdcxAmount(String(text))
-        }
-        return sum
-      }
-
-      // Helper: fetch private token balance with retry for Shield wallet
-      const fetchPrivateTokenBalance = async (
-        programId: string,
-        label: string,
-        maxRetries: number = 2,
-      ): Promise<bigint> => {
-        let result = 0n
-
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-          if (attempt > 0) {
-            devLog(`[Balance] ${label} retry ${attempt}/${maxRetries}...`)
-            await new Promise(r => setTimeout(r, 1000)) // Wait 1s between retries
-          }
-
-          // Method 1: Shield wallet direct (most reliable for Shield)
-          if (result === 0n && connectedType === 'shield') {
-            const shieldObj = (window as any).shield || (window as any).shieldWallet || (window as any).shieldAleo
-            if (shieldObj) {
-              // Try requestRecordPlaintexts first (returns plaintext directly)
-              if (typeof shieldObj.requestRecordPlaintexts === 'function') {
-                try {
-                  devLog(`[Balance] ${label}: Shield requestRecordPlaintexts(${programId})...`)
-                  const records = await withTimeout(
-                    Promise.resolve(shieldObj.requestRecordPlaintexts(programId)),
-                    4_000,
-                    `${label} Shield plaintext lookup`,
-                  )
-                  result = sumUsdcxRecords(records, `${label}-Shield-plaintexts`)
-                  if (result > 0n) break
-                } catch (err: any) {
-                  devLog(`[Balance] ${label} Shield plaintexts failed:`, err?.message || err)
-                }
-              }
-              // Fallback: requestRecords
-              if (result === 0n && typeof shieldObj.requestRecords === 'function') {
-                try {
-                  devLog(`[Balance] ${label}: Shield requestRecords(${programId})...`)
-                  const records = await withTimeout(
-                    Promise.resolve(shieldObj.requestRecords(programId)),
-                    4_000,
-                    `${label} Shield record lookup`,
-                  )
-                  result = sumUsdcxRecords(records, `${label}-Shield-records`)
-                  if (result > 0n) break
-                } catch (err: any) {
-                  devLog(`[Balance] ${label} Shield records failed:`, err?.message || err)
-                }
-              }
-            }
-          }
-
-          // Method 2: Adapter API (works for all wallet types)
-          if (result === 0n) {
-            const requestRecords = (window as any).__aleoRequestRecords
-            if (typeof requestRecords === 'function') {
-              try {
-                devLog(`[Balance] ${label}: adapter requestRecords(${programId})...`)
-                const records = await withTimeout(
-                  Promise.resolve(requestRecords(programId, true)),
-                  4_500,
-                  `${label} adapter lookup`,
-                )
-                result = sumUsdcxRecords(records, `${label}-adapter`)
-                if (result > 0n) break
-              } catch (err: any) {
-                devLog(`[Balance] ${label} adapter failed:`, err?.message || err)
-              }
-            }
-          }
-
-          // Method 3: walletManager fallback
-          if (result === 0n) {
-            try {
-              devLog(`[Balance] ${label}: walletManager.getRecords(${programId})...`)
-              const records = await withTimeout(
-                walletManager.getRecords(programId),
-                4_500,
-                `${label} walletManager lookup`,
-              )
-              result = sumUsdcxRecords(records, `${label}-walletManager`)
-              if (result > 0n) break
-            } catch {
-              // Non-critical
-            }
-          }
-
-          // If all methods returned 0 on first try, retry (Shield sometimes needs warmup)
-          if (result > 0n) break
-        }
-
-        if (result > 0n) {
-          devLog(`[Balance] ${label} private total: ${Number(result) / 1_000_000}`)
-        } else {
-          devLog(`[Balance] ${label} private: 0 (records not found after ${maxRetries + 1} attempts)`)
-        }
-        return result
-      }
-
-      // Fetch USDCX and USAD private balances (with retry)
-      usdcxPrivate = await fetchPrivateTokenBalance(usdcxProgramId, 'USDCX')
-
-      // Fetch USAD private balance (same helper with retry)
-      let usadPrivate = 0n
-      const usadProgramId = 'test_usad_stablecoin.aleo'
-      usadPrivate = await fetchPrivateTokenBalance(usadProgramId, 'USAD')
-
-      if (connectedType === 'shield') {
-        const stabilizedUsdcx = stabilizeShieldPrivateBalance(refreshAddress, 'usdcxPrivate', usdcxPrivate, currentBalance.usdcxPrivate)
-        usdcxPrivate = stabilizedUsdcx.value
-        reusedShieldPrivate = reusedShieldPrivate || stabilizedUsdcx.preserved
-
-        const stabilizedUsad = stabilizeShieldPrivateBalance(refreshAddress, 'usadPrivate', usadPrivate, currentBalance.usadPrivate)
-        usadPrivate = stabilizedUsad.value
-        reusedShieldPrivate = reusedShieldPrivate || stabilizedUsad.preserved
-      }
-
-      // Record Scanner fallback — if wallet methods missed any private balances
-      if (privateBalance === 0n || usdcxPrivate === 0n || usadPrivate === 0n) {
-        try {
-          const { getAllPrivateBalances } = await import('./record-scanner');
-          const scanned = await withTimeout(
-            getAllPrivateBalances(),
-            8_000,
-            'Record scanner private balance scan',
-          )
-          if (privateBalance === 0n && scanned.aleoPrivate > 0n) {
-            privateBalance = scanned.aleoPrivate;
-            devLog(`[Balance] Scanner found ALEO private: ${Number(scanned.aleoPrivate) / 1_000_000}`)
-          }
-          if (usdcxPrivate === 0n && scanned.usdcxPrivate > 0n) {
-            usdcxPrivate = scanned.usdcxPrivate;
-            devLog(`[Balance] Scanner found USDCX private: ${Number(scanned.usdcxPrivate) / 1_000_000}`)
-          }
-          if (usadPrivate === 0n && scanned.usadPrivate > 0n) {
-            usadPrivate = scanned.usadPrivate;
-            devLog(`[Balance] Scanner found USAD private: ${Number(scanned.usadPrivate) / 1_000_000}`)
-          }
-        } catch {
-          devLog('[Balance] Record scanner fallback unavailable')
-        }
-      }
-
+      const [privateBalance, usdcxPrivate, usadPrivate] = await Promise.all([
+        notesBalance(1),
+        notesBalance(2),
+        notesBalance(3),
+      ])
       const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic, usdcxPrivate, usadPublic, usadPrivate }
-      const isPartial = hasPublicErrors || reusedShieldPrivate || (connectedType === 'shield' && privateBalance === 0n)
-      const balanceError = isPartial
-        ? hasPublicErrors
-          ? publicErrors.join(' · ')
-          : reusedShieldPrivate
-            ? 'Using the last successful private balance scan because Shield returned empty records on this refresh.'
-          : 'Showing public balances immediately; private ALEO balance may take longer to detect in Shield.'
-        : null
-
       devLog('[Balance] Final:', {
-        public: `${Number(publicBalance) / 1_000_000} ALEO`,
-        private: `${Number(privateBalance) / 1_000_000} ALEO`,
+        public: `${Number(publicBalance) / 1_000_000} NEAR`,
+        private: `${Number(privateBalance) / 1_000_000} NEAR`,
         usdcxPublic: `${Number(usdcxPublic) / 1_000_000} USDCX`,
         usdcxPrivate: `${Number(usdcxPrivate) / 1_000_000} USDCX`,
         usadPublic: `${Number(usadPublic) / 1_000_000} USAD`,
         usadPrivate: `${Number(usadPrivate) / 1_000_000} USAD`,
       })
-
-      applyBalanceUpdate(balance, isPartial ? 'partial' : 'ready', balanceError)
+      applyBalanceUpdate(balance, hasPublicErrors ? 'partial' : 'ready', hasPublicErrors ? publicErrors.join(' · ') : null)
     } catch (error) {
       console.error('Failed to refresh balance:', error)
       const latestWallet = get().wallet
@@ -1054,7 +575,7 @@ const mockMarkets: Market[] = [
     deadline: BigInt(Math.floor(Date.now() / 1000) + 65 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 68 * 24 * 60 * 60),
     status: 1,
-    totalVolume: 2500000000n, // 2500 ALEO
+    totalVolume: 2500000000n, // 2500 NEAR
     totalBets: 342,
     ...seedMockBinaryMarketFields(62.5, 2500000000n, ['Above $150k', 'Below $150k']),
     creator: 'aleo1rhgdu77hgyqd3xjj8ucu3jj9r2krwz6mnzyd80gncr5fxcwlh5rsvzp9px',
@@ -1101,7 +622,7 @@ const mockMarkets: Market[] = [
   {
     id: 'market_004',
     question: 'Will Aleo token price exceed $1 by June 2026?',
-    description: 'Binary market with Above $1.00 and At or Below $1.00 outcomes for the ALEO token before June 30, 2026.',
+    description: 'Binary market with Above $1.00 and At or Below $1.00 outcomes for the NEAR token before June 30, 2026.',
     category: 3,
     deadline: BigInt(Math.floor(Date.now() / 1000) + 155 * 24 * 60 * 60),
     resolutionDeadline: BigInt(Math.floor(Date.now() / 1000) + 160 * 24 * 60 * 60),
@@ -1650,7 +1171,8 @@ async function resolvePendingBetStatus(bet: Bet): Promise<{
   status: 'confirmed' | 'rejected' | 'pending';
   transactionId?: string;
 }> {
-  if (bet.id.startsWith('at1')) {
+  // NEAR transaction hashes (base58) are checked on chain, as the at1… ids were on Aleo.
+  if (bet.id.startsWith('at1') || /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(bet.id)) {
     const diagnosis = await diagnoseTransaction(bet.id)
     if (diagnosis.status === 'accepted') {
       return { status: 'confirmed', transactionId: bet.id }
@@ -1727,20 +1249,20 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const marketQuestion = market?.question || `Market ${marketId}`
 
       // Build inputs for the active market contract.
-      // ALEO uses buy_shares_private, stablecoins use Token.record + MerkleProof.
-      const tokenType = market?.tokenType || 'ALEO'
+      // NEAR uses buy_shares_private, stablecoins use Token.record + MerkleProof.
+      const tokenType = market?.tokenType || 'NEAR'
       const outcomeNum = outcomeToIndex(outcome)
 
       let creditsRecord: string | undefined
 
-      if (tokenType === 'ALEO') {
+      if (tokenType === 'NEAR') {
         const { fetchCreditsRecord } = await import('./credits-record')
         const gasBuffer = 500_000
         const totalNeeded = Number(amount) + gasBuffer
         const record = await fetchCreditsRecord(totalNeeded, walletState.address)
         if (!record) {
           throw new Error(
-            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} NEAR. ` +
             `Private betting requires an unspent Credits record.`
           )
         }
@@ -1753,7 +1275,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         amount,
         0n, // expectedShares
         0n, // minSharesOut
-        tokenType as 'ALEO' | 'USDCX' | 'USAD',
+        tokenType as 'NEAR' | 'USDCX' | 'USAD',
         creditsRecord,
       )
 
@@ -1801,7 +1323,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         programId,
         functionName: betFunctionName,
         inputs,
-        fee: 1.5, // 1.5 ALEO fee for v31
+        fee: 1.5, // 1.5 NEAR fee for v31
         recordIndices: tokenType === 'USDCX' || tokenType === 'USAD' ? [6] : undefined,
       })
 
@@ -2370,7 +1892,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
       const groups = new Map<string, Bet[]>()
 
       for (const bet of claimedBets) {
-        const tokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+        const tokenType = (bet.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
         const groupKey = `${getProgramIdForToken(tokenType)}::${bet.marketId}`
         const existing = groups.get(groupKey) || []
         existing.push(bet)
@@ -2379,7 +1901,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
 
       for (const bets of groups.values()) {
         const sampleBet = bets[0]
-        const tokenType = (sampleBet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+        const tokenType = (sampleBet.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
         const programId = getProgramIdForToken(tokenType)
 
         let records = await fetchOutcomeShareRecords(programId, sampleBet.marketId)

@@ -72,7 +72,7 @@ export function VotePanel({
     setError(null);
     const amount = parseVeilInput(voteAmount || '0');
     if (amount <= 0n) { setError('Enter a vote amount'); return; }
-    if (amount > veilBalance) { setError('Insufficient ALEO balance'); return; }
+    if (amount > veilBalance) { setError('Insufficient NEAR balance'); return; }
 
     try {
       await onVote(proposal.proposalId, direction, amount);
@@ -175,7 +175,7 @@ export function VotePanel({
                 FOR — {proposal.forPercent.toFixed(1)}%
               </span>
               <span className="text-emerald-400 font-mono text-xs">
-                {formatVeil(proposal.votesFor)} ALEO
+                {formatVeil(proposal.votesFor)} NEAR
               </span>
             </div>
             <div className="h-3 bg-surface-800 rounded-full overflow-hidden">
@@ -195,7 +195,7 @@ export function VotePanel({
                 AGAINST — {proposal.againstPercent.toFixed(1)}%
               </span>
               <span className="text-red-400 font-mono text-xs">
-                {formatVeil(proposal.votesAgainst)} ALEO
+                {formatVeil(proposal.votesAgainst)} NEAR
               </span>
             </div>
             <div className="h-3 bg-surface-800 rounded-full overflow-hidden">
@@ -262,7 +262,7 @@ export function VotePanel({
           <h3 className="text-base font-bold text-white mb-4">Cast Your Vote</h3>
 
           <div className="mb-4">
-            <label className="text-sm text-surface-400 mb-1.5 block">Vote Amount (ALEO)</label>
+            <label className="text-sm text-surface-400 mb-1.5 block">Vote Amount (NEAR)</label>
             <div className="relative">
               <input
                 type="text"
@@ -271,7 +271,7 @@ export function VotePanel({
                 placeholder="0.00"
                 className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-3 text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-lg font-mono"
               />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-500 text-sm">ALEO</span>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-500 text-sm">NEAR</span>
             </div>
             <div className="flex gap-2 mt-2">
               {[25, 50, 75, 100].map((pct) => (
@@ -285,7 +285,7 @@ export function VotePanel({
               ))}
             </div>
             <div className="text-xs text-surface-500 mt-1.5">
-              Balance: {formatVeil(veilBalance)} ALEO
+              Balance: {formatVeil(veilBalance)} NEAR
             </div>
           </div>
 
@@ -347,7 +347,7 @@ export function VotePanel({
                       className="flex flex-col gap-2 rounded-lg border border-white/[0.05] bg-surface-800/25 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div>
-                        <div className="text-sm font-medium text-white">{formatVeil(lock.amount)} ALEO locked</div>
+                        <div className="text-sm font-medium text-white">{formatVeil(lock.amount)} NEAR locked</div>
                         <div className="mt-1 text-xs text-surface-500">
                           {isUnlockReady
                             ? 'Ready to unlock now'
@@ -415,7 +415,7 @@ export function VotePanel({
               <div className="flex flex-col gap-1">
                 <div className="text-sm font-medium text-white">Execute treasury transfer</div>
                 <div className="text-xs text-surface-500">
-                  Amount locked in proposal: {formatVeil(proposal.payload1)} ALEO. The recipient address must hash to the proposal payload.
+                  Amount locked in proposal: {formatVeil(proposal.payload1)} NEAR. The recipient address must hash to the proposal payload.
                 </div>
               </div>
 

@@ -34,7 +34,7 @@ const TIER_COLORS: Record<ResolverTier, { text: string; bg: string; border: stri
 };
 
 const TIERS = [
-  { tier: RESOLVER_TIERS.BRONZE, label: 'Bronze', stake: RESOLVER_STAKE_REQUIREMENTS[RESOLVER_TIERS.BRONZE], desc: '0+ resolves · < 100 ALEO markets' },
+  { tier: RESOLVER_TIERS.BRONZE, label: 'Bronze', stake: RESOLVER_STAKE_REQUIREMENTS[RESOLVER_TIERS.BRONZE], desc: '0+ resolves · < 100 NEAR markets' },
   { tier: RESOLVER_TIERS.SILVER, label: 'Silver', stake: RESOLVER_STAKE_REQUIREMENTS[RESOLVER_TIERS.SILVER], desc: '10+ resolves · ≥ 70% rep' },
   { tier: RESOLVER_TIERS.GOLD, label: 'Gold', stake: RESOLVER_STAKE_REQUIREMENTS[RESOLVER_TIERS.GOLD], desc: '50+ resolves · ≥ 90% rep' },
   { tier: RESOLVER_TIERS.COMMITTEE, label: 'Committee', stake: RESOLVER_STAKE_REQUIREMENTS[RESOLVER_TIERS.COMMITTEE], desc: 'Elected via governance vote' },
@@ -54,7 +54,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister, onFocusActo
     setError(null);
     const required = RESOLVER_STAKE_REQUIREMENTS[selectedTier];
     if (aleoBalance < required) {
-      setError(`Need ${formatVeil(required)} ALEO to register.`);
+      setError(`Need ${formatVeil(required)} NEAR to register.`);
       return;
     }
     setIsSubmitting(true);
@@ -67,7 +67,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister, onFocusActo
     setError(null);
     const additional = RESOLVER_STAKE_REQUIREMENTS[newTier] - (resolverProfile?.stakeAmount ?? 0n);
     if (additional > aleoBalance) {
-      setError(`Need ${formatVeil(additional)} more ALEO.`);
+      setError(`Need ${formatVeil(additional)} more NEAR.`);
       return;
     }
     setIsSubmitting(true);
@@ -95,7 +95,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister, onFocusActo
         <div className="rounded-xl border border-white/[0.06] bg-surface-900/50 p-4 space-y-3">
           <h3 className="text-sm font-semibold text-white">Become a Resolver</h3>
           <p className="text-xs text-surface-400">
-            Stake ALEO to resolve markets and earn rewards. Wrong resolutions = slashing.
+            Stake NEAR to resolve markets and earn rewards. Wrong resolutions = slashing.
           </p>
 
           <div className="space-y-1.5">
@@ -118,7 +118,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister, onFocusActo
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <span className={`text-sm font-medium ${c.text}`}>{t.label}</span>
-                      <span className="text-xs text-surface-400 font-mono">{formatVeil(t.stake)} ALEO</span>
+                      <span className="text-xs text-surface-400 font-mono">{formatVeil(t.stake)} NEAR</span>
                     </div>
                     <p className="text-[10px] text-surface-500 mt-0.5">{t.desc}</p>
                   </div>
@@ -146,7 +146,7 @@ export function ResolverPanel({ onRegister, onUpgrade, onDeregister, onFocusActo
           </button>
 
           <p className="text-[10px] text-surface-500 text-center">
-            Staked ALEO is locked while active. 10 ALEO slash per wrong resolution. 3 strikes = 90-day ban.
+            Staked NEAR is locked while active. 10 NEAR slash per wrong resolution. 3 strikes = 90-day ban.
           </p>
         </div>
       ) : resolverProfile && (
@@ -240,7 +240,7 @@ function UpgradeSection({ profile, aleoBalance, onUpgrade, isSubmitting, error }
             <Icon className={`w-4 h-4 ${c.text} shrink-0`} />
             <div className="flex-1 min-w-0">
               <span className={`text-sm font-medium ${c.text}`}>{t.label}</span>
-              <span className="ml-2 text-[10px] text-surface-500">+{formatVeil(additional)} ALEO</span>
+              <span className="ml-2 text-[10px] text-surface-500">+{formatVeil(additional)} NEAR</span>
             </div>
             <button
               onClick={() => onUpgrade(t.tier)}

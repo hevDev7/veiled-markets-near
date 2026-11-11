@@ -29,7 +29,7 @@ export function ProbabilityDonut({
   reserves,
   totalLiquidity,
   totalVolume,
-  tokenSymbol = 'ALEO',
+  tokenSymbol = 'NEAR',
   className,
 }: ProbabilityDonutProps) {
   const size = 180

@@ -216,7 +216,7 @@ export function MarketCard({
         <div className="flex items-center gap-4 pt-3 mt-auto border-t border-white/[0.03] text-xs text-surface-500">
           <span className="flex items-center gap-1.5 tabular-nums">
             <TrendingUp className="w-3 h-3" />
-            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}
+            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}
           </span>
           <span className="flex items-center gap-1.5 tabular-nums">
             <Users className="w-3 h-3" />

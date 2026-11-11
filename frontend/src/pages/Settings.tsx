@@ -18,7 +18,7 @@ import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
-import { WalletCompatibilityLab } from '@/components/WalletCompatibilityLab'
+import { PrivateBalancePanel } from '@/components/PrivateBalancePanel'
 import { cn, formatCredits } from '@/lib/utils'
 import { clearAllStaleData } from '@/lib/aleo-client'
 
@@ -32,7 +32,7 @@ function setSetting(key: string, value: string) {
 
 export function Settings() {
   const { wallet, refreshBalance } = useWalletStore()
-  const { connected: providerConnected } = useWallet()
+  const { connected: providerConnected, wallet: providerWallet } = useWallet()
   const [copied, setCopied] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
@@ -113,8 +113,10 @@ export function Settings() {
                 <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
                   <div>
                     <p className="text-sm text-surface-400 mb-1">Address</p>
-                    <p className="font-mono text-sm text-white">
-                      {wallet.address?.slice(0, 20)}...{wallet.address?.slice(-10)}
+                    <p className="font-mono text-sm text-white break-all">
+                      {wallet.address && wallet.address.length > 40
+                        ? `${wallet.address.slice(0, 20)}...${wallet.address.slice(-10)}`
+                        : wallet.address}
                     </p>
                   </div>
                   <button
@@ -136,7 +138,7 @@ export function Settings() {
                     <div className="flex items-center gap-4">
                       <div>
                         <p className="text-lg font-bold text-white">
-                          {formatCredits(wallet.balance.public + wallet.balance.private)} ALEO
+                          {formatCredits(wallet.balance.public + wallet.balance.private)} NEAR
                         </p>
                         <p className="text-xs text-surface-500">
                           Public: {formatCredits(wallet.balance.public)} | Private: {formatCredits(wallet.balance.private)}
@@ -167,13 +169,13 @@ export function Settings() {
                 {/* Wallet Type */}
                 <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02]">
                   <div>
-                    <p className="text-sm text-surface-400 mb-1">Wallet Type</p>
-                    <p className="text-white capitalize">
-                      {wallet.walletType} {wallet.isDemoMode && '(Demo Mode)'}
+                    <p className="text-sm text-surface-400 mb-1">Wallet</p>
+                    <p className="text-white">
+                      {providerWallet?.adapter?.name || 'NEAR Wallet'} {wallet.isDemoMode && '(Demo Mode)'}
                     </p>
                   </div>
                   <a
-                    href={`https://testnet.explorer.provable.com/address/${wallet.address}`}
+                    href={`https://testnet.nearblocks.io/address/${wallet.address}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-2 text-brand-400 hover:text-brand-300 text-sm"
@@ -183,6 +185,15 @@ export function Settings() {
                   </a>
                 </div>
               </div>
+            </motion.div>
+
+            {/* Private balance (shielded note pool) */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+            >
+              <PrivateBalancePanel />
             </motion.div>
 
             {/* Preferences Section */}
@@ -287,9 +298,9 @@ export function Settings() {
                       Zero-Knowledge Privacy Enabled
                     </p>
                     <p className="text-sm text-surface-400">
-                      All your bets are encrypted using Aleo's zero-knowledge proofs. 
-                      Your bet amounts, positions, and trading history are completely private 
-                      and cannot be viewed by anyone else on the network.
+                      Your positions are private notes in a shielded pool on NEAR. Each trade
+                      carries a zero-knowledge proof and is submitted by a relayer, so your
+                      amounts, positions and trading history are not linked to your account.
                     </p>
                   </div>
                 </div>
@@ -344,14 +355,6 @@ export function Settings() {
               </div>
             </motion.div>
 
-            {/* Wallet A/B Lab */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 }}
-            >
-              <WalletCompatibilityLab />
-            </motion.div>
           </div>
         </div>
       </main>

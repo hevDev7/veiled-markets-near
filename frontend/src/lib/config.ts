@@ -97,17 +97,17 @@ function getEnvBool(key: string, fallback: boolean = false): boolean {
  */
 function loadConfig(): AppConfig {
   const network = (getEnv('VITE_NETWORK', 'testnet') as NetworkType);
-  const networkConfig = NETWORK_CONFIGS[network] || NETWORK_CONFIGS.testnet;
 
   return {
     // Network
     network,
-    rpcUrl: getEnv('VITE_ALEO_RPC_URL', networkConfig.rpcUrl),
-    explorerUrl: getEnv('VITE_EXPLORER_URL', networkConfig.explorerUrl),
+    // NEAR testnet. rpcUrl stays for legacy readers; the NEAR layer (lib/near) keeps its own RPC list.
+    rpcUrl: getEnv('VITE_NEAR_RPC_URL', 'https://test.rpc.fastnear.com'),
+    explorerUrl: getEnv('VITE_NEAR_EXPLORER_URL', 'https://testnet.nearblocks.io'),
 
-    // Block time (measured on testnet: ~3.6s, use 4s as conservative estimate)
-    secondsPerBlock: network === 'mainnet' ? 15 : 4,
-    msPerBlock: network === 'mainnet' ? 15000 : 4000,
+    // The Veiled contract's height is block_timestamp_ms / 4000: one tick every 4 s, like Aleo testnet.
+    secondsPerBlock: 4,
+    msPerBlock: 4000,
 
     // Program (v6 post-audit hardening, deployed 2026-04-08)
     // - Bug A: removed governance_resolved_outcomes collision in committee/panel
@@ -146,7 +146,7 @@ function loadConfig(): AppConfig {
 
     // App
     appName: getEnv('VITE_APP_NAME', 'Veiled Markets'),
-    appDescription: getEnv('VITE_APP_DESCRIPTION', 'Privacy-Preserving Prediction Markets on Aleo'),
+    appDescription: getEnv('VITE_APP_DESCRIPTION', 'Privacy-Preserving Prediction Markets on NEAR'),
     appUrl: getEnv('VITE_APP_URL', 'https://veiled.markets'),
   };
 }
@@ -185,14 +185,7 @@ export function getTransactionUrl(txId: string): string {
   // Clean the transaction ID (remove any whitespace)
   const cleanTxId = txId.trim();
 
-  // Build the URL - Provable Explorer supports both formats
-  const url = `${config.explorerUrl}/transaction/${cleanTxId}`;
-
-  devLog('Generated URL:', url);
-  devLog('Explorer base:', config.explorerUrl);
-  devLog('Transaction ID format:', cleanTxId.startsWith('at1') ? 'Aleo format' : 'UUID format');
-
-  return url;
+  return `${config.explorerUrl}/txns/${cleanTxId}`;
 }
 
 /**
@@ -205,8 +198,9 @@ export function getAddressUrl(address: string): string {
 /**
  * Get program URL on explorer
  */
-export function getProgramUrl(programId?: string): string {
-  return `${config.explorerUrl}/program/${programId || config.programId}`;
+export function getProgramUrl(_programId?: string): string {
+  // Every Aleo program maps to the one Veiled contract on NEAR.
+  return `${config.explorerUrl}/address/${import.meta.env.VITE_NEAR_CONTRACT || 'v1.veiled-markets.testnet'}`;
 }
 
 // Export default config

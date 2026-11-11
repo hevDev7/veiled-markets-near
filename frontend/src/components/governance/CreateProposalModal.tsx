@@ -62,7 +62,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
   const handleSubmit = async () => {
     setError(null);
     if (!title.trim()) { setError('Title is required'); return; }
-    if (!hasEnoughStake) { setError('Insufficient ALEO balance for stake'); return; }
+    if (!hasEnoughStake) { setError('Insufficient NEAR balance for stake'); return; }
     if (proposalType === PROPOSAL_TYPES.TREASURY && !recipientAddress.trim().startsWith('aleo1')) {
       setError('Treasury proposals require a valid recipient address');
       return;
@@ -184,7 +184,7 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
                   type="text"
                   value={payload1}
                   onChange={(e) => setPayload1(e.target.value)}
-                  placeholder={proposalType === PROPOSAL_TYPES.TREASURY ? 'Amount in ALEO' : '0'}
+                  placeholder={proposalType === PROPOSAL_TYPES.TREASURY ? 'Amount in NEAR' : '0'}
                   className="w-full bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500/50 font-mono"
                 />
               </div>
@@ -221,12 +221,12 @@ export function CreateProposalModal({ isOpen, onClose, onSubmit }: CreateProposa
               <div className="bg-white/[0.02] border border-surface-700/30 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between text-xs">
                   <span className="text-surface-400">Stake Required</span>
-                  <span className="text-white font-medium">{formatVeil(MIN_PROPOSAL_STAKE)} ALEO</span>
+                  <span className="text-white font-medium">{formatVeil(MIN_PROPOSAL_STAKE)} NEAR</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-surface-400">Your Balance</span>
                   <span className={`font-medium ${hasEnoughStake ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {formatVeil(veilBalance)} ALEO
+                    {formatVeil(veilBalance)} NEAR
                   </span>
                 </div>
                 <div className="flex justify-between text-xs">

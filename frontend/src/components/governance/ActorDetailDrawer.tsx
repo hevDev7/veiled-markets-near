@@ -373,7 +373,7 @@ export function ActorDetailDrawer({
                     ) : activeProfile ? (
                       <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <InfoChip label="Tier" value={RESOLVER_TIER_LABELS[activeProfile.tier]} />
-                        <InfoChip label="Stake" value={`${formatVeil(activeProfile.stakeAmount)} ALEO`} />
+                        <InfoChip label="Stake" value={`${formatVeil(activeProfile.stakeAmount)} NEAR`} />
                         <InfoChip label="Reputation" value={`${activeProfile.reputationScore.toFixed(1)}%`} />
                         <InfoChip label="Strikes" value={`${activeProfile.strikes}/3`} />
                         <InfoChip label="Markets resolved" value={String(activeProfile.marketsResolved)} />

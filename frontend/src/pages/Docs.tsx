@@ -6,6 +6,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { Footer } from '../components/Footer'
+import { NearPortNotice } from '@/components/NearPortNotice'
 
 // ============================================================================
 // Docs — comprehensive documentation for the Veiled Markets protocol + SDK.
@@ -155,6 +156,7 @@ export function Docs() {
         {/* Main content */}
         <main className="max-w-3xl">
           <h1 className="font-display text-3xl sm:text-4xl text-white mb-3">Veiled Markets Documentation</h1>
+          <NearPortNotice className="mb-6" />
           <p className="text-surface-400 mb-10 leading-relaxed">
             Complete reference for the Veiled Markets protocol on Aleo. Covers the contract
             architecture, the TypeScript SDK, and practical recipes for building apps, bots,

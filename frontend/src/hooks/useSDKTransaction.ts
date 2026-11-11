@@ -38,7 +38,7 @@ interface ExecuteOptions {
   functionName: string
   inputs: string[]
   privateKey: string
-  priorityFee?: number   // in microcredits (default 500_000 = 0.5 ALEO)
+  priorityFee?: number   // in microcredits (default 500_000 = 0.5 NEAR)
   usePrivateCredits?: boolean // If true, scan for Credits record and use buy_shares_private (privacy mode)
 }
 
@@ -294,7 +294,7 @@ export function useSDKTransaction() {
 
         let userMsg = msg
         if (msg.includes('insufficient') || msg.includes('balance')) {
-          userMsg = `Insufficient public balance. Make sure your account has enough public ALEO to cover the bet amount + ~0.5 ALEO fee.\n\nOriginal error: ${msg}`
+          userMsg = `Insufficient public balance. Make sure your account has enough public NEAR to cover the bet amount + ~0.5 NEAR fee.\n\nOriginal error: ${msg}`
         } else if (msg.includes('Invalid private key')) {
           userMsg = msg
         } else if (msg.includes('deadline') || msg.includes('assert')) {

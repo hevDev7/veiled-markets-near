@@ -830,7 +830,7 @@ export class LeoWalletAdapter {
     // Fetch public balance from API
     try {
       publicBalance = await fetchPublicBalance(this.account.address);
-      devLog('Leo Wallet: Public balance from API:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
+      devLog('Leo Wallet: Public balance from API:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} NEAR)`);
     } catch (error) {
       console.error('Leo Wallet: Failed to fetch public balance:', error);
     }
@@ -948,7 +948,7 @@ export class LeoWalletAdapter {
         const amount = extractMicrocredits(r);
         if (amount > 0n) {
           sum += amount;
-          devLog('Leo Wallet: Unspent record:', (Number(amount) / 1_000_000).toFixed(2), 'ALEO');
+          devLog('Leo Wallet: Unspent record:', (Number(amount) / 1_000_000).toFixed(2), 'NEAR');
         }
       }
       devLog(`Leo Wallet: Total records: ${totalCount}, spent: ${spentCount}, unspent with value: ${totalCount - spentCount}`);
@@ -1011,9 +1011,9 @@ export class LeoWalletAdapter {
 
     const totalBalance = publicBalance + privateBalance;
     devLog('Leo Wallet: ========== FINAL BALANCE SUMMARY ==========');
-    devLog('Leo Wallet: Public:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} ALEO)`);
-    devLog('Leo Wallet: Private:', privateBalance.toString(), `(${Number(privateBalance) / 1_000_000} ALEO)`);
-    devLog('Leo Wallet: Total:', totalBalance.toString(), `(${Number(totalBalance) / 1_000_000} ALEO)`);
+    devLog('Leo Wallet: Public:', publicBalance.toString(), `(${Number(publicBalance) / 1_000_000} NEAR)`);
+    devLog('Leo Wallet: Private:', privateBalance.toString(), `(${Number(privateBalance) / 1_000_000} NEAR)`);
+    devLog('Leo Wallet: Total:', totalBalance.toString(), `(${Number(totalBalance) / 1_000_000} NEAR)`);
     devLog('Leo Wallet: ==========================================');
 
     if (privateBalance === 0n) {
@@ -1064,8 +1064,8 @@ export class LeoWalletAdapter {
       let result: any = null;
 
       if (leoWallet) {
-        // Leo Wallet expects fee in MICROCREDITS (integer), not ALEO.
-        // Callers pass fee in ALEO (e.g., 0.5), so convert here.
+        // Leo Wallet expects fee in MICROCREDITS (integer), not NEAR.
+        // Callers pass fee in NEAR (e.g., 0.5), so convert here.
         const feeInAleo = request.fee || 0.5;
         const feeInMicrocredits = Math.round(feeInAleo * 1_000_000);
 
@@ -2453,7 +2453,7 @@ export class WalletManager {
       programId: 'credits.aleo',
       functionName: 'transfer_public',
       inputs: [account.address, '1000u64'],
-      fee: 1.5, // 1.5 ALEO fee
+      fee: 1.5, // 1.5 NEAR fee
     });
   }
 
@@ -2480,7 +2480,7 @@ export class WalletManager {
       programId: 'credits.aleo',
       functionName: 'transfer_public_to_private',
       inputs: [account.address, `${amount}u64`],
-      fee: 1.5, // 1.5 ALEO (Leo Wallet expects fee in ALEO, not microcredits)
+      fee: 1.5, // 1.5 NEAR (Leo Wallet expects fee in NEAR, not microcredits)
     });
   }
 

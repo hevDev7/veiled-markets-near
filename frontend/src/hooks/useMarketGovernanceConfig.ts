@@ -7,7 +7,7 @@ import {
 } from '@/lib/aleo-client'
 
 export function useMarketGovernanceConfig(
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' = 'ALEO'
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' = 'NEAR'
 ): MarketGovernanceConfig {
   const [governanceConfig, setGovernanceConfig] = useState<MarketGovernanceConfig>(
     DEFAULT_MARKET_GOVERNANCE_CONFIG

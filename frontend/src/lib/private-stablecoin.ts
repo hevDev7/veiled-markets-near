@@ -12,7 +12,7 @@
 
 import { config } from './config';
 import { buildDefaultMerkleProofs } from './aleo-client';
-import { devLog, devWarn } from './logger';
+import { devLog } from './logger';
 
 const RESERVED_TOKEN_RECORDS = new Map<string, number>();
 const RESERVED_TOKEN_RECORD_TTL_MS = 3 * 60 * 1000;
@@ -37,159 +37,12 @@ export function releaseTokenRecord(tokenType: 'USDCX' | 'USAD', record: string):
   RESERVED_TOKEN_RECORDS.delete(makeReservedTokenKey(tokenType, record));
 }
 
-function isTokenRecordReserved(tokenType: 'USDCX' | 'USAD', record: string): boolean {
-  cleanupReservedTokenRecords();
-  const expiresAt = RESERVED_TOKEN_RECORDS.get(makeReservedTokenKey(tokenType, record));
-  return typeof expiresAt === 'number' && expiresAt > Date.now();
-}
 
-function isTokenRecordPlaintext(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith('{')) return false;
-  if (trimmed.startsWith('{"')) return false;
-  if (!trimmed.includes('owner')) return false;
-  if (!trimmed.includes('amount')) return false;
-  if (trimmed.includes('microcredits')) return false;
-  return true;
-}
 
-function extractTokenPlaintext(record: unknown): string | null {
-  if (typeof record === 'string') {
-    return isTokenRecordPlaintext(record) ? record.trim() : null;
-  }
 
-  if (!record || typeof record !== 'object') return null;
 
-  const candidateKeys = [
-    'plaintext',
-    'recordPlaintext',
-    'record_plaintext',
-    'data',
-    'content',
-  ];
 
-  for (const key of candidateKeys) {
-    const value = (record as Record<string, unknown>)[key];
-    if (value == null) continue;
-    const text = String(value);
-    if (isTokenRecordPlaintext(text)) return text.trim();
-  }
 
-  for (const value of Object.values(record as Record<string, unknown>)) {
-    if (value == null) continue;
-    const text = String(value);
-    if (isTokenRecordPlaintext(text)) return text.trim();
-  }
-
-  return null;
-}
-
-function isRecordMarkedSpent(record: unknown): boolean {
-  if (!record || typeof record !== 'object') return false;
-  const obj = record as Record<string, unknown>;
-  return obj.spent === true
-    || obj.is_spent === true
-    || obj.isSpent === true
-    || obj.spent === 'true'
-    || obj.is_spent === 'true'
-    || obj.isSpent === 'true'
-    || obj.status === 'spent'
-    || obj.status === 'Spent'
-    || obj.recordStatus === 'spent'
-    || obj.recordStatus === 'Spent';
-}
-
-function isRecordExplicitlyUnspent(record: unknown): boolean {
-  if (!record || typeof record !== 'object') return false;
-  const obj = record as Record<string, unknown>;
-  return obj.spent === false
-    || obj.is_spent === false
-    || obj.isSpent === false
-    || obj.status === 'unspent'
-    || obj.status === 'Unspent'
-    || obj.recordStatus === 'unspent'
-    || obj.recordStatus === 'Unspent';
-}
-
-function extractRecordBlockHeight(record: unknown): number {
-  if (!record || typeof record !== 'object') return -1;
-  const obj = record as Record<string, unknown>;
-  for (const value of [obj.blockHeight, obj.block_height, obj.height]) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && /^\d+$/.test(value)) return parseInt(value, 10);
-  }
-  return -1;
-}
-
-function findBestTokenRecord(
-  tokenType: 'USDCX' | 'USAD',
-  records: unknown[],
-  minAmount: bigint,
-  label: string,
-): string | null {
-  type Candidate = {
-    plaintext: string;
-    amount: bigint;
-    arrayIndex: number;
-    blockHeight: number;
-    hasMetadata: boolean;
-    explicitlyUnspent: boolean;
-  };
-
-  const candidates: Candidate[] = [];
-
-  for (let i = 0; i < records.length; i++) {
-    const record = records[i];
-    if (!record || isRecordMarkedSpent(record)) continue;
-
-    const plaintext = extractTokenPlaintext(record);
-    if (!plaintext) continue;
-
-    const match = plaintext.match(/amount\s*:\s*(\d+)u128/);
-    if (!match) continue;
-
-    const amount = BigInt(match[1]);
-    if (amount < minAmount) continue;
-    if (isTokenRecordReserved(tokenType, plaintext)) {
-      devLog(`[PrivateStablecoin] ${label} record ${i} skipped because it is temporarily reserved`);
-      continue;
-    }
-
-    candidates.push({
-      plaintext,
-      amount,
-      arrayIndex: i,
-      blockHeight: extractRecordBlockHeight(record),
-      hasMetadata: typeof record === 'object' && record !== null,
-      explicitlyUnspent: isRecordExplicitlyUnspent(record),
-    });
-  }
-
-  if (candidates.length === 0) return null;
-
-  const metadataCandidates = candidates.filter(candidate => candidate.hasMetadata);
-  const pool = metadataCandidates.length > 0 ? metadataCandidates : candidates;
-
-  pool.sort((a, b) => {
-    if (a.explicitlyUnspent !== b.explicitlyUnspent) {
-      return a.explicitlyUnspent ? -1 : 1;
-    }
-    if (a.blockHeight !== b.blockHeight) {
-      return b.blockHeight - a.blockHeight;
-    }
-    if (a.arrayIndex !== b.arrayIndex) {
-      return b.arrayIndex - a.arrayIndex;
-    }
-    if (a.amount !== b.amount) {
-      return a.amount > b.amount ? -1 : 1;
-    }
-    return 0;
-  });
-
-  const best = pool[0];
-  devLog(`[PrivateStablecoin] Selected ${label} Token record #${best.arrayIndex} (${Number(best.amount) / 1_000000}, blockHeight=${best.blockHeight})`);
-  return best.plaintext;
-}
 
 /**
  * Get the stablecoin program ID for a token type.
@@ -238,97 +91,15 @@ export function buildPrivateDepositInputs(
 }
 
 /**
- * Find a Token record for USDCX or USAD with sufficient balance.
- * Tries multiple strategies: wallet adapter, direct wallet API, record scanner.
+ * A spendable stablecoin balance record for private betting: the account's private notes of the token plus its
+ * NEP-141 wallet balance (the executor shields the shortfall in the same flow).
  */
 export async function findTokenRecord(
   tokenType: 'USDCX' | 'USAD',
   minAmount: bigint,
 ): Promise<string | null> {
-  const programId = getStablecoinProgramId(tokenType);
-  const label = tokenType;
-
-  devLog(`[PrivateStablecoin] Finding ${label} Token record >= ${Number(minAmount) / 1_000000}`);
-
-  // Strategy 1: Record Scanner SDK (best source for confirmed unspent records)
-  try {
-    const { findUsdcxTokenRecord, findUsadTokenRecord } = await import('./record-scanner');
-    const record = tokenType === 'USAD'
-      ? await findUsadTokenRecord(minAmount)
-      : await findUsdcxTokenRecord(minAmount);
-    if (record) {
-      if (isTokenRecordReserved(tokenType, record)) {
-        devLog(`[PrivateStablecoin] Strategy 1 scanner record skipped because it is temporarily reserved`);
-      } else {
-        devLog(`[PrivateStablecoin] Found via scanner: ${label}`);
-        return record;
-      }
-    }
-  } catch {
-    devLog(`[PrivateStablecoin] Strategy 1 scanner fallback unavailable`);
-  }
-
-  // Strategy 2: Wallet adapter requestRecordPlaintexts
-  const requestPlaintexts = (window as any).__aleoRequestRecordPlaintexts;
-  if (typeof requestPlaintexts === 'function') {
-    try {
-      devLog(`[PrivateStablecoin] Strategy 2: adapter requestRecordPlaintexts(${programId})`);
-      const records = await requestPlaintexts(programId);
-      const arr = Array.isArray(records) ? records : (records?.records || []);
-      const found = findBestTokenRecord(tokenType, arr, minAmount, label);
-      if (found) return found;
-    } catch (err) {
-      devWarn(`[PrivateStablecoin] Strategy 2 failed:`, err);
-    }
-  }
-
-  // Strategy 3: Wallet adapter requestRecords
-  const requestRecords = (window as any).__aleoRequestRecords;
-  if (typeof requestRecords === 'function') {
-    try {
-      devLog(`[PrivateStablecoin] Strategy 3: adapter requestRecords(${programId})`);
-      const records = await requestRecords(programId, true);
-      const arr = Array.isArray(records) ? records : (records?.records || []);
-      const found = findBestTokenRecord(tokenType, arr, minAmount, label);
-      if (found) return found;
-    } catch (err) {
-      devWarn(`[PrivateStablecoin] Strategy 3 failed:`, err);
-    }
-  }
-
-  // Strategy 4: Direct wallet object (Shield/Leo/Fox)
-  const walletObjs: Array<{ name: string; obj: any }> = [];
-  const shieldObj = (window as any).shield || (window as any).shieldWallet;
-  if (shieldObj) walletObjs.push({ name: 'Shield', obj: shieldObj });
-
-  for (const { name, obj } of walletObjs) {
-    if (typeof obj.requestRecordPlaintexts === 'function') {
-      try {
-        devLog(`[PrivateStablecoin] Strategy 4a: ${name} requestRecordPlaintexts(${programId})`);
-        const result = await obj.requestRecordPlaintexts(programId);
-        const arr = Array.isArray(result) ? result : (result?.records || []);
-        const found = findBestTokenRecord(tokenType, arr, minAmount, label);
-        if (found) return found;
-      } catch (err) {
-        devWarn(`[PrivateStablecoin] Strategy 4a ${name} failed:`, err);
-      }
-    }
-
-    if (typeof obj.requestRecords === 'function') {
-      try {
-        devLog(`[PrivateStablecoin] Strategy 4b: ${name} requestRecords(${programId})`);
-        const result = await obj.requestRecords(programId, true);
-        const arr = Array.isArray(result) ? result : (result?.records || []);
-        const found = findBestTokenRecord(tokenType, arr, minAmount, label);
-        if (found) return found;
-      } catch (err) {
-        devWarn(`[PrivateStablecoin] Strategy 4b ${name} failed:`, err);
-      }
-    }
-  }
-
-  devWarn(`[PrivateStablecoin] No ${label} Token record found >= ${Number(minAmount) / 1_000000}`);
-  return null;
+  const { spendableRecord } = await import('./near/wallet-records');
+  return spendableRecord(tokenType === 'USAD' ? 3 : 2, minAmount);
 }
 
 /**

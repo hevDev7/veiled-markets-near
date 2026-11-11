@@ -29,7 +29,7 @@ export function RewardClaimPanel({
     <div className="bg-surface-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-5">
       <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4">
         <Gift className="w-5 h-5 text-emerald-400" />
-        ALEO Rewards
+        NEAR Rewards
       </h3>
 
       {isLoading ? (
@@ -40,7 +40,7 @@ export function RewardClaimPanel({
         <div className="text-center py-8 text-surface-500 text-sm">
           <Gift className="w-10 h-10 mx-auto mb-2 opacity-30" />
           No rewards to claim yet
-          <p className="text-xs mt-1">Provide liquidity or trade to earn ALEO</p>
+          <p className="text-xs mt-1">Provide liquidity or trade to earn NEAR</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -77,7 +77,7 @@ export function RewardClaimPanel({
                   <span className="text-xs text-surface-300">
                     Epoch #{reward.epochId} — {reward.rewardType === 'lp' ? 'LP' : 'Trading'}
                   </span>
-                  <div className="text-sm font-medium text-white">{formatVeil(reward.amount)} ALEO</div>
+                  <div className="text-sm font-medium text-white">{formatVeil(reward.amount)} NEAR</div>
                 </div>
                 <button
                   onClick={() => onClaimReward(reward.epochId, reward.rewardType, reward.amount)}
@@ -102,7 +102,7 @@ export function RewardClaimPanel({
                   Claiming rewards...
                 </span>
               ) : (
-                `Claim All — ${formatVeil(totalClaimable)} ALEO`
+                `Claim All — ${formatVeil(totalClaimable)} NEAR`
               )}
             </button>
           )}

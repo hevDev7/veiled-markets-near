@@ -131,7 +131,7 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
         <div className="flex items-center gap-4 pt-3 border-t border-white/[0.03] text-xs text-surface-500">
           <span className="flex items-center gap-1.5 tabular-nums">
             <TrendingUp className="w-3 h-3" />
-            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}
+            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}
           </span>
           <span className="flex items-center gap-1.5 tabular-nums">
             <Users className="w-3 h-3" />
@@ -252,7 +252,7 @@ export function TrendingMarkets() {
           className="mt-12 flex flex-wrap items-center justify-center gap-8 py-6 rounded-2xl"
         >
           {[
-            { icon: <BarChart3 className="w-4 h-4 text-brand-400" />, label: 'Total Volume', value: `${formatCredits(markets.reduce((sum, m) => sum + m.totalVolume, 0n), 0)} ALEO` },
+            { icon: <BarChart3 className="w-4 h-4 text-brand-400" />, label: 'Total Volume', value: `${formatCredits(markets.reduce((sum, m) => sum + m.totalVolume, 0n), 0)} NEAR` },
             { icon: <Flame className="w-4 h-4 text-brand-400" />, label: 'Active Markets', value: markets.filter(m => m.status === 1).length.toString() },
             { icon: <Users className="w-4 h-4 text-brand-400" />, label: 'Total Bets', value: markets.reduce((sum, m) => sum + m.totalBets, 0).toLocaleString() },
             { icon: <Shield className="w-4 h-4 text-brand-400" />, label: '100% Private', value: 'ZK Proofs' },

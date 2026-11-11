@@ -11,6 +11,7 @@ import { initializeMarketIds } from './lib/aleo-client'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { MobileNav } from './components/MobileNav'
 import { ParlaySlip } from './components/ParlaySlip'
+import { FEATURES } from './lib/near/config'
 
 // Protected Route Component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -158,7 +159,7 @@ function App() {
       </Routes>
 
       {/* Parlay Slip — floating overlay */}
-      <ParlaySlip />
+      {FEATURES.parlays && <ParlaySlip />}
 
       {/* Mobile bottom navigation — hidden on md+ */}
       <MobileNav />

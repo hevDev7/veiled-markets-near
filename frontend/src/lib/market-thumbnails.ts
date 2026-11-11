@@ -101,6 +101,8 @@ const CATEGORY_THUMBS: Record<number, string> = {
   99: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=80&h=80&fit=crop&q=60', // Other
 }
 
+const NEAR_LOGO = 'https://assets.coingecko.com/coins/images/10365/small/near.jpg'
+
 // ── Simple in-memory cache ──
 const cache = new Map<string, string>()
 
@@ -115,6 +117,12 @@ export function getMarketThumbnail(question: string, category: number, customUrl
   const cacheKey = `${category}:${question}`
   const cached = cache.get(cacheKey)
   if (cached) return cached
+
+  // The NEAR ticker, matched case-sensitively so "in the near future" keeps its category image.
+  if (/\bNEAR\b/.test(question)) {
+    cache.set(cacheKey, NEAR_LOGO)
+    return NEAR_LOGO
+  }
 
   const q = question.toLowerCase()
 

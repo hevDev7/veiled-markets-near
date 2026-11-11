@@ -44,8 +44,8 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
   const numOutcomes = market?.numOutcomes || 2
   const outcomeLabels = market?.outcomeLabels || OUTCOME_LABELS_DEFAULT.slice(0, numOutcomes)
-  const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'ALEO'
-  const marketTokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'NEAR'
+  const marketTokenType = (market?.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
   const governanceConfig = useMarketGovernanceConfig(marketTokenType)
   const isStablecoin = marketTokenType === 'USDCX' || marketTokenType === 'USAD'
   const stablecoinTotalBalance = marketTokenType === 'USDCX'
@@ -151,7 +151,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         if (onChainMarket) {
           const onChainTokenType = onChainMarket.token_type === 3 ? 'USAD'
             : onChainMarket.token_type === 2 ? 'USDCX'
-            : 'ALEO'
+            : 'NEAR'
           if (marketTokenType !== onChainTokenType) {
             throw new Error(
               `Token type mismatch: UI shows ${marketTokenType} but on-chain market uses ${onChainTokenType}. Please refresh the page.`
@@ -178,7 +178,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
 
       if (isStablecoin) {
         if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+          throw new Error('Insufficient public NEAR for transaction fee. Gas fees are always paid in public NEAR.')
         }
         if (!wallet.isDemoMode && amountMicro > stablecoinTotalBalance) {
           throw new Error(
@@ -192,21 +192,21 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         setPrivacyMode(stablecoinPrivateBalance > 0n ? 'private' : 'public')
       } else {
         if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+          throw new Error('Insufficient public NEAR for transaction fee. Gas fees are always paid in public NEAR.')
         }
-        // ALEO: buy_shares_private uses transfer_private_to_public (needs credits record)
+        // NEAR: buy_shares_private uses transfer_private_to_public (needs credits record)
         const totalNeeded = Number(amountMicro)
         const { reserveCreditsRecord, releaseCreditsRecord } = await import('@/lib/credits-record')
         const creditsRecord = await fetchCreditsRecord(totalNeeded, wallet.address)
         if (!creditsRecord) {
           throw new Error(
-            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} NEAR. ` +
             `Private betting requires an unspent Credits record. ` +
-            `Make sure your wallet has private ALEO credits (not just public balance).`
+            `Make sure your wallet has private NEAR credits (not just public balance).`
           )
         }
         reserveCreditsRecord(creditsRecord)
-        const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'ALEO', creditsRecord)
+        const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, 'NEAR', creditsRecord)
         functionName = result.functionName
         inputs = result.inputs
         setPrivacyMode('private')
@@ -274,7 +274,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           marketQuestion: market.question,
           lockedMultiplier: tradePreview?.potentialPayout ? tradePreview.potentialPayout / parseFloat(amount) : 1,
           sharesReceived: minSharesOut,  // matches on-chain OutcomeShare.quantity (= expected_shares)
-          tokenType: market.tokenType || 'ALEO',
+          tokenType: market.tokenType || 'NEAR',
         })
 
         pollTransactionStatus(submittedTxId, (status, onChainTxId) => {
@@ -523,7 +523,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                               <span className="text-surface-500">
                                 {isStablecoin
                                   ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${marketTokenType} (private: ${formatCredits(stablecoinPrivateBalance)})`
-                                  : `Balance: ${formatCredits(wallet.balance.public + wallet.balance.private)} ALEO (private: ${formatCredits(wallet.balance.private)})`
+                                  : `Balance: ${formatCredits(wallet.balance.public + wallet.balance.private)} NEAR (private: ${formatCredits(wallet.balance.private)})`
                                 }
                               </span>
                               <button

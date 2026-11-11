@@ -55,7 +55,7 @@ export function AdminPanel() {
     const fetchBalances = async () => {
       setIsLoadingBalances(true)
       try {
-        // program_credits[0u8] = ALEO, program_credits[1u8] = USDCX
+        // program_credits[0u8] = NEAR, program_credits[1u8] = USDCX
         const [aleoBalRaw, usdcxBalRaw] = await Promise.all([
           getMappingValue<string>('protocol_treasury', '0u8'),
           getMappingValue<string>('protocol_treasury', '1u8'),
@@ -207,12 +207,12 @@ export function AdminPanel() {
         {/* Treasury Balances */}
         <div className="grid grid-cols-2 gap-3">
           <div className="p-4 rounded-xl bg-white/[0.02]">
-            <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">ALEO Treasury</p>
+            <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">NEAR Treasury</p>
             {isLoadingBalances ? (
               <div className="h-7 w-20 bg-surface-700/50 rounded animate-pulse" />
             ) : (
               <p className="text-lg font-bold text-white">
-                {formatCredits(treasuryBalances.aleo)} ALEO
+                {formatCredits(treasuryBalances.aleo)} NEAR
               </p>
             )}
           </div>

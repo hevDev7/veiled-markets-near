@@ -36,6 +36,7 @@ const COINGECKO_IDS: Record<string, string> = {
   ETHEREUM: 'ethereum',
   SOL: 'solana',
   SOLANA: 'solana',
+  NEAR: 'near',
   ALEO: 'aleo',
   BNB: 'binancecoin',
   XRP: 'ripple',

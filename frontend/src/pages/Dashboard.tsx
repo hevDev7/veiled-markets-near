@@ -20,6 +20,7 @@ import { cn, formatCredits, getCategoryEmoji } from '@/lib/utils'
 import { getLeadingOutcome, getMarketOutcomeLabels } from '@/lib/market-outcomes'
 import { resolvePendingMarkets, hasPendingMarkets, getPendingMarketsInfo, clearPendingMarkets, type PendingMarketInfo } from '@/lib/aleo-client'
 import { devWarn } from '../lib/logger'
+import { FEATURES } from '@/lib/near/config'
 
 // ── localStorage helpers ──
 const BOOKMARKS_KEY = 'veiled_bookmarks'
@@ -72,7 +73,7 @@ export function Dashboard() {
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid')
     const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
-    const [tokenFilter, setTokenFilter] = useState<'all' | 'ALEO' | 'USDCX' | 'USAD'>('all')
+    const [tokenFilter, setTokenFilter] = useState<'all' | 'NEAR' | 'USDCX' | 'USAD'>('all')
     const [marketTypeFilter, setMarketTypeFilter] = useState<'all' | 'binary' | 'multi' | 'scalar' | 'conditional'>('all')
     const [visibleCount, setVisibleCount] = useState(12)
     const [expandPositions, setExpandPositions] = useState(false)
@@ -135,7 +136,7 @@ export function Dashboard() {
     }, [])
 
     useEffect(() => {
-        if (slipLegs.length > 0) {
+        if (FEATURES.parlays && slipLegs.length > 0) {
             setParlayMode(true)
         }
     }, [slipLegs.length])
@@ -223,7 +224,7 @@ export function Dashboard() {
             const amount = (Number(bet.amount) / 1_000_000).toFixed(2)
             feed.push({
                 id: `turbo-${bet.id}`,
-                message: `${amount} ALEO on ${sym} ${direction}`,
+                message: `${amount} NEAR on ${sym} ${direction}`,
                 time: bet.placedAt,
                 marketId: bet.marketId,
             })
@@ -261,7 +262,7 @@ export function Dashboard() {
             else { if (market.status !== 1 || market.timeRemaining === 'Ended') return false }
             if (selectedCategory !== 0 && market.category !== selectedCategory) return false
             if (searchQuery !== '' && !market.question.toLowerCase().includes(searchQuery.toLowerCase())) return false
-            if (tokenFilter !== 'all' && (market.tokenType || 'ALEO') !== tokenFilter) return false
+            if (tokenFilter !== 'all' && (market.tokenType || 'NEAR') !== tokenFilter) return false
             // Market type filter
             if (marketTypeFilter !== 'all') {
                 const outcomes = market.numOutcomes ?? 2
@@ -409,7 +410,7 @@ export function Dashboard() {
                                                         const colorMap = ['bg-yes-400/15 text-yes-400', 'bg-no-400/15 text-no-400', 'bg-purple-400/15 text-purple-400', 'bg-yellow-400/15 text-yellow-400']
                                                         return <span className={cn('text-[10px] font-mono font-bold px-1.5 py-0.5 rounded', colorMap[idx - 1] || colorMap[0])}>{label}</span>
                                                     })()}
-                                                    <span className="text-[10px] font-mono text-surface-500">{formatCredits(bet.amount)} {bet.tokenType || 'ALEO'}</span>
+                                                    <span className="text-[10px] font-mono text-surface-500">{formatCredits(bet.amount)} {bet.tokenType || 'NEAR'}</span>
                                                     {bet.status === 'pending' && <span className="text-[10px] font-mono text-brand-400">PENDING</span>}
                                                 </div>
                                             </div>
@@ -477,7 +478,7 @@ export function Dashboard() {
                                 className={cn('btn-secondary gap-2 px-5 py-2.5 text-sm whitespace-nowrap flex items-center', showFilters && 'border-brand-400/30 text-brand-400')}>
                                 <SlidersHorizontal className="w-4 h-4 flex-shrink-0" /> Filters
                             </button>
-                            <button
+                            {FEATURES.parlays && <button
                                 type="button"
                                 onClick={() => setParlayMode(value => !value)}
                                 className={cn(
@@ -494,7 +495,7 @@ export function Dashboard() {
                                         {slipLegs.length}
                                     </span>
                                 )}
-                            </button>
+                            </button>}
                             <div className="flex items-center gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                                 <button onClick={() => setViewMode('grid')}
                                     className={cn('p-2.5 rounded-lg transition-all duration-200', viewMode === 'grid' ? 'bg-white/[0.06] text-white' : 'text-surface-500 hover:text-surface-300')}>
@@ -516,7 +517,7 @@ export function Dashboard() {
                                         <div>
                                             <label className="text-[9px] font-semibold text-surface-500 mb-2 block uppercase tracking-wider">Token Type</label>
                                             <div className="flex gap-2">
-                                                {(['all', 'ALEO', 'USDCX', 'USAD'] as const).map((t) => (
+                                                {(['all', 'NEAR', 'USDCX', 'USAD'] as const).map((t) => (
                                                     <button key={t} onClick={() => setTokenFilter(t)}
                                                         className={cn('px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200', tokenFilter === t ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]' : 'bg-white/[0.02] text-surface-400 border border-white/[0.04] hover:bg-white/[0.04]')}>
                                                         {t === 'all' ? 'All' : t}

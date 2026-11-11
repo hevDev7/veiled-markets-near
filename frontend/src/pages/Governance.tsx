@@ -57,6 +57,8 @@ import {
   saveGovernanceVoteReceipt,
 } from '../lib/governance-persistence';
 
+import { FEATURES } from '@/lib/near/config';
+
 type Tab = 'proposals' | 'disputes' | 'resolver';
 type ProposalStatusFilter = 'all' | 'active' | 'passed' | 'executed' | 'rejected';
 
@@ -90,7 +92,7 @@ export function Governance() {
   const governance = useGovernance();
   const { wallet } = useWalletStore();
 
-  const [activeTab, setActiveTab] = useState<Tab>('proposals');
+  const [activeTab, setActiveTab] = useState<Tab>(FEATURES.proposals ? 'proposals' : 'disputes');
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeProposalActionId, setActiveProposalActionId] = useState<string | null>(null);
@@ -116,8 +118,8 @@ export function Governance() {
       const requiredLabel = requiredFeeAleo.toFixed(requiredFeeAleo % 1 === 0 ? 0 : 1);
       const currentLabel = (Number(publicBalance) / 1_000_000).toFixed(6);
       throw new Error(
-        `Need at least ${requiredLabel} ALEO public balance to pay the ${actionLabel} fee. `
-        + `Current public balance: ${currentLabel} ALEO.`,
+        `Need at least ${requiredLabel} NEAR public balance to pay the ${actionLabel} fee. `
+        + `Current public balance: ${currentLabel} NEAR.`,
       );
     }
   }, [wallet.address, wallet.balance.public]);
@@ -173,7 +175,7 @@ export function Governance() {
       const { fetchCreditsRecord } = await import('../lib/credits-record');
       const creditsRecord = await fetchCreditsRecord(10_000000, wallet.address);
       if (!creditsRecord) {
-        throw new Error('No credits record found. Need at least 10 ALEO private balance to create a proposal.');
+        throw new Error('No credits record found. Need at least 10 NEAR private balance to create a proposal.');
       }
 
       const targetField = data.target.trim() || '0field';
@@ -270,7 +272,7 @@ export function Governance() {
       const { fetchCreditsRecord } = await import('../lib/credits-record');
       const creditsRecord = await fetchCreditsRecord(Number(amount), wallet.address);
       if (!creditsRecord) {
-        throw new Error(`No credits record found. Need at least ${Number(amount) / 1_000000} ALEO private balance to vote.`);
+        throw new Error(`No credits record found. Need at least ${Number(amount) / 1_000000} NEAR private balance to vote.`);
       }
 
       const inputs = buildVoteInputs(creditsRecord, proposalId, amount);
@@ -368,7 +370,7 @@ export function Governance() {
     const { fetchCreditsRecord } = await import('../lib/credits-record');
     const creditsRecord = await fetchCreditsRecord(50_000000, wallet.address);
     if (!creditsRecord) {
-      throw new Error('No credits record found with sufficient balance. Need at least 50 ALEO private balance.');
+      throw new Error('No credits record found with sufficient balance. Need at least 50 NEAR private balance.');
     }
 
     const result = await executeTransaction({
@@ -692,7 +694,7 @@ export function Governance() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              {FEATURES.proposals && <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setShowCreateModal(true)}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-600"
@@ -700,8 +702,14 @@ export function Governance() {
                   <Plus className="h-4 w-4" />
                   Create Proposal
                 </button>
-              </div>
+              </div>}
             </div>
+
+            {!FEATURES.proposals && (
+              <p className="mt-4 rounded-lg border border-white/[0.08] bg-white/[0.03] px-4 py-2.5 text-xs text-surface-300">
+                On NEAR testnet, dispute escalation is live. Proposals and resolver staking are not deployed yet.
+              </p>
+            )}
 
             {!wallet.connected && (
               <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-2.5 text-xs text-amber-200">

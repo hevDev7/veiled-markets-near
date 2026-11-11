@@ -18,7 +18,7 @@ import {
 import { cn } from '@/lib/utils'
 import { ParlayConfirmModal } from './ParlayConfirmModal'
 
-const TOKEN_OPTIONS: ParlayTokenType[] = ['ALEO', 'USDCX', 'USAD']
+const TOKEN_OPTIONS: ParlayTokenType[] = ['NEAR', 'USDCX', 'USAD']
 
 const QUICK_STAKES = [
   { label: '0.5', value: 500_000n },

@@ -146,7 +146,7 @@ export function ClaimWinningsModal({
           owner: tr.owner,
         }))
       } else {
-        const betTokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+        const betTokenType = (bet.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
         records = await fetchOutcomeShareRecords(getProgramIdForToken(betTokenType), bet.marketId)
       }
       // Don't filter by owner — Shield Wallet uses a relayer pattern where
@@ -227,13 +227,7 @@ export function ClaimWinningsModal({
     setIsSubmitting(true)
     setError(null)
     try {
-      const publicFeeRequired = 1_500_000n
-      if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
-        throw new Error(
-          `Insufficient public ALEO for transaction fee. ${isRefund ? 'claim_refund' : 'redeem_shares'} needs 1.50 public ALEO for gas, ` +
-          `but only ${Number(wallet.balance.public) / 1_000_000} ALEO is public in your wallet.`
-        )
-      }
+      // Redeem and refund are relayed private actions: the relayer pays the gas.
 
       const inspectedRecord = selectedRecord ?? inspectOutcomeShareInput(recordPlaintext)
       if (inspectedRecord.marketId && inspectedRecord.marketId !== bet.marketId) {
@@ -253,7 +247,7 @@ export function ClaimWinningsModal({
         )
       }
 
-      const tokenType = (bet.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const tokenType = (bet.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
       // Collateral check — skip for turbo (handled differently in turbo claim)
       if (!isTurboBet && inspectedRecord.quantity != null) {
         try {
@@ -490,7 +484,7 @@ export function ClaimWinningsModal({
 
   if (!bet) return null
 
-  const tokenType = bet.tokenType || 'ALEO'
+  const tokenType = bet.tokenType || 'NEAR'
   const tokenSymbol = getTokenSymbol(tokenType)
 
   // FPMM: winning shares redeem 1:1, payout = quantity from OutcomeShare record (most accurate)
@@ -503,6 +497,8 @@ export function ClaimWinningsModal({
   // Resolve outcome label from market data
   const resolveOutcomeLabel = (outcomeNum: number): string => {
     if (outcomeNum < 1) return 'Pending'
+    // Turbo rounds are not in the market list; their bets are 'up' (outcome 1) or 'down' (outcome 2).
+    if (!market && (bet.outcome === 'up' || bet.outcome === 'down')) return outcomeNum === 1 ? 'UP' : 'DOWN'
     return market ? (getMarketOutcomeLabels({
       numOutcomes: Math.max(market.numOutcomes || market.outcomeLabels?.length || 2, 2),
       outcomeLabels: market.outcomeLabels ?? [],

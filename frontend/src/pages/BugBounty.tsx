@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Shield, Clock, ArrowRight } from 'lucide-react'
 import { Footer } from '../components/Footer'
+import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function BugBounty() {
   return (
@@ -28,6 +29,7 @@ export function BugBounty() {
           </div>
 
           <h1 className="font-display text-3xl sm:text-4xl text-white mb-4">Bug Bounty Program</h1>
+          <NearPortNotice className="mb-6" />
           <p className="text-surface-400 leading-relaxed mb-8">
             We're building a formal bug bounty program to reward security researchers who help keep
             Veiled Markets safe. The program will cover smart contract vulnerabilities, front-end

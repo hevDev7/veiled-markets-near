@@ -3,7 +3,7 @@
 // ============================================================================
 // Handles persistent storage of bet data in Supabase PostgreSQL.
 // Works alongside localStorage as write-through cache.
-// If VITE_SUPABASE_URL is not set, all operations return empty/no-op.
+// If VITE_NEAR_SUPABASE_URL is not set, all operations return empty/no-op.
 //
 // PRIVACY: Sensitive bet fields (outcome, amount, shares) are encrypted
 // with a wallet-derived AES-256-GCM key before storage. See crypto.ts.
@@ -31,9 +31,11 @@ export interface MarketRegistryEntry {
   thumbnail_url?: string
 }
 
-// Initialize Supabase client (null if env vars not configured)
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+// Initialize Supabase client (null if env vars not configured).
+// NEAR build: only a project configured for NEAR is used (VITE_NEAR_SUPABASE_*), never the Aleo app's tables;
+// without one every call is a no-op and the chain is the only source of truth.
+const supabaseUrl = import.meta.env.VITE_NEAR_SUPABASE_URL as string | undefined
+const supabaseAnonKey = import.meta.env.VITE_NEAR_SUPABASE_ANON_KEY as string | undefined
 
 // Track the current wallet address so RLS policies on Supabase can scope
 // writes to that user. The header `x-aleo-address` is read by the
@@ -127,7 +129,7 @@ async function betToRow(bet: Bet, address: string, encryptionKey: CryptoKey | nu
     type: bet.type || 'buy',
     market_question: bet.marketQuestion || null,
     claimed: bet.claimed || false,
-    token_type: bet.tokenType || 'ALEO',
+    token_type: bet.tokenType || 'NEAR',
     updated_at: new Date().toISOString(),
   }
 }

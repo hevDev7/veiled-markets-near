@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft, AlertTriangle } from 'lucide-react'
 import { Footer } from '../components/Footer'
+import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function RiskDisclosure() {
   return (
@@ -19,6 +20,7 @@ export function RiskDisclosure() {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Risk Disclosure</h1>
         <p className="text-sm text-surface-500 mb-8">Last updated: April 9, 2026</p>
+        <NearPortNotice className="mb-8" />
 
         {/* Warning Banner */}
         <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/[0.06] border border-yellow-500/[0.12] mb-12">

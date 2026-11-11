@@ -99,7 +99,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
       }
 
       const amountMicro = BigInt(Math.floor(parseFloat(betAmount) * 1_000_000))
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const tokenType = (market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
 
       // Pre-validate market status on-chain to avoid wasted gas
       try {
@@ -124,7 +124,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
 
       if (tokenType === 'USDCX' || tokenType === 'USAD') {
         if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+          throw new Error('Insufficient public NEAR for transaction fee. Gas fees are always paid in public NEAR.')
         }
         const totalStablecoin = tokenType === 'USDCX'
           ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
@@ -142,21 +142,21 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
         setPrivacyMode(privateStablecoin > 0n ? 'private' : 'public')
       } else {
         if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-          throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+          throw new Error('Insufficient public NEAR for transaction fee. Gas fees are always paid in public NEAR.')
         }
-        // ALEO: buy_shares_private with credits record
+        // NEAR: buy_shares_private with credits record
         const totalNeeded = Number(amountMicro)
         const { reserveCreditsRecord, releaseCreditsRecord } = await import('@/lib/credits-record')
         const creditsRecord = await fetchCreditsRecord(totalNeeded, wallet.address)
         if (!creditsRecord) {
           throw new Error(
-            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} ALEO. ` +
+            `Could not find a Credits record with at least ${(totalNeeded / 1_000_000).toFixed(2)} NEAR. ` +
             `Private betting requires an unspent Credits record.`
           )
         }
         reserveCreditsRecord(creditsRecord)
         releaseSelectedRecord = () => releaseCreditsRecord(creditsRecord)
-        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'ALEO', creditsRecord)
+        const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, 'NEAR', creditsRecord)
         functionName = betResult.functionName
         inputs = betResult.inputs
         setPrivacyMode('private')
@@ -213,7 +213,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           status: 'pending',
           marketQuestion: market.question,
           lockedMultiplier: selectedOutcomeSummary?.payout,
-          tokenType: market.tokenType || 'ALEO',
+          tokenType: market.tokenType || 'NEAR',
         })
 
         pollTransactionStatus(submittedTxId, (status, onChainTxId) => {
@@ -255,8 +255,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
     : 0
 
   const isExpired = market ? (market.timeRemaining === 'Ended' || market.status !== 1) : false
-  const marketTokenType = (market?.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
-  const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'ALEO'
+  const marketTokenType = (market?.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
+  const tokenSymbol = market ? getTokenSymbol(market.tokenType) : 'NEAR'
   const isStablecoin = marketTokenType === 'USDCX' || marketTokenType === 'USAD'
   const stablecoinTotalBalance = marketTokenType === 'USDCX'
     ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
@@ -432,7 +432,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                             <span className="text-surface-500">
                               {isStablecoin
                                 ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${marketTokenType} (private: ${formatCredits(stablecoinPrivateBalance)})`
-                                : `Public: ${formatCredits(wallet.balance.public)} ALEO`
+                                : `Public: ${formatCredits(wallet.balance.public)} NEAR`
                               }
                             </span>
                             <button
@@ -441,7 +441,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                                   const usable = stablecoinTotalBalance
                                   setBetAmount((Number(usable) / 1_000_000).toString())
                                 } else {
-                                  // Public balance minus gas reserve (~0.7 ALEO for tx fee)
+                                  // Public balance minus gas reserve (~0.7 NEAR for tx fee)
                                   const usable = wallet.balance.public > 700_000n ? wallet.balance.public - 700_000n : 0n
                                   setBetAmount((Number(usable) / 1_000_000).toString())
                                 }
@@ -500,8 +500,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                               <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient balance</p>
                               <p className="text-xs text-surface-400 leading-relaxed">
                                 {isStablecoin
-                                  ? `You need private ${marketTokenType} Token balance to bet on this market, plus ALEO for gas.`
-                                  : `You need ALEO (public or private) to place a bet. Public balance is needed for the transaction fee.`
+                                  ? `You need private ${marketTokenType} Token balance to bet on this market, plus NEAR for gas.`
+                                  : `You need NEAR (public or private) to place a bet. Public balance is needed for the transaction fee.`
                                 }
                               </p>
                             </div>

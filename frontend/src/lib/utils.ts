@@ -25,29 +25,37 @@ export function formatNumber(num: number): string {
  * Format credits (microcredits to credits)
  */
 export function formatCredits(microcredits: bigint, decimals: number = 2): string {
-  // Truncate instead of round so 995000 micro (0.995 ALEO) displays as
+  // Truncate instead of round so 995000 micro (0.995 NEAR) displays as
   // "0.99" not "1.00" — matches actual spendable amount after 0.5% fee.
-  const factor = Math.pow(10, decimals)
-  const credits = Math.trunc((Number(microcredits) / 1_000_000) * factor) / factor
+  // Testnet amounts are often below 0.01: a non-zero amount that would truncate to 0.00 gets two significant
+  // digits instead (9950 micro shows as 0.0099, not 0.00).
+  const value = Number(microcredits) / 1_000_000
+  let shown = decimals
+  if (value !== 0 && Math.trunc(value * Math.pow(10, decimals)) === 0) {
+    while (shown < 6 && Math.trunc(value * Math.pow(10, shown)) === 0) shown++
+    shown = Math.min(shown + 1, 6)
+  }
+  const factor = Math.pow(10, shown)
+  const credits = Math.trunc(value * factor) / factor
   return credits.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: shown,
   })
 }
 
 /**
  * Token type helpers
  */
-export type TokenType = 'ALEO' | 'USDCX' | 'USAD'
+export type TokenType = 'NEAR' | 'USDCX' | 'USAD'
 
 export function getTokenSymbol(tokenType?: TokenType | number): string {
   if (tokenType === 3 || tokenType === 'USAD') return 'USAD'
   if (tokenType === 2 || tokenType === 'USDCX') return 'USDCX'
-  return 'ALEO'
+  return 'NEAR'
 }
 
 /**
- * Format token amount (both ALEO and USDCX use 6 decimals)
+ * Format token amount (both NEAR and USDCX use 6 decimals)
  */
 export function formatTokenAmount(microAmount: bigint, _tokenType?: TokenType, decimals: number = 2): string {
   return formatCredits(microAmount, decimals)

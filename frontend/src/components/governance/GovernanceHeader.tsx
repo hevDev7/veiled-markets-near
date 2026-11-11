@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED GOVERNANCE — GovernanceHeader Component
 // ============================================================================
-// Displays ALEO balance, voting power, and claimable rewards
+// Displays NEAR balance, voting power, and claimable rewards
 // ============================================================================
 
 import { motion } from 'framer-motion';
@@ -68,7 +68,7 @@ export function GovernanceHeader({
             <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
               <div className="flex items-center gap-1.5 text-[11px] text-surface-500">
                 <Coins className="h-3.5 w-3.5 text-brand-400" />
-                Wallet ALEO
+                Wallet NEAR
               </div>
               <div className="mt-2 text-lg font-semibold text-white">{formatCredits(totalAleo, 2)}</div>
               <div className="mt-1 text-[11px] text-surface-500">
@@ -88,7 +88,7 @@ export function GovernanceHeader({
               ) : (
                 <>
                   <div className="mt-2 text-lg font-semibold text-yellow-300">{formatVeil(stats.totalStakedInVotes)}</div>
-                  <div className="mt-1 text-[11px] text-surface-500">ALEO currently bonded into governance votes</div>
+                  <div className="mt-1 text-[11px] text-surface-500">NEAR currently bonded into governance votes</div>
                 </>
               )}
             </div>
@@ -164,8 +164,8 @@ export function GovernanceHeader({
           <ControlStat label="Protocol Fee" value={`${(Number(stats.protocolFeeBps) / 100).toFixed(2)}%`} />
           <ControlStat label="Creator Fee" value={`${(Number(stats.creatorFeeBps) / 100).toFixed(2)}%`} />
           <ControlStat label="LP Fee" value={`${(Number(stats.lpFeeBps) / 100).toFixed(2)}%`} />
-          <ControlStat label="Min Trade" value={`${formatCredits(stats.minTradeAmount, 4)} ALEO`} />
-          <ControlStat label="Min Liquidity" value={`${formatCredits(stats.minLiquidity, 4)} ALEO`} />
+          <ControlStat label="Min Trade" value={`${formatCredits(stats.minTradeAmount, 4)} NEAR`} />
+          <ControlStat label="Min Liquidity" value={`${formatCredits(stats.minLiquidity, 4)} NEAR`} />
           <ControlStat
             label="Guardian Set"
             value={stats.guardianAddresses.length > 0 ? `${stats.guardianAddresses.length} configured` : 'Loading'}

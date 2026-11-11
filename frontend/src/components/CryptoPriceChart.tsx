@@ -12,7 +12,7 @@ const CRYPTO_MAP: Record<string, { id: string; symbol: string; name: string }> =
   ETHEREUM: { id: 'ethereum', symbol: 'ETH', name: 'Ethereum' },
   SOL: { id: 'solana', symbol: 'SOL', name: 'Solana' },
   SOLANA: { id: 'solana', symbol: 'SOL', name: 'Solana' },
-  ALEO: { id: 'aleo', symbol: 'ALEO', name: 'Aleo' },
+  NEAR: { id: 'near', symbol: 'NEAR', name: 'NEAR Protocol' },
   BNB: { id: 'binancecoin', symbol: 'BNB', name: 'BNB' },
   XRP: { id: 'ripple', symbol: 'XRP', name: 'XRP' },
   DOGE: { id: 'dogecoin', symbol: 'DOGE', name: 'Dogecoin' },
@@ -98,29 +98,38 @@ export function CryptoPriceChart({ question, category, baselinePrice, baselineTi
   const feedId = CHAINLINK_FEED_IDS[crypto.symbol]
   const sourceLabel = priceService.getSourceLabel()
 
-  const fetchPriceData = useCallback(async () => {
+  const hasDataRef = useRef(false)
+  const fetchPriceData = useCallback(async (withHistory: boolean) => {
     try {
       const [history, priceResult] = await Promise.all([
-        priceService.getPriceHistory(crypto.symbol),
+        withHistory ? priceService.getPriceHistory(crypto.symbol) : Promise.resolve(null),
         priceService.getCurrentPrice(crypto.symbol),
       ])
 
-      setPriceData(history.points)
+      if (history) setPriceData(history.points)
       setCurrentPrice(priceResult.price)
       setPriceChange24h(priceResult.change24h)
       setLastUpdated(new Date())
       setError(null)
+      hasDataRef.current = true
     } catch (err) {
-      setError('Failed to load price data')
+      // A missed refresh (CoinGecko rate limit) keeps the chart already drawn.
+      if (!hasDataRef.current) setError('Failed to load price data')
     } finally {
       setLoading(false)
     }
   }, [crypto.symbol])
 
   useEffect(() => {
-    fetchPriceData()
-    // Refresh every 30s (more frequent for price markets)
-    intervalRef.current = setInterval(fetchPriceData, 30_000)
+    // CoinGecko's free API allows a few calls a minute per IP, shared with the turbo oracle: the spot price
+    // refreshes every minute, the 24h history every five.
+    let ticks = 0
+    hasDataRef.current = false
+    fetchPriceData(true)
+    intervalRef.current = setInterval(() => {
+      ticks += 1
+      fetchPriceData(ticks % 5 === 0 || !hasDataRef.current)
+    }, 60_000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [fetchPriceData])
 
@@ -262,7 +271,7 @@ export function CryptoPriceChart({ question, category, baselinePrice, baselineTi
             </span>
           )}
           <button
-            onClick={() => { setLoading(true); fetchPriceData() }}
+            onClick={() => { setLoading(true); fetchPriceData(true) }}
             className="p-1 rounded-md hover:bg-white/[0.03] transition-colors"
             aria-label="Refresh price"
           >
@@ -345,7 +354,7 @@ export function CryptoPriceChart({ question, category, baselinePrice, baselineTi
         </div>
         <div className="flex items-center gap-1">
           <div className={cn('w-1.5 h-1.5 rounded-full animate-pulse', isUp ? 'bg-emerald-400' : 'bg-rose-400')} />
-          <span className="text-[10px] text-surface-500">Live · 30s</span>
+          <span className="text-[10px] text-surface-500">Live · 60s</span>
           {lastUpdated && (
             <span className="text-[10px] text-surface-600 tabular-nums">
               {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

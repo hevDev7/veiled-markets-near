@@ -797,7 +797,7 @@ export function WalletCompatibilityLab() {
           />
         </label>
         <label className="space-y-1">
-          <span className="text-xs text-surface-400 uppercase tracking-wide">Fee (ALEO)</span>
+          <span className="text-xs text-surface-400 uppercase tracking-wide">Fee (NEAR)</span>
           <input
             value={feeAleo}
             onChange={(e) => setFeeAleo(e.target.value)}

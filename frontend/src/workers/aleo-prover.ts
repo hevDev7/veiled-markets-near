@@ -1,5 +1,5 @@
 // ============================================================================
-// ALEO PROVER WEB WORKER
+// NEAR PROVER WEB WORKER
 // ============================================================================
 // Uses @provablehq/sdk ProgramManager to execute transactions in a Web Worker
 // with multi-threaded WASM proving. This bypasses browser wallet prover limits.

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Footer } from '../components/Footer'
+import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function TermsOfService() {
   return (
@@ -19,6 +20,7 @@ export function TermsOfService() {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Terms of Service</h1>
         <p className="text-sm text-surface-500 mb-12">Last updated: April 9, 2026</p>
+        <NearPortNotice className="mb-12" />
 
         <div className="space-y-10 text-sm leading-relaxed">
           <section>

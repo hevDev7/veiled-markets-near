@@ -14,6 +14,8 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { TurboMarketPanel, type TurboSymbol } from '@/components/TurboMarketPanel'
+import { TURBO_ORACLE_URL } from '@/lib/near/config'
+import { useTurboPriceSource } from '@/hooks/useTurboPriceSource'
 
 interface TurboMarketRow {
   market_id: string
@@ -22,8 +24,9 @@ interface TurboMarketRow {
   deadline_ms: number
 }
 
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || ''
-const SUPABASE_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ''
+// NEAR: the turbo oracle serves the audit trail at the same PostgREST path Supabase did.
+const SUPABASE_URL = TURBO_ORACLE_URL
+const SUPABASE_KEY = 'public'
 // Mainnet 15s/block; testnet 4s/block. Used to convert deadline_block → epoch ms.
 const SECONDS_PER_BLOCK = Number(
   (import.meta as any).env?.VITE_ALEO_SECONDS_PER_BLOCK || 4,
@@ -170,11 +173,12 @@ export function Turbo() {
 }
 
 function Header({ subtitle }: { subtitle: string }) {
+  const source = useTurboPriceSource()
   return (
     <div>
       <h1 className="text-2xl font-bold text-white">Veiled Turbo</h1>
       <p className="text-xs text-surface-400 mt-1">
-        5-minute UP/DOWN markets · Pyth-resolved · {subtitle}
+        5-minute UP/DOWN markets · {source.label} · {subtitle}
       </p>
     </div>
   )

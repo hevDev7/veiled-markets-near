@@ -36,7 +36,7 @@ export function Footer() {
               <span className="font-display text-lg text-white">Veiled Markets</span>
             </div>
             <p className="text-sm text-surface-400 leading-relaxed max-w-xs">
-              Privacy-preserving prediction market built on Aleo. Predict freely, bet privately.
+              Privacy-preserving prediction market built on NEAR. Predict freely, bet privately.
             </p>
             <div className="flex items-center gap-3 mt-6">
               {[
@@ -115,7 +115,7 @@ export function Footer() {
         {/* Bottom bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-16 pt-8 border-t border-white/[0.04]">
           <p className="text-xs text-surface-600">
-            © 2026 Veiled Markets. Built on Aleo.
+            © 2026 Veiled Markets. Built on NEAR.
           </p>
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">

@@ -1,7 +1,7 @@
 // ============================================================================
 // VEILED GOVERNANCE — Blockchain Client
 // ============================================================================
-// Client for interacting with the veiled_governance_v6.aleo program (pure ALEO).
+// Client for interacting with the veiled_governance_v6.aleo program (pure NEAR).
 // v6 post-audit hardening:
 //   - initiate_escalation split into 3 token-specific transitions
 //     (initiate_escalation_aleo/usdcx/usad), each cross-program calls
@@ -35,7 +35,7 @@ import type { ScannedRecord } from './record-scanner';
 
 const API_BASE_URL = config.rpcUrl || 'https://api.explorer.provable.com/v1/testnet';
 const GOV_PROGRAM_ID = config.governanceProgramId || 'veiled_governance_v6.aleo';
-// v2: No separate token program — governance uses native ALEO credits
+// v2: No separate token program — governance uses native NEAR credits
 const TOKEN_PROGRAM_ID = 'credits.aleo';
 const FETCH_TIMEOUT_MS = 15_000;
 
@@ -143,11 +143,11 @@ function parseAleoValue(value: unknown): unknown {
 }
 
 // ============================================================================
-// ALEO Amount Utilities (v2: pure ALEO, no custom token)
+// NEAR Amount Utilities (v2: pure NEAR, no custom token)
 // ============================================================================
 
 /**
- * Format ALEO amount (6 decimals / microcredits) for display
+ * Format NEAR amount (6 decimals / microcredits) for display
  */
 export function formatVeil(amount: bigint, decimals: number = 2): string {
   const whole = amount / BigInt(10 ** VEIL_DECIMALS);
@@ -183,7 +183,7 @@ export function parseVeilInput(input: string): bigint {
 // ============================================================================
 
 /**
- * Fetch total ALEO held by the governance program
+ * Fetch total NEAR held by the governance program
  * v2: Reads program_credits[0u8] from governance contract
  */
 export async function getVeilTotalSupply(): Promise<bigint> {
@@ -225,8 +225,8 @@ export async function getTokenMappingValue<T>(
 }
 
 /**
- * Fetch ALEO public balance for an address (from credits.aleo)
- * v2: User's governance "balance" is their ALEO credits balance
+ * Fetch NEAR public balance for an address (from credits.aleo)
+ * v2: User's governance "balance" is their NEAR credits balance
  */
 export async function getVeilPublicBalance(address: string): Promise<bigint> {
   try {
@@ -462,7 +462,7 @@ export async function getGovernanceLiveConfig(): Promise<GovernanceLiveConfig> {
 // ============================================================================
 
 /**
- * Build inputs for creating a governance proposal (v2: stake ALEO credits)
+ * Build inputs for creating a governance proposal (v2: stake NEAR credits)
  * create_proposal(credits_in, proposal_type, target, payload_1, payload_2, nonce)
  */
 export function buildCreateProposalInputs(
@@ -484,7 +484,7 @@ export function buildCreateProposalInputs(
 }
 
 /**
- * Build inputs for voting on a proposal (v2: lock ALEO credits)
+ * Build inputs for voting on a proposal (v2: lock NEAR credits)
  * vote_for/vote_against(credits_in, proposal_id, amount)
  */
 export function buildVoteInputs(
@@ -500,7 +500,7 @@ export function buildVoteInputs(
 }
 
 /**
- * Build inputs for delegating votes (v2: lock ALEO credits)
+ * Build inputs for delegating votes (v2: lock NEAR credits)
  * delegate_votes(credits_in, delegate_to, amount)
  */
 export function buildDelegateInputs(
@@ -516,7 +516,7 @@ export function buildDelegateInputs(
 }
 
 /**
- * Build inputs for registering as a resolver (v2: stake ALEO credits)
+ * Build inputs for registering as a resolver (v2: stake NEAR credits)
  * register_resolver(credits_in)
  */
 export function buildRegisterResolverInputs(
@@ -586,7 +586,7 @@ function normalizeFieldValue(value: string): string {
   return trimmed.endsWith('field') ? trimmed : `${trimmed}field`;
 }
 
-/** initiate_escalation_aleo(market_id) — Tier 0 → Tier 2 for ALEO market */
+/** initiate_escalation_aleo(market_id) — Tier 0 → Tier 2 for NEAR market */
 export function buildInitiateEscalationAleoInputs(marketId: string): string[] {
   return [normalizeFieldValue(marketId)];
 }
@@ -606,11 +606,11 @@ export function buildInitiateEscalationUsadInputs(marketId: string): string[] {
  * Returns null if token type is unknown.
  */
 export function getInitiateEscalationFunctionName(
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' | string | undefined,
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' | string | undefined,
 ): string | null {
   if (tokenType === 'USDCX') return 'initiate_escalation_usdcx';
   if (tokenType === 'USAD') return 'initiate_escalation_usad';
-  if (tokenType === 'ALEO') return 'initiate_escalation_aleo';
+  if (tokenType === 'NEAR') return 'initiate_escalation_aleo';
   return null;
 }
 
@@ -655,7 +655,7 @@ export function buildEscalateToCommunityInputs(
 export const ESCALATION_TIER_COMMITTEE = 2;
 export const ESCALATION_TIER_COMMUNITY = 3;
 
-/** governance_resolve_aleo(market_id, winning_outcome, tier) — for ALEO market */
+/** governance_resolve_aleo(market_id, winning_outcome, tier) — for NEAR market */
 export function buildGovernanceResolveAleoInputs(
   marketId: string,
   winningOutcome: number,
@@ -697,11 +697,11 @@ export function buildSlashResolverInputs(resolver: string, marketId: string): st
  * Returns null if token type is unknown.
  */
 export function getGovernanceResolveFunctionName(
-  tokenType: 'ALEO' | 'USDCX' | 'USAD' | string | undefined,
+  tokenType: 'NEAR' | 'USDCX' | 'USAD' | string | undefined,
 ): string | null {
   if (tokenType === 'USDCX') return 'governance_resolve_usdcx';
   if (tokenType === 'USAD') return 'governance_resolve_usad';
-  if (tokenType === 'ALEO') return 'governance_resolve_aleo';
+  if (tokenType === 'NEAR') return 'governance_resolve_aleo';
   return null;
 }
 

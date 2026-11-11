@@ -28,7 +28,7 @@ export function OddsChart({
   reserves,
   prices,
   totalBets,
-  tokenSymbol = 'ALEO',
+  tokenSymbol = 'NEAR',
   className,
 }: OddsChartProps) {
   const totalPool = reserves.reduce((sum, r) => sum + r, 0n)

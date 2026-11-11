@@ -507,7 +507,7 @@ export async function findCreditsRecord(minMicrocredits: number): Promise<string
   if (!status?.ready) return null;
 
   try {
-    devLog(`[RecordScanner] Finding credits record >= ${minMicrocredits / 1_000000} ALEO`);
+    devLog(`[RecordScanner] Finding credits record >= ${minMicrocredits / 1_000000} NEAR`);
     const record = await ctx.scanner.findCreditsRecord(minMicrocredits, {
       uuid: ctx.uuid,
       unspent: true,
@@ -573,7 +573,7 @@ export async function getPrivateBalance(
 
 /**
  * Get all token balances using record scanner.
- * Returns private balances for ALEO, USDCX, and USAD.
+ * Returns private balances for NEAR, USDCX, and USAD.
  */
 export async function getAllPrivateBalances(): Promise<{
   aleoPrivate: bigint;

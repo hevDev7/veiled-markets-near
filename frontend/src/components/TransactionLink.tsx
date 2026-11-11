@@ -62,7 +62,7 @@ export function TransactionLink({
                 className="inline-flex items-center gap-1.5 text-sm text-brand-400 hover:text-brand-300 transition-colors"
             >
                 <ExternalLink className="w-4 h-4" />
-                <span>View on Provable Explorer</span>
+                <span>View on NearBlocks</span>
             </a>
 
             {/* Note */}

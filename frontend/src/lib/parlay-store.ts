@@ -20,7 +20,7 @@ import {
 export interface ParlaySlipLeg {
   marketId: string
   marketQuestion: string
-  marketProgram: number         // 1=ALEO, 2=USDCX, 3=USAD (which market contract)
+  marketProgram: number         // 1=NEAR, 2=USDCX, 3=USAD (which market contract)
   outcome: number               // 1-4
   outcomeLabel: string
   oddsBps: bigint               // Odds in basis points (25000 = 2.5x)
@@ -28,7 +28,7 @@ export interface ParlaySlipLeg {
   marketTokenType: string       // Market's native token (for display only)
 }
 
-export type ParlayTokenType = 'ALEO' | 'USDCX' | 'USAD'
+export type ParlayTokenType = 'NEAR' | 'USDCX' | 'USAD'
 
 export interface ParlayRecord {
   id: string                     // local primary key (on-chain id when available, tx fallback otherwise)
@@ -182,7 +182,7 @@ export const useParlayStore = create<ParlayState>()(
       // State
       slipLegs: [],
       slipStake: 0n,
-      slipTokenType: 'ALEO' as ParlayTokenType,
+      slipTokenType: 'NEAR' as ParlayTokenType,
       slipOpen: false,
       parlays: [],
 
@@ -207,7 +207,7 @@ export const useParlayStore = create<ParlayState>()(
           outcomeLabel: label,
           oddsBps,
           displayOdds: oddsBpsToDisplay(oddsBps),
-          marketTokenType: market.tokenType ?? 'ALEO',
+          marketTokenType: market.tokenType ?? 'NEAR',
         }
 
         const nextLegs = existingIndex >= 0

@@ -14,38 +14,38 @@ const faqs: FAQItem[] = [
   {
     category: 'General',
     question: 'What is Veiled Markets?',
-    answer: 'Veiled Markets is a privacy-preserving prediction market protocol built on the Aleo blockchain. It uses zero-knowledge proofs (zk-SNARKs) to keep your bets, positions, and balances private on-chain. You can predict outcomes across various categories while maintaining full financial privacy.',
+    answer: 'Veiled Markets is a privacy-preserving prediction market on NEAR. Your balance and your positions are private notes inside the Veiled contract. Every trade carries a zero-knowledge proof and is submitted by a relayer, so no trade is linked to your account. You can trade markets in many categories and 5-minute turbo rounds on BTC, ETH and SOL.',
   },
   {
     category: 'General',
     question: 'What network does Veiled Markets run on?',
-    answer: 'Veiled Markets is currently deployed on the Aleo Testnet. Testnet tokens have no real monetary value and the network may be reset at any time. The protocol is built to support mainnet deployment in the future.',
+    answer: 'NEAR testnet, on the contract v1.veiled-markets.testnet. Testnet tokens have no monetary value. Veiled Markets started on Aleo testnet, and that version still exists.',
   },
   {
     category: 'General',
     question: 'Which wallets are supported?',
-    answer: 'Veiled Markets supports five Aleo-compatible wallets: Shield Wallet, Puzzle Wallet, Leo Wallet, Fox Wallet, and Soter Wallet. Each wallet is a browser extension that manages your private keys independently — the protocol never has access to your keys.',
+    answer: 'Meteor Wallet and MyNearWallet on NEAR testnet. Your keys stay in your wallet. The app asks you to sign one message (no fee) to unlock your private balance.',
   },
   {
     category: 'General',
     question: 'Is Veiled Markets custodial?',
-    answer: 'No. Veiled Markets is fully non-custodial. Your funds are controlled by your wallet at all times. The protocol consists of on-chain smart contracts that execute trades, but never custody or control user assets. You interact with the contracts directly from your wallet.',
+    answer: 'No one but you can spend your funds. Deposits sit in the Veiled contract as notes, and spending a note needs a proof made from your note key. The relayer only submits proofs and cannot change or redirect them. You can withdraw to any NEAR account at any time.',
   },
   // Trading
   {
     category: 'Trading',
     question: 'How do I place a bet?',
-    answer: 'Connect your wallet, navigate to a market, choose an outcome, enter your bet amount, and confirm the transaction in your wallet. Markets can have 2, 3, or 4 outcomes. The FPMM (Fixed Product Market Maker) determines how many shares you receive based on current market reserves. Your position is encrypted on-chain — only you can see your bet details.',
+    answer: 'Connect your wallet, open a market, choose an outcome, enter an amount and confirm. Your browser makes a zero-knowledge proof in a few seconds and the relayer submits the trade, so no wallet approval is needed when your private balance covers the amount. If it does not, your wallet first asks you to approve a deposit. The FPMM (Fixed Product Market Maker) sets how many shares you receive.',
   },
   {
     category: 'Trading',
     question: 'What tokens can I use?',
-    answer: 'Markets support three token types, each with its own market contract: ALEO (native token via veiled_markets_v37.aleo), USDCX (test stablecoin via veiled_markets_usdcx_v7.aleo), and USAD (stablecoin via veiled_markets_usad_v14.aleo). Each market is denominated in one specific token. ALEO markets use private credits records, while USDCX and USAD markets use Token records with MerkleProof verification for private trading.',
+    answer: 'NEAR, USDCX and USAD. USDCX and USAD are 6-decimal test stablecoins on NEAR testnet. One contract runs markets in all three tokens, and each market uses one of them.',
   },
   {
     category: 'Trading',
     question: 'What fees are charged?',
-    answer: 'A total of 2.0% fee is charged on each buy transaction: 0.5% protocol fee (to treasury), 0.5% creator fee (to market creator), and 1.0% LP fee (stays in the AMM pool for liquidity providers). Sell transactions also incur fees. Fee rates can be modified through governance proposals.',
+    answer: 'Each buy pays 2.0% in total: 0.5% protocol fee, 0.5% to the market creator, and 1.0% to the liquidity providers (it stays in the pool). Sells pay fees too.',
   },
   {
     category: 'Trading',
@@ -60,28 +60,28 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'Can I combine multiple markets into a parlay?',
-    answer: 'Yes. The veiled_parlay_v3.aleo contract lets you build multi-leg parlays where the payout requires every leg to resolve in your favor. Click an outcome chip on the dashboard while parlay mode is on to add a leg to your slip; the parlay client computes combined odds and stake before submission. Parlays use the same private record settlement as single-market trades.',
+    answer: 'Not on NEAR yet. Parlays exist in the Aleo version of Veiled Markets and are hidden in the NEAR app.',
   },
   // Markets
   {
     category: 'Markets',
     question: 'How are markets created?',
-    answer: 'Anyone with a connected wallet can create a market by specifying a question, 2, 3, or 4 outcome labels, deadline (in block height), category, initial liquidity amount, and token type. The creator provides the initial liquidity and receives LP shares. Market creation requires a blockchain transaction.',
+    answer: 'Anyone with a connected wallet can create a market: a question, 2, 3 or 4 outcome labels, a deadline, a category, the token and the initial liquidity (at least 0.01 NEAR). The question and labels are stored on chain with the market. The creator receives the LP position as a private note.',
   },
   {
     category: 'Markets',
     question: 'How are markets resolved?',
-    answer: 'Markets use a Multi-Voter Quorum resolution system (not automated oracles or single resolvers). After the market deadline passes and the market is closed (close_market), anyone can vote on the outcome by posting a 1 ALEO bond (vote_outcome). A minimum of 3 voters is required to reach quorum. After the voting window (~3 hours), votes are finalized (finalize_votes). A dispute window (~3 hours) follows, during which anyone can override the result by posting 3x the total bonds (dispute_resolution). If no dispute occurs, the outcome is confirmed (confirm_resolution). Majority voters can claim their bonds plus rewards, while minority voters lose their bonds (slashing).',
+    answer: 'By bonded voting. After the deadline, anyone closes the market and votes on the outcome by posting a 0.1 NEAR bond. On testnet the voting window is 5 minutes and one voter is enough. Then the votes are finalized and a 5-minute dispute window starts. Without a dispute, the outcome is confirmed. Voters on the winning outcome get their bond back; bonds on a losing outcome are forfeited.',
   },
   {
     category: 'Markets',
     question: 'What happens if a market is disputed?',
-    answer: 'After votes are finalized, there is a dispute window (~3 hours). During this window, any user can dispute the resolution by posting a bond equal to 3x the total voter bonds and proposing an alternative outcome (dispute_resolution). If a dispute is submitted, the disputed outcome overrides the voter result. Successful disputors can reclaim their bond (claim_dispute_bond). If no dispute is filed within the window, the voted outcome is confirmed (confirm_resolution).',
+    answer: 'After the votes are finalized, a dispute window opens (5 minutes on testnet). Anyone can dispute by posting 3x the total voter bonds and proposing another outcome. A dispute puts the market on hold, and anyone can then escalate it to the 5-member committee, where 3 matching votes decide the outcome. If the committee agrees with the dispute, the disputer gets the bond back. If the committee does not decide in time (1 hour on testnet), the market is cancelled and everyone is refunded. Without a dispute, the voted outcome is confirmed.',
   },
   {
     category: 'Markets',
     question: 'How do I claim my winnings?',
-    answer: 'After a market is resolved and finalized, holders of winning outcome shares can redeem them for tokens. Navigate to your Portfolio, find the resolved market, and click "Claim Winnings." The payout is delivered as an encrypted Aleo record directly to your wallet.',
+    answer: 'After the market resolves, open your Portfolio and click "Claim Winnings". Your winning shares are redeemed through the relayer, and the payout goes into your private balance. Withdraw it to any NEAR account from Settings.',
   },
   {
     category: 'Markets',
@@ -113,39 +113,39 @@ const faqs: FAQItem[] = [
   {
     category: 'Privacy & Security',
     question: 'How is my privacy protected?',
-    answer: 'All transactions use Aleo\'s zero-knowledge proofs (zk-SNARKs). Your bets, positions, and balances are stored as encrypted records on-chain that only you can decrypt with your view key. Off-chain data (if Supabase is enabled) is encrypted with AES-256-GCM using a key derived from your wallet signature.',
+    answer: 'Your balance and positions are notes: commitments in a Merkle tree inside the Veiled contract. Spending a note needs a zero-knowledge proof (Groth16) that your browser makes, and a relayer submits it. Public: deposits, withdrawals, and each trade\'s market, outcome and amount, because the market maker is public. Private: which account holds which position.',
   },
   {
     category: 'Privacy & Security',
     question: 'Can anyone see my bets?',
-    answer: 'No. Your bet amounts, selected outcome, and resulting positions are private by default on the Aleo blockchain. Only you can view your own records using your view key. The protocol front-end decrypts your data locally in the browser.',
+    answer: 'People can see that someone bought an outcome in a market, and how much, because the pool is public. They cannot see that it was you: the trade is submitted by the relayer and spends notes that only you can identify. Your browser decrypts your own notes locally.',
   },
   {
     category: 'Privacy & Security',
     question: 'What happens if I lose my private keys?',
-    answer: 'If you lose your private keys, you permanently lose access to all funds and records associated with that wallet. There is no recovery mechanism — the protocol is non-custodial and has no ability to restore access. Always back up your wallet securely.',
+    answer: 'Your note key comes from a message your wallet signs, so your wallet recovers your notes on any device. If you lose access to your NEAR account, you lose your notes as well. If your wallet cannot sign messages, the app keeps the note key in this browser instead. Always back up your wallet.',
   },
   // Governance
   {
     category: 'Governance',
     question: 'How does governance work?',
-    answer: 'Veiled Markets uses on-chain governance (veiled_governance_v6.aleo, 31 transitions) powered by ALEO token voting. Features include dispute resolution overrides via cross-program calls (governance_resolve_aleo/usdcx/usad), fee changes, 3-of-N multisig treasury management, parameter updates, and emergency pause. The app UI now exposes the operational proposal, voting, execution, resolver, and reward flows needed to use that governance system on testnet.',
+    answer: 'Governance proposals and token voting exist in the Aleo version only. On NEAR, disputed markets can be escalated to a committee of 5 members, and 3 matching votes decide the outcome.',
   },
   {
     category: 'Governance',
     question: 'What are the quorum requirements?',
-    answer: 'Quorum varies by proposal type: Emergency Pause needs only 5%, Dispute Resolution and Parameter changes need 10-15%, Fee Changes need 20%, and Treasury proposals need 30%. After passing, proposals enter a timelock (0-72 hours) before execution.',
+    answer: 'Proposal quorums belong to the Aleo version\'s governance, which is not on NEAR yet. On NEAR, the dispute committee needs 3 of its 5 members to agree.',
   },
   // Turbo Markets
   {
     category: 'Turbo Markets',
     question: 'What are Turbo Markets?',
-    answer: 'Turbo Markets are rolling 5-minute UP/DOWN prediction markets powered by the Pyth Network oracle. Every 5 minutes, a new market opens for 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, DOT). You predict whether the price will be higher or lower at the end of the round compared to the baseline set at round start. Resolution is fully automatic — no voting, no disputes. Deployed contract: veiled_turbo_v9.aleo.',
+    answer: 'Rolling 5-minute UP/DOWN rounds on BTC, ETH and SOL. A new round opens every 5 minutes, and you predict whether the price will be higher or lower at the deadline than the baseline at the start. The operator resolves each round, so there is no voting. On testnet the operator reads prices from CoinGecko.',
   },
   {
     category: 'Turbo Markets',
     question: 'How do I bet on a Turbo market?',
-    answer: 'Open the Dashboard or navigate to /market/<turbo_market_id>. Pick a side (Yes Up or Yes Down), enter your bet amount in ALEO, and click "Buy X Shares". Minimum bet is 0.001 ALEO. Your stake is encrypted on-chain via Aleo private records — only you can see your position. The chart shows live Pyth price updates relative to the baseline until the countdown hits 00:00.',
+    answer: 'Open Turbo from the dashboard, pick UP or DOWN, enter an amount in NEAR and confirm. Your bet is private: it goes through the same note pool as market trades. The chart shows the live price against the baseline until the countdown ends.',
   },
   {
     category: 'Turbo Markets',
@@ -155,22 +155,22 @@ const faqs: FAQItem[] = [
   {
     category: 'Turbo Markets',
     question: 'What happens when the round ends?',
-    answer: 'At the exact deadline, the operator backend captures the frozen Pyth price and immediately broadcasts a resolve_turbo_market transaction to the contract. This typically confirms within 15–30 seconds. Once status flips to RESOLVED on-chain, winners can claim via the Portfolio page. If the resolve tx fails for 60+ blocks (operator downtime, endpoint failure), anyone can call emergency_cancel to let all bettors claim a full refund.',
+    answer: 'At the deadline the operator submits the closing price to the contract, usually within seconds. When the round is RESOLVED, winners claim from the Portfolio page. If nobody bet on the winning side, or the round is not resolved within its grace period, the round is cancelled and every bet can be refunded.',
   },
   {
     category: 'Turbo Markets',
     question: 'Who operates the Turbo markets?',
-    answer: 'A trusted operator wallet (hardcoded as ORACLE_OPERATOR in veiled_turbo_v9.aleo) runs the backend service that subscribes to Pyth Hermes, creates new markets every 5 minutes, and resolves them at deadline. Users do NOT create turbo markets manually — the operator handles everything. The operator can be audited: every create and resolve transaction is logged to Supabase (turbo_oracle_audit) and cross-checkable against Pyth Hermes historical data at /verify/turbo/:marketId.',
+    answer: 'The operator account veiled-oracle.testnet. The contract accepts round creation and resolution only from this account and checks the price bounds. The operator runs the backend that opens a round every 5 minutes and resolves it at the deadline.',
   },
   {
     category: 'Turbo Markets',
     question: 'How do I verify the operator isn\'t cheating?',
-    answer: 'Navigate to /verify/turbo/<market_id> for any turbo market. The page shows the operator\'s on-chain claim (baseline and closing price committed on-chain) side-by-side with Pyth Hermes historical data at the exact same timestamp. If prices match (within 0.1%), the round is verified. If they don\'t match, it\'s potential operator misbehavior — report via /bug-bounty. The contract also enforces sanity rails: max price move per round, confidence interval checks, and baseline/closing block windows.',
+    answer: 'Open /verify/turbo/<market_id> for any turbo round. It shows the operator\'s audit record (baseline, closing price and transactions) next to the values stored in the contract. On testnet the prices come from CoinGecko, so the comparison with Pyth historical prices is approximate.',
   },
   {
     category: 'Turbo Markets',
     question: 'Are Turbo markets available for governance disputes?',
-    answer: 'No. Turbo markets resolve automatically via the Pyth oracle and are not eligible for the veiled_governance_v6.aleo dispute system. If you believe a round was resolved incorrectly, your only recourse is the public audit trail at /verify/turbo/:marketId and the bug bounty program. This is a deliberate trade-off: fast 5-minute rounds don\'t have time for a Multi-Voter Quorum, so trust shifts to oracle transparency.',
+    answer: 'No. Turbo rounds are resolved by the operator and cannot be disputed. Fast 5-minute rounds leave no time for voting, so the trust moves to the operator, and its audit trail at /verify/turbo/:marketId is public.',
   },
 ]
 

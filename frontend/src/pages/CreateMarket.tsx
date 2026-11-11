@@ -21,8 +21,11 @@ import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
 import { uploadMarketMetadata, uploadImageToIPFS, isPinataAvailable } from '@/lib/ipfs'
 import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
 import { devWarn } from '@/lib/logger'
+import { stashMarketMetadata } from '@/lib/near/executor'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
+import { PUBLIC_CALL_GAS_MICRO } from '@/lib/near/config'
+import { isChainTxId } from '@/lib/near/config'
 
 type CreateStep = 'details' | 'timing' | 'review' | 'creating' | 'success' | 'error'
 
@@ -38,7 +41,7 @@ interface MarketFormData {
   resolutionDeadlineDate: string
   resolutionDeadlineTime: string
   resolutionSource: string
-  tokenType: 'ALEO' | 'USDCX' | 'USAD'
+  tokenType: 'NEAR' | 'USDCX' | 'USAD'
   thumbnailUrl: string
 }
 
@@ -58,7 +61,7 @@ const initialFormData: MarketFormData = {
   outcomeLabels: ['Yes', 'No', '', ''], initialLiquidity: '10',
   deadlineDate: '', deadlineTime: '23:59',
   resolutionDeadlineDate: '', resolutionDeadlineTime: '23:59',
-  resolutionSource: '', tokenType: 'ALEO',
+  resolutionSource: '', tokenType: 'NEAR',
   thumbnailUrl: '',
 }
 
@@ -69,7 +72,7 @@ function clearDraft() { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
 function hasFormContent(data: MarketFormData) { return data.question.trim() !== '' || data.description.trim() !== '' }
 
 function getCreateMarketBalanceError(
-  tokenType: 'ALEO' | 'USDCX' | 'USAD',
+  tokenType: 'NEAR' | 'USDCX' | 'USAD',
   liquidityMicro: bigint,
   balances: {
     public: bigint
@@ -80,17 +83,17 @@ function getCreateMarketBalanceError(
     usadPrivate: bigint
   },
 ): string | null {
-  const feeMicro = 1_500_000n
+  const feeMicro = PUBLIC_CALL_GAS_MICRO
 
-  if (tokenType === 'ALEO') {
+  if (tokenType === 'NEAR') {
     const totalNeeded = liquidityMicro + feeMicro
     if (balances.public < totalNeeded) {
       return (
-        `Insufficient public ALEO. Market creation uses public ALEO, not private credits. ` +
-        `Need ${formatCredits(totalNeeded)} ALEO total ` +
-        `(${formatCredits(liquidityMicro)} ALEO liquidity + ${formatCredits(feeMicro)} ALEO fee), ` +
-        `but only have ${formatCredits(balances.public)} public ALEO. ` +
-        `Private ALEO available: ${formatCredits(balances.private)}.`
+        `Insufficient wallet NEAR. Market creation uses NEAR from your wallet, not your private balance. ` +
+        `Need ${formatCredits(totalNeeded)} NEAR total ` +
+        `(${formatCredits(liquidityMicro)} NEAR liquidity + ${formatCredits(feeMicro)} NEAR gas), ` +
+        `but only have ${formatCredits(balances.public)} public NEAR. ` +
+        `Private NEAR available: ${formatCredits(balances.private)}.`
       )
     }
     return null
@@ -100,19 +103,19 @@ function getCreateMarketBalanceError(
   const privateStableBalance = tokenType === 'USDCX' ? balances.usdcxPrivate : balances.usadPrivate
   if (publicStableBalance < liquidityMicro) {
     return (
-      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity via transfer_public_as_signer. ` +
+      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity (ft_transfer_call). ` +
       `Need ${formatCredits(liquidityMicro)} ${tokenType}, ` +
       `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.` +
       (privateStableBalance > 0n
-        ? ` Private ${tokenType} available: ${formatCredits(privateStableBalance)}. Unshield ${tokenType} first.`
+        ? ` Private ${tokenType} available: ${formatCredits(privateStableBalance)}. Withdraw it from your private balance (Settings) first.`
         : '')
     )
   }
 
-  if (balances.public < 1_500_000n) {
+  if (balances.public < PUBLIC_CALL_GAS_MICRO) {
     return (
-      `Insufficient public ALEO for network fee. Market creation also needs ${formatCredits(1_500_000n)} public ALEO ` +
-      `for the transaction fee, but only have ${formatCredits(balances.public)} public ALEO.`
+      `Insufficient wallet NEAR for gas. Market creation also needs ${formatCredits(PUBLIC_CALL_GAS_MICRO)} NEAR ` +
+      `for gas, but only have ${formatCredits(balances.public)} NEAR in your wallet.`
     )
   }
 
@@ -142,11 +145,10 @@ async function getStablecoinCreateFundingError(
     if (livePublicBalance < liquidityMicro) {
       return (
         `On-chain public ${tokenType} is too low for market creation. ` +
-        `create_market_${tokenType.toLowerCase()} calls ${stableProgramId}/transfer_public_as_signer, ` +
-        `so only public ${tokenType} can fund the initial liquidity. ` +
+        `Market creation funds the initial liquidity from the ${tokenType} in your wallet. ` +
         `Need ${formatCredits(liquidityMicro)} ${tokenType}, but the stablecoin mapping shows ${formatCredits(livePublicBalance)} public ${tokenType}.` +
         (privateStableBalance > 0n
-          ? ` You still have ${formatCredits(privateStableBalance)} private ${tokenType}; unshield it first.`
+          ? ` You still have ${formatCredits(privateStableBalance)} private ${tokenType}; withdraw it from your private balance (Settings) first.`
           : '')
       )
     }
@@ -381,7 +383,7 @@ export function CreateMarketPage() {
       if (!wallet.isDemoMode) {
         const balanceError = getCreateMarketBalanceError(formData.tokenType, liquidityMicro, wallet.balance)
         if (balanceError) throw new Error(balanceError)
-        if (formData.tokenType !== 'ALEO') {
+        if (formData.tokenType !== 'NEAR') {
           const fundingError = await getStablecoinCreateFundingError(
             formData.tokenType,
             wallet.address!,
@@ -396,6 +398,14 @@ export function CreateMarketPage() {
       const slowTimer = setTimeout(() => setIsSlowTransaction(true), 30_000)
 
       const createFn = formData.tokenType === 'USAD' ? 'create_market_usad' : formData.tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market'
+      // NEAR: the question, outcome labels and details are stored on chain with the market (no IPFS/registry needed).
+      stashMarketMetadata(String(questionHash), {
+        question: formData.question.trim(),
+        description: formData.description?.trim() || undefined,
+        resolutionSource: formData.resolutionSource?.trim() || undefined,
+        outcomeLabels: formData.outcomeLabels.slice(0, formData.numOutcomes).map(l => l.trim()).filter(Boolean),
+        thumbnailUrl: formData.thumbnailUrl || undefined,
+      })
       const txPromise = executeTransaction({ program: createProgramId, function: createFn, inputs, fee: 1.5 })
       const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Wallet did not respond within 2 minutes.')), 120_000))
 
@@ -629,11 +639,11 @@ export function CreateMarketPage() {
                       <div>
                         <label className="text-sm font-medium text-white mb-3 block">Betting Token</label>
                         <div className="grid grid-cols-3 gap-3">
-                          {(['ALEO', 'USDCX', 'USAD'] as const).map((t) => (
+                          {(['NEAR', 'USDCX', 'USAD'] as const).map((t) => (
                             <button key={t} onClick={() => updateForm({ tokenType: t })}
                               className={cn('p-3 rounded-xl text-center transition-all', formData.tokenType === t ? 'bg-brand-400/[0.12] border border-brand-400/[0.2]' : 'bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04]')}>
                               <span className="text-lg font-semibold text-white block">{t}</span>
-                              <span className="text-2xs text-surface-400">{t === 'ALEO' ? 'Native' : 'Stablecoin'}</span>
+                              <span className="text-2xs text-surface-400">{t === 'NEAR' ? 'Native' : 'Stablecoin'}</span>
                             </button>
                           ))}
                         </div>
@@ -688,9 +698,9 @@ export function CreateMarketPage() {
                         </div>
                         <p className="text-2xs text-surface-500 mt-2">
                           Seeds the AMM pool. Split equally across outcomes.
-                          {formData.tokenType === 'ALEO'
-                            ? ' Uses public ALEO balance; private credits cannot be used here.'
-                            : ` Uses public ${formData.tokenType} balance, plus 1.5 public ALEO for the network fee.`}
+                          {formData.tokenType === 'NEAR'
+                            ? ' Uses public NEAR balance; private credits cannot be used here.'
+                            : ` Uses public ${formData.tokenType} balance, plus 1.5 public NEAR for the network fee.`}
                         </p>
                       </div>
                       {deadline && resolutionDeadline && (
@@ -765,9 +775,9 @@ export function CreateMarketPage() {
                     <h3 className="text-2xl font-display font-bold text-white mb-2">Transaction Submitted!</h3>
                     <p className="text-surface-400 mb-6">Your market creation transaction has been sent to the network.</p>
                     <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04] mb-4 text-left">
-                      <p className="text-2xs text-surface-500 uppercase tracking-wider mb-1">{marketId?.startsWith('at1') ? 'Transaction ID' : 'Wallet Request ID'}</p>
+                      <p className="text-2xs text-surface-500 uppercase tracking-wider mb-1">{isChainTxId(marketId) ? 'Transaction ID' : 'Wallet Request ID'}</p>
                       <p className="text-sm text-white font-mono break-all">{marketId}</p>
-                      {marketId?.startsWith('at1') && (
+                      {isChainTxId(marketId) && (
                         <a href={getTransactionUrl(marketId)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-brand-400 hover:text-brand-300 mt-2">
                           View on Explorer <ExternalLink className="w-3 h-3" />
                         </a>

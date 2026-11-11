@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -17,10 +21,50 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@sdk/*": ["../sdk/src/*"]
+      "@/*": [
+        "src/*"
+      ],
+      "@sdk/*": [
+        "../sdk/src/*"
+      ],
+      "@provablehq/aleo-wallet-adaptor-react-ui": [
+        "src/lib/near/compat/wallet-react-ui.tsx"
+      ],
+      "@provablehq/aleo-wallet-adaptor-react": [
+        "src/lib/near/compat/wallet-react.tsx"
+      ],
+      "@provablehq/aleo-wallet-adaptor-core": [
+        "src/lib/near/compat/wallet-core.ts"
+      ],
+      "@provablehq/aleo-wallet-adaptor-shield": [
+        "src/lib/near/compat/wallet-adapters.ts"
+      ],
+      "@provablehq/aleo-wallet-adaptor-leo": [
+        "src/lib/near/compat/wallet-adapters.ts"
+      ],
+      "@provablehq/aleo-wallet-adaptor-fox": [
+        "src/lib/near/compat/wallet-adapters.ts"
+      ],
+      "@provablehq/aleo-wallet-adaptor-soter": [
+        "src/lib/near/compat/wallet-adapters.ts"
+      ],
+      "@provablehq/aleo-types": [
+        "src/lib/near/compat/aleo-types.ts"
+      ],
+      "@provablehq/sdk": [
+        "src/lib/near/compat/provable-sdk.ts"
+      ],
+      "@puzzlehq/sdk": [
+        "src/lib/near/compat/puzzle-sdk.ts"
+      ]
     }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
 }

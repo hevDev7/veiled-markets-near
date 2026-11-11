@@ -78,7 +78,7 @@ async function transformMarketData(
     sourceProgramId?: string,
 ): Promise<Market> {
     const numOutcomes = market.num_outcomes || 2
-    const tokenType = (TOKEN_SYMBOLS[market.token_type] || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+    const tokenType = (TOKEN_SYMBOLS[market.token_type] || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
 
     // Build AMM reserves for price calculation
     const reserves: AMMReserves = {

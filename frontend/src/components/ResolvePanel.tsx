@@ -33,6 +33,9 @@ import {
 } from '@/lib/aleo-client'
 import { TransactionLink } from './TransactionLink'
 import { config } from '@/lib/config'
+import { getNearConfig, getNearVote } from '@/lib/near/chain'
+import { currentAccountId } from '@/lib/near/near-wallet'
+import { PUBLIC_CALL_GAS_MICRO } from '@/lib/near/config'
 
 interface ResolvePanelProps {
   market: Market
@@ -42,14 +45,11 @@ interface ResolvePanelProps {
 
 type ResolveStep = 'close' | 'submit' | 'challenge' | 'disputed' | 'finalize' | 'cancel' | 'done'
 
-// v33 constants (must match contract)
-const MIN_RESOLUTION_BOND = 1_000_000n // 1 ALEO per voter (matches contract MIN_VOTE_BOND)
-const MIN_FINALIZE_VOTERS_BIGINT = 3n // matches contract MIN_VOTERS
-// Contract requires `dispute_bond >= 3 × tally.total_bonded`. See
-// contracts-v37/src/main.leo:67 (DISPUTE_BOND_MULTIPLIER = 3) and the
-// assertion in dispute_resolution_fin (line ~721). Frontend MUST match.
-const DISPUTE_BOND_MULTIPLIER = 3n
-const MIN_FINALIZE_VOTERS = 3
+// Resolution rules of the NEAR deployment. The panel reads the live values from get_config, and the executor
+// attaches the on-chain bond amounts itself, so these defaults only cover the first render.
+interface ResolutionRules { voteBond: bigint; minVoters: number; disputeMultiplier: bigint }
+const DEFAULT_RULES: ResolutionRules = { voteBond: 100_000n, minVoters: 1, disputeMultiplier: 3n }
+const nearAmount = (micro: bigint) => `${Number(micro) / 1_000_000} NEAR`
 
 interface ParsedVoterBondReceipt {
   plaintext: string
@@ -125,6 +125,30 @@ async function inspectVoterBondReceiptsForMarket(
     return true
   }
 
+  // NEAR: votes are public contract state, so the bond "receipt" is the account's get_vote entry.
+  const account = await currentAccountId().catch(() => null)
+  if (account) {
+    const vote = await getNearVote(marketId, account)
+    if (!vote) return { unspent: null, spent: null }
+    const receipt: ParsedVoterBondReceipt = {
+      plaintext: [
+        '{',
+        `  owner: ${account}.private,`,
+        `  market_id: ${marketId}.private,`,
+        `  voted_outcome: ${vote.outcome}u8.private,`,
+        `  bond_amount: ${vote.bond}u64.private,`,
+        '  bond_nonce: 0field.private,',
+        '  _nonce: 0group.public',
+        '}',
+      ].join('\n'),
+      marketId,
+      votedOutcome: vote.outcome,
+      owner: account,
+    }
+    devLog(`${logPrefix} NEAR vote for ${marketId}: outcome ${vote.outcome}, claimed ${vote.claimed}`)
+    return vote.claimed ? { unspent: null, spent: receipt } : { unspent: receipt, spent: null }
+  }
+
   const adapterFn = (window as any).__aleoRequestRecords
   if (!matchedUnspent && typeof adapterFn === 'function') {
     try {
@@ -197,8 +221,8 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   const [bondIndicator, setBondIndicator] = useState<BondIndicatorState>({ status: 'idle', receipt: null })
 
   const tokenSymbol = getTokenSymbol(market.tokenType)
-  const tokenTypeStr: 'ALEO' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
-    : market.tokenType === 'USAD' ? 'USAD' : 'ALEO'
+  const tokenTypeStr: 'NEAR' | 'USDCX' | 'USAD' = market.tokenType === 'USDCX' ? 'USDCX'
+    : market.tokenType === 'USAD' ? 'USAD' : 'NEAR'
   const marketProgramId = getProgramIdForMarket(tokenTypeStr, market.programId)
   const numOutcomes = market.numOutcomes ?? 2
   const outcomeLabels = market.outcomeLabels ?? (numOutcomes === 2 ? ['Yes', 'No'] : Array.from({ length: numOutcomes }, (_, i) => `Outcome ${i + 1}`))
@@ -255,27 +279,35 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
 
   const canFinalize = resolution && currentBlock > resolution.challenge_deadline
 
+  const [rules, setRules] = useState<ResolutionRules>(DEFAULT_RULES)
+  useEffect(() => {
+    let cancelled = false
+    getNearConfig()
+      .then((c) => {
+        if (cancelled) return
+        setRules({ voteBond: BigInt(c.vote_bond), minVoters: c.min_voters, disputeMultiplier: BigInt(c.dispute_bond_multiplier) })
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   // Resolution round info from on-chain data
   const roundInfo = useMemo(() => {
     if (!resolution) return null
     return {
       round: resolution.round || 1,
       proposer: resolution.proposer || resolution.resolver || 'unknown',
-      bondAmount: resolution.bond_amount || MIN_RESOLUTION_BOND,
-      totalBonded: resolution.total_bonded || MIN_RESOLUTION_BOND,
+      bondAmount: resolution.bond_amount || rules.voteBond,
+      totalBonded: resolution.total_bonded || rules.voteBond,
       proposedOutcome: resolution.proposed_outcome || resolution.winning_outcome,
     }
-  }, [resolution])
+  }, [resolution, rules.voteBond])
 
-  // Minimum dispute bond — must match the on-chain contract requirement of
-  // `dispute_bond >= 3 × tally.total_bonded`. Previous implementation used
-  // (single voter bond) × 2 which always undershot the required amount and
-  // would cause dispute_resolution_fin to revert with assertion failure.
-  // Fallback (when roundInfo is null) assumes minimum quorum of 3 voters
-  // each posting MIN_RESOLUTION_BOND, which is the smallest legal dispute.
+  // The dispute bond the contract requires: dispute_bond_multiplier × the bonds already posted. Without tally data,
+  // the smallest legal dispute (the minimum number of voters, each posting the vote bond).
   const minChallengeBond = roundInfo
-    ? BigInt(roundInfo.totalBonded) * DISPUTE_BOND_MULTIPLIER
-    : MIN_RESOLUTION_BOND * MIN_FINALIZE_VOTERS_BIGINT * DISPUTE_BOND_MULTIPLIER
+    ? BigInt(roundInfo.totalBonded) * rules.disputeMultiplier
+    : rules.voteBond * BigInt(rules.minVoters) * rules.disputeMultiplier
 
   // Challenge window countdown
   const challengeInfo = useMemo(() => {
@@ -296,7 +328,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
   const shieldNeedsPrivateBondSync = wallet.walletType === 'shield'
     && needsPrivateAleoBond
     && !wallet.isDemoMode
-    && wallet.balance.private < MIN_RESOLUTION_BOND
+    && wallet.balance.private < rules.voteBond
 
   const refreshShieldPrivateBalance = async () => {
     try {
@@ -426,7 +458,6 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     if (!selectedOutcome) return
     setIsSubmitting(true)
     setError(null)
-    let reservedRecord: string | null = null
     try {
       if (!wallet.address) {
         throw new Error('Wallet address not available. Reconnect your wallet and try again.')
@@ -487,44 +518,28 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         )
       }
 
-      const publicFeeRequired = 1_500_000n
+      const publicFeeRequired = PUBLIC_CALL_GAS_MICRO
       if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
         throw new Error(
-          `Insufficient public ALEO for transaction fee. vote_outcome needs 1.50 public ALEO for gas, ` +
-          `but only ${Number(wallet.balance.public) / 1_000_000} ALEO is public in your wallet.`
+          `Insufficient public NEAR for gas. vote_outcome needs about 0.01 NEAR for gas, ` +
+          `but only ${Number(wallet.balance.public) / 1_000_000} NEAR is public in your wallet.`
         )
       }
 
-      if (wallet.walletType === 'shield' && wallet.balance.private < MIN_RESOLUTION_BOND) {
-        await refreshShieldPrivateBalance()
-      }
-
-      // Need a credits record for bond
-      const { fetchCreditsRecord, reserveCreditsRecord } = await import('@/lib/credits-record')
-      const bondAmount = Number(MIN_RESOLUTION_BOND)
-      const record = await fetchCreditsRecord(bondAmount, wallet.address)
-      if (!record) {
+      // A vote is a public call: the bond is attached from the wallet's NEAR balance.
+      if (!wallet.isDemoMode && wallet.balance.public < rules.voteBond + publicFeeRequired) {
         throw new Error(
-          `vote_outcome needs an unspent private Credits record with at least ${bondAmount / 1_000_000} ALEO ` +
-          `for the vote bond. Shield did not return one for this wallet, so the transaction stopped ` +
-          `before the wallet confirmation popup could open. Refresh Shield after record sync or shield ALEO privately, then try again.`
+          `Voting attaches a ${nearAmount(rules.voteBond)} bond from your wallet, plus about 0.01 NEAR for gas. ` +
+          `Your wallet holds ${nearAmount(wallet.balance.public)}.`
         )
       }
 
       const bondNonce = `${Date.now()}field`
-      const inputs = [
-        ...buildVoteOutcomeInputs(market.id, selectedOutcome, bondNonce),
-        record,
-      ]
-      reserveCreditsRecord(record)
-      reservedRecord = record
-
       const result = await executeTransaction({
         program: marketProgramId,
         function: 'vote_outcome',
-        inputs,
+        inputs: buildVoteOutcomeInputs(market.id, selectedOutcome, bondNonce),
         fee: 1.5,
-        recordIndices: [3],
       })
       if (result?.transactionId) {
         setTransactionId(result.transactionId)
@@ -533,10 +548,6 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
-      if (reservedRecord) {
-        const { releaseCreditsRecord } = await import('@/lib/credits-record')
-        releaseCreditsRecord(reservedRecord)
-      }
       setError(err instanceof Error ? err.message : 'Failed to submit outcome')
     } finally {
       setIsSubmitting(false)
@@ -547,7 +558,6 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     if (!selectedOutcome) return
     setIsSubmitting(true)
     setError(null)
-    let reservedRecord: string | null = null
     try {
       if (!wallet.address) {
         throw new Error('Wallet address not available. Reconnect your wallet and try again.')
@@ -585,45 +595,30 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         )
       }
 
-      const publicFeeRequired = 1_500_000n
+      const publicFeeRequired = PUBLIC_CALL_GAS_MICRO
       if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
         throw new Error(
-          `Insufficient public ALEO for transaction fee. dispute_resolution needs 1.50 public ALEO for gas, ` +
-          `but only ${Number(wallet.balance.public) / 1_000_000} ALEO is public in your wallet.`
+          `Insufficient public NEAR for gas. dispute_resolution needs about 0.01 NEAR for gas, ` +
+          `but only ${Number(wallet.balance.public) / 1_000_000} NEAR is public in your wallet.`
         )
       }
 
-      if (wallet.walletType === 'shield' && wallet.balance.private < minChallengeBond) {
-        await refreshShieldPrivateBalance()
-      }
-
+      // A dispute is a public call: the executor attaches the bond the contract requires from the wallet.
       const bondAmount = minChallengeBond
-      const { fetchCreditsRecord, reserveCreditsRecord } = await import('@/lib/credits-record')
-      const record = await fetchCreditsRecord(Number(bondAmount), wallet.address)
-      if (!record) {
+      if (!wallet.isDemoMode && wallet.balance.public < bondAmount + publicFeeRequired) {
         throw new Error(
-          `dispute_resolution needs an unspent private Credits record with at least ${Number(bondAmount) / 1_000_000} ALEO ` +
-          `for the dispute bond. Shield did not return one for this wallet, so the transaction stopped ` +
-          `before the wallet confirmation popup could open. Refresh Shield after record sync or shield ALEO privately, then try again.`
+          `Disputing attaches a ${nearAmount(bondAmount)} bond from your wallet ` +
+          `(${rules.disputeMultiplier.toString()}× the bonds already posted), plus about 0.01 NEAR for gas. ` +
+          `Your wallet holds ${nearAmount(wallet.balance.public)}.`
         )
       }
 
       const bondNonce = `${Date.now()}field`
-      // v34: dispute_resolution(market_id, proposed_outcome, dispute_nonce, credits_in, dispute_bond)
-      const inputs = [
-        ...buildDisputeInputs(market.id, selectedOutcome, bondAmount, bondNonce),
-        record,
-        `${bondAmount}u128`,
-      ]
-      reserveCreditsRecord(record)
-      reservedRecord = record
-
       const result = await executeTransaction({
         program: marketProgramId,
         function: 'dispute_resolution',
-        inputs,
+        inputs: buildDisputeInputs(market.id, selectedOutcome, bondAmount, bondNonce),
         fee: 1.5,
-        recordIndices: [3],
       })
       if (result?.transactionId) {
         setTransactionId(result.transactionId)
@@ -632,10 +627,6 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
         throw new Error('No transaction ID returned from wallet')
       }
     } catch (err: unknown) {
-      if (reservedRecord) {
-        const { releaseCreditsRecord } = await import('@/lib/credits-record')
-        releaseCreditsRecord(reservedRecord)
-      }
       setError(err instanceof Error ? err.message : 'Failed to challenge outcome')
     } finally {
       setIsSubmitting(false)
@@ -646,11 +637,11 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
     setIsSubmitting(true)
     setError(null)
     try {
-      const publicFeeRequired = 1_500_000n
+      const publicFeeRequired = PUBLIC_CALL_GAS_MICRO
       if (!wallet.isDemoMode && wallet.balance.public < publicFeeRequired) {
         throw new Error(
-          `Insufficient public ALEO for transaction fee. cancel_market needs 1.50 public ALEO for gas, ` +
-          `but only ${Number(wallet.balance.public) / 1_000_000} ALEO is public in your wallet.`
+          `Insufficient public NEAR for gas. cancel_market needs about 0.01 NEAR for gas, ` +
+          `but only ${Number(wallet.balance.public) / 1_000_000} NEAR is public in your wallet.`
         )
       }
 
@@ -713,9 +704,9 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
             'finalize_votes will be rejected until that window ends.'
           )
         }
-        if ((onChainResolution.round || 0) < MIN_FINALIZE_VOTERS) {
+        if ((onChainResolution.round || 0) < rules.minVoters) {
           throw new Error(
-            `finalize_votes requires at least ${MIN_FINALIZE_VOTERS} voters on-chain, ` +
+            `finalize_votes requires at least ${rules.minVoters} voters on-chain, ` +
             `but this market currently has only ${onChainResolution.round || 0}.`
           )
         }
@@ -787,7 +778,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
           receipt: null,
           message: 'This wallet does not have a VoterBondReceipt for this market.',
         })
-        throw new Error('No VoterBondReceipt for this market was found in your wallet. If you voted from another wallet, already claimed, or only have receipts from other ALEO markets, this claim will fail.')
+        throw new Error('No VoterBondReceipt for this market was found in your wallet. If you voted from another wallet, already claimed, or only have receipts from other NEAR markets, this claim will fail.')
       }
 
       if (
@@ -940,7 +931,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 <span className="text-sm font-medium text-white">Claim Voter Bond</span>
               </div>
               <p className="text-xs text-surface-400">
-                If you voted on the winning outcome, claim your 1 ALEO bond back.
+                If you voted on the winning outcome, claim your {nearAmount(rules.voteBond)} bond back.
                 Wrong voters' bonds are forfeited (slashed).
               </p>
               {bondIndicator.status === 'checking' && (
@@ -1023,7 +1014,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
               {roundInfo && (
                 <div className="flex justify-between text-xs text-surface-500">
                   <span>Total Bonded</span>
-                  <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} ALEO</span>
+                  <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} NEAR</span>
                 </div>
               )}
               <button
@@ -1045,7 +1036,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 ) : !wallet.address ? (
                   <><Shield className="w-4 h-4" /><span>Connect Wallet</span></>
                 ) : (
-                  <><Coins className="w-4 h-4" /><span>Claim 1 ALEO Bond</span></>
+                  <><Coins className="w-4 h-4" /><span>Claim {nearAmount(rules.voteBond)} Bond</span></>
                 )}
               </button>
             </div>
@@ -1093,7 +1084,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <div className="flex-1">
                       <p className="text-sm font-medium text-yellow-300">Shield private bond not detected yet</p>
                       <p className="text-xs text-surface-400 mt-1">
-                        vote_outcome needs a private ALEO bond record. If Shield has not finished syncing `credits.aleo`,
+                        vote_outcome needs a private NEAR bond record. If Shield has not finished syncing `credits.aleo`,
                         clicking submit will stop before the wallet confirmation popup appears.
                       </p>
                       <button
@@ -1104,7 +1095,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                         {balanceStatus === 'refreshing' ? (
                           <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Refreshing Shield balance...</span></>
                         ) : (
-                          <><Clock className="w-3.5 h-3.5" /><span>Refresh Private ALEO</span></>
+                          <><Clock className="w-3.5 h-3.5" /><span>Refresh Private NEAR</span></>
                         )}
                       </button>
                     </div>
@@ -1120,11 +1111,11 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Total Voters</span>
-                      <span className="text-white font-medium">{roundInfo.round} / 3 minimum</span>
+                      <span className="text-white font-medium">{roundInfo.round} / {rules.minVoters} minimum</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Total Bonded</span>
-                      <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} ALEO</span>
+                      <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} NEAR</span>
                     </div>
                     {challengeInfo && (
                       <div className="flex justify-between text-sm">
@@ -1150,8 +1141,8 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                   <div>
                     <p className="text-sm font-medium text-white">Vote Outcome</p>
                     <p className="text-xs text-surface-400 mt-1">
-                      Anyone can vote on the winning outcome with a <span className="text-white font-medium">1 ALEO bond</span>.
-                      Minimum 3 voters are required before the market can advance. Wrong voters get slashed, and disputed results can still move into committee or community override.
+                      Anyone can vote on the winning outcome with a <span className="text-white font-medium">{nearAmount(rules.voteBond)} bond</span>.
+                      {rules.minVoters === 1 ? 'One vote is enough' : `${rules.minVoters} voters are required`} before the market can advance. Wrong voters lose their bonds, and a disputed result goes to the committee.
                     </p>
                   </div>
                 </div>
@@ -1159,7 +1150,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-brand-500/5 border border-brand-500/20">
                   <Shield className="w-4 h-4 text-brand-400 flex-shrink-0" />
                   <p className="text-xs text-brand-300">
-                    Bond: <span className="font-mono font-medium">1 ALEO</span> (returned if your outcome wins)
+                    Bond: <span className="font-mono font-medium">{nearAmount(rules.voteBond)}</span> (returned if your outcome wins)
                   </p>
                 </div>
 
@@ -1187,7 +1178,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
 
                 <button onClick={handleSubmitOutcome} disabled={isSubmitting || !selectedOutcome}
                   className={cn('w-full flex items-center justify-center gap-2 btn-primary', !selectedOutcome && 'opacity-50 cursor-not-allowed')}>
-                  {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Gavel className="w-5 h-5" /><span>{selectedOutcome ? `Vote: ${outcomeLabels[selectedOutcome - 1]} Wins (1 ALEO bond)` : 'Select Outcome'}</span></>}
+                  {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Gavel className="w-5 h-5" /><span>{selectedOutcome ? `Vote: ${outcomeLabels[selectedOutcome - 1]} Wins (1 NEAR bond)` : 'Select Outcome'}</span></>}
                 </button>
               </div>
             )}
@@ -1201,7 +1192,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <div className="flex-1">
                       <p className="text-sm font-medium text-yellow-300">Shield private dispute bond not detected yet</p>
                       <p className="text-xs text-surface-400 mt-1">
-                        dispute_resolution needs a private ALEO bond record. If Shield has not finished syncing `credits.aleo`,
+                        dispute_resolution needs a private NEAR bond record. If Shield has not finished syncing `credits.aleo`,
                         clicking dispute will stop before the wallet confirmation popup appears.
                       </p>
                       <button
@@ -1212,7 +1203,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                         {balanceStatus === 'refreshing' ? (
                           <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Refreshing Shield balance...</span></>
                         ) : (
-                          <><Clock className="w-3.5 h-3.5" /><span>Refresh Private ALEO</span></>
+                          <><Clock className="w-3.5 h-3.5" /><span>Refresh Private NEAR</span></>
                         )}
                       </button>
                     </div>
@@ -1238,7 +1229,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Total Bonded</span>
-                      <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} ALEO</span>
+                      <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} NEAR</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Dispute Deadline</span>
@@ -1253,7 +1244,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-yes-500/5 border border-yes-500/20">
                   <CheckCircle2 className="w-4 h-4 text-yes-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-yes-300">
-                    Agree with the result? No action needed. After {challengeInfo?.blocksLeft?.toString() || '...'} blocks it will be confirmed and market resolved.
+                    Agree with the result? Nothing to do now. After {challengeInfo?.blocksLeft?.toString() || '...'} blocks, anyone can confirm it here and the market resolves.
                   </p>
                 </div>
 
@@ -1264,7 +1255,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <div>
                       <p className="text-sm font-medium text-no-300">Disagree? File a Dispute!</p>
                       <p className="text-xs text-surface-400 mt-1">
-                        Override the vote result with <span className="text-white font-medium">{Number(BigInt(roundInfo?.totalBonded || 0) * 3n) / 1_000_000} ALEO bond</span> (3× total bonded).
+                        Override the vote result with <span className="text-white font-medium">{nearAmount(minChallengeBond)} bond</span> ({rules.disputeMultiplier.toString()}× total bonded).
                         If your outcome is correct, you get your bond back + all voter bonds. If wrong, you lose your entire bond. A successful dispute is the hand-off point into the escalation lane.
                       </p>
                     </div>
@@ -1277,7 +1268,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     </div>
                     <div className="rounded-xl bg-white/[0.02] p-3">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Bonded dispute</div>
-                      <p className="mt-2 text-xs text-surface-400">A challenger posts 3x bonded value to contest the result during the dispute window.</p>
+                      <p className="mt-2 text-xs text-surface-400">A challenger posts {rules.disputeMultiplier.toString()}× the bonded value to contest the result during the dispute window.</p>
                     </div>
                     <div className="rounded-xl bg-white/[0.02] p-3">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-surface-500">Governance override</div>
@@ -1310,7 +1301,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
 
                   <button onClick={handleChallengeOutcome} disabled={isSubmitting || !selectedOutcome}
                     className={cn('w-full flex items-center justify-center gap-2 mt-4', 'bg-no-500/20 hover:bg-no-500/30 text-no-300 font-medium py-3 rounded-xl transition-colors', !selectedOutcome && 'opacity-50 cursor-not-allowed')}>
-                    {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Swords className="w-5 h-5" /><span>{selectedOutcome ? `Dispute: ${outcomeLabels[selectedOutcome - 1]} (${Number(BigInt(roundInfo?.totalBonded || 0) * 3n) / 1_000_000} ALEO)` : 'Select Outcome to Dispute'}</span></>}
+                    {isSubmitting ? <><Loader2 className="w-5 h-5 animate-spin" /><span>Confirm in Wallet...</span></> : <><Swords className="w-5 h-5" /><span>{selectedOutcome ? `Dispute: ${outcomeLabels[selectedOutcome - 1]} (${Number(BigInt(roundInfo?.totalBonded || 0) * 3n) / 1_000_000} NEAR)` : 'Select Outcome to Dispute'}</span></>}
                   </button>
                 </div>
               </div>
@@ -1346,7 +1337,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Total voter bond</span>
                       <span className="text-white font-mono">
-                        {Number(roundInfo.totalBonded) / 1_000_000} ALEO
+                        {Number(roundInfo.totalBonded) / 1_000_000} NEAR
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -1408,7 +1399,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-surface-400">Total Bonded</span>
-                      <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} ALEO</span>
+                      <span className="text-white font-mono">{Number(roundInfo.totalBonded) / 1_000_000} NEAR</span>
                     </div>
                   </div>
                 )}

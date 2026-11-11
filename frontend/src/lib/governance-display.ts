@@ -7,7 +7,7 @@ function formatMicrocredits(amount: bigint): string {
   return `${(Number(amount) / 1_000_000).toLocaleString(undefined, {
     minimumFractionDigits: Number(amount) % 1_000_000 === 0 ? 0 : 2,
     maximumFractionDigits: 6,
-  })} ALEO`
+  })} NEAR`
 }
 
 function formatBps(value: bigint): string {

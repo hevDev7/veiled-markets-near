@@ -201,7 +201,7 @@ export function MarketRow({
                             <span className="text-[10px] text-surface-500 uppercase tracking-wider font-semibold">Volume</span>
                         </div>
                         <p className="text-sm font-bold text-white tabular-nums">
-                            {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'ALEO'}</span>
+                            {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'NEAR'}</span>
                         </p>
                       </div>
                     </Tooltip>
@@ -221,7 +221,7 @@ export function MarketRow({
                             (market.status === 3 || market.status === 4) && market.remainingCredits !== undefined
                                 ? market.remainingCredits
                                 : (market.totalLiquidity ?? 0n), 0
-                        )} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'ALEO'}</span></p>
+                        )} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'NEAR'}</span></p>
                       </div>
                     </Tooltip>
 
@@ -337,14 +337,14 @@ export function MarketRow({
                     <div className="flex items-center gap-4">
                         <span className="text-surface-400 tabular-nums">
                             <TrendingUp className="w-3 h-3 inline mr-1" />
-                            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'ALEO'}
+                            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}
                         </span>
                         <span className="text-surface-400 tabular-nums">
                             LIQ {formatCredits(
                                 (market.status === 3 || market.status === 4) && market.remainingCredits !== undefined
                                     ? market.remainingCredits
                                     : (market.totalLiquidity ?? 0n), 0
-                            )} {market.tokenType ?? 'ALEO'}
+                            )} {market.tokenType ?? 'NEAR'}
                         </span>
                         <span className="text-surface-400 tabular-nums">
                             <Clock className="w-3 h-3 inline mr-1" />

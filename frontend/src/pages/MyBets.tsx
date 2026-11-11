@@ -47,6 +47,7 @@ import {
   getShortParlayId,
 } from '@/lib/parlay-helpers'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { FEATURES, isChainTxId } from '@/lib/near/config'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'history' | 'watchlist'
 
@@ -146,12 +147,12 @@ function formatShareQuantity(quantity: bigint): string {
   })
 }
 
-type PortfolioToken = 'ALEO' | 'USDCX' | 'USAD'
+type PortfolioToken = 'NEAR' | 'USDCX' | 'USAD'
 type PortfolioTokenTotals = Record<PortfolioToken, number>
 
 function createPortfolioTokenTotals(): PortfolioTokenTotals {
   return {
-    ALEO: 0,
+    NEAR: 0,
     USDCX: 0,
     USAD: 0,
   }
@@ -159,7 +160,7 @@ function createPortfolioTokenTotals(): PortfolioTokenTotals {
 
 function normalizePortfolioToken(token?: string): PortfolioToken {
   if (token === 'USDCX' || token === 'USAD') return token
-  return 'ALEO'
+  return 'NEAR'
 }
 
 function formatPortfolioTokenSummary(
@@ -185,7 +186,7 @@ function formatPortfolioTokenSummary(
  *
  * The string summary joins token amounts with " · " which works for a single
  * dominant token but becomes unreadable when a user holds exposure across
- * two or three different tokens (ALEO, USDCX, USAD) — each amount stretches
+ * two or three different tokens (NEAR, USDCX, USAD) — each amount stretches
  * the card horizontally until it ellipsises. This helper lays the same data
  * out one token per row so each balance stays readable independently of the
  * others, and differing decimals / signs align cleanly.
@@ -635,12 +636,12 @@ export function MyBets() {
               <h1 className="font-display text-[2rem] leading-[1.15] tracking-tight text-white mb-1">Portfolio</h1>
               <div className="flex items-center gap-3">
                 <p className="text-surface-400 text-sm">Track your positions and performance</p>
-                <Link
+                {FEATURES.parlays && <Link
                   to="/my-parlays"
                   className="inline-flex items-center gap-1.5 rounded-full bg-brand-500/10 px-3 py-1 text-xs font-medium text-brand-400 hover:bg-brand-500/20 transition-colors"
                 >
                   Parlay Details
-                </Link>
+                </Link>}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -713,7 +714,7 @@ export function MyBets() {
               return [
                 {
                   label: 'Active Exposure',
-                  // Multi-line JSX: one row per token (ALEO / USDCX / USAD)
+                  // Multi-line JSX: one row per token (NEAR / USDCX / USAD)
                   // so different-token balances don't get squished onto a
                   // single ellipsised line.
                   value: renderPortfolioTokenLines(exposureByToken, { emptyLabel: '0' }),
@@ -781,7 +782,10 @@ export function MyBets() {
                         fontSize: '12px',
                         color: '#fff',
                       }}
-                      formatter={(value?: number) => [`${(value ?? 0) >= 0 ? '+' : ''}${(value ?? 0).toFixed(2)} ALEO`, 'P&L']}
+                      formatter={(value) => {
+                        const pnl = Number(value ?? 0)
+                        return [`${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} NEAR`, 'P&L']
+                      }}
                     />
                     <Line
                       type="monotone"
@@ -914,7 +918,7 @@ export function MyBets() {
                         <tbody>
                           {displayBets.map((bet, index) => {
                             const market = getMarketInfo(bet.marketId)
-                            const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
+                            const tokenSymbol = market?.tokenType || bet.tokenType || 'NEAR'
                             const badgeColors = getBetBadgeColors(bet)
                             const outcomeLabel = getBetOutcomeLabel(bet, market)
                             const isPending = bet.status === 'pending'
@@ -1008,7 +1012,7 @@ export function MyBets() {
                     <div className="md:hidden space-y-3">
                       {displayBets.map((bet, index) => {
                         const market = getMarketInfo(bet.marketId)
-                        const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
+                        const tokenSymbol = market?.tokenType || bet.tokenType || 'NEAR'
                         const badgeColors = getBetBadgeColors(bet)
                         const outcomeLabel = getBetOutcomeLabel(bet, market)
                         const isPending = bet.status === 'pending'
@@ -1244,7 +1248,7 @@ export function MyBets() {
                 {/* Amount */}
                 <div>
                   <label className="block text-xs font-medium text-surface-400 mb-1.5">
-                    Amount (ALEO)
+                    Amount (NEAR)
                   </label>
                   <input
                     type="number"
@@ -1346,12 +1350,11 @@ function BetCard({
   market,
   index,
   onClaim,
-  onRestoreClaim,
   onRemove,
   showClaimAction,
 }: {
   bet: Bet
-  market?: { question: string; tokenType?: 'ALEO' | 'USDCX' | 'USAD'; numOutcomes?: number; outcomeLabels?: string[] }
+  market?: { question: string; tokenType?: 'NEAR' | 'USDCX' | 'USAD'; numOutcomes?: number; outcomeLabels?: string[] }
   index: number
   onClaim: (mode: 'winnings' | 'refund') => void
   onRestoreClaim: () => void
@@ -1359,7 +1362,7 @@ function BetCard({
   showClaimAction: boolean
 }) {
   const isSell = bet.type === 'sell'
-  const tokenSymbol = market?.tokenType || bet.tokenType || 'ALEO'
+  const tokenSymbol = market?.tokenType || bet.tokenType || 'NEAR'
   const outcomeIdx = outcomeToIndex(bet.outcome) // 1-indexed
   const isPending = bet.status === 'pending'
   const isWon = bet.status === 'won'
@@ -1577,9 +1580,9 @@ function BetCard({
               run markBetUnclaimed(betId) from the browser DevTools console
               or clear localStorage to reset. */}
 
-          {bet.id.startsWith('at1') ? (
+          {isChainTxId(bet.id) ? (
             <a
-              href={`https://testnet.explorer.provable.com/transaction/${bet.id}`}
+              href={`https://testnet.nearblocks.io/txns/${bet.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="p-1.5 rounded-lg hover:bg-white/[0.03] transition-colors"

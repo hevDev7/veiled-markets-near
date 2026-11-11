@@ -11,8 +11,8 @@ import { TransactionLink } from './TransactionLink'
 
 const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
 
-const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = { ALEO: 1, USDCX: 2, USAD: 3 }
-const TOKENS: ParlayTokenType[] = ['ALEO', 'USDCX', 'USAD']
+const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = { NEAR: 1, USDCX: 2, USAD: 3 }
+const TOKENS: ParlayTokenType[] = ['NEAR', 'USDCX', 'USAD']
 
 interface PoolState {
   pool: bigint
@@ -26,13 +26,13 @@ export function ParlayPoolAdmin() {
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [pools, setPools] = useState<Record<ParlayTokenType, PoolState>>({
-    ALEO: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
+    NEAR: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
     USDCX: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
     USAD: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
   })
   const [loading, setLoading] = useState(false)
   const [fundAmount, setFundAmount] = useState('')
-  const [selectedToken, setSelectedToken] = useState<ParlayTokenType>('ALEO')
+  const [selectedToken, setSelectedToken] = useState<ParlayTokenType>('NEAR')
   const [funding, setFunding] = useState(false)
   const [txId, setTxId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,8 +81,8 @@ export function ParlayPoolAdmin() {
 
       const amountMicro = BigInt(Math.round(amountNum * 1_000_000))
 
-      if (selectedToken !== 'ALEO') {
-        throw new Error('Only ALEO pool funding is supported via this panel currently.')
+      if (selectedToken !== 'NEAR') {
+        throw new Error('Only NEAR pool funding is supported via this panel currently.')
       }
 
       const result = await executeTransaction({

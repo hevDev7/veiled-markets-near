@@ -7,29 +7,29 @@ const steps = [
     number: '01',
     icon: Wallet,
     title: 'Connect Your Wallet',
-    description: 'Connect a compatible Aleo wallet to get started. Supported wallets include Shield, Puzzle, Leo, Fox, and Soter. Your private keys never leave your wallet.',
-    detail: 'The Protocol is non-custodial — we never have access to your keys or funds.',
+    description: 'Connect a NEAR testnet wallet: Meteor Wallet or MyNearWallet. Your keys never leave your wallet.',
+    detail: 'One signed message (no fee) unlocks your private balance on any device.',
   },
   {
     number: '02',
     icon: Target,
-    title: 'Browse & Choose Markets',
-    description: 'Explore prediction markets across various categories. Every market runs with 2, 3, or 4 named outcomes, each with a clear question, deadline, and live probabilities determined by the AMM.',
-    detail: 'Markets support three denominations: ALEO (native), USDCX, and USAD.',
+    title: 'Fund Your Private Balance',
+    description: 'Deposit NEAR, USDCX or USAD into your private balance in Settings. The deposit is public; what you do with it afterwards is not.',
+    detail: 'If you skip this step, the app tops up your private balance right before your first trade.',
   },
   {
     number: '03',
     icon: Lock,
-    title: 'Place Encrypted Bets',
-    description: 'Buy outcome shares using the FPMM (Fixed Product Market Maker). Your position is encrypted on-chain using zero-knowledge proofs — no one can see your bet amount or direction.',
-    detail: 'Trade fees are enforced on-chain and can be updated by governance without off-chain coordination.',
+    title: 'Place Private Bets',
+    description: 'Buy outcome shares from the market maker. Your browser proves the trade with a zero-knowledge proof and a relayer submits it, so the trade is not signed by your account.',
+    detail: 'Markets have 2, 3 or 4 named outcomes with live prices set by the AMM.',
   },
   {
     number: '04',
     icon: Zap,
     title: 'Claim Winnings',
-    description: 'When a market resolves, winning shares can be redeemed for tokens. The payout is delivered privately as an encrypted Aleo record — fully on-chain and verifiable.',
-    detail: 'Markets are resolved by Multi-Voter Quorum with dispute protection.',
+    description: 'When a market resolves, redeem your winning shares. The payout goes back into your private balance, and you withdraw to any NEAR account when you like.',
+    detail: 'Markets are resolved by bonded voting with a dispute window.',
   },
 ]
 
@@ -37,93 +37,78 @@ const mechanisms = [
   {
     icon: BarChart3,
     title: 'FPMM (Fixed Product Market Maker)',
-    description: 'Prices are determined algorithmically using the constant product formula. Buying one outcome increases its implied probability while the other outcomes reprice automatically in real time.',
+    description: 'Prices come from the constant product formula. Buying one outcome raises its implied probability, and the other outcomes reprice automatically.',
     items: [
-      'Complete-set minting keeps every market collateralized across its active outcomes',
-      'Outcome prices are derived from reserve balances across 2, 3, or 4 outcomes',
-      'Slippage increases with larger trades relative to pool size',
+      'Complete-set minting keeps every market fully collateralized',
+      'Outcome prices are derived from the reserves of 2, 3 or 4 outcomes',
+      'Slippage grows with the size of a trade relative to the pool',
+      'Fees per trade: 1.0% to liquidity providers, 0.5% to the market creator, 0.5% to the protocol',
+    ],
+  },
+  {
+    icon: Shield,
+    title: 'Private Notes on NEAR',
+    description: 'Your private balance and your positions are notes: hidden entries in a Merkle tree inside the Veiled contract.',
+    items: [
+      'Each trade spends notes with a Groth16 zero-knowledge proof (BN254, Poseidon hashing)',
+      'A relayer submits the proof, so no trade carries your NEAR account',
+      'The proof binds the action, the recipient and the fee, so the relayer cannot change a trade',
+      'Your browser finds your notes by decrypting memos with a key derived from your wallet signature',
+      'Public: deposits, withdrawals and each trade’s market, outcome and amount. Private: who holds which position',
     ],
   },
   {
     icon: GitBranch,
     title: 'Market Resolution',
-    description: 'Markets go through a Multi-Voter Quorum resolution process designed to ensure fair outcomes:',
+    description: 'After the deadline, markets are resolved by bonded voting (testnet settings shown):',
     items: [
-      'After close_market, anyone can vote on the outcome by posting a 1 ALEO bond (vote_outcome)',
-      'Minimum 3 voters required to reach quorum; voting window ~3 hours',
-      'Votes are finalized (finalize_votes), then a dispute window (~3 hours) begins',
-      'Anyone can dispute by posting 3x total bonds to override the result (dispute_resolution)',
-      'After dispute window passes without dispute, outcome is confirmed (confirm_resolution)',
-      'Majority voters claim rewards; minority voters lose their bond (slashing)',
-    ],
-  },
-  {
-    icon: Shield,
-    title: 'Zero-Knowledge Privacy',
-    description: 'All transactions are processed using Aleo\'s zk-SNARK proofs. This means:',
-    items: [
-      'Your bet amounts are hidden from other users and the protocol',
-      'Your positions are stored as encrypted records only you can decrypt',
-      'Transaction validity is proven without revealing the details',
-      'Client-side AES-256-GCM encryption for any off-chain data',
+      'Anyone closes the market, then votes on the outcome by posting a 0.1 NEAR bond',
+      'The voting window lasts 5 minutes, then the votes are finalized',
+      'A 5-minute dispute window follows; a dispute must post 3x the total bonds',
+      'Without a dispute the outcome is confirmed; disputed markets can escalate to a 5-member committee (3 votes decide)',
+      'Voters on the winning outcome get their bond back; bonds on the losing outcome are forfeited',
     ],
   },
   {
     icon: Users,
     title: 'Liquidity Provision',
-    description: 'Anyone can provide liquidity to earn trading fees:',
+    description: 'Anyone can add liquidity to a market and earn trading fees:',
     items: [
-      'Deposit tokens to receive LP shares proportional to the pool',
-      'Earn 1.0% LP fee on every trade automatically',
-      'Withdraw liquidity after market resolution',
-      'Note: LP shares are currently non-transferable between wallets',
-    ],
-  },
-  {
-    icon: Vote,
-    title: 'Governance',
-    description: 'The Protocol is governed by ALEO token holders through on-chain governance (veiled_governance_v6.aleo, 31 transitions):',
-    items: [
-      '3-of-N multisig treasury management',
-      'Dispute resolution overrides, fee changes, parameter updates, emergency pause',
-      'Operational governance flows are available in the app UI for proposals, voting, execution, resolver actions, and rewards',
-      'Variable quorum (5%–30%) and timelock (0–72 hours) per proposal type',
+      'Add tokens from your private balance and receive a private LP position',
+      'Earn the 1.0% LP fee on every trade',
+      'Withdraw your liquidity after the market resolves',
     ],
   },
   {
     icon: Coins,
     title: 'Supported Tokens',
-    description: 'Markets can be denominated in three different tokens, each with its own market contract:',
+    description: 'One NEAR contract runs markets in three tokens:',
     items: [
-      'ALEO — Native Aleo blockchain token via veiled_markets_v37.aleo (25 transitions)',
-      'USDCX — Test stablecoin via veiled_markets_usdcx_v7.aleo (25 transitions)',
-      'USAD — Stablecoin via veiled_markets_usad_v14.aleo (25 transitions)',
-      'ALEO uses private credits records; USDCX/USAD use Token records + MerkleProof for private trading',
-    ],
-  },
-  {
-    icon: GitBranch,
-    title: 'Multi-Leg Parlays',
-    description: 'Combine multiple market outcomes into a single parlay via veiled_parlay_v3.aleo:',
-    items: [
-      'Toggle parlay mode on the dashboard and click outcome chips to add legs to your slip',
-      'Combined odds and stake are computed client-side before submission',
-      'A parlay pays out only when every leg resolves in your favor',
-      'Settles using the same private record flow as single-market trades',
+      'NEAR, the native token',
+      'USDCX and USAD, 6-decimal test stablecoins on NEAR testnet',
+      'All amounts use 6 decimals, so every token works with the same market math',
     ],
   },
   {
     icon: Radio,
     title: 'Turbo Markets (rolling 5-minute rounds)',
-    description: 'Fast-paced parimutuel UP/DOWN markets via veiled_turbo_v9.aleo, backed by the Pyth Network oracle:',
+    description: 'Fast parimutuel UP/DOWN rounds on BTC, ETH and SOL, run by the oracle operator:',
     items: [
-      'Predict whether BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK, or DOT will be up or down 5 minutes from now',
-      'New rounds are created automatically every 5 minutes by the operator backend — no manual market creation needed',
-      'Baseline price is snapshotted from Pyth Hermes at round start; closing price is captured at the exact deadline moment and committed on-chain',
-      'Parimutuel payouts: winners split the entire pool (minus 0.5% protocol fee) proportionally to their bet size',
-      'All markets share a single vault for liquidity — no per-round seed capital required',
-      'Resolution is fully automatic via the Pyth oracle — no Multi-Voter Quorum, no dispute window',
-      'Every round is publicly verifiable: audit log at /verify/turbo/:marketId cross-checks the operator\'s on-chain claim against Pyth Hermes historical data',
+      'A new round opens every 5 minutes; each round’s closing price becomes the next round’s baseline',
+      'Bets and claims are private, through the same note pool as market trades',
+      'Winners split the pool in proportion to their stake, after a 0.5% protocol fee',
+      'If a round is not resolved in time, it is cancelled and every bet can be refunded',
+      'On testnet the operator reads prices from CoinGecko; the contract checks the operator and the price bounds',
+      'Each round’s audit record is public at /verify/turbo/:marketId',
+    ],
+  },
+  {
+    icon: Vote,
+    title: 'Not on NEAR yet',
+    description: 'These features of the Aleo version are not part of the NEAR deployment yet:',
+    items: [
+      'Multi-leg parlays',
+      'Governance proposals, resolver staking and rewards',
     ],
   },
 ]
@@ -143,8 +128,8 @@ export function HowItWorks() {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-3">How It Works</h1>
         <p className="text-surface-400 max-w-2xl mb-16">
-          Veiled Markets is a privacy-preserving prediction market on Aleo. Predict outcomes, provide
-          liquidity, and claim winnings — all with zero-knowledge privacy.
+          Veiled Markets is a privacy-preserving prediction market on NEAR. Predict outcomes, provide
+          liquidity, and claim winnings, while zero-knowledge proofs keep your positions private.
         </p>
 
         {/* Steps */}

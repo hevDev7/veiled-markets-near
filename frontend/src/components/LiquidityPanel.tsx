@@ -5,6 +5,7 @@ import { type Market, useWalletStore } from '@/lib/store'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useMarketGovernanceConfig } from '@/hooks/useMarketGovernanceConfig'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
+import { GAS_RESERVE_MICRO } from '@/lib/near/wallet-records'
 import {
   buildAddLiquidityInputs,
   buildWithdrawLpResolvedInputs,
@@ -28,7 +29,7 @@ type LiquidityTab = 'add' | 'withdraw'
 export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const { wallet } = useWalletStore()
   const { executeTransaction } = useAleoTransaction()
-  const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+  const tokenType = (market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
   const governanceConfig = useMarketGovernanceConfig(tokenType)
 
   const isResolved = market.status === MARKET_STATUS.RESOLVED
@@ -145,11 +146,22 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     ? BigInt(Math.floor(parseFloat(amount) * 1_000_000))
     : 0n
   const meetsMinLiquidity = amountMicro >= governanceConfig.minLiquidity
-  const addLiquidityBalance = tokenType === 'USDCX'
+  // Liquidity is added from the private balance; the executor deposits any shortfall from the wallet first,
+  // keeping GAS_RESERVE_MICRO of NEAR there for gas.
+  const privateTokenBalance = tokenType === 'USDCX'
+    ? wallet.balance.usdcxPrivate
+    : tokenType === 'USAD'
+      ? wallet.balance.usadPrivate
+      : wallet.balance.private
+  const walletTokenBalance = tokenType === 'USDCX'
     ? wallet.balance.usdcxPublic
     : tokenType === 'USAD'
       ? wallet.balance.usadPublic
       : wallet.balance.public
+  const walletSpendable = tokenType === 'NEAR'
+    ? (walletTokenBalance > GAS_RESERVE_MICRO ? walletTokenBalance - GAS_RESERVE_MICRO : 0n)
+    : walletTokenBalance
+  const addLiquidityBalance = privateTokenBalance + walletSpendable
 
   const winnerClaimUnlockBlock = useMemo(() => {
     if (!isResolved || market.challengeDeadline === undefined) return null
@@ -236,7 +248,7 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
         )
       }
 
-      const tokenType = (market.tokenType || 'ALEO') as 'ALEO' | 'USDCX' | 'USAD'
+      const tokenType = (market.tokenType || 'NEAR') as 'NEAR' | 'USDCX' | 'USAD'
       // CRITICAL: min_tokens_out is used as the ACTUAL transfer amount in the transition.
       // Estimate LP share value from on-chain pool data, apply 2% slippage buffer.
       // For cancelled markets, each LP share = proportional to total_liquidity / total_lp_shares.
@@ -464,14 +476,10 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                   </div>
                   <div className="flex justify-between text-sm mt-2">
                     <span className="text-surface-500">
-                      Balance: {formatCredits(addLiquidityBalance)} {tokenSymbol}
+                      Private: {formatCredits(privateTokenBalance)} · Wallet: {formatCredits(walletTokenBalance)} {tokenSymbol}
                     </span>
                     <button
-                      onClick={() => {
-                        const gasBuffer = tokenType === 'ALEO' ? 700_000n : 0n
-                        const usable = addLiquidityBalance > gasBuffer ? addLiquidityBalance - gasBuffer : 0n
-                        setAmount((Number(usable) / 1_000_000).toString())
-                      }}
+                      onClick={() => setAmount((Number(addLiquidityBalance) / 1_000_000).toString())}
                       className="text-brand-400 hover:text-brand-300"
                     >
                       Max

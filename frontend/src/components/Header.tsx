@@ -215,7 +215,7 @@ export function Header() {
 
                         <div className="p-1 mt-1 space-y-0.5">
                           <a
-                            href={`https://testnet.explorer.provable.com/address/${wallet.address}`}
+                            href={`https://testnet.nearblocks.io/address/${wallet.address}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs text-surface-300 hover:text-white hover:bg-white/[0.04] transition-colors"

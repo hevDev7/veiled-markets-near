@@ -104,7 +104,7 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
         throw new Error('Connect your wallet before placing a parlay.')
       }
       if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-        throw new Error('Insufficient public ALEO for transaction fee. Gas fees are always paid in public ALEO.')
+        throw new Error('Insufficient public NEAR for transaction fee. Gas fees are always paid in public NEAR.')
       }
       const currentValidationError = validationError()
       if (currentValidationError) {
@@ -151,10 +151,10 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
       let recordIndices: number[] | undefined
 
       const buildPrivateInputs = async () => {
-        if (slipTokenType === 'ALEO') {
+        if (slipTokenType === 'NEAR') {
           const creditsRecord = await fetchCreditsRecord(Number(slipStake), walletAddress)
           if (!creditsRecord) {
-            throw new Error('No private ALEO record with sufficient balance was found.')
+            throw new Error('No private NEAR record with sufficient balance was found.')
           }
 
           reserveCreditsRecord(creditsRecord)

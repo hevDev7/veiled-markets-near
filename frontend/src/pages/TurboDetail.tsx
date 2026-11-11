@@ -26,6 +26,9 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { getTransactionUrl } from '@/lib/config'
+import { TURBO_ORACLE_URL } from '@/lib/near/config'
+import { VEILED_CONTRACT as NEAR_CONTRACT_ID } from '@/lib/near/config'
+import { useTurboPriceSource } from '@/hooks/useTurboPriceSource'
 
 interface ResolvedEntry {
   market_id: string
@@ -85,6 +88,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
   const { symbol: rawSymbol } = useParams<{ symbol: string }>()
   const navigate = useNavigate()
   const symbol = symbolOverride ?? ((rawSymbol?.toUpperCase() || 'BTC') as TurboSymbol)
+  const priceSource = useTurboPriceSource()
   const [history, setHistory] = useState<ResolvedEntry[]>([])
   /** Total number of resolved rounds for this symbol across ALL time,
    *  read from Supabase's Content-Range header. `history` itself is
@@ -140,10 +144,10 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
     let cancelled = false
     const fetchHistory = async () => {
       try {
-        const SBURL = (import.meta as any).env?.VITE_SUPABASE_URL || ''
-        const SBKEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ''
+        const SBURL = TURBO_ORACLE_URL
+        const SBKEY = 'public'
         if (!SBURL || !SBKEY) {
-          console.warn('[turbo-history] VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY not set')
+          console.warn('[turbo-history] turbo oracle URL not set')
           return
         }
         const headers = { apikey: SBKEY, authorization: `Bearer ${SBKEY}` }
@@ -250,8 +254,8 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
     let cancelled = false
     ;(async () => {
       try {
-        const SBURL = (import.meta as any).env?.VITE_SUPABASE_URL || ''
-        const SBKEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || ''
+        const SBURL = TURBO_ORACLE_URL
+        const SBKEY = 'public'
         if (!SBURL || !SBKEY) return
         const headers = { apikey: SBKEY, authorization: `Bearer ${SBKEY}` }
         const res = await fetch(
@@ -357,7 +361,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                       {marketTitle}
                     </h1>
                     <p className="text-xs text-surface-400 mt-1">
-                      Rolling 5-minute {SYMBOL_NAMES[symbol]}/USD prediction markets · Pyth-resolved · Auto-chaining
+                      Rolling 5-minute {SYMBOL_NAMES[symbol]}/USD prediction markets · {priceSource.label} · Auto-chaining
                     </p>
                   </div>
                 </div>
@@ -398,7 +402,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                       <Shield className="w-4 h-4" />
                       <span>Oracle</span>
                     </div>
-                    <p className="text-lg font-bold text-amber-400">Pyth</p>
+                    <p className="text-lg font-bold text-amber-400">{priceSource.short}</p>
                   </div>
                 </div>
 
@@ -496,18 +500,18 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                           <Shield className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                           <p>
                             The resolution source for this market is information from{' '}
-                            <span className="font-semibold text-amber-400">Pyth Network</span>, specifically the{' '}
+                            <span className="font-semibold text-amber-400">{priceSource.name}</span>, specifically the{' '}
                             <code className="px-1.5 py-0.5 rounded bg-surface-800/60 text-[13px] text-amber-300">
                               {symbol}/USD
                             </code>{' '}
                             price feed available at{' '}
                             <a
-                              href={`https://www.pyth.network/price-feeds/crypto-${symbol.toLowerCase()}-usd`}
+                              href={priceSource.feedUrl(symbol)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-amber-400 hover:text-amber-300 underline"
                             >
-                              pyth.network/price-feeds/crypto-{symbol.toLowerCase()}-usd
+                              {priceSource.feedText(symbol)}
                             </a>
                             .
                           </p>
@@ -515,10 +519,9 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                         <div className="flex items-start gap-3">
                           <FileText className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                           <p className="text-surface-400 text-[13px]">
-                            Please note that this market is about the price according to the Pyth Network{' '}
-                            {symbol}/USD price feed, not according to other sources or spot markets. Pyth Network
-                            aggregates prices from 90+ institutional publishers including major exchanges,
-                            market makers, and trading firms, ensuring a robust and manipulation-resistant price feed.
+                            Please note that this market is about the price according to the {priceSource.name}{' '}
+                            {symbol}/USD price feed, not according to other sources or spot markets.{' '}
+                            {priceSource.about}
                           </p>
                         </div>
                       </div>
@@ -823,7 +826,9 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                             </>
                           ) : (
                             <>
-                              {currentMarket.market_id.slice(0, 8)}…{currentMarket.market_id.slice(-6)}
+                              {currentMarket.market_id.length > 16
+                                ? `${currentMarket.market_id.slice(0, 8)}…${currentMarket.market_id.slice(-6)}`
+                                : currentMarket.market_id}
                             </>
                           )}
                         </button>
@@ -857,17 +862,17 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-surface-500">Token</span>
-                      <span className="text-xs font-medium text-white">ALEO</span>
+                      <span className="text-xs font-medium text-white">NEAR</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-surface-500">Oracle</span>
                       <a
-                        href={`https://www.pyth.network/price-feeds/crypto-${symbol.toLowerCase()}-usd`}
+                        href={priceSource.feedUrl(symbol)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1"
                       >
-                        Pyth Network <ExternalLink className="w-3 h-3" />
+                        {priceSource.name} <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
                     <div className="flex items-center justify-between">
@@ -877,12 +882,12 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-surface-500">Contract</span>
                       <a
-                        href="https://testnet.explorer.provable.com/program/veiled_turbo_v9.aleo"
+                        href={`https://testnet.nearblocks.io/address/${NEAR_CONTRACT_ID}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 font-mono"
                       >
-                        veiled_turbo_v9.aleo <ExternalLink className="w-3 h-3" />
+                        {NEAR_CONTRACT_ID} <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
                   </div>
@@ -897,7 +902,7 @@ export function TurboDetail({ symbolOverride }: TurboDetailProps = {}) {
                       href={getTransactionUrl(currentCreateTx)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="View create_market_turbo transaction on Provable Explorer"
+                      title="View create_turbo_market transaction on NearBlocks"
                       className="mt-4 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-brand-500/8 border border-brand-500/15 text-brand-400 hover:bg-brand-500/15 hover:border-brand-500/30 transition-all text-xs font-semibold"
                     >
                       <Shield className="w-3.5 h-3.5" />
