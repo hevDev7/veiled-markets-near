@@ -14,6 +14,7 @@ import { ownerBlindOf, randomField } from './notes/crypto';
 import { sealMemo } from './notes/memo';
 import { balanceOf, notesOf, syncNotes, type Note } from './notes/store';
 import { RelayError } from './relayer';
+import { useMarketTx } from './market-tx';
 
 export interface AleoCall {
   program: string;
@@ -139,7 +140,10 @@ async function createMarket(call: AleoCall): Promise<ExecResult> {
     const m = await findMarketByQuestionHash(questionHash, r.signerId);
     if (m) marketId = aleoId(m.id);
   }
-  if (marketId) createdMarkets.set(questionHash, marketId);
+  if (marketId) {
+    createdMarkets.set(questionHash, marketId);
+    useMarketTx.getState().remember(marketId, txHash); // its page lives at /market/<txHash>
+  }
   pendingMetadata.delete(questionHash);
   syncNotes(keys).catch(() => undefined);
   return { transactionId: txHash, value: marketId };

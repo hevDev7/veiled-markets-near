@@ -9,6 +9,7 @@ import { RELAYER_ACCOUNT } from '@/lib/near/config'
 import type { Market } from '@/lib/store'
 import { btnPrimary, btnSecondary, btnLg, Container, EASE, Tag, Veil } from './shared'
 import { formatPct, LINKS, useProtocolFacts, type LaunchApp } from './data'
+import { useMarketPath } from '@/lib/near/market-tx'
 
 const PROOF_POINTS = ['Groth16 proofs', 'Pyth-priced Turbo', 'MIT open source']
 
@@ -134,10 +135,11 @@ const panel =
 function FeaturedMarket({ market }: { market: Market }) {
   const outcomes = useMemo(() => getMarketOutcomeSummaries(market), [market])
   const timeLeft = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
+  const marketHref = useMarketPath()
 
   return (
     <Link
-      to={`/market/${market.id}`}
+      to={marketHref(market.id)}
       className={cn(panel, 'group block p-6 pb-16 transition-colors hover:border-white/[0.16] sm:p-7 sm:pb-20')}
     >
       <div className="flex items-center justify-between gap-3">

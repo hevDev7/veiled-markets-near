@@ -88,7 +88,13 @@ import { devWarn } from '../lib/logger'
 import { getTurboSymbolFromMarketId } from '@/lib/turbo-client'
 import { TurboDetail } from './TurboDetail'
 import type { TurboSymbol } from '@/components/TurboMarketPanel'
-import { FEATURES, isChainTxId, VEILED_CONTRACT as NEAR_CONTRACT_ID } from '@/lib/near/config'
+import { FEATURES, isChainTxId, isNearTxHash, txUrl as nearTxUrl, VEILED_CONTRACT as NEAR_CONTRACT_ID } from '@/lib/near/config'
+import { marketPath, useMarketPath, useMarketTx } from '@/lib/near/market-tx'
+import { nearId } from '@/lib/near/ids'
+
+const nearIdOrSelf = (id: string) => {
+  try { return nearId(id) } catch { return id }
+}
 import { PrivateStepText } from '@/components/PrivateStepText'
 
 const categoryNames: Record<number, string> = {
@@ -182,6 +188,7 @@ function HeroDescription({ text }: { text: string }) {
 // ── Vertical News Ticker ──
 function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; currentMarketId: string }) {
   const navigate = useNavigate()
+  const marketHref = useMarketPath()
   const otherMarkets = useMemo(
     () => markets.filter(m => m.id !== currentMarketId && m.status === 1),
     [markets, currentMarketId]
@@ -231,7 +238,7 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
           {doubled.map((item, i) => (
             <button
               key={`${item.id}-${i}`}
-              onClick={() => navigate(`/market/${item.id}`)}
+              onClick={() => navigate(marketHref(item.id))}
               className="flex items-center gap-3 w-full px-3 text-left hover:bg-white/[0.03] transition-colors"
               style={{ height: itemHeight }}
             >
@@ -253,7 +260,28 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
 
 export function MarketDetail() {
   const navigate = useNavigate()
-  const { marketId } = useParams<{ marketId: string }>()
+  // The route param is the market's creating transaction hash (/market/<hash>) or, for older links, its id.
+  const { marketId: routeParam } = useParams<{ marketId: string }>()
+  const routeIsTx = isNearTxHash(routeParam)
+  const [marketId, setMarketId] = useState<string | undefined>(() => (routeParam && !isNearTxHash(routeParam) ? routeParam : undefined))
+  const [routeNotFound, setRouteNotFound] = useState(false)
+  const marketTxById = useMarketTx((s) => s.byId)
+  useEffect(() => {
+    setRouteNotFound(false)
+    if (!routeParam) return
+    if (!isNearTxHash(routeParam)) {
+      setMarketId(routeParam)
+      return
+    }
+    let cancelled = false
+    setMarketId(undefined)
+    useMarketTx.getState().resolve(routeParam).then((id) => {
+      if (cancelled) return
+      if (id) setMarketId(id)
+      else setRouteNotFound(true)
+    })
+    return () => { cancelled = true }
+  }, [routeParam])
   const { wallet } = useWalletStore()
   const { addPendingBet, confirmPendingBet, removePendingBet } = useBetsStore()
   const { markets, fetchMarkets, isLoading: marketsLoading } = useRealMarketsStore()
@@ -266,7 +294,7 @@ export function MarketDetail() {
   // first wins). The probe is cheap: a single HTTP GET.
   const [turboSymbol, setTurboSymbol] = useState<string | null | 'loading'>('loading')
   useEffect(() => {
-    if (!marketId) { setTurboSymbol(null); return }
+    if (!marketId) { setTurboSymbol(routeIsTx && !routeNotFound ? 'loading' : null); return }
     let cancelled = false
     ;(async () => {
       try {
@@ -277,7 +305,24 @@ export function MarketDetail() {
       }
     })()
     return () => { cancelled = true }
-  }, [marketId])
+  }, [marketId, routeIsTx, routeNotFound])
+
+  const createTxHash = routeIsTx ? routeParam : (() => {
+    try { return marketId ? marketTxById[nearId(marketId)] : undefined } catch { return undefined }
+  })()
+
+  // An id link (/market/30field) moves to the market's transaction-hash URL once that hash is known.
+  useEffect(() => {
+    if (!marketId || routeIsTx || turboSymbol !== null) return
+    let hash: string | undefined
+    try {
+      hash = marketTxById[nearId(marketId)]
+    } catch {
+      return
+    }
+    if (hash) navigate(`/market/${hash}`, { replace: true })
+    else useMarketTx.getState().refresh([marketId])
+  }, [marketId, routeIsTx, turboSymbol, marketTxById]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [market, setMarket] = useState<Market | null>(null)
   const [selectedOutcome, setSelectedOutcome] = useState<number | null>(null)
@@ -322,6 +367,13 @@ export function MarketDetail() {
     const saved = localStorage.getItem('veiled_bookmarks')
     return saved ? (JSON.parse(saved) as string[]).includes(marketId || '') : false
   })
+  // A /market/<hash> URL learns its market id after the page mounts.
+  useEffect(() => {
+    if (!marketId) return
+    try {
+      setIsBookmarked((JSON.parse(localStorage.getItem('veiled_bookmarks') || '[]') as string[]).includes(marketId))
+    } catch { /* unreadable bookmarks */ }
+  }, [marketId])
 
   // Ref for mobile scroll-to-trading
   const tradingPanelRef = useRef<HTMLDivElement>(null)
@@ -1166,7 +1218,7 @@ export function MarketDetail() {
                 <div className="flex items-center gap-3 mt-6 pt-6 border-t border-white/[0.04]">
                   <button
                     onClick={async () => {
-                      const url = window.location.href
+                      const url = new URL(marketPath(market.id, marketTxById), window.location.origin).href
                       if (navigator.share) {
                         try { await navigator.share({ title: market.question, url }) } catch {}
                       } else {
@@ -2267,13 +2319,21 @@ export function MarketDetail() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Market ID</span>
-                    <CopyableText text={market.id} displayText={market.id.length > 16 ? `${market.id.slice(0, 8)}...${market.id.slice(-6)}` : market.id} />
+                    <CopyableText text={nearIdOrSelf(market.id)} displayText={`#${nearIdOrSelf(market.id)}`} />
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Created</span>
-                    <span className="text-xs font-medium text-white tabular-nums">
-                      {createdTimestamp || (market.transactionId?.startsWith('at1') ? 'Fetching...' : 'On-chain')}
-                    </span>
+                    {createTxHash ? (
+                      <a href={nearTxUrl(createTxHash)} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs font-medium text-brand-400 hover:text-brand-300 font-mono">
+                        {createTxHash.slice(0, 6)}…{createTxHash.slice(-6)}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-xs font-medium text-white tabular-nums">
+                        {createdTimestamp || 'On-chain'}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Deadline</span>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useMarketTx } from './lib/near/market-tx'
 import { Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, Docs, BrandKit, BugBounty } from './pages'
@@ -63,6 +64,8 @@ function App() {
   // Initialize market IDs from indexer on app startup
   useEffect(() => {
     initializeMarketIds().catch(console.error);
+    // Market pages are addressed by their creating transaction hash; fill in hashes of markets created since last visit.
+    useMarketTx.getState().refresh().catch(() => undefined);
   }, []);
 
   return (

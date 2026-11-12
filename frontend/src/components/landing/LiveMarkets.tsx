@@ -8,6 +8,7 @@ import { useTurboPriceSource } from '@/hooks/useTurboPriceSource'
 import type { Market } from '@/lib/store'
 import { Container, Reveal, SectionHeading } from './shared'
 import { formatClock, formatPct, formatUsd, useTurboBoard, type LaunchApp, type TurboRow } from './data'
+import { useMarketPath } from '@/lib/near/market-tx'
 
 const MAX_TILES = 4
 
@@ -103,10 +104,11 @@ function MarketTile({ market }: { market: Market }) {
   const outcomes = useMemo(() => getMarketOutcomeSummaries(market), [market])
   const timeLeft = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const token = market.tokenType ?? 'NEAR'
+  const marketHref = useMarketPath()
 
   return (
     <Link
-      to={`/market/${market.id}`}
+      to={marketHref(market.id)}
       className="group flex h-full flex-col rounded-2xl border border-white/[0.08] bg-[#0c0e13] p-5 transition-[border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-brand-400/35 sm:p-6"
     >
       <div className="flex items-center justify-between font-mono text-[10.5px] uppercase tracking-[0.18em]">

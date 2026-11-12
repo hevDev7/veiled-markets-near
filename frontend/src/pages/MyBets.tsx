@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useWalletStore, useBetsStore, type Bet, type Market, outcomeToIndex, outcomeToString } from '@/lib/store'
 import { useParlayStore, type ParlayRecord } from '@/lib/parlay-store'
+import { marketPath } from '@/lib/near/market-tx'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
@@ -943,7 +944,7 @@ export function MyBets() {
                                 initial={{ opacity: 0, y: 6 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: index * 0.03 }}
-                                onClick={() => navigate(`/market/${bet.marketId}`)}
+                                onClick={() => navigate(marketPath(bet.marketId))}
                                 className="border-b border-white/[0.03] last:border-0 cursor-pointer hover:bg-white/[0.02] transition-colors group"
                               >
                                 <td className="px-5 py-4 max-w-[320px]">
@@ -1035,7 +1036,7 @@ export function MyBets() {
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: index * 0.03 }}
-                            onClick={() => navigate(`/market/${bet.marketId}`)}
+                            onClick={() => navigate(marketPath(bet.marketId))}
                             className="glass-card p-4 cursor-pointer hover:border-surface-600/50 transition-all"
                           >
                             <div className="flex items-start justify-between gap-3 mb-3">

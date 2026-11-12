@@ -28,6 +28,7 @@ import { useWalletStore } from '../../lib/store';
 import { useAleoTransaction } from '../../hooks/useAleoTransaction';
 import { config } from '../../lib/config';
 import { cn, getTokenSymbol, shortenAddress } from '../../lib/utils';
+import { marketPath } from '../../lib/near/market-tx';
 
 const STAGE_STYLES = {
   voting: {
@@ -454,7 +455,7 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
 
                   <div className="flex flex-wrap gap-2">
                     <button
-                      onClick={() => navigate(`/market/${item.marketId}`)}
+                      onClick={() => navigate(marketPath(item.marketId))}
                       className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-xs font-medium text-surface-200 transition-colors hover:bg-white/[0.06]"
                     >
                       Open Market

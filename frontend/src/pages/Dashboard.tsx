@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TokenIcon } from '@/components/TokenSelect'
+import { useMarketPath } from '@/lib/near/market-tx'
 import { useWalletStore, useBetsStore, type Market, outcomeToIndex } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
@@ -237,7 +238,8 @@ export function Dashboard() {
         setActivityFeed(feed.sort((a, b) => b.time - a.time).slice(0, 5))
     }, [markets, userBets])
 
-    const handleMarketClick = useCallback((market: Market) => navigate(`/market/${market.id}`), [navigate])
+    const marketHref = useMarketPath()
+    const handleMarketClick = useCallback((market: Market) => navigate(marketHref(market.id)), [navigate, marketHref])
     const handleQuickAddParlay = useCallback((market: Market, outcome: number) => {
         const existingLeg = getLegForMarket(market.id)
         if (existingLeg?.outcome === outcome) {
