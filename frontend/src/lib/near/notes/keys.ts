@@ -61,6 +61,12 @@ async function seedFromWallet(accountId: string, sign: SignKeyMessage): Promise<
   return new Uint8Array(await crypto.subtle.digest('SHA-256', sigBytes));
 }
 
+/** What the failed signature request itself reported, to follow our own explanation: without it the cause is a guess. */
+function reasonOf(err: unknown): string {
+  const text = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return text ? ` Reason reported: ${text}` : '';
+}
+
 function storeSeed(accountId: string, seed: Uint8Array, source: NoteKeys['source']) {
   try {
     localStorage.setItem(storageKey(accountId), JSON.stringify({ seed: hex(seed), source }));
@@ -81,7 +87,8 @@ export async function unlockNoteKeys(accountId: string, sign: SignKeyMessage): P
     if ((err as { code?: string } | null)?.code !== SIGN_UNSUPPORTED) {
       throw new Error(
         'The wallet did not sign the key message, so your private balance key was not unlocked. ' +
-          'Approve the signature request to continue; if no wallet window opened, allow pop-ups for this site.',
+          'Approve the signature request to continue; if no wallet window opened, allow pop-ups for this site.' +
+          reasonOf(err),
       );
     }
     console.warn('[notes] this wallet cannot sign messages; using a key kept in this browser');
@@ -108,7 +115,8 @@ export async function switchToWalletKey(accountId: string, sign: SignKeyMessage)
       (err as { code?: string } | null)?.code === SIGN_UNSUPPORTED
         ? 'This wallet cannot sign messages, so the key cannot come from it. The key in this browser was kept.'
         : 'The wallet did not sign the key message, so the key in this browser was kept. Approve the signature ' +
-          'request to switch; if no wallet window opened, allow pop-ups for this site.',
+          'request to switch; if no wallet window opened, allow pop-ups for this site.' +
+          reasonOf(err),
     );
   }
   const keys = await fromSeed(accountId, seed, 'signature');

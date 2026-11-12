@@ -71,6 +71,15 @@ describe('note keys', () => {
     expect((await unlockNoteKeys('grace.testnet', declines)).sk).toBe(local.sk); // still the stored key
   });
 
+  it('passes on the reason a signature request failed', async () => {
+    const refusedBeforeTheWallet = async (): Promise<{ signature: string }> => {
+      throw new Error('Invalid nonce. It must be a Buffer with a length of 32 bytes.');
+    };
+    await expect(unlockNoteKeys('heidi.testnet', refusedBeforeTheWallet)).rejects.toThrow(/Invalid nonce/);
+    await unlockNoteKeys('ivan.testnet', cannotSign);
+    await expect(switchToWalletKey('ivan.testnet', refusedBeforeTheWallet)).rejects.toThrow(/Invalid nonce/);
+  });
+
   it('refuses a backup that is not 32 bytes of hex', async () => {
     await expect(importNoteSeed('erin.testnet', 'abc')).rejects.toThrow(/backup/i);
     expect(store.size).toBe(0);

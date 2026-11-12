@@ -1,7 +1,7 @@
 // NEAR Wallet Selector glue (Meteor + MyNearWallet on testnet), loaded lazily. Public actions (deposits, market
 // creation, bonded votes, claims) are signed here by the user's own account; private actions never come through
 // this file: they are proven in the browser and submitted by the relayer (./private.ts).
-import type { WalletSelector, WalletSelectorState } from '@near-wallet-selector/core';
+import type { Wallet, WalletSelector, WalletSelectorState } from '@near-wallet-selector/core';
 import type { WalletSelectorModal } from '@near-wallet-selector/modal-ui';
 import { GAS_DEFAULT, VEILED_CONTRACT } from './config';
 import { decodeReturn, failureText, invalidateViews, outcomeFailure, txStatus, type TxOutcome } from './rpc';
@@ -151,14 +151,24 @@ export async function callContract(opts: {
 /** NEP-413 signature over a fixed message (deterministic for the same key), base64. */
 export async function signMessage(message: string, nonce: Uint8Array): Promise<{ signature: string; publicKey: string }> {
   const selector = await getSelector();
-  const wallet = await selector.wallet();
+  return signMessageWith(await selector.wallet(), message, nonce);
+}
+
+/** `signMessage` on a given wallet of the selector. */
+export async function signMessageWith(
+  wallet: Wallet,
+  message: string,
+  nonce: Uint8Array,
+): Promise<{ signature: string; publicKey: string }> {
   if (!('signMessage' in wallet) || typeof wallet.signMessage !== 'function') {
     throw new WalletError('This wallet cannot sign messages.', 'SIGN_UNSUPPORTED');
   }
   const signed = await wallet.signMessage({
     message,
     recipient: VEILED_CONTRACT,
-    nonce: nonce as unknown as Buffer,
+    // The selector refuses anything but a Buffer of 32 bytes before the wallet is asked, and it tests against the
+    // global Buffer (the one boot.ts installs), so a plain Uint8Array with the same bytes never got through.
+    nonce: Buffer.from(nonce),
   });
   if (!signed || !signed.signature) throw new WalletError('The wallet returned no signature.');
   return { signature: signed.signature, publicKey: String(signed.publicKey) };
