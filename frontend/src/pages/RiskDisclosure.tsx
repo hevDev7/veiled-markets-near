@@ -101,7 +101,8 @@ export function RiskDisclosure() {
               <li><strong className="text-surface-300">Liquidity Risk:</strong> In markets with low liquidity, large trades suffer high slippage, so you may receive significantly less than expected.</li>
               <li><strong className="text-surface-300">Resolution Risk:</strong> Markets are resolved by bonded voting, not by an automated oracle. After the deadline anyone can vote on the outcome by posting a 0.1 NEAR bond. On testnet one voter is enough, and the voting and dispute windows last 5 minutes each, so a single account can decide a market if nobody disputes in time. A dispute requires 3 times the total voter bonds and moves the decision to a 5-member committee; if the committee does not decide within 1 hour on testnet, the market can be cancelled and refunded. The process is human-driven and may produce errors.</li>
               <li><strong className="text-surface-300">Voter Bond Risk:</strong> If you vote and your outcome does not win, your 0.1 NEAR bond is forfeited to the treasury. A disputer whose outcome the committee rejects forfeits the dispute bond.</li>
-              <li><strong className="text-surface-300">Impermanent Loss:</strong> Liquidity providers face impermanent loss when prices move away from where they provided liquidity. LP value can fall as an outcome becomes more certain.</li>
+              <li><strong className="text-surface-300">Impermanent Loss:</strong> Liquidity providers face impermanent loss when prices move away from where they provided liquidity. LP value can fall as an outcome becomes more certain; on a 2-outcome market the pool can lose up to half of its liquidity.</li>
+              <li><strong className="text-surface-300">Late Liquidity:</strong> Liquidity added to a lopsided market is spread in proportion to the pool&apos;s reserves, so most of it backs the outcomes traders expect to lose. If the favoured outcome wins, a late LP can get back far less than they deposited, and earlier LPs gain the difference.</li>
               <li><strong className="text-surface-300">LP Withdrawal Timing:</strong> Liquidity can only be withdrawn after the market resolves (after a short priority window for winners) or is cancelled.</li>
             </ul>
           </section>
@@ -111,7 +112,7 @@ export function RiskDisclosure() {
             <p className="mb-3">The Protocol charges the following fees:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">Buying shares:</strong> 1.0% in total: 0.5% protocol fee to the treasury and 0.5% to the market creator.</li>
-              <li><strong className="text-surface-300">Selling shares:</strong> 2.0% in total: 0.5% protocol fee, 0.5% to the market creator, and 1.0% to liquidity providers (it stays in the pool).</li>
+              <li><strong className="text-surface-300">Selling shares:</strong> 2.0% in total: 0.5% protocol fee, 0.5% to the market creator, and 1.0% to liquidity providers (it stays in the market and is paid out when LPs withdraw).</li>
               <li><strong className="text-surface-300">Turbo bets:</strong> 0.5% of each bet, to the treasury.</li>
               <li><strong className="text-surface-300">Parlays:</strong> 2% of the payout of a winning parlay, to the treasury.</li>
             </ul>

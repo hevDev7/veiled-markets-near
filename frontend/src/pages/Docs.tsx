@@ -697,7 +697,14 @@ buy outcome i with a tokens (after fees):
   x = r_i
   for every other outcome k:   x = x × r_k / (r_k + a)
   shares_out = r_i + a − x
-  new reserves:  r_i = x,  r_k = r_k + a`}</CodeBlock>
+  new reserves:  r_i = x,  r_k = r_k + a
+
+sell outcome i for t = tokens_desired (gross):
+  x = r_i
+  for every other outcome k:   x = x × r_k / (r_k − t)
+  shares_needed = x − r_i + t
+  new reserves:  r_i = x,  r_k = r_k − t
+  seller receives t − protocol fee − creator fee − LP fee`}</CodeBlock>
             <H3>Fees</H3>
             <Table
               head={['', 'Protocol', 'Creator', 'LP', 'Total']}
@@ -708,8 +715,11 @@ buy outcome i with a tokens (after fees):
             />
             <P muted>
               Protocol fees go to the treasury. Creator fees accumulate in the market, and the creator collects them once
-              with <C>withdraw_creator_fees</C> after resolution. The LP fee stays in the pool. The owner can change the
-              rates with <C>set_governance_value</C>; their sum must stay below 100%.
+              with <C>withdraw_creator_fees</C> after resolution. On a sell the pool releases the full{' '}
+              <C>tokens_desired</C>; the seller receives it minus the three fees, and the LP fee stays in the market&apos;s
+              collateral, so LPs collect it when they withdraw. (The Aleo program priced sells on tokens_desired − LP fee,
+              which meant LPs never received the LP fee; the NEAR contract fixes that.) The owner can change the rates
+              with <C>set_governance_value</C>; their sum must stay below 100%.
             </P>
             <H3>Trading rules</H3>
             <Bullets>
@@ -727,6 +737,12 @@ buy outcome i with a tokens (after fees):
             <H3>Liquidity and payouts</H3>
             <Bullets>
               <li><B>add_liquidity</B>: at least 0.01; LP shares = amount × total LP shares / sum of reserves, and the amount is spread over the reserves in proportion.</li>
+              <li>
+                LP outcome risk: on a 2-outcome market the pool can lose up to half of its liquidity when the favoured
+                outcome wins, and gains when the other one does. Liquidity added to a lopsided market mostly backs the
+                outcomes traders expect to lose, so a late LP can get back much less than they put in while earlier LPs
+                gain the difference. The Liquidity panel shows what a deposit would return under each outcome before you add it.
+              </li>
               <li><B>redeem</B>: on a Resolved market, winning shares pay 1:1 in the market&apos;s token.</li>
               <li><B>refund</B>: on a Cancelled market, shares pay their share of the traders&apos; collateral (shares × trader collateral / outstanding shares).</li>
               <li>

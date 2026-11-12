@@ -92,7 +92,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Liquidity',
     question: 'How does liquidity provision work?',
-    answer: 'You can add liquidity to any active market by depositing tokens. You receive LP shares proportional to your deposit relative to the pool size. LP providers earn a 1.0% fee on every sell, which stays in the pool reserves.',
+    answer: 'You can add liquidity to any active market from your private balance and receive a private LP note. LPs earn the 1.0% LP fee on every sell, which stays in the market until they withdraw, and they carry the outcome risk of the pool: on a 2-outcome market the pool can lose up to half its liquidity if the favoured outcome wins. Adding to a lopsided market is costly, because most of the deposit backs the outcomes expected to lose; the Liquidity panel shows what you would get back under each outcome. Liquidity is withdrawn after the market resolves or is cancelled.',
   },
   {
     category: 'Liquidity',

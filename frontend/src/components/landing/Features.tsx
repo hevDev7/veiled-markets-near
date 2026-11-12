@@ -27,7 +27,7 @@ export function Features() {
     {
       icon: Scale,
       title: 'Always-on pricing',
-      text: 'A fixed-product market maker quotes every outcome at all times. Add liquidity and earn the LP fee on every trade.',
+      text: 'A fixed-product market maker quotes every outcome at all times. Add liquidity and earn the LP fee on every sell.',
       spec: 'FPMM · LP fees',
     },
     {
