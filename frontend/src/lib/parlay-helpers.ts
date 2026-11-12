@@ -1,7 +1,7 @@
 import type { ParlayRecord, ParlaySlipLeg, ParlayTokenType } from './parlay-store'
 import type { WalletBalance } from './wallet'
 import { config, getTransactionUrl } from './config'
-import { TOKEN, isChainTxId, tokenLabel } from './near/config'
+import { TOKEN, TOKEN_KEY, isChainTxId, tokenLabel } from './near/config'
 import { getParlayPool } from './near/parlay'
 import { devWarn } from './logger'
 import { findRecords, type ScannedRecord } from './record-scanner'
@@ -42,11 +42,7 @@ const ZERO_FIELD = '0field'
 const ODDS_PRECISION = 10000n
 const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = TOKEN
 
-const TOKEN_ID_TO_TYPE: Record<number, ParlayTokenType> = {
-  1: 'NEAR',
-  2: 'USDCX',
-  3: 'USAD',
-}
+const TOKEN_ID_TO_TYPE: Record<number, ParlayTokenType> = TOKEN_KEY
 
 function normalizeField(value: string): string {
   const trimmed = value.trim()

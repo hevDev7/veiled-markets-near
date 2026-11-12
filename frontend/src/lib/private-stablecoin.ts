@@ -11,6 +11,7 @@
 // ============================================================================
 
 import { config } from './config';
+import { TOKEN } from './near/config';
 import { buildDefaultMerkleProofs } from './aleo-client';
 import { devLog } from './logger';
 
@@ -99,7 +100,7 @@ export async function findTokenRecord(
   minAmount: bigint,
 ): Promise<string | null> {
   const { spendableRecord } = await import('./near/wallet-records');
-  return spendableRecord(tokenType === 'USAD' ? 3 : 2, minAmount);
+  return spendableRecord(TOKEN[tokenType], minAmount);
 }
 
 /**
