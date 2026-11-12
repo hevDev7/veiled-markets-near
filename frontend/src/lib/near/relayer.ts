@@ -35,6 +35,19 @@ export const ERROR_TEXT: Record<string, string> = {
   ERR_POOL_UNDERFLOW: 'The pool cannot pay that much; try a smaller amount.',
   ERR_MARKET_CREDITS: 'The market does not hold enough collateral for this payout.',
   ERR_AMOUNT: 'Nothing to claim for this position.',
+  ERR_LEG_COUNT: 'A parlay needs 2 to 4 legs.',
+  ERR_DUPLICATE_LEG: 'Each parlay leg must be on a different market.',
+  ERR_LEG_CLOSED: 'One of the legs is on a market that is no longer open for trading.',
+  ERR_LEG_ODDS: 'One leg is outside the 1×–100× odds range.',
+  ERR_COMBINED_ODDS: 'The combined odds exceed the 1000× limit.',
+  ERR_MIN_STAKE: 'The stake is below the parlay minimum.',
+  ERR_MAX_PAYOUT: 'The potential payout exceeds the maximum for one parlay.',
+  ERR_POOL_CAPACITY: 'The parlay pool cannot back this payout right now. Try a smaller stake.',
+  ERR_PARLAY_NOT_READY: 'This parlay is not settled yet: some legs are still open.',
+  ERR_PARLAY_LOST: 'This parlay lost; there is nothing to claim.',
+  ERR_PARLAY_SETTLED: 'This parlay is already settled.',
+  ERR_CLAIMED: 'This parlay was already claimed.',
+  ERR_NO_PARLAY: 'This parlay does not exist.',
 };
 
 export const explain = (code: string) => ERROR_TEXT[code] ?? code;

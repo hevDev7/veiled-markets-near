@@ -35,7 +35,7 @@ import { registerMarketInRegistry, isSupabaseAvailable } from '@/lib/supabase'
 import { uploadMarketMetadata, isPinataAvailable, type MarketMetadataIPFS } from '@/lib/ipfs'
 import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
-import { PUBLIC_CALL_GAS_MICRO } from '@/lib/near/config'
+import { PUBLIC_CALL_GAS_MICRO, tokenLabel } from '@/lib/near/config'
 import { isChainTxId } from '@/lib/near/config'
 
 interface CreateMarketModalProps {
@@ -96,7 +96,11 @@ function saveDraft(data: MarketFormData) {
 function loadDraft(): MarketFormData | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY)
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const draft = JSON.parse(raw) as MarketFormData
+    // USAD is no longer offered; an old draft falls back to NEAR.
+    if (draft.tokenType === 'USAD') draft.tokenType = 'NEAR'
+    return draft
   } catch { return null }
 }
 
@@ -132,15 +136,16 @@ function getCreateMarketBalanceError(
     return null
   }
 
+  const label = tokenLabel(tokenType)
   const publicStableBalance = tokenType === 'USDCX' ? balances.usdcxPublic : balances.usadPublic
   const privateStableBalance = tokenType === 'USDCX' ? balances.usdcxPrivate : balances.usadPrivate
   if (publicStableBalance < liquidityMicro) {
     return (
-      `Insufficient public ${tokenType}. Market creation uses public ${tokenType} for initial liquidity (ft_transfer_call). ` +
-      `Need ${formatCredits(liquidityMicro)} ${tokenType}, ` +
-      `but only have ${formatCredits(publicStableBalance)} public ${tokenType}.` +
+      `Insufficient public ${label}. Market creation uses public ${label} for initial liquidity (ft_transfer_call). ` +
+      `Need ${formatCredits(liquidityMicro)} ${label}, ` +
+      `but only have ${formatCredits(publicStableBalance)} public ${label}.` +
       (privateStableBalance > 0n
-        ? ` Private ${tokenType} available: ${formatCredits(privateStableBalance)}. Withdraw it from your private balance (Settings) first.`
+        ? ` Private ${label} available: ${formatCredits(privateStableBalance)}. Withdraw it from your private balance (Settings) first.`
         : '')
     )
   }
@@ -169,6 +174,7 @@ async function getStablecoinCreateFundingError(
   },
 ): Promise<string | null> {
   const stableProgramId = tokenType === 'USAD' ? 'test_usad_stablecoin.aleo' : config.usdcxProgramId
+  const label = tokenLabel(tokenType)
   const privateStableBalance = tokenType === 'USDCX' ? balances.usdcxPrivate : balances.usadPrivate
 
   try {
@@ -177,11 +183,11 @@ async function getStablecoinCreateFundingError(
 
     if (livePublicBalance < liquidityMicro) {
       return (
-        `On-chain public ${tokenType} is too low for market creation. ` +
-        `Market creation funds the initial liquidity from the ${tokenType} in your wallet. ` +
-        `Need ${formatCredits(liquidityMicro)} ${tokenType}, but the stablecoin mapping shows ${formatCredits(livePublicBalance)} public ${tokenType}.` +
+        `On-chain public ${label} is too low for market creation. ` +
+        `Market creation funds the initial liquidity from the ${label} in your wallet. ` +
+        `Need ${formatCredits(liquidityMicro)} ${label}, but the stablecoin mapping shows ${formatCredits(livePublicBalance)} public ${label}.` +
         (privateStableBalance > 0n
-          ? ` You still have ${formatCredits(privateStableBalance)} private ${tokenType}; withdraw it from your private balance (Settings) first.`
+          ? ` You still have ${formatCredits(privateStableBalance)} private ${label}; withdraw it from your private balance (Settings) first.`
           : '')
       )
     }
@@ -1083,13 +1089,13 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                               step="1"
                               className="input-field pr-16"
                             />
-                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 text-sm">{formData.tokenType}</span>
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 text-sm">{tokenLabel(formData.tokenType)}</span>
                           </div>
                           <p className="text-xs text-surface-500 mt-1">
-                            Seeds the AMM pool. Split equally across outcomes. Min: 0.01 {formData.tokenType}.
+                            Seeds the AMM pool. Split equally across outcomes. Min: 0.01 {tokenLabel(formData.tokenType)}.
                             {formData.tokenType === 'NEAR'
                               ? ' Uses public NEAR balance; private credits cannot be used here.'
-                              : ` Uses public ${formData.tokenType} balance, plus 1.5 public NEAR for the network fee.`}
+                              : ` Uses public ${tokenLabel(formData.tokenType)} balance, plus 1.5 public NEAR for the network fee.`}
                           </p>
                         </div>
 
@@ -1099,7 +1105,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             <Coins className="w-4 h-4 text-surface-400" />
                             Betting Token
                           </label>
-                          <div className="grid grid-cols-3 gap-3">
+                          <div className="grid grid-cols-2 gap-3">
                             <button
                               onClick={() => updateForm({ tokenType: 'NEAR' })}
                               className={cn(
@@ -1121,20 +1127,8 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                                   : "border-surface-700 hover:border-surface-600"
                               )}
                             >
-                              <span className="text-lg font-semibold text-white block">USDCX</span>
-                              <span className="text-xs text-surface-400">Stablecoin</span>
-                            </button>
-                            <button
-                              onClick={() => updateForm({ tokenType: 'USAD' })}
-                              className={cn(
-                                "p-3 rounded-xl border-2 transition-all text-center",
-                                formData.tokenType === 'USAD'
-                                  ? "border-brand-500 bg-brand-500/10"
-                                  : "border-surface-700 hover:border-surface-600"
-                              )}
-                            >
-                              <span className="text-lg font-semibold text-white block">USAD</span>
-                              <span className="text-xs text-surface-400">Stablecoin</span>
+                              <span className="text-lg font-semibold text-white block">USDC</span>
+                              <span className="text-xs text-surface-400">Circle stablecoin</span>
                             </button>
                           </div>
                         </div>
@@ -1321,7 +1315,7 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">Betting Token</p>
-                              <p className="text-sm text-white font-semibold">{formData.tokenType}</p>
+                              <p className="text-sm text-white font-semibold">{tokenLabel(formData.tokenType)}</p>
                             </div>
                           </div>
 

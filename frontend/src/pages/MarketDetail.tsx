@@ -830,7 +830,7 @@ export function MarketDetail() {
           ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate
           : wallet.balance.usadPublic + wallet.balance.usadPrivate
         if (buyAmountMicro > totalStablecoin) {
-          throw new Error(`Insufficient ${tokenType} balance. You need ${buyAmount} ${tokenType} but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${tokenType}.`)
+          throw new Error(`Insufficient ${getTokenSymbol(tokenType)} balance. You need ${buyAmount} ${getTokenSymbol(tokenType)} but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${getTokenSymbol(tokenType)}.`)
         }
       }
 
@@ -886,8 +886,8 @@ export function MarketDetail() {
             devWarn('[Trade] USDCX PRIVATE buy — Token record + MerkleProof appended')
           } else {
             throw new Error(
-              `No private USDCX Token record found with at least ${Number(buyAmountMicro) / 1_000_000} USDCX. ` +
-              `Private betting requires USDCX Token records in your wallet.`
+              `Not enough USDC for this trade (need ${Number(buyAmountMicro) / 1_000_000} USDC). ` +
+              `Add USDC to your wallet or private balance (Settings) first.`
             )
           }
         }
@@ -907,8 +907,8 @@ export function MarketDetail() {
             devWarn('[Trade] USAD PRIVATE buy — Token record + MerkleProof appended')
           } else {
             throw new Error(
-              `Not enough USAD for this trade (need ${Number(buyAmountMicro) / 1_000_000} USAD). ` +
-              `Add USAD to your wallet or private balance (Settings) first.`
+              `Not enough ${getTokenSymbol(tokenType)} for this trade (need ${Number(buyAmountMicro) / 1_000_000} ${getTokenSymbol(tokenType)}). ` +
+              `Add ${getTokenSymbol(tokenType)} to your wallet or private balance (Settings) first.`
             )
           }
         }
@@ -1242,7 +1242,7 @@ export function MarketDetail() {
                       : (market.totalLiquidity ?? 0n)
                   }
                   totalVolume={market.totalVolume}
-                  tokenSymbol={market.tokenType || 'NEAR'}
+                  tokenSymbol={getTokenSymbol(market.tokenType)}
                 />
 
               {/* Pool Breakdown Chart */}
@@ -1743,7 +1743,7 @@ export function MarketDetail() {
                           {isWalletConnected ? (
                             <p className="text-xs text-surface-500">
                               {isStablecoin
-                                ? `${tokenType} Balance: ${formatCredits(tokenType === 'USDCX' ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate : wallet.balance.usadPublic + wallet.balance.usadPrivate)} ${tokenType}`
+                                ? `${tokenSymbol} Balance: ${formatCredits(tokenType === 'USDCX' ? wallet.balance.usdcxPublic + wallet.balance.usdcxPrivate : wallet.balance.usadPublic + wallet.balance.usadPrivate)} ${tokenSymbol}`
                                 : <>Private balance: {formatCredits(wallet.balance.private)} NEAR · Wallet: {formatCredits(wallet.balance.public)} NEAR</>
                               }
                             </p>

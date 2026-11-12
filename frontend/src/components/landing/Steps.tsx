@@ -7,7 +7,7 @@ const STEPS = [
     n: '01',
     icon: ArrowDownToLine,
     title: 'Deposit',
-    text: 'Move NEAR, or the test stablecoins USDCX and USAD, from your wallet into your private balance.',
+    text: 'Move NEAR or testnet USDC from your wallet into your private balance.',
     tone: 'public' as const,
   },
   {

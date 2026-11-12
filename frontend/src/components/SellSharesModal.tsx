@@ -6,6 +6,7 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { buildSellSharesInputs, getMarket, getCurrentBlockHeight, getMarketGovernanceConfig, MARKET_STATUS, getProgramIdForToken } from '@/lib/aleo-client'
 import { devWarn } from '@/lib/logger'
+import { TOKEN } from '@/lib/near/config'
 import {
   calculateSellSharesNeeded,
   calculateSellNetTokens,
@@ -142,11 +143,11 @@ export function SellSharesModal({ isOpen, onClose, shareRecord, market }: SellSh
             throw new Error('Betting deadline has passed. Trading is no longer available.')
           }
           // Validate token type matches on-chain (prevents transition/finalize mismatch)
-          const onChainIsUsdcx = onChainMarket.token_type === 2
+          const onChainIsUsdcx = onChainMarket.token_type === TOKEN.USDCX
           const uiIsUsdcx = tokenType === 'USDCX'
           if (uiIsUsdcx !== onChainIsUsdcx) {
             throw new Error(
-              `Token type mismatch: UI shows ${tokenType} but on-chain market uses ${onChainIsUsdcx ? 'USDCX' : 'NEAR'}. Please refresh the page.`
+              `Token type mismatch: UI shows ${getTokenSymbol(tokenType)} but on-chain market uses ${onChainIsUsdcx ? 'USDC' : 'NEAR'}. Please refresh the page.`
             )
           }
         }

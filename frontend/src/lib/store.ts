@@ -20,6 +20,7 @@ import {
 } from './aleo-client'
 import { config } from './config'
 import { devLog, devWarn } from './logger'
+import { getTokenSymbol } from './utils'
 import {
   isSupabaseAvailable, fetchBets as sbFetchBets, upsertBets as sbUpsertBets,
   fetchPendingBets as sbFetchPendingBets, upsertPendingBets as sbUpsertPendingBets,
@@ -383,8 +384,9 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
 
       const publicErrors: string[] = []
       if (publicResult.status === 'rejected') publicErrors.push('NEAR public balance unavailable')
-      if (usdcxPublicResult.status === 'rejected') publicErrors.push('USDCX public balance unavailable')
-      if (usadPublicResult.status === 'rejected') publicErrors.push('USAD public balance unavailable')
+      if (usdcxPublicResult.status === 'rejected') publicErrors.push('USDC public balance unavailable')
+      // USAD is not offered on NEAR, so a failed USAD lookup is not shown to the user.
+      if (usadPublicResult.status === 'rejected') devWarn('[Balance] USAD public balance unavailable:', usadPublicResult.reason)
       const hasPublicErrors = publicErrors.length > 0
 
       applyBalanceUpdate(
@@ -1288,7 +1290,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         const tokenRecord = await findTokenRecord(tokenType, amount)
         if (!tokenRecord) {
           throw new Error(
-            `No private ${tokenType} Token record found with at least ${(Number(amount) / 1_000_000).toFixed(2)} ${tokenType}.`
+            `No private ${getTokenSymbol(tokenType)} Token record found with at least ${(Number(amount) / 1_000_000).toFixed(2)} ${getTokenSymbol(tokenType)}.`
           )
         }
 

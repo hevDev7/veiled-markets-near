@@ -10,23 +10,16 @@ import {
   type ParlayRecord,
 } from '@/lib/parlay-store'
 import { useWalletStore } from '@/lib/store'
-import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn } from '@/lib/utils'
-import { fetchCreditsRecord, releaseCreditsRecord, reserveCreditsRecord } from '@/lib/credits-record'
-import { buildMerkleProofsForAddress } from '@/lib/aleo-client'
-import { findTokenRecord, releaseTokenRecord, reserveTokenRecord } from '@/lib/private-stablecoin'
-import { config } from '@/lib/config'
 import {
-  buildParlayLegInputs,
-  computeParlayOnChainId,
-  createParlayTicketNonce,
   describeParlayFundingSource,
   formatParlayAmount,
-  getParlayCreateFunctionName,
   getParlayCreateReadiness,
-  getParlayExplorerTransactionId,
   getParlayFundingRoute,
 } from '@/lib/parlay-helpers'
+import { placeParlay, quoteParlay } from '@/lib/near/parlay'
+import { tokenOfType } from '@/lib/near/programs'
+import { tokenLabel } from '@/lib/near/config'
 import { TransactionLink } from './TransactionLink'
 
 interface ParlayConfirmModalProps {
@@ -61,10 +54,10 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
     slipStake,
     slipTokenType,
     addParlay,
+    setSlipLegOdds,
     validationError,
   } = useParlayStore()
   const { wallet } = useWalletStore()
-  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [step, setStep] = useState<ConfirmStep>('review')
   const [error, setError] = useState<string | null>(null)
@@ -85,202 +78,100 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
     [wallet.balance, slipTokenType, slipStake],
   )
 
-  const parlayProgramId = config.parlayProgramId || 'veiled_parlay_v3.aleo'
-
   useEffect(() => {
     isModalOpenRef.current = isOpen
   }, [isOpen])
+
+  // NEAR: refresh the slip with the contract's live leg odds whenever the modal opens or the stake changes, so the
+  // odds and payout shown are exactly what parlay_buy will give (the pools move with every trade).
+  const [quoteError, setQuoteError] = useState<string | null>(null)
+  const legKey = slipLegs.map((l) => `${l.marketId}:${l.outcome}`).join(',')
+  useEffect(() => {
+    if (!isOpen || step !== 'review' || slipLegs.length < 2) return
+    let cancelled = false
+    const stake = slipStake > 0n ? slipStake : 1_000_000n
+    quoteParlay(tokenOfType(slipTokenType), stake, slipLegs)
+      .then((q) => {
+        if (cancelled) return
+        setQuoteError(null)
+        setSlipLegOdds(q.leg_odds_bps.map((x) => BigInt(x)))
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setQuoteError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, step, legKey, slipStake, slipTokenType])
 
   const handleConfirm = async () => {
     setStep('submitting')
     setError(null)
     setRouteNote(null)
-    let releaseSelectedRecord: (() => void) | undefined
 
     try {
-      const feeInMicro = 1_500_000n
       const walletAddress = wallet.address
       if (!wallet.connected || !walletAddress) {
         throw new Error('Connect your wallet before placing a parlay.')
-      }
-      if (!wallet.isDemoMode && wallet.balance.public < feeInMicro) {
-        throw new Error('Insufficient public NEAR for transaction fee. Gas fees are always paid in public NEAR.')
       }
       const currentValidationError = validationError()
       if (currentValidationError) {
         throw new Error(currentValidationError)
       }
-      if (slipLegs.length < 2) {
-        throw new Error('Add at least two legs to place a parlay.')
-      }
-      if (slipStake <= 0n) {
-        throw new Error('Enter a stake amount before continuing.')
-      }
-
-      const ticketNonce = createParlayTicketNonce()
-      const legInputs = buildParlayLegInputs(slipLegs)
-      const onChainParlayId = await computeParlayOnChainId({
-        owner: walletAddress,
-        legs: slipLegs,
-        numLegs: slipLegs.length,
-        stake: slipStake,
-        tokenType: slipTokenType,
-        ticketNonce,
-      })
-
-      let fundingSource: 'private' | 'public' | null = fundingRoute.recommendedSource
-      if (!fundingSource) {
+      if (fundingRoute.privateBalance + fundingRoute.publicBalance < slipStake) {
         throw new Error(
-          `Parlay placement currently requires a private ${slipTokenType} balance. `
-          + `Available private balance: ${formatParlayAmount(fundingRoute.privateBalance)} ${slipTokenType}.`,
+          `Not enough ${tokenLabel(slipTokenType)}: ${formatParlayAmount(fundingRoute.privateBalance)} private + `
+          + `${formatParlayAmount(fundingRoute.publicBalance)} in the wallet.`,
         )
       }
 
+      // Exact contract quote at submit time; the bet accepts up to 2% worse in case a trade lands first.
+      const token = tokenOfType(slipTokenType)
+      const quote = await quoteParlay(token, slipStake, slipLegs)
+      const gross = BigInt(quote.potential_payout)
+      setSlipLegOdds(quote.leg_odds_bps.map((x) => BigInt(x)))
       const readiness = await getParlayCreateReadiness({
         tokenType: slipTokenType,
         stake: slipStake,
-        combinedOddsBps: combinedOdds,
-        grossPayout: payout.gross,
+        combinedOddsBps: BigInt(quote.combined_odds_bps),
+        grossPayout: gross,
       })
       if (!readiness.canCreate) {
         throw new Error(readiness.reason ?? 'Parlay is not ready for on-chain submission.')
       }
 
-      const functionName = getParlayCreateFunctionName(slipTokenType)
-      let inputs: string[] = []
-      let recordIndices: number[] | undefined
-
-      const buildPrivateInputs = async () => {
-        if (slipTokenType === 'NEAR') {
-          const creditsRecord = await fetchCreditsRecord(Number(slipStake), walletAddress)
-          if (!creditsRecord) {
-            throw new Error('No private NEAR record with sufficient balance was found.')
-          }
-
-          reserveCreditsRecord(creditsRecord)
-          releaseSelectedRecord = () => releaseCreditsRecord(creditsRecord)
-          inputs = [
-            creditsRecord,
-            ticketNonce,
-            `${slipLegs.length}u8`,
-            `${slipStake}u128`,
-            ...legInputs,
-          ]
-          recordIndices = [0]
-          return
-        }
-
-        const tokenRecord = await findTokenRecord(slipTokenType, slipStake)
-        if (!tokenRecord) {
-          throw new Error(`No private ${slipTokenType} token record with sufficient balance was found.`)
-        }
-
-        reserveTokenRecord(slipTokenType, tokenRecord)
-        releaseSelectedRecord = () => releaseTokenRecord(slipTokenType, tokenRecord)
-        const merkleProofs = await buildMerkleProofsForAddress(walletAddress)
-        inputs = [
-          tokenRecord,
-          merkleProofs,
-          ticketNonce,
-          `${slipLegs.length}u8`,
-          `${slipStake}u128`,
-          ...legInputs,
-        ]
-        recordIndices = [0]
-      }
-
-      await buildPrivateInputs()
-
-      console.log('[Parlay] Transaction submission:', {
-        program: parlayProgramId,
-        function: functionName,
-        inputCount: inputs.length,
-        inputs: inputs.map((inp, i) => `[${i}] ${inp.length > 80 ? inp.slice(0, 80) + '...' : inp}`),
-        recordIndices,
-        readiness: {
-          pool: formatParlayAmount(readiness.pool),
-          exposure: formatParlayAmount(readiness.exposure),
-          available: formatParlayAmount(readiness.availableBacking),
-          required: formatParlayAmount(readiness.requiredBacking),
-        },
+      const legsAtSubmit = useParlayStore.getState().slipLegs.map((l) => ({ ...l }))
+      const placed = await placeParlay({
+        token,
+        stake: slipStake,
+        legs: legsAtSubmit,
+        minPayout: (gross * 98n) / 100n,
       })
-
-      const result = await executeTransaction({
-        program: parlayProgramId,
-        function: functionName,
-        inputs,
-        fee: 1.5,
-        recordIndices,
-      })
-      const submittedTxId = result.transactionId
-
-      if (!submittedTxId) {
-        throw new Error('Transaction was not submitted.')
-      }
-
-      const explorerReadyTxId = getParlayExplorerTransactionId(submittedTxId)
+      const fee = (placed.grossPayout * 200n) / 10000n
 
       const parlayRecord: ParlayRecord = {
-        id: onChainParlayId ?? submittedTxId,
-        onChainParlayId: onChainParlayId ?? undefined,
-        ticketNonce,
-        fundingSource,
+        id: placed.parlayId,
+        onChainParlayId: placed.parlayId,
+        fundingSource: 'private',
         ownerAddress: walletAddress,
-        legs: [...slipLegs],
-        numLegs: slipLegs.length,
+        legs: legsAtSubmit,
+        numLegs: legsAtSubmit.length,
         stake: slipStake,
-        potentialPayout: payout.net,
+        potentialPayout: placed.grossPayout - fee,
+        grossPayout: placed.grossPayout,
         tokenType: slipTokenType,
         status: 'active',
         createdAt: Date.now(),
-        txId: explorerReadyTxId ?? undefined,
+        txId: placed.txHash,
       }
-
+      addParlay(parlayRecord)
       setSavedParlay(parlayRecord)
-      setFundingSourceUsed(fundingSource)
-      setTxId(explorerReadyTxId)
-      setRouteNote(
-        explorerReadyTxId
-          ? 'This transaction will appear in My Parlays only after it is confirmed on-chain. Rejected submissions are not saved.'
-          : 'Wallet returned a temporary submission ID. The explorer link will appear after the on-chain transaction ID is resolved.',
-      )
+      setFundingSourceUsed('private')
+      setTxId(placed.txHash)
+      setConfirmationStatus('confirmed')
+      setRouteNote('Placed privately through the relayer: your account does not appear in the transaction. Track it in My Parlays.')
       setStep('success')
-      setConfirmationStatus('pending')
-
-      void pollTransactionStatus(submittedTxId, (status, resolvedTxId) => {
-        const confirmedExplorerTxId =
-          getParlayExplorerTransactionId(resolvedTxId)
-          || explorerReadyTxId
-
-        if (status === 'confirmed') {
-          const confirmedParlay: ParlayRecord = {
-            ...parlayRecord,
-            txId: confirmedExplorerTxId ?? undefined,
-          }
-          addParlay(confirmedParlay)
-          if (isModalOpenRef.current) {
-            setSavedParlay(confirmedParlay)
-            setTxId(confirmedExplorerTxId)
-            setConfirmationStatus('confirmed')
-            setRouteNote(
-              confirmedExplorerTxId
-                ? 'Transaction confirmed on-chain and added to My Parlays.'
-                : 'Transaction confirmed and added to My Parlays, but explorer link is waiting for the on-chain transaction ID to be exposed by the wallet.',
-            )
-          }
-          return
-        }
-        if (status === 'failed') {
-          releaseSelectedRecord?.()
-          if (isModalOpenRef.current) {
-            setConfirmationStatus('rejected')
-            setError('Transaction was rejected on-chain and was not added to My Parlays.')
-            setStep('error')
-          }
-        }
-      })
     } catch (err: unknown) {
-      releaseSelectedRecord?.()
       const message = err instanceof Error ? err.message : 'Failed to place parlay.'
       setError(message)
       setStep('error')
@@ -351,7 +242,7 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
                   <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
                     <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Stake</p>
                     <p className="mt-2 text-xl font-semibold text-white">
-                      {formatParlayAmount(slipStake)} {slipTokenType}
+                      {formatParlayAmount(slipStake)} {tokenLabel(slipTokenType)}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
@@ -363,7 +254,7 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
                     <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/80">Net Payout</p>
                     <p className="mt-2 text-xl font-semibold text-emerald-300">
-                      {formatParlayAmount(payout.net)} {slipTokenType}
+                      {formatParlayAmount(payout.net)} {tokenLabel(slipTokenType)}
                     </p>
                   </div>
                 </div>
@@ -373,8 +264,12 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
                     <div>
                       <p className="text-sm font-medium text-white">Funding route</p>
                       <p className="text-xs text-surface-400">
-                        Parlay placement now uses private records only, so the ticket can stay aligned with the lean core contract.
+                        The stake comes from your private balance. If it is short, your wallet first deposits the
+                        difference; the bet itself is proven in this browser and sent by the relayer.
                       </p>
+                      {quoteError && (
+                        <p className="mt-2 text-xs text-amber-300">{quoteError}</p>
+                      )}
                     </div>
                     <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-surface-300">
                       {describeParlayFundingSource(fundingRoute.recommendedSource ?? undefined)}
@@ -385,14 +280,14 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
                       <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Private</p>
                       <p className="mt-2 flex items-center gap-2 text-base font-semibold text-white">
                         <Shield className="h-4 w-4 text-brand-400" />
-                        {formatParlayAmount(fundingRoute.privateBalance)} {slipTokenType}
+                        {formatParlayAmount(fundingRoute.privateBalance)} {tokenLabel(slipTokenType)}
                       </p>
                     </div>
                     <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
                       <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Public</p>
                       <p className="mt-2 flex items-center gap-2 text-base font-semibold text-white">
                         <Coins className="h-4 w-4 text-emerald-400" />
-                        {formatParlayAmount(fundingRoute.publicBalance)} {slipTokenType}
+                        {formatParlayAmount(fundingRoute.publicBalance)} {tokenLabel(slipTokenType)}
                       </p>
                     </div>
                   </div>
@@ -448,16 +343,16 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
                 <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-surface-400">Gross payout</span>
-                    <span className="text-white">{formatParlayAmount(payout.gross)} {slipTokenType}</span>
+                    <span className="text-white">{formatParlayAmount(payout.gross)} {tokenLabel(slipTokenType)}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between text-sm">
                     <span className="text-surface-400">Protocol fee</span>
-                    <span className="text-surface-300">-{formatParlayAmount(payout.fee, 4)} {slipTokenType}</span>
+                    <span className="text-surface-300">-{formatParlayAmount(payout.fee, 4)} {tokenLabel(slipTokenType)}</span>
                   </div>
                   <div className="mt-3 flex items-center justify-between border-t border-white/[0.08] pt-3 text-sm">
                     <span className="font-medium text-surface-300">Net payout if every leg wins</span>
                     <span className="text-lg font-semibold text-emerald-300">
-                      {formatParlayAmount(payout.net)} {slipTokenType}
+                      {formatParlayAmount(payout.net)} {tokenLabel(slipTokenType)}
                     </span>
                   </div>
                 </div>

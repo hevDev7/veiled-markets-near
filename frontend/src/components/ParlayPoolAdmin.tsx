@@ -1,233 +1,179 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, RefreshCw, Shield, AlertCircle, Check, Coins } from 'lucide-react'
+import { Loader2, RefreshCw, AlertCircle, Check, Coins } from 'lucide-react'
 import { useWalletStore } from '@/lib/store'
-import { useAleoTransaction } from '@/hooks/useAleoTransaction'
-import { config } from '@/lib/config'
-import { getMappingValue } from '@/lib/aleo-client'
 import { cn } from '@/lib/utils'
 import { formatParlayAmount } from '@/lib/parlay-helpers'
-import type { ParlayTokenType } from '@/lib/parlay-store'
+import { ENABLED_TOKEN_KEYS, TOKEN, VEILED_CONTRACT, YOCTO_PER_MICRO, tokenAccount, tokenLabel } from '@/lib/near/config'
+import { getParlayPool, parlayErrorText, type NearParlayPool } from '@/lib/near/parlay'
+import { callContract } from '@/lib/near/near-wallet'
+import { invalidateViews } from '@/lib/near/rpc'
 import { TransactionLink } from './TransactionLink'
 
-const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
+type PoolKey = (typeof ENABLED_TOKEN_KEYS)[number]
 
-const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = { NEAR: 1, USDCX: 2, USAD: 3 }
-const TOKENS: ParlayTokenType[] = ['NEAR', 'USDCX', 'USAD']
-
-interface PoolState {
-  pool: bigint
-  exposure: bigint
-  treasury: bigint
-  available: bigint
+/** "1.5" → 1_500_000 micro units; null when the text is not a positive amount with at most 6 decimals. */
+function toMicro(text: string): bigint | null {
+  const m = text.trim().match(/^(\d+)(?:\.(\d{0,6}))?$/)
+  if (!m) return null
+  const micro = BigInt(m[1]) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0')
+  return micro > 0n ? micro : null
 }
 
+/**
+ * The house pool that pays winning parlays. Anyone can add to it (the contract keeps it, and only the owner can take
+ * out what is not needed to cover 110% of open tickets); this panel shows how much room it leaves for new parlays.
+ */
 export function ParlayPoolAdmin() {
   const { wallet } = useWalletStore()
-  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
-
-  const [pools, setPools] = useState<Record<ParlayTokenType, PoolState>>({
-    NEAR: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
-    USDCX: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
-    USAD: { pool: 0n, exposure: 0n, treasury: 0n, available: 0n },
-  })
+  const [pool, setPool] = useState<NearParlayPool | null>(null)
   const [loading, setLoading] = useState(false)
   const [fundAmount, setFundAmount] = useState('')
-  const [selectedToken, setSelectedToken] = useState<ParlayTokenType>('NEAR')
+  const [selected, setSelected] = useState<PoolKey>('NEAR')
   const [funding, setFunding] = useState(false)
   const [txId, setTxId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const isAdmin = wallet.address === ADMIN_ADDRESS
-
-  const fetchPoolState = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setLoading(true)
-    const programId = config.parlayProgramId
-    const newPools = { ...pools }
-
-    for (const token of TOKENS) {
-      const id = TOKEN_TYPE_TO_ID[token]
-      const [pool, exposure, treasury] = await Promise.all([
-        getMappingValue<bigint>('parlay_pool', `${id}u8`, programId).catch(() => null),
-        getMappingValue<bigint>('total_exposure', `${id}u8`, programId).catch(() => null),
-        getMappingValue<bigint>('parlay_treasury', `${id}u8`, programId).catch(() => null),
-      ])
-      const p = pool ?? 0n
-      const e = exposure ?? 0n
-      newPools[token] = {
-        pool: p,
-        exposure: e,
-        treasury: treasury ?? 0n,
-        available: p > e ? p - e : 0n,
-      }
+    try {
+      invalidateViews('get_parlay_pool')
+      setPool(await getParlayPool())
+    } catch (err) {
+      setError(parlayErrorText(err))
+    } finally {
+      setLoading(false)
     }
-
-    setPools(newPools)
-    setLoading(false)
   }, [])
 
   useEffect(() => {
-    fetchPoolState()
-  }, [fetchPoolState])
+    refresh()
+  }, [refresh])
 
-  const handleFundPool = async () => {
-    if (!isAdmin || funding) return
+  const handleFund = async () => {
+    const micro = toMicro(fundAmount)
+    if (!micro) {
+      setError('Enter an amount, for example 1 or 2.5.')
+      return
+    }
     setFunding(true)
     setError(null)
     setTxId(null)
-
     try {
-      const amountNum = parseFloat(fundAmount)
-      if (isNaN(amountNum) || amountNum <= 0) throw new Error('Enter a valid amount')
-
-      const amountMicro = BigInt(Math.round(amountNum * 1_000_000))
-
-      if (selectedToken !== 'NEAR') {
-        throw new Error('Only NEAR pool funding is supported via this panel currently.')
-      }
-
-      const result = await executeTransaction({
-        program: config.parlayProgramId,
-        function: 'fund_pool_aleo_public',
-        inputs: [`${amountMicro}u128`],
-        fee: 1.0,
-      })
-
-      const submittedTxId = result.transactionId
-      if (!submittedTxId) throw new Error('Transaction was not submitted')
-
-      setTxId(submittedTxId)
-      void pollTransactionStatus(submittedTxId, () => {})
-
-      setTimeout(() => fetchPoolState(), 15000)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to fund pool')
+      const token = TOKEN[selected]
+      const r = token === TOKEN.NEAR
+        ? await callContract({ method: 'fund_parlay_pool', args: { token }, deposit: micro * YOCTO_PER_MICRO, gas: 30_000_000_000_000n })
+        : await callContract({
+            contractId: tokenAccount(token)!,
+            method: 'ft_transfer_call',
+            args: { receiver_id: VEILED_CONTRACT, amount: micro.toString(), msg: JSON.stringify({ fund_parlay_pool: {} }) },
+            deposit: 1n,
+            gas: 100_000_000_000_000n,
+          })
+      setTxId(r.txHash)
+      setFundAmount('')
+      await refresh()
+    } catch (err) {
+      setError(parlayErrorText(err))
     } finally {
       setFunding(false)
     }
   }
 
-  if (!wallet.connected) return null
+  const safetyBps = BigInt(pool?.safety_bps ?? '11000')
+  const rows = ENABLED_TOKEN_KEYS.map((key) => {
+    const id = TOKEN[key]
+    const p = BigInt(pool?.pool[id] ?? '0')
+    const e = BigInt(pool?.exposure[id] ?? '0')
+    const covered = (e * safetyBps) / 10_000n
+    return { key, pool: p, exposure: e, room: p > covered ? ((p - covered) * 10_000n) / safetyBps : 0n }
+  })
 
   return (
     <div className="rounded-[24px] border border-white/[0.08] bg-[#10141f] p-6">
-      <div className="flex items-center justify-between mb-5">
+      <div className="mb-5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Coins className="h-5 w-5 text-brand-400" />
-          <h3 className="text-lg font-semibold text-white">Parlay Pool Status</h3>
+          <h3 className="text-lg font-semibold text-white">Parlay Pool</h3>
+          {pool?.paused && (
+            <span className="rounded-full border border-amber-500/20 bg-amber-500/15 px-2 py-0.5 text-xs text-amber-300">Paused</span>
+          )}
         </div>
         <button
-          onClick={fetchPoolState}
+          onClick={refresh}
           disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-surface-400 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-surface-400 transition-colors hover:text-white"
         >
           {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           Refresh
         </button>
       </div>
 
-      {/* Pool overview */}
-      <div className="grid gap-3 sm:grid-cols-3 mb-6">
-        {TOKENS.map((token) => {
-          const state = pools[token]
-          return (
-            <div key={token} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-              <p className="text-xs uppercase tracking-wider text-surface-500">{token} Pool</p>
-              <p className="mt-2 text-xl font-semibold text-white">
-                {formatParlayAmount(state.pool)} {token}
-              </p>
-              <div className="mt-2 space-y-1 text-xs text-surface-400">
-                <div className="flex justify-between">
-                  <span>Exposure</span>
-                  <span className="text-amber-400">{formatParlayAmount(state.exposure)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Available</span>
-                  <span className={state.available > 0n ? 'text-emerald-400' : 'text-red-400'}>
-                    {formatParlayAmount(state.available)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Treasury (fees)</span>
-                  <span className="text-brand-400">{formatParlayAmount(state.treasury)}</span>
-                </div>
-              </div>
+      <div className="mb-5 grid gap-3 sm:grid-cols-2">
+        {rows.map((r) => (
+          <div key={r.key} className="rounded-2xl border border-white/[0.06] bg-black/20 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-surface-500">{tokenLabel(r.key)}</p>
+            <div className="mt-3 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3"><span className="text-surface-400">Pool</span><span className="text-white">{formatParlayAmount(r.pool)}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-surface-400">Open tickets could pay</span><span className="text-white">{formatParlayAmount(r.exposure)}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-surface-400">Room for new payouts</span><span className="text-emerald-300">{formatParlayAmount(r.room)}</span></div>
             </div>
-          )
-        })}
+          </div>
+        ))}
       </div>
 
-      {/* Fund pool (admin only) */}
-      {isAdmin && (
-        <div className="rounded-2xl border border-brand-500/20 bg-brand-500/5 p-4">
-          <p className="text-sm font-medium text-white mb-3">
-            <Shield className="h-4 w-4 inline mr-1.5 text-brand-400" />
-            Admin: Fund Pool
-          </p>
+      <p className="mb-4 text-xs leading-relaxed text-surface-500">
+        Every parlay&apos;s potential payout must stay covered 110% by this pool, so a large ticket can be refused until the
+        pool grows. Anyone can add to it; added funds stay in the pool.
+      </p>
 
-          <div className="flex gap-2 mb-3">
-            {TOKENS.map((token) => (
+      {wallet.connected && (
+        <div className="space-y-3">
+          <div className="flex gap-2">
+            {ENABLED_TOKEN_KEYS.map((key) => (
               <button
-                key={token}
-                onClick={() => setSelectedToken(token)}
+                key={key}
+                onClick={() => setSelected(key)}
                 className={cn(
-                  'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                  selectedToken === token
-                    ? 'bg-brand-500/20 text-brand-400 ring-1 ring-brand-500/50'
-                    : 'bg-white/[0.04] text-surface-400 hover:text-white',
+                  'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                  selected === key ? 'border-brand-400/40 bg-brand-500/15 text-brand-200' : 'border-white/10 bg-white/5 text-surface-400 hover:text-white',
                 )}
               >
-                {token}
+                {tokenLabel(key)}
               </button>
             ))}
           </div>
-
           <div className="flex gap-2">
             <input
-              type="number"
               value={fundAmount}
               onChange={(e) => setFundAmount(e.target.value)}
-              placeholder="Amount to fund"
-              className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-surface-500 focus:border-brand-500 focus:outline-none"
+              inputMode="decimal"
+              placeholder={`Amount in ${tokenLabel(selected)}`}
+              className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder:text-surface-500 focus:border-brand-400/50 focus:outline-none"
             />
             <button
-              onClick={handleFundPool}
-              disabled={funding || !fundAmount}
-              className={cn(
-                'rounded-lg px-4 py-2 text-sm font-semibold transition-colors',
-                funding || !fundAmount
-                  ? 'bg-white/[0.04] text-surface-500 cursor-not-allowed'
-                  : 'bg-brand-500 text-white hover:bg-brand-600',
-              )}
+              onClick={handleFund}
+              disabled={funding}
+              className="flex items-center gap-1.5 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:opacity-60"
             >
-              {funding ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                `Fund ${selectedToken}`
-              )}
+              {funding && <Loader2 className="h-4 w-4 animate-spin" />}
+              Add to pool
             </button>
           </div>
-
-          {error && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              {error}
-            </div>
-          )}
-
-          {txId && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg bg-emerald-500/10 px-3 py-2 text-xs text-emerald-400">
-              <Check className="h-3.5 w-3.5 shrink-0" />
-              Fund transaction submitted
-              <TransactionLink transactionId={txId} />
-            </div>
-          )}
         </div>
       )}
 
-      {!isAdmin && (
-        <p className="text-xs text-surface-500 text-center">
-          Pool funding is restricted to the protocol admin.
-        </p>
+      {error && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+      {txId && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-emerald-300">
+          <Check className="h-4 w-4" />
+          <span>Added to the pool.</span>
+          <TransactionLink transactionId={txId} />
+        </div>
       )}
     </div>
   )

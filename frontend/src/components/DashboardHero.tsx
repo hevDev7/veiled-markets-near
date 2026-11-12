@@ -10,7 +10,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { type Market } from '@/lib/store'
-import { cn, formatCredits, formatPercentage, getCategoryEmoji, getCategoryName } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getCategoryEmoji, getCategoryName, getTokenSymbol } from '@/lib/utils'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
@@ -115,7 +115,7 @@ function MarketSlide({
           <div className="flex flex-wrap items-center gap-2 text-xs text-surface-500 lg:max-w-[30%] lg:justify-end lg:pl-4">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
               <TrendingUp className="h-3.5 w-3.5" />
-              <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}</span>
+              <span className="tabular-nums">{formatCredits(market.totalVolume, 0)} {getTokenSymbol(market.tokenType)}</span>
             </span>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.04] bg-white/[0.02] px-2.5 py-1.5">
               <span className="tabular-nums">{market.totalBets}</span>
@@ -410,13 +410,9 @@ export function DashboardHero({
     [markets]
   )
 
+  // Circle USDC markets (internal token key 'USDCX').
   const usdcxVolume = useMemo(
     () => markets.filter(m => m.tokenType === 'USDCX').reduce((sum, m) => sum + m.totalVolume, 0n),
-    [markets]
-  )
-
-  const usadVolume = useMemo(
-    () => markets.filter(m => m.tokenType === 'USAD').reduce((sum, m) => sum + m.totalVolume, 0n),
     [markets]
   )
 
@@ -652,16 +648,10 @@ export function DashboardHero({
               color="text-brand-400"
             />
             <StatRow
-              icon={<img src="/usdcx-logo.png" alt="USDCX" className="h-4 w-4 rounded-full object-contain" />}
-              label="USDCX Volume"
-              value={`${formatCredits(usdcxVolume)} USDCX`}
+              icon={<img src="/usdc-logo.svg" alt="USDC" className="h-4 w-4 rounded-full object-contain" />}
+              label="USDC Volume"
+              value={`${formatCredits(usdcxVolume)} USDC`}
               color="text-blue-400"
-            />
-            <StatRow
-              icon={<img src="/usad-logo.svg" alt="USAD" className="h-4 w-4 rounded-full object-contain" />}
-              label="USAD Volume"
-              value={`${formatCredits(usadVolume)} USAD`}
-              color="text-purple-400"
             />
           </div>
         </div>

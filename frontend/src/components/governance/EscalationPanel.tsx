@@ -27,7 +27,7 @@ import {
 import { useWalletStore } from '../../lib/store';
 import { useAleoTransaction } from '../../hooks/useAleoTransaction';
 import { config } from '../../lib/config';
-import { cn, shortenAddress } from '../../lib/utils';
+import { cn, getTokenSymbol, shortenAddress } from '../../lib/utils';
 
 const STAGE_STYLES = {
   voting: {
@@ -365,7 +365,7 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-white">{item.question}</span>
                       <span className="rounded-full border border-white/[0.08] bg-white/[0.02] px-2 py-0.5 text-[11px] text-surface-400">
-                        {item.tokenType}
+                        {getTokenSymbol(item.tokenType)}
                       </span>
                     </div>
                     <div className="mt-1 text-[11px] text-surface-500 font-mono">

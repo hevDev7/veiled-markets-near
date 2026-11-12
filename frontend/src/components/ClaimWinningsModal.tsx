@@ -254,8 +254,8 @@ export function ClaimWinningsModal({
           const remainingCollateral = await getMarketCredits(bet.marketId, getProgramIdForToken(tokenType))
           if (remainingCollateral !== null && remainingCollateral < inspectedRecord.quantity) {
             throw new Error(
-              `This market only has ${formatCredits(remainingCollateral)} ${tokenType} remaining on-chain, ` +
-              `but this share record needs ${formatCredits(inspectedRecord.quantity)} ${tokenType}. ` +
+              `This market only has ${formatCredits(remainingCollateral)} ${getTokenSymbol(tokenType)} remaining on-chain, ` +
+              `but this share record needs ${formatCredits(inspectedRecord.quantity)} ${getTokenSymbol(tokenType)}. ` +
               `Redemption will be rejected until enough collateral remains.`
             )
           }

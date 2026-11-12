@@ -12,7 +12,7 @@ import { devLog, devWarn } from './logger'
 import { decodeMetadata, findMarketByQuestionHash, getNearVote, listNearMarkets, type NearMarket } from './near/chain'
 import { aleoId } from './near/ids'
 import { createdMarketFor, knownTxOutcome } from './near/executor'
-import { RELAYER_ACCOUNT } from './near/config'
+import { RELAYER_ACCOUNT, TOKEN_KEY } from './near/config'
 import { currentAccountId } from './near/near-wallet'
 import { outcomeFailure, txStatus } from './near/rpc'
 import {
@@ -47,11 +47,8 @@ export const TOKEN_TYPE = {
   USAD: 3,
 } as const;
 
-export const TOKEN_SYMBOLS: Record<number, string> = {
-  1: 'NEAR',
-  2: 'USDCX',
-  3: 'USAD',
-};
+/** Internal token key by on-chain slot (slot 3 is Circle USDC, keyed 'USDCX'; see TOKEN in near/config). */
+export const TOKEN_SYMBOLS: Record<number, string> = TOKEN_KEY;
 
 // Must stay in sync with WINNER_CLAIM_PRIORITY_BLOCKS in contracts/src/main.leo.
 export const WINNER_CLAIM_PRIORITY_BLOCKS = 2880n;

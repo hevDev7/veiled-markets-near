@@ -24,12 +24,10 @@ import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { cn, shortenAddress, formatCredits } from '@/lib/utils'
 
-const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
-
 const baseNavItems = [
   { name: 'Markets', href: '/dashboard', icon: LayoutDashboard, adminOnly: false },
   { name: 'Portfolio', href: '/portfolio', icon: TrendingUp, adminOnly: false },
-  { name: 'Parlays', href: '/my-parlays', icon: Ticket, adminOnly: true },
+  { name: 'Parlays', href: '/my-parlays', icon: Ticket, adminOnly: false },
   { name: 'Create', href: '/create', icon: Plus, adminOnly: false },
   { name: 'Govern', href: '/governance', icon: Vote, adminOnly: false },
 ]
@@ -45,8 +43,7 @@ export function DashboardHeader() {
   const [refreshing, setRefreshing] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
-  const isAdmin = wallet.address === ADMIN_ADDRESS
-  const navItems = baseNavItems.filter(item => !item.adminOnly || isAdmin)
+  const navItems = baseNavItems.filter(item => !item.adminOnly)
 
   useEffect(() => setShowMobileMenu(false), [location.pathname])
 
@@ -344,20 +341,12 @@ export function DashboardHeader() {
                           </p>
                         ) : null}
                         <div className="flex justify-between items-center">
-                          <p className="text-xs text-surface-500">USDCX (Public)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPublic)} <img src="/usdcx-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-xs text-surface-500">USDC (Public)</p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPublic)} <img src="/usdc-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                         <div className="flex justify-between items-center">
-                          <p className="text-xs text-surface-500">USDCX (Private)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPrivate)} <img src="/usdcx-logo.png" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <p className="text-xs text-surface-500">USAD (Public)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usadPublic)} <img src="/usad-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <p className="text-xs text-surface-500">USAD (Private)</p>
-                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usadPrivate)} <img src="/usad-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
+                          <p className="text-xs text-surface-500">USDC (Private)</p>
+                          <p className="text-sm font-medium text-surface-200 tabular-nums">{formatCredits(wallet.balance.usdcxPrivate)} <img src="/usdc-logo.svg" alt="" className="w-3.5 h-3.5 rounded-full inline-block ml-0.5" /></p>
                         </div>
                       </div>
                     </div>

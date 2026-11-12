@@ -131,8 +131,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           : wallet.balance.usadPublic + wallet.balance.usadPrivate
         if (!wallet.isDemoMode && amountMicro > totalStablecoin) {
           throw new Error(
-            `Insufficient ${tokenType} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
-            `but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${tokenType}.`
+            `Insufficient ${getTokenSymbol(tokenType)} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${getTokenSymbol(tokenType)} ` +
+            `but only have ${(Number(totalStablecoin) / 1_000_000).toFixed(2)} ${getTokenSymbol(tokenType)}.`
           )
         }
         const betResult = buildBuySharesInputs(market.id, outcomeNum, amountMicro, 0n, 0n, tokenType)
@@ -180,7 +180,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
           inputs.push(await buildMerkleProofsForAddress(wallet.address))
         } else {
           throw new Error(
-            `No private ${tokenType} Token record found. Please unshield ${tokenType} in Shield Wallet first.`
+            `No private ${getTokenSymbol(tokenType)} Token record found. Please unshield ${getTokenSymbol(tokenType)} in Shield Wallet first.`
           )
         }
       }
@@ -431,7 +431,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                           <div className="flex justify-between text-sm">
                             <span className="text-surface-500">
                               {isStablecoin
-                                ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${marketTokenType} (private: ${formatCredits(stablecoinPrivateBalance)})`
+                                ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${tokenSymbol} (private: ${formatCredits(stablecoinPrivateBalance)})`
                                 : `Public: ${formatCredits(wallet.balance.public)} NEAR`
                               }
                             </span>
@@ -477,10 +477,8 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                         <div>
                           <p className="text-sm font-medium text-brand-300">Secure Transaction</p>
                           <p className="text-xs text-surface-400 mt-1">
-                            {marketTokenType === 'USDCX'
-                              ? 'USDCX market — private Token record used when available. Your address stays hidden on-chain.'
-                              : marketTokenType === 'USAD'
-                              ? 'USAD market — private Token record used when available. Your address stays hidden on-chain.'
+                            {isStablecoin
+                              ? `${tokenSymbol} market — private Token record used when available. Your address stays hidden on-chain.`
                               : 'Bet uses private credits record. ZK proofs verify your transaction on-chain.'
                             }
                           </p>
@@ -500,7 +498,7 @@ export function BettingModal({ market, isOpen, onClose }: BettingModalProps) {
                               <p className="text-sm font-medium text-yellow-300 mb-1">Insufficient balance</p>
                               <p className="text-xs text-surface-400 leading-relaxed">
                                 {isStablecoin
-                                  ? `You need private ${marketTokenType} Token balance to bet on this market, plus NEAR for gas.`
+                                  ? `You need private ${tokenSymbol} Token balance to bet on this market, plus NEAR for gas.`
                                   : `You need NEAR (public or private) to place a bet. Public balance is needed for the transaction fee.`
                                 }
                               </p>

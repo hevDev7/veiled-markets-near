@@ -4,16 +4,13 @@ import { useEffect, useState } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, EyeOff, KeyRound, Loader2 } from 'lucide-react'
 import { useWalletStore } from '@/lib/store'
 import { cn, formatCredits } from '@/lib/utils'
-import { TOKEN, txUrl } from '@/lib/near/config'
+import { ENABLED_TOKEN_KEYS, TOKEN, USDC_FAUCET_URL, tokenLabel, txUrl } from '@/lib/near/config'
 import { cachedNoteKeys } from '@/lib/near/notes/keys'
 import { deposit, noteKeys, refreshNotes, withdraw, type PrivateStep } from '@/lib/near/private'
 import { GAS_RESERVE_MICRO } from '@/lib/near/wallet-records'
 
-const TOKENS = [
-  { id: TOKEN.NEAR, symbol: 'NEAR' },
-  { id: TOKEN.USDCX, symbol: 'USDCX' },
-  { id: TOKEN.USAD, symbol: 'USAD' },
-] as const
+// NEAR and Circle USDC (internal key 'USDCX').
+const TOKENS = ENABLED_TOKEN_KEYS.map((key) => ({ id: TOKEN[key], symbol: tokenLabel(key) }))
 
 const STEP_LABEL: Record<PrivateStep, string> = {
   unlocking: 'Waiting for the wallet signature…',
@@ -189,6 +186,20 @@ export function PrivateBalancePanel() {
           </p>
         </div>
       </div>
+
+      {token === TOKEN.USDCX && (
+        <p className="-mt-1 mb-4 text-xs text-surface-400">
+          <a
+            href={USDC_FAUCET_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-brand-400 hover:text-brand-300"
+          >
+            <span>Get test USDC from Circle's faucet (choose NEAR Testnet)</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </p>
+      )}
 
       {!unlocked ? (
         <button

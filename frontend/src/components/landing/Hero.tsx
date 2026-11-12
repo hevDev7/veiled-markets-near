@@ -2,7 +2,7 @@ import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowRight, ArrowUpRight } from 'lucide-react'
-import { cn, formatCredits, getCategoryName } from '@/lib/utils'
+import { cn, formatCredits, getCategoryName, getTokenSymbol } from '@/lib/utils'
 import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { RELAYER_ACCOUNT } from '@/lib/near/config'
@@ -142,7 +142,7 @@ function FeaturedMarket({ market }: { market: Market }) {
     >
       <div className="flex items-center justify-between gap-3">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-brand-300">
-          {getCategoryName(market.category)} · {market.tokenType ?? 'NEAR'}
+          {getCategoryName(market.category)} · {getTokenSymbol(market.tokenType)}
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-yes-500/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-yes-400">
           <span className="h-1.5 w-1.5 rounded-full bg-yes-400" />
@@ -168,7 +168,7 @@ function FeaturedMarket({ market }: { market: Market }) {
 
       <div className="mt-6 flex items-center justify-between font-mono text-[12px] text-[#8b919e]">
         <span className="tabular-nums">
-          Vol {formatCredits(market.totalVolume, 2)} {market.tokenType ?? 'NEAR'}
+          Vol {formatCredits(market.totalVolume, 2)} {getTokenSymbol(market.tokenType)}
         </span>
         <span className="tabular-nums">{timeLeft === 'Ended' ? 'Closed' : `Ends in ${timeLeft}`}</span>
       </div>

@@ -17,7 +17,7 @@ export function Faq() {
     },
     {
       q: 'Is this real money?',
-      a: 'No. Veiled Markets runs on NEAR testnet. You trade with testnet NEAR and the mock stablecoins USDCX and USAD, which have no value.',
+      a: 'No. Veiled Markets runs on NEAR testnet. You trade with testnet NEAR and Circle’s testnet USDC, and neither has any value. You can get test USDC from Circle’s faucet at faucet.circle.com (choose NEAR Testnet).',
     },
     {
       q: 'Which wallets can I use?',

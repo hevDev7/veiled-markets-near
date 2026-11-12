@@ -15,10 +15,11 @@ import {
   formatParlayAmount,
   getParlayFundingRoute,
 } from '@/lib/parlay-helpers'
-import { cn } from '@/lib/utils'
+import { cn, getTokenSymbol } from '@/lib/utils'
+import { ENABLED_TOKEN_KEYS } from '@/lib/near/config'
 import { ParlayConfirmModal } from './ParlayConfirmModal'
 
-const TOKEN_OPTIONS: ParlayTokenType[] = ['NEAR', 'USDCX', 'USAD']
+const TOKEN_OPTIONS: ParlayTokenType[] = [...ENABLED_TOKEN_KEYS]
 
 const QUICK_STAKES = [
   { label: '0.5', value: 500_000n },
@@ -104,9 +105,10 @@ export function ParlaySlip() {
     if (slipStake <= 0n) return null
     if (fundingRoute.recommendedSource) return null
 
-    return `Parlay placement currently requires a private ${slipTokenType} balance. `
-      + `Available private balance: ${formatParlayAmount(fundingRoute.privateBalance)} ${slipTokenType}. `
-      + `Public balance (${formatParlayAmount(fundingRoute.publicBalance)} ${slipTokenType}) cannot be used for the lean core contract.`
+    const sym = getTokenSymbol(slipTokenType)
+    return `Not enough ${sym} for this stake: ${formatParlayAmount(fundingRoute.privateBalance)} ${sym} private `
+      + `and ${formatParlayAmount(fundingRoute.publicBalance)} ${sym} in your wallet. Placing tops up the private `
+      + `balance from the wallet when needed.`
   }, [fundingRoute, slipStake, slipTokenType])
 
   const validationMessage = validationError()
@@ -205,13 +207,13 @@ export function ParlaySlip() {
                     <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3">
                       <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Stake</p>
                       <p className="mt-2 text-xl font-semibold text-white">
-                        {slipStake > 0n ? `${formatParlayAmount(slipStake)} ${slipTokenType}` : '—'}
+                        {slipStake > 0n ? `${formatParlayAmount(slipStake)} ${getTokenSymbol(slipTokenType)}` : '—'}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-3">
                       <p className="text-xs uppercase tracking-[0.18em] text-emerald-300/80">Potential</p>
                       <p className="mt-2 text-xl font-semibold text-emerald-300">
-                        {slipStake > 0n ? `${formatParlayAmount(payout.net)} ${slipTokenType}` : '—'}
+                        {slipStake > 0n ? `${formatParlayAmount(payout.net)} ${getTokenSymbol(slipTokenType)}` : '—'}
                       </p>
                     </div>
                   </div>
@@ -239,7 +241,7 @@ export function ParlaySlip() {
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 space-y-2">
                                   <p className="text-xs uppercase tracking-[0.18em] text-surface-500">
-                                    Leg {index + 1} · {leg.marketTokenType}
+                                    Leg {index + 1} · {getTokenSymbol(leg.marketTokenType)}
                                   </p>
                                   <p className="text-sm font-medium leading-relaxed text-white">
                                     {leg.marketQuestion}
@@ -300,7 +302,7 @@ export function ParlaySlip() {
                                     : 'border border-white/[0.08] bg-black/20 text-surface-400 hover:text-white',
                                 )}
                               >
-                                {token}
+                                {getTokenSymbol(token)}
                               </button>
                             ))}
                           </div>
@@ -311,14 +313,14 @@ export function ParlaySlip() {
                             <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Private</p>
                             <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-white">
                               <Shield className="h-4 w-4 text-brand-400" />
-                              {formatParlayAmount(fundingRoute.privateBalance)} {slipTokenType}
+                              {formatParlayAmount(fundingRoute.privateBalance)} {getTokenSymbol(slipTokenType)}
                             </p>
                           </div>
                           <div className="rounded-xl border border-white/[0.06] bg-black/20 p-3">
                             <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Public</p>
                             <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-white">
                               <Coins className="h-4 w-4 text-emerald-400" />
-                              {formatParlayAmount(fundingRoute.publicBalance)} {slipTokenType}
+                              {formatParlayAmount(fundingRoute.publicBalance)} {getTokenSymbol(slipTokenType)}
                             </p>
                           </div>
                         </div>
@@ -360,16 +362,16 @@ export function ParlaySlip() {
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
                           <span className="text-surface-400">Gross payout</span>
-                          <span className="text-white">{formatParlayAmount(payout.gross)} {slipTokenType}</span>
+                          <span className="text-white">{formatParlayAmount(payout.gross)} {getTokenSymbol(slipTokenType)}</span>
                         </div>
                         <div className="mt-2 flex items-center justify-between text-sm">
                           <span className="text-surface-400">Protocol fee</span>
-                          <span className="text-surface-300">-{formatParlayAmount(payout.fee, 4)} {slipTokenType}</span>
+                          <span className="text-surface-300">-{formatParlayAmount(payout.fee, 4)} {getTokenSymbol(slipTokenType)}</span>
                         </div>
                         <div className="mt-3 flex items-center justify-between border-t border-white/[0.08] pt-3">
                           <span className="text-sm font-medium text-surface-300">Net payout if all legs win</span>
                           <span className="text-lg font-semibold text-emerald-300">
-                            {formatParlayAmount(payout.net)} {slipTokenType}
+                            {formatParlayAmount(payout.net)} {getTokenSymbol(slipTokenType)}
                           </span>
                         </div>
                       </div>

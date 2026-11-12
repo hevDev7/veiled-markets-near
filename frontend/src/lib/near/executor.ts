@@ -68,7 +68,7 @@ async function marketToken(marketId: string): Promise<number> {
 
 /** Tops the private balance up from the wallet when short, rounding up to whole tokens so the deposit does not
  * reveal the exact size of the trade that follows. */
-async function topUp(token: number, micro: bigint): Promise<void> {
+export async function topUp(token: number, micro: bigint): Promise<void> {
   const keys = await noteKeys();
   await syncNotes(keys);
   const have = balanceOf(keys.accountId, KIND.BALANCE, token, 0);

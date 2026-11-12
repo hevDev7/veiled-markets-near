@@ -35,7 +35,7 @@ import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { ParlayClaimModal } from '@/components/ParlayClaimModal'
 import { EmptyState } from '@/components/EmptyState'
 import { useRepairParlayExplorerIds } from '@/hooks/useRepairParlayExplorerIds'
-import { cn, formatCredits } from '@/lib/utils'
+import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { syncTurboBetStatus, isTurboMarket } from '@/lib/turbo-client'
 import { devWarn } from '../lib/logger'
 import { calculateAllPrices, calculateSellTokensOut, type AMMReserves } from '@/lib/amm'
@@ -176,7 +176,7 @@ function formatPortfolioTokenSummary(
   return entries
     .map(([token, amount]) => {
       const prefix = signed && amount > 0 ? '+' : ''
-      return `${prefix}${amount.toFixed(2)} ${token}`
+      return `${prefix}${amount.toFixed(2)} ${getTokenSymbol(token)}`
     })
     .join(' · ')
 }
@@ -186,7 +186,7 @@ function formatPortfolioTokenSummary(
  *
  * The string summary joins token amounts with " · " which works for a single
  * dominant token but becomes unreadable when a user holds exposure across
- * two or three different tokens (NEAR, USDCX, USAD) — each amount stretches
+ * two different tokens (NEAR, USDC) — each amount stretches
  * the card horizontally until it ellipsises. This helper lays the same data
  * out one token per row so each balance stays readable independently of the
  * others, and differing decimals / signs align cleanly.
@@ -218,7 +218,7 @@ function renderPortfolioTokenLines(
           >
             <span className="tabular-nums">{prefix}{amount.toFixed(2)}</span>
             <span className="text-[10px] font-semibold tracking-wider text-surface-500 uppercase">
-              {token}
+              {getTokenSymbol(token)}
             </span>
           </div>
         )
@@ -259,7 +259,7 @@ function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
 export function MyBets() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
-  const { parlays, patchParlay } = useParlayStore()
+  const { parlays, patchParlay, syncParlaysFromChain } = useParlayStore()
   const {
     userBets,
     pendingBets,
@@ -293,6 +293,11 @@ export function MyBets() {
     walletAddress: wallet.address ?? undefined,
   })
 
+  // Parlay tickets are private notes: pull their current status (won, lost, refundable, claimed) from the chain.
+  useEffect(() => {
+    if (FEATURES.parlays && wallet.connected && wallet.address) syncParlaysFromChain(wallet.address)
+  }, [wallet.connected, wallet.address])
+
   const walletParlays = useMemo(
     () => wallet.address ? parlays.filter((parlay) => parlay.ownerAddress === wallet.address) : [],
     [parlays, wallet.address],
@@ -317,7 +322,8 @@ export function MyBets() {
     || (b.type === 'sell')
   )
   const activeParlays = walletParlays.filter((parlay) => parlay.status === 'active' || parlay.status === 'pending_dispute')
-  const claimableParlays = walletParlays.filter((parlay) => parlay.status === 'won' && !parlay.claimed)
+  // Won tickets pay out; a ticket with a cancelled leg (and no lost one) refunds its stake.
+  const claimableParlays = walletParlays.filter((parlay) => (parlay.status === 'won' || parlay.status === 'cancelled') && !parlay.claimed)
   const settledParlays = walletParlays.filter((parlay) =>
     parlay.status === 'won' || parlay.status === 'lost' || parlay.status === 'cancelled'
   )
@@ -714,7 +720,7 @@ export function MyBets() {
               return [
                 {
                   label: 'Active Exposure',
-                  // Multi-line JSX: one row per token (NEAR / USDCX / USAD)
+                  // Multi-line JSX: one row per token (NEAR / USDC)
                   // so different-token balances don't get squished onto a
                   // single ellipsised line.
                   value: renderPortfolioTokenLines(exposureByToken, { emptyLabel: '0' }),
@@ -918,7 +924,7 @@ export function MyBets() {
                         <tbody>
                           {displayBets.map((bet, index) => {
                             const market = getMarketInfo(bet.marketId)
-                            const tokenSymbol = market?.tokenType || bet.tokenType || 'NEAR'
+                            const tokenSymbol = getTokenSymbol(market?.tokenType || bet.tokenType)
                             const badgeColors = getBetBadgeColors(bet)
                             const outcomeLabel = getBetOutcomeLabel(bet, market)
                             const isPending = bet.status === 'pending'
@@ -1012,7 +1018,7 @@ export function MyBets() {
                     <div className="md:hidden space-y-3">
                       {displayBets.map((bet, index) => {
                         const market = getMarketInfo(bet.marketId)
-                        const tokenSymbol = market?.tokenType || bet.tokenType || 'NEAR'
+                        const tokenSymbol = getTokenSymbol(market?.tokenType || bet.tokenType)
                         const badgeColors = getBetBadgeColors(bet)
                         const outcomeLabel = getBetOutcomeLabel(bet, market)
                         const isPending = bet.status === 'pending'
@@ -1362,7 +1368,7 @@ function BetCard({
   showClaimAction: boolean
 }) {
   const isSell = bet.type === 'sell'
-  const tokenSymbol = market?.tokenType || bet.tokenType || 'NEAR'
+  const tokenSymbol = getTokenSymbol(market?.tokenType || bet.tokenType)
   const outcomeIdx = outcomeToIndex(bet.outcome) // 1-indexed
   const isPending = bet.status === 'pending'
   const isWon = bet.status === 'won'
@@ -1685,7 +1691,7 @@ function ParlayPortfolioCard({
       : isLost
         ? 'Ticket lost'
         : isCancelled
-          ? 'Ticket cancelled'
+          ? 'Stake refundable'
           : isActive
             ? 'Waiting for resolution'
             : 'Waiting for dispute outcome'
@@ -1738,7 +1744,7 @@ function ParlayPortfolioCard({
                 {parlay.numLegs}-Leg Parlay
               </h3>
               <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase bg-brand-500/15 text-brand-300">
-                {parlay.tokenType}
+                {getTokenSymbol(parlay.tokenType)}
               </span>
               {getParlayStatusBadge(parlay.status)}
               {parlay.claimed && (
@@ -1767,7 +1773,7 @@ function ParlayPortfolioCard({
         <div className="rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3">
           <p className="text-xs font-heading text-surface-500">Stake</p>
           <p className="mt-1 text-sm font-heading font-bold text-white tabular-nums">
-            {formatParlayAmount(parlay.stake)} {parlay.tokenType}
+            {formatParlayAmount(parlay.stake)} {getTokenSymbol(parlay.tokenType)}
           </p>
         </div>
 
@@ -1779,7 +1785,7 @@ function ParlayPortfolioCard({
               isLost ? 'text-red-300 line-through' : 'text-emerald-300',
             )}
           >
-            {formatParlayAmount(parlay.potentialPayout)} {parlay.tokenType}
+            {formatParlayAmount(parlay.potentialPayout)} {getTokenSymbol(parlay.tokenType)}
           </p>
         </div>
 
@@ -1808,13 +1814,13 @@ function ParlayPortfolioCard({
               </span>
             )}
 
-            {showClaimAction && isWon && !parlay.claimed && (
+            {showClaimAction && (isWon || isCancelled) && !parlay.claimed && (
               <button
                 onClick={onClaim}
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-600"
               >
                 <Gift className="w-3.5 h-3.5" />
-                Claim
+                {isCancelled ? 'Refund' : 'Claim'}
               </button>
             )}
           </div>

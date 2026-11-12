@@ -21,7 +21,7 @@ const footerRoutes: Record<string, string> = {
 
 export function Footer() {
   return (
-    <footer className="relative mt-32 border-t border-white/[0.04]">
+    <footer className="relative mt-32 overflow-hidden border-t border-white/[0.04]">
       {/* Ambient glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-px bg-gradient-to-r from-transparent via-brand-400/20 to-transparent" />
 

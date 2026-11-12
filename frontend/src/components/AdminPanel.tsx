@@ -217,12 +217,12 @@ export function AdminPanel() {
             )}
           </div>
           <div className="p-4 rounded-xl bg-white/[0.02]">
-            <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">USDCX Treasury</p>
+            <p className="text-xs text-surface-500 uppercase tracking-wide mb-1">USDC Treasury</p>
             {isLoadingBalances ? (
               <div className="h-7 w-20 bg-surface-700/50 rounded animate-pulse" />
             ) : (
               <p className="text-lg font-bold text-white">
-                {formatCredits(treasuryBalances.usdcx)} USDCX
+                {formatCredits(treasuryBalances.usdcx)} USDC
               </p>
             )}
           </div>
@@ -306,7 +306,7 @@ export function AdminPanel() {
                             : 'border-surface-700 text-surface-400 hover:text-surface-300'
                         )}
                       >
-                        {t.toUpperCase()}
+                        {t === 'aleo' ? 'NEAR' : 'USDC'}
                       </button>
                     ))}
                   </div>
@@ -324,7 +324,7 @@ export function AdminPanel() {
                       className="input-field text-lg font-semibold pr-20"
                     />
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 text-sm">
-                      {proposalTokenType.toUpperCase()}
+                      {proposalTokenType === 'aleo' ? 'NEAR' : 'USDC'}
                     </div>
                   </div>
                 </div>

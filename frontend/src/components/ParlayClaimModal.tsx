@@ -2,14 +2,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Trophy, Loader2, Check, AlertCircle, RefreshCw, ShieldAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useParlayStore, type ParlayRecord } from '@/lib/parlay-store'
-import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { cn } from '@/lib/utils'
-import { config } from '@/lib/config'
-import {
-  findParlayTicketRecord,
-  formatParlayAmount,
-  getShortParlayId,
-} from '@/lib/parlay-helpers'
+import { formatParlayAmount, getShortParlayId } from '@/lib/parlay-helpers'
+import { claimParlay, getNearParlay, parlayStatusName, ticketNote } from '@/lib/near/parlay'
+import { tokenLabel } from '@/lib/near/config'
 import { TransactionLink } from './TransactionLink'
 
 interface ParlayClaimModalProps {
@@ -23,7 +19,6 @@ type TicketLookupState = 'idle' | 'locating' | 'ready' | 'missing' | 'blocked'
 
 export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalProps) {
   const { markParlayClaimed, patchParlay } = useParlayStore()
-  const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
 
   const [step, setStep] = useState<ClaimStep>('review')
   const [error, setError] = useState<string | null>(null)
@@ -32,58 +27,41 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
   const [ticketLookupState, setTicketLookupState] = useState<TicketLookupState>('idle')
   const [ticketMessage, setTicketMessage] = useState<string | null>(null)
 
-  const parlayProgramId = config.parlayProgramId || 'veiled_parlay_v3.aleo'
-
-  const getFunctionName = (): string => {
-    if (!parlay) return 'redeem_parlay_aleo'
-    switch (parlay.tokenType) {
-      case 'USDCX':
-        return 'redeem_parlay_usdcx'
-      case 'USAD':
-        return 'redeem_parlay_usad'
-      default:
-        return 'redeem_parlay_aleo'
-    }
-  }
-
   const locateTicket = async (currentParlay: ParlayRecord) => {
     setTicketLookupState('locating')
-    setTicketMessage('Searching your wallet records for the private ParlayTicket...')
+    setTicketMessage('Looking for the private ticket note in your wallet...')
     setTicketRecord(null)
 
     try {
-      const ticket = await findParlayTicketRecord(currentParlay)
-      if (!ticket) {
+      const id = currentParlay.onChainParlayId ?? currentParlay.id
+      const note = await ticketNote(id)
+      if (!note) {
         setTicketLookupState('missing')
         setTicketMessage(
-          'Your private ParlayTicket has not surfaced yet. Shield and the record scanner can take a short moment after placement. Refresh and try again.',
+          currentParlay.claimed
+            ? 'This ticket was already claimed.'
+            : 'The private ticket for this parlay is not in this wallet. Unlock your private balance in Settings with the wallet that placed it, then refresh.',
         )
         return
       }
-
-      setTicketRecord(ticket.plaintext)
-      patchParlay(currentParlay.id, {
-        onChainParlayId: currentParlay.onChainParlayId ?? ticket.parlayId,
-        ticketNonce: currentParlay.ticketNonce ?? ticket.ticketNonce,
-      })
-
-      if (ticket.potentialPayout <= 0n && currentParlay.potentialPayout > 0n) {
-        setTicketLookupState('blocked')
-        setTicketMessage(
-          'This ticket is present, but its on-chain payout metadata is still zero. Claim is temporarily blocked in the app to avoid sending a zero-payout redemption.',
-        )
-        return
+      const onChain = await getNearParlay(id)
+      if (onChain) {
+        const status = parlayStatusName(onChain)
+        if (status !== currentParlay.status) patchParlay(currentParlay.id, { status })
+        if (status === 'active' || status === 'lost') {
+          setTicketLookupState('blocked')
+          setTicketMessage(status === 'lost'
+            ? 'A leg of this parlay lost, so there is nothing to claim.'
+            : 'Some legs are still open. The ticket becomes claimable once every leg market is resolved.')
+          return
+        }
       }
-
+      setTicketRecord(id)
       setTicketLookupState('ready')
-      setTicketMessage('Private ticket located and ready for redemption.')
+      setTicketMessage('Private ticket found. Claiming spends it and credits your private balance.')
     } catch (lookupError) {
       setTicketLookupState('missing')
-      setTicketMessage(
-        lookupError instanceof Error
-          ? lookupError.message
-          : 'Could not inspect your private ParlayTicket yet.',
-      )
+      setTicketMessage(lookupError instanceof Error ? lookupError.message : 'Could not read your private ticket yet.')
     }
   }
 
@@ -105,7 +83,7 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
 
   const handleClaim = async () => {
     if (ticketLookupState !== 'ready' || !ticketRecord) {
-      setError(ticketMessage || 'Parlay ticket is not ready for redemption yet.')
+      setError(ticketMessage || 'Parlay ticket is not ready to claim yet.')
       setStep('error')
       return
     }
@@ -114,29 +92,16 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
     setError(null)
 
     try {
-      const result = await executeTransaction({
-        program: parlayProgramId,
-        function: getFunctionName(),
-        inputs: [ticketRecord],
-        fee: 1.5,
-        recordIndices: [0],
-      })
-      const submittedTxId = result.transactionId
-
-      if (!submittedTxId) {
-        throw new Error('Transaction was not submitted.')
-      }
-
-      setTxId(submittedTxId)
+      const result = await claimParlay(ticketRecord)
+      setTxId(result.txHash)
       markParlayClaimed(parlay.id)
       setStep('success')
-
-      void pollTransactionStatus(submittedTxId, () => {})
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to claim parlay.')
       setStep('error')
     }
   }
+
 
   const handleClose = () => {
     setStep('review')
@@ -148,7 +113,9 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
     onClose()
   }
 
-  const payoutDisplay = formatParlayAmount(parlay.potentialPayout)
+  // A cancelled leg market refunds the stake; a won parlay pays the payout minus the 2% fee.
+  const isRefund = parlay.status === 'cancelled'
+  const payoutDisplay = formatParlayAmount(isRefund ? parlay.stake : parlay.potentialPayout)
   const stakeDisplay = formatParlayAmount(parlay.stake)
 
   return (
@@ -175,10 +142,10 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
                   Claim Center
                 </div>
                 <h2 className="text-2xl font-semibold text-white">
-                  {step === 'success' ? 'Winnings claimed' : 'Redeem your parlay'}
+                  {step === 'success' ? (isRefund ? 'Stake refunded' : 'Winnings claimed') : (isRefund ? 'Refund your parlay' : 'Redeem your parlay')}
                 </h2>
                 <p className="text-sm text-surface-400">
-                  {parlay.numLegs}-leg ticket · {payoutDisplay} {parlay.tokenType} potential return
+                  {parlay.numLegs}-leg ticket · {payoutDisplay} {tokenLabel(parlay.tokenType)} potential return
                 </p>
               </div>
               <button
@@ -195,12 +162,14 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
             {(step === 'review' || step === 'claiming') && (
               <>
                 <div className="rounded-[24px] border border-emerald-500/20 bg-emerald-500/10 p-5 text-center">
-                  <p className="text-sm font-medium text-emerald-200">All {parlay.numLegs} legs are marked as winners</p>
+                  <p className="text-sm font-medium text-emerald-200">
+                    {isRefund ? 'A leg market was cancelled, so the stake is refunded' : `All ${parlay.numLegs} legs won`}
+                  </p>
                   <p className="mt-2 text-3xl font-semibold text-emerald-300">
-                    +{payoutDisplay} {parlay.tokenType}
+                    +{payoutDisplay} {tokenLabel(parlay.tokenType)}
                   </p>
                   <p className="mt-1 text-xs text-surface-400">
-                    From {stakeDisplay} {parlay.tokenType} stake
+                    From {stakeDisplay} {tokenLabel(parlay.tokenType)} stake
                   </p>
                 </div>
 
@@ -209,7 +178,7 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
                     <div>
                       <p className="text-sm font-medium text-white">Private ticket status</p>
                       <p className="text-xs text-surface-400">
-                        Claim needs the exact ParlayTicket record emitted when you placed the parlay.
+                        Claiming spends the private ticket note minted when you placed the parlay.
                       </p>
                     </div>
                     <button
@@ -292,7 +261,7 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
                       Redeeming ticket...
                     </span>
                   ) : (
-                    `Claim ${payoutDisplay} ${parlay.tokenType}`
+                    `Claim ${payoutDisplay} ${tokenLabel(parlay.tokenType)}`
                   )}
                 </button>
               </>
@@ -305,7 +274,7 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
                 </div>
                 <div className="space-y-2">
                   <p className="text-2xl font-semibold text-white">
-                    +{payoutDisplay} {parlay.tokenType} claimed
+                    +{payoutDisplay} {tokenLabel(parlay.tokenType)} claimed
                   </p>
                   <p className="text-sm text-surface-400">
                     Your private payout record is on its way back to the wallet.

@@ -9,6 +9,7 @@ import { buildBuySharesInputs, getMarket, getCurrentBlockHeight, MARKET_STATUS, 
 import { fetchCreditsRecord } from '@/lib/credits-record'
 import { calculateAllPrices, calculateBuySharesOut, calculateBuyPriceImpact, calculateMinSharesOut, calculateFees, type AMMReserves } from '@/lib/amm'
 import { devWarn } from '../lib/logger'
+import { TOKEN_KEY } from '@/lib/near/config'
 import { useMarketGovernanceConfig } from '@/hooks/useMarketGovernanceConfig'
 
 interface BuySharesModalProps {
@@ -149,12 +150,10 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         }
         // Validate token type matches on-chain market (prevents transition/finalize mismatch)
         if (onChainMarket) {
-          const onChainTokenType = onChainMarket.token_type === 3 ? 'USAD'
-            : onChainMarket.token_type === 2 ? 'USDCX'
-            : 'NEAR'
+          const onChainTokenType = TOKEN_KEY[onChainMarket.token_type] ?? 'NEAR'
           if (marketTokenType !== onChainTokenType) {
             throw new Error(
-              `Token type mismatch: UI shows ${marketTokenType} but on-chain market uses ${onChainTokenType}. Please refresh the page.`
+              `Token type mismatch: UI shows ${getTokenSymbol(marketTokenType)} but on-chain market uses ${getTokenSymbol(onChainTokenType)}. Please refresh the page.`
             )
           }
         }
@@ -182,8 +181,8 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
         }
         if (!wallet.isDemoMode && amountMicro > stablecoinTotalBalance) {
           throw new Error(
-            `Insufficient ${tokenType} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenType} ` +
-            `but only have ${(Number(stablecoinTotalBalance) / 1_000_000).toFixed(2)} ${tokenType}.`
+            `Insufficient ${tokenSymbol} balance. Need ${(Number(amountMicro) / 1_000_000).toFixed(2)} ${tokenSymbol} ` +
+            `but only have ${(Number(stablecoinTotalBalance) / 1_000_000).toFixed(2)} ${tokenSymbol}.`
           )
         }
         const result = buildBuySharesInputs(market.id, selectedOutcome, amountMicro, expectedShares, minSharesOut, tokenType)
@@ -233,7 +232,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
           inputs!.push(await buildMerkleProofsForAddress(wallet.address))
         } else {
           throw new Error(
-            `No private ${tokenType} Token record found. Please unshield ${tokenType} in Shield Wallet first.`
+            `No private ${tokenSymbol} Token record found. Please unshield ${tokenSymbol} in Shield Wallet first.`
           )
         }
       }
@@ -522,7 +521,7 @@ export function BuySharesModal({ market, isOpen, onClose }: BuySharesModalProps)
                             <div className="flex justify-between text-xs mt-2">
                               <span className="text-surface-500">
                                 {isStablecoin
-                                  ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${marketTokenType} (private: ${formatCredits(stablecoinPrivateBalance)})`
+                                  ? `Balance: ${formatCredits(stablecoinTotalBalance)} ${tokenSymbol} (private: ${formatCredits(stablecoinPrivateBalance)})`
                                   : `Balance: ${formatCredits(wallet.balance.public + wallet.balance.private)} NEAR (private: ${formatCredits(wallet.balance.private)})`
                                 }
                               </span>

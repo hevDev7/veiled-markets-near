@@ -2,7 +2,7 @@ import { Clock, TrendingUp, Shield, ChevronRight, Flame, Ticket } from 'lucide-r
 import { useMemo } from 'react'
 import { useLiveCountdown as useGlobalCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
-import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryStrip, getCategoryColor } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryStrip, getCategoryColor, getTokenSymbol } from '@/lib/utils'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -201,7 +201,7 @@ export function MarketRow({
                             <span className="text-[10px] text-surface-500 uppercase tracking-wider font-semibold">Volume</span>
                         </div>
                         <p className="text-sm font-bold text-white tabular-nums">
-                            {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'NEAR'}</span>
+                            {formatCredits(market.totalVolume, 0)} <span className="text-[10px] font-medium text-surface-400">{getTokenSymbol(market.tokenType)}</span>
                         </p>
                       </div>
                     </Tooltip>
@@ -221,7 +221,7 @@ export function MarketRow({
                             (market.status === 3 || market.status === 4) && market.remainingCredits !== undefined
                                 ? market.remainingCredits
                                 : (market.totalLiquidity ?? 0n), 0
-                        )} <span className="text-[10px] font-medium text-surface-400">{market.tokenType ?? 'NEAR'}</span></p>
+                        )} <span className="text-[10px] font-medium text-surface-400">{getTokenSymbol(market.tokenType)}</span></p>
                       </div>
                     </Tooltip>
 
@@ -337,14 +337,14 @@ export function MarketRow({
                     <div className="flex items-center gap-4">
                         <span className="text-surface-400 tabular-nums">
                             <TrendingUp className="w-3 h-3 inline mr-1" />
-                            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}
+                            {formatCredits(market.totalVolume, 0)} {getTokenSymbol(market.tokenType)}
                         </span>
                         <span className="text-surface-400 tabular-nums">
                             LIQ {formatCredits(
                                 (market.status === 3 || market.status === 4) && market.remainingCredits !== undefined
                                     ? market.remainingCredits
                                     : (market.totalLiquidity ?? 0n), 0
-                            )} {market.tokenType ?? 'NEAR'}
+                            )} {getTokenSymbol(market.tokenType)}
                         </span>
                         <span className="text-surface-400 tabular-nums">
                             <Clock className="w-3 h-3 inline mr-1" />

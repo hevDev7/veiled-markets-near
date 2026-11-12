@@ -3,12 +3,10 @@ import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useWalletStore } from '@/lib/store'
 
-const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
-
 const allItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Markets', adminOnly: false },
   { href: '/portfolio', icon: TrendingUp, label: 'Portfolio', adminOnly: false },
-  { href: '/my-parlays', icon: Ticket, label: 'Parlays', adminOnly: true },
+  { href: '/my-parlays', icon: Ticket, label: 'Parlays', adminOnly: false },
   { href: '/create', icon: Plus, label: 'Create', adminOnly: false },
   { href: '/governance', icon: Vote, label: 'Govern', adminOnly: false },
 ]
@@ -18,8 +16,7 @@ export function MobileNav() {
   const { wallet } = useWalletStore()
   if (!wallet.connected) return null
 
-  const isAdmin = wallet.address === ADMIN_ADDRESS
-  const items = allItems.filter(item => !item.adminOnly || isAdmin)
+  const items = allItems.filter(item => !item.adminOnly)
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-surface-950/90 backdrop-blur-xl border-t border-white/[0.04]">

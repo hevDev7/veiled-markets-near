@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { TrendingUp, Clock, Users, Shield, ChevronRight, Flame, BarChart3 } from 'lucide-react'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { type Market } from '@/lib/store'
-import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor, getTokenSymbol } from '@/lib/utils'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
 import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
@@ -131,7 +131,7 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
         <div className="flex items-center gap-4 pt-3 border-t border-white/[0.03] text-xs text-surface-500">
           <span className="flex items-center gap-1.5 tabular-nums">
             <TrendingUp className="w-3 h-3" />
-            {formatCredits(market.totalVolume, 0)} {market.tokenType ?? 'NEAR'}
+            {formatCredits(market.totalVolume, 0)} {getTokenSymbol(market.tokenType)}
           </span>
           <span className="flex items-center gap-1.5 tabular-nums">
             <Users className="w-3 h-3" />

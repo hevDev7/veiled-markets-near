@@ -13,7 +13,7 @@ import {
 import { useParlayStore, type ParlayRecord } from '@/lib/parlay-store'
 import { useWalletStore } from '@/lib/store'
 import { useRepairParlayExplorerIds } from '@/hooks/useRepairParlayExplorerIds'
-import { cn } from '@/lib/utils'
+import { cn, getTokenSymbol } from '@/lib/utils'
 import {
   describeParlayFundingSource,
   formatParlayAmount,
@@ -50,17 +50,24 @@ function getStatusBadge(status: ParlayRecord['status']) {
   }
 }
 
+/** Won tickets pay out; a ticket with a cancelled leg (and no lost one) refunds its stake. */
+const isClaimable = (parlay: ParlayRecord) => (parlay.status === 'won' || parlay.status === 'cancelled') && !parlay.claimed
+
 export function MyParlays() {
-  const { parlays, patchParlay, syncParlaysFromSupabase } = useParlayStore()
+  const { parlays, patchParlay, syncParlaysFromSupabase, syncParlaysFromChain } = useParlayStore()
   const { wallet } = useWalletStore()
   const [activeTab, setActiveTab] = useState<ParlayTab>('active')
   const [claimParlay, setClaimParlay] = useState<ParlayRecord | null>(null)
 
-  // Sync parlays from Supabase on mount / wallet change
+  // Tickets are the wallet's own private notes, so the chain is the source of truth: refresh on mount, on wallet
+  // change and every 30 s while the page is open (settlement and claims change the status).
   useEffect(() => {
-    if (wallet.connected && wallet.address) {
-      syncParlaysFromSupabase(wallet.address, wallet.encryptionKey)
-    }
+    if (!wallet.connected || !wallet.address) return
+    const address = wallet.address
+    syncParlaysFromSupabase(address, wallet.encryptionKey)
+    syncParlaysFromChain(address)
+    const t = setInterval(() => syncParlaysFromChain(address), 30_000)
+    return () => clearInterval(t)
   }, [wallet.connected, wallet.address])
 
   useRepairParlayExplorerIds({
@@ -97,10 +104,10 @@ export function MyParlays() {
       .reduce((sum, parlay) => sum + parlay.potentialPayout, 0n)
 
     const claimable = walletParlays
-      .filter((parlay) => parlay.status === 'won' && !parlay.claimed)
-      .reduce((sum, parlay) => sum + parlay.potentialPayout, 0n)
+      .filter(isClaimable)
+      .reduce((sum, parlay) => sum + (parlay.status === 'cancelled' ? parlay.stake : parlay.potentialPayout), 0n)
 
-    const claimableCount = walletParlays.filter((parlay) => parlay.status === 'won' && !parlay.claimed).length
+    const claimableCount = walletParlays.filter(isClaimable).length
 
     return {
       activeStake,
@@ -110,16 +117,13 @@ export function MyParlays() {
     }
   }, [walletParlays])
 
-  const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8'
-  const isAdmin = wallet.connected && wallet.address === ADMIN_ADDRESS
-
-  if (!wallet.connected || !isAdmin) {
+  if (!wallet.connected) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="rounded-[28px] border border-white/[0.08] bg-[#10141f] px-10 py-12 text-center shadow-[0_18px_50px_rgba(0,0,0,0.3)]">
           <Ticket className="mx-auto h-12 w-12 text-surface-500" />
           <p className="mt-4 text-xl font-semibold text-white">
-            {!wallet.connected ? 'Connect your wallet to view parlays' : 'Admin access only'}
+            Connect your wallet to view parlays
           </p>
           <p className="mt-2 text-sm text-surface-400">
             Your private parlay tickets and local slip history appear here after you connect.
@@ -263,7 +267,7 @@ export function MyParlays() {
                             <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3">
                               <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Stake</p>
                               <p className="mt-2 text-lg font-semibold text-white">
-                                {formatParlayAmount(parlay.stake)} {parlay.tokenType}
+                                {formatParlayAmount(parlay.stake)} {getTokenSymbol(parlay.tokenType)}
                               </p>
                             </div>
                             <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
@@ -274,7 +278,7 @@ export function MyParlays() {
                                   ? 'text-red-300 line-through'
                                   : 'text-emerald-300',
                               )}>
-                                {formatParlayAmount(parlay.potentialPayout)} {parlay.tokenType}
+                                {formatParlayAmount(parlay.potentialPayout)} {getTokenSymbol(parlay.tokenType)}
                               </p>
                             </div>
                           </div>
@@ -324,7 +328,7 @@ export function MyParlays() {
                               <div className="flex items-center justify-between gap-3">
                                 <span>Claim state</span>
                                 <span className="text-white">
-                                  {parlay.claimed ? 'Claimed' : parlay.status === 'won' ? 'Ready / syncing' : 'Not claimable'}
+                                  {parlay.claimed ? 'Claimed' : parlay.status === 'won' ? 'Ready to claim' : parlay.status === 'cancelled' ? 'Stake refundable' : 'Not claimable'}
                                 </span>
                               </div>
                               <div className="flex items-center justify-between gap-3">
@@ -350,12 +354,12 @@ export function MyParlays() {
                             </div>
                           </div>
 
-                          {parlay.status === 'won' && !parlay.claimed ? (
+                          {isClaimable(parlay) ? (
                             <button
                               onClick={() => setClaimParlay(parlay)}
                               className="w-full rounded-2xl bg-emerald-500 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
                             >
-                              Open Claim Flow
+                              {parlay.status === 'cancelled' ? 'Claim Refund' : 'Claim Winnings'}
                             </button>
                           ) : (
                             <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-4 py-3 text-sm text-surface-400">
@@ -363,7 +367,7 @@ export function MyParlays() {
                                 ? 'This parlay has already been claimed.'
                                 : parlay.status === 'lost'
                                   ? 'At least one leg missed, so this ticket cannot be redeemed.'
-                                  : 'This ticket is still waiting on final resolution or dispute flow.'}
+                                  : 'Waiting for every leg to resolve. A lost leg settles the ticket right away.'}
                             </div>
                           )}
                         </div>

@@ -33,7 +33,7 @@ export function Features() {
     {
       icon: Layers,
       title: 'Up to four outcomes',
-      text: 'Ask a yes-or-no question, or offer up to four outcomes in one market. Markets can trade in NEAR or a stablecoin.',
+      text: 'Ask a yes-or-no question, or offer up to four outcomes in one market. Markets can trade in NEAR or USDC.',
       spec: '2 to 4 outcomes',
     },
     {

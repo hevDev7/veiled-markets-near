@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import { TOKEN_SYMBOL, tokenLabel } from './near/config'
 
 /**
  * Merge Tailwind CSS classes with clsx
@@ -48,14 +49,14 @@ export function formatCredits(microcredits: bigint, decimals: number = 2): strin
  */
 export type TokenType = 'NEAR' | 'USDCX' | 'USAD'
 
-export function getTokenSymbol(tokenType?: TokenType | number): string {
-  if (tokenType === 3 || tokenType === 'USAD') return 'USAD'
-  if (tokenType === 2 || tokenType === 'USDCX') return 'USDCX'
-  return 'NEAR'
+/** User-facing symbol for a token key or on-chain slot. The internal 'USDCX' key (slot 3) is Circle's USDC on NEAR. */
+export function getTokenSymbol(tokenType?: TokenType | number | string | null): string {
+  if (typeof tokenType === 'number') return TOKEN_SYMBOL[tokenType] ?? 'NEAR'
+  return tokenLabel(tokenType)
 }
 
 /**
- * Format token amount (both NEAR and USDCX use 6 decimals)
+ * Format token amount (both NEAR and USDC use 6 decimals)
  */
 export function formatTokenAmount(microAmount: bigint, _tokenType?: TokenType, decimals: number = 2): string {
   return formatCredits(microAmount, decimals)

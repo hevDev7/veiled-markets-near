@@ -1,7 +1,8 @@
 import type { ParlayRecord, ParlaySlipLeg, ParlayTokenType } from './parlay-store'
 import type { WalletBalance } from './wallet'
 import { config, getTransactionUrl } from './config'
-import { getMappingValue } from './aleo-client'
+import { TOKEN, isChainTxId, tokenLabel } from './near/config'
+import { getParlayPool } from './near/parlay'
 import { devWarn } from './logger'
 import { findRecords, type ScannedRecord } from './record-scanner'
 
@@ -39,14 +40,7 @@ export interface ParlayCreateReadiness {
 
 const ZERO_FIELD = '0field'
 const ODDS_PRECISION = 10000n
-const DEFAULT_MIN_STAKE = 100000n
-const DEFAULT_MAX_SINGLE_PAYOUT = 100_000_000_000n
-const DEFAULT_MAX_COMBINED_MULTIPLIER = 10000n
-const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = {
-  NEAR: 1,
-  USDCX: 2,
-  USAD: 3,
-}
+const TOKEN_TYPE_TO_ID: Record<ParlayTokenType, number> = TOKEN
 
 const TOKEN_ID_TO_TYPE: Record<number, ParlayTokenType> = {
   1: 'NEAR',
@@ -220,7 +214,8 @@ export function getParlayFundingRoute(
     publicBalance,
     hasEnoughPrivate,
     hasEnoughPublic,
-    recommendedSource: hasEnoughPrivate ? 'private' : null,
+    // NEAR: the stake is always paid privately; a short private balance is topped up from the wallet first.
+    recommendedSource: stake > 0n && privateBalance + publicBalance >= stake ? 'private' : null,
   }
 }
 
@@ -262,56 +257,36 @@ export async function getParlayCreateReadiness(params: {
   combinedOddsBps: bigint
   grossPayout: bigint
 }): Promise<ParlayCreateReadiness> {
+  // NEAR: the contract's parlay pool view; the solvency rule is pool + stake >= 110% of open payouts.
   const tokenTypeId = TOKEN_TYPE_TO_ID[params.tokenType]
-  const programId = config.parlayProgramId
-
-  const [
-    pauseState,
-    minStakeValue,
-    maxCombinedMultiplierValue,
-    poolValue,
-    exposureValue,
-    maxSinglePayoutValue,
-  ] = await Promise.all([
-    getMappingValue<bigint>('governance_values', '4field', programId),
-    getMappingValue<bigint>('governance_values', '2field', programId),
-    getMappingValue<bigint>('governance_values', '3field', programId),
-    getMappingValue<bigint>('parlay_pool', `${tokenTypeId}u8`, programId),
-    getMappingValue<bigint>('total_exposure', `${tokenTypeId}u8`, programId),
-    getMappingValue<bigint>('max_single_payout', `${tokenTypeId}u8`, programId),
-  ])
-
-  const paused = (pauseState ?? 0n) > 0n
-  const minStake = minStakeValue ?? DEFAULT_MIN_STAKE
-  const maxCombinedMultiplier = maxCombinedMultiplierValue ?? DEFAULT_MAX_COMBINED_MULTIPLIER
-  const pool = poolValue ?? 0n
-  const exposure = exposureValue ?? 0n
-  const maxPayout = maxSinglePayoutValue ?? DEFAULT_MAX_SINGLE_PAYOUT
+  const label = tokenLabel(params.tokenType)
+  const p = await getParlayPool()
+  const paused = p.paused
+  const minStake = BigInt(p.min_stake)
+  const maxCombinedOdds = BigInt(p.max_combined_odds_bps)
+  const maxCombinedMultiplier = maxCombinedOdds / ODDS_PRECISION
+  const maxPayout = BigInt(p.max_payout)
+  const pool = BigInt(p.pool[tokenTypeId] ?? '0')
+  const exposure = BigInt(p.exposure[tokenTypeId] ?? '0')
+  const safety = BigInt(p.safety_bps)
+  const needed = ((exposure + params.grossPayout) * safety) / ODDS_PRECISION
+  const capacity = pool + params.stake
   const availableBacking = pool > exposure ? pool - exposure : 0n
   const requiredBacking = params.grossPayout > params.stake ? params.grossPayout - params.stake : 0n
 
   let reason: string | null = null
-
   if (paused) {
     reason = 'Parlay placement is currently paused on-chain.'
   } else if (params.stake < minStake) {
-    reason = `Stake is below the current on-chain minimum of ${formatParlayAmount(minStake)} ${params.tokenType}.`
-  } else if (params.combinedOddsBps > maxCombinedMultiplier * ODDS_PRECISION) {
-    reason = 'Combined parlay odds exceed the current on-chain multiplier limit.'
+    reason = `Stake is below the on-chain minimum of ${formatParlayAmount(minStake)} ${label}.`
+  } else if (params.combinedOddsBps > maxCombinedOdds) {
+    reason = `Combined parlay odds exceed the ${maxCombinedMultiplier.toString()}× limit.`
   } else if (params.grossPayout > maxPayout) {
-    reason =
-      `Potential payout of ${formatParlayAmount(params.grossPayout)} ${params.tokenType} `
-      + `exceeds the current max single payout of ${formatParlayAmount(maxPayout)} ${params.tokenType}.`
-  } else if (availableBacking + params.stake < params.grossPayout) {
-    const shortfall = params.grossPayout - (availableBacking + params.stake)
-    reason = availableBacking === 0n
-      ? `Parlay pool has no available ${params.tokenType} backing. `
-        + `This ticket needs ${formatParlayAmount(requiredBacking)} ${params.tokenType} of pool liquidity beyond your stake. `
-        + 'Fund the parlay pool before placing parlays.'
-      : `Parlay pool has insufficient ${params.tokenType} backing for this ticket. `
-        + `Available backing: ${formatParlayAmount(availableBacking)} ${params.tokenType}. `
-        + `Required backing beyond your stake: ${formatParlayAmount(requiredBacking)} ${params.tokenType}. `
-        + `Shortfall: ${formatParlayAmount(shortfall)} ${params.tokenType}.`
+    reason = `Potential payout of ${formatParlayAmount(params.grossPayout)} ${label} exceeds the max single payout of ${formatParlayAmount(maxPayout)} ${label}.`
+  } else if (capacity < needed) {
+    reason = pool === 0n
+      ? `The ${label} parlay pool is not funded yet, so it cannot back a payout. Try NEAR, or a smaller stake later.`
+      : `The ${label} parlay pool cannot back this payout right now (it keeps 110% of open payouts). Try a smaller stake.`
   }
 
   return {
@@ -438,7 +413,7 @@ export function getShortParlayId(value?: string | null): string | null {
 export function getParlayExplorerTransactionId(txId?: string | null): string | null {
   if (!txId) return null
   const trimmed = txId.trim()
-  return trimmed.startsWith('at1') ? trimmed : null
+  return isChainTxId(trimmed) ? trimmed : null
 }
 
 export function getParlayTransactionUrl(txId?: string): string | null {

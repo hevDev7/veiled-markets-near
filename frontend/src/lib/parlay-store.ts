@@ -7,6 +7,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { devLog, devWarn } from './logger'
+import { TOKEN_KEY } from './near/config'
 import type { Market } from './store'
 import {
   isSupabaseAvailable, fetchParlays as sbFetchParlays,
@@ -46,6 +47,8 @@ export interface ParlayRecord {
   onChainParlayId?: string
   ticketNonce?: string
   fundingSource?: 'private' | 'public'
+  /** Gross potential payout (the ticket note amount); `potentialPayout` is what the bettor receives after the fee. */
+  grossPayout?: bigint
 }
 
 // ============================================================================
@@ -150,6 +153,8 @@ interface ParlayState {
   closeSlip: () => void
   hasLeg: (marketId: string) => boolean
   getLegForMarket: (marketId: string) => ParlaySlipLeg | undefined
+  /** Replaces the slip's leg odds with the contract's live quote (same order as slipLegs). */
+  setSlipLegOdds: (oddsBps: bigint[]) => void
 
   // Actions — parlays
   addParlay: (parlay: ParlayRecord) => void
@@ -158,6 +163,8 @@ interface ParlayState {
   markParlayClaimed: (parlayId: string) => void
   getParlaysByStatus: (status: ParlayRecord['status']) => ParlayRecord[]
   syncParlaysFromSupabase: (address: string, encryptionKey?: CryptoKey | null) => Promise<void>
+  /** Rebuilds this account's parlays from its private ticket notes and the contract (any device). */
+  syncParlaysFromChain: (address: string) => Promise<void>
 
   // Computed
   combinedOdds: () => bigint
@@ -251,6 +258,14 @@ export const useParlayStore = create<ParlayState>()(
         return get().slipLegs.find(l => l.marketId === marketId)
       },
 
+      setSlipLegOdds: (oddsBps: bigint[]) => {
+        set(s => ({
+          slipLegs: s.slipLegs.map((leg, i) => oddsBps[i] === undefined
+            ? leg
+            : { ...leg, oddsBps: oddsBps[i], displayOdds: oddsBpsToDisplay(oddsBps[i]) }),
+        }))
+      },
+
       // Parlay records
       addParlay: (parlay: ParlayRecord) => {
         set(s => ({ parlays: [parlay, ...s.parlays], slipLegs: [], slipStake: 0n }))
@@ -309,6 +324,64 @@ export const useParlayStore = create<ParlayState>()(
           }
         } catch (e) {
           devWarn('[Parlay] Supabase sync failed:', e)
+        }
+      },
+
+      syncParlaysFromChain: async (address: string) => {
+        try {
+          const { ownedParlays, parlayStatusName } = await import('./near/parlay')
+          const owned = await ownedParlays()
+          if (owned.length === 0) return
+          const byId = new Map(get().parlays.map(p => [p.onChainParlayId ?? p.id, p]))
+          const next = [...get().parlays]
+          for (const o of owned) {
+            const p = o.parlay
+            const gross = BigInt(p.potential_payout)
+            const fee = (gross * FEE_BPS) / FEE_DENOM
+            const status = parlayStatusName(p)
+            const claimed = p.claimed || !o.unclaimed
+            const tokenType: ParlayTokenType = TOKEN_KEY[p.token_type] ?? 'NEAR'
+            const existing = byId.get(p.id)
+            if (existing) {
+              const i = next.indexOf(existing)
+              next[i] = {
+                ...existing,
+                onChainParlayId: p.id,
+                status,
+                claimed,
+                grossPayout: gross,
+                resolvedAt: status === 'active' ? existing.resolvedAt : existing.resolvedAt ?? Date.now(),
+              }
+              continue
+            }
+            next.push({
+              id: p.id,
+              onChainParlayId: p.id,
+              ownerAddress: address,
+              legs: p.legs.map((leg, i) => ({
+                marketId: leg.market_id,
+                marketQuestion: o.questions[i],
+                marketProgram: o.marketTokens[i],
+                outcome: leg.outcome,
+                outcomeLabel: o.outcomeLabels[i],
+                oddsBps: BigInt(leg.odds_bps),
+                displayOdds: oddsBpsToDisplay(BigInt(leg.odds_bps)),
+                marketTokenType: TOKEN_KEY[o.marketTokens[i]] ?? 'NEAR',
+              })),
+              numLegs: p.num_legs,
+              stake: BigInt(p.stake),
+              potentialPayout: gross - fee,
+              grossPayout: gross,
+              tokenType,
+              status,
+              claimed,
+              createdAt: Number(p.created_at) * 4000, // virtual height: one tick per 4 s of block time
+              fundingSource: 'private',
+            })
+          }
+          set({ parlays: next })
+        } catch (e) {
+          devWarn('[Parlay] Chain sync failed:', e)
         }
       },
 
