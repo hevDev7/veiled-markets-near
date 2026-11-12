@@ -681,7 +681,7 @@ nullifier   = Poseidon(sk, commitment)     published when the note is spent`}</C
               rows={[
                 ['Collateral', <>NEAR attached to <C>create_market</C>, or USDC through <C>ft_transfer_call</C> with a <C>create_market</C> message</>],
                 ['Initial liquidity', 'at least 0.01 (min_liquidity = 10,000 micro units)'],
-                ['Deadlines', 'ticks; the deadline must be in the future and the resolution deadline after it'],
+                ['Deadlines', 'ticks; the deadline must be in the future, and the resolution deadline at least two vote windows plus one dispute window after it (ERR_RESOLUTION_DEADLINE)'],
                 ['Metadata', <>JSON text up to 2048 bytes, stored on chain: <C>q</C> question, <C>d</C> description, <C>s</C> resolution source, <C>o</C> outcome labels, <C>i</C> image</>],
                 ['question_hash', 'up to 96 characters'],
               ]}
@@ -699,27 +699,32 @@ buy outcome i with a tokens (after fees):
   shares_out = r_i + a − x
   new reserves:  r_i = x,  r_k = r_k + a
 
-sell outcome i for t = tokens_desired (gross):
+sell outcome i, releasing t (gross) for the shares offered:
   x = r_i
   for every other outcome k:   x = x × r_k / (r_k − t)
   shares_needed = x − r_i + t
   new reserves:  r_i = x,  r_k = r_k − t
-  seller receives t − protocol fee − creator fee − LP fee`}</CodeBlock>
+  t = the largest amount whose shares_needed fits in the shares offered,
+      and at least tokens_desired (otherwise ERR_SLIPPAGE)
+  seller receives t − protocol fee − creator fee − LP fee
+every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeBlock>
             <H3>Fees</H3>
             <Table
               head={['', 'Protocol', 'Creator', 'LP', 'Total']}
               rows={[
                 ['Buy (of the amount in)', '0.5%', '0.5%', '—', '1.0%'],
-                ['Sell (of tokens_desired)', '0.5%', '0.5%', '1.0%', '2.0%'],
+                ['Sell (of the amount released)', '0.5%', '0.5%', '1.0%', '2.0%'],
               ]}
             />
             <P muted>
               Protocol fees go to the treasury. Creator fees accumulate in the market, and the creator collects them once
-              with <C>withdraw_creator_fees</C> after resolution. On a sell the pool releases the full{' '}
-              <C>tokens_desired</C>; the seller receives it minus the three fees, and the LP fee stays in the market&apos;s
-              collateral, so LPs collect it when they withdraw. (The Aleo program priced sells on tokens_desired − LP fee,
-              which meant LPs never received the LP fee; the NEAR contract fixes that.) The owner can change the rates
-              with <C>set_governance_value</C>; their sum must stay below 100%.
+              with <C>withdraw_creator_fees</C> after resolution. A sell pays for every share offered:{' '}
+              <C>tokens_desired</C> is the least the seller accepts, and the pool releases as much as the shares cover.
+              The seller receives that minus the three fees, and the LP fee stays in the market&apos;s collateral, so LPs
+              collect it when they withdraw. (The Aleo program released exactly tokens_desired, burned the shares offered
+              beyond that, and priced sells on tokens_desired − LP fee, so LPs never received the LP fee; the NEAR
+              contract fixes both.) The owner can change the rates with <C>set_governance_value</C>; their sum is capped
+              at 10%.
             </P>
             <H3>Trading rules</H3>
             <Bullets>
@@ -744,7 +749,7 @@ sell outcome i for t = tokens_desired (gross):
                 gain the difference. The Liquidity panel shows what a deposit would return under each outcome before you add it.
               </li>
               <li><B>redeem</B>: on a Resolved market, winning shares pay 1:1 in the market&apos;s token.</li>
-              <li><B>refund</B>: on a Cancelled market, shares pay their share of the traders&apos; collateral (shares × trader collateral / outstanding shares).</li>
+              <li><B>refund</B>: on a Cancelled market, an outcome&apos;s shares get back the collateral that was paid into that outcome, pro rata within it (shares × that outcome&apos;s collateral / that outcome&apos;s shares), so cheap shares of one outcome cannot draw on what another outcome&apos;s buyers paid. <C>get_market</C> shows the ledger as <C>outcome_collateral</C>. Markets created before this ledger refund pro rata to all trader collateral.</li>
               <li>
                 <B>withdraw_lp</B>: on a Resolved market, after the dispute deadline plus the winner-claim priority window
                 (75 ticks on testnet), LPs receive their share of what is left once unredeemed winning shares and unclaimed
@@ -782,7 +787,7 @@ sell outcome i for t = tokens_desired (gross):
                 },
                 {
                   title: 'Vote',
-                  body: <><C>vote_outcome(market_id, outcome)</C> with exactly 0.1 NEAR attached, one vote per account, until the resolution deadline. The first vote starts the voting window (75 ticks, 5 minutes).</>,
+                  body: <><C>vote_outcome(market_id, outcome)</C> with exactly 0.1 NEAR attached, one vote per account, until the resolution deadline. The first vote starts the voting window (75 ticks, 5 minutes). A window that ends without the quorum reopens with the next vote.</>,
                 },
                 {
                   title: 'Finalize',
@@ -809,8 +814,9 @@ sell outcome i for t = tokens_desired (gross):
               <li><B>withdraw_creator_fees(market_id)</B>: the creator, once, after the dispute deadline plus the winner-claim priority window.</li>
               <li>
                 <B>cancel_market(market_id)</B>: the creator while the market is Active with no volume; anyone after the
-                resolution deadline unless the market is Resolved, Cancelled or Disputed; anyone when it has been Disputed
-                for longer than disputed_timeout.
+                resolution deadline unless the market is Resolved, Cancelled, Disputed, or already has a voted outcome
+                waiting to be confirmed (a voted outcome is confirmed or disputed, never cancelled); anyone when it has
+                been Disputed for longer than disputed_timeout.
               </li>
             </Bullets>
             <Callout tone="warn">
@@ -857,7 +863,7 @@ sell outcome i for t = tokens_desired (gross):
                 ['Stake token', 'NEAR only'],
                 ['Minimum bet', '0.001 NEAR'],
                 ['Fee', '0.5% of each bet, to the treasury'],
-                ['Betting closes', 'at the deadline tick'],
+                ['Betting closes', 'one fifth of the round before the deadline (get_turbo_market shows betting_deadline); later bets fail with ERR_BETTING_CLOSED'],
                 ['Prices', 'USD with 6 decimals (price × 10^6)'],
               ]}
             />
@@ -925,7 +931,8 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
             <Table
               head={['Rule', 'Value']}
               rows={[
-                ['Legs', '2 to 4, each on a different market that is Active and not past its deadline'],
+                ['Legs', '2 to 4, each on a different market that the owner approved for parlays, is Active and not past its deadline'],
+                ['Leg cap', 'one ticket pays at most 1% of its thinnest leg\'s pool depth (outcomes × smallest reserve); the owner can change the share'],
                 ['Stake token', 'NEAR or USDC, paid from your private balance'],
                 ['Minimum stake', '0.1'],
                 ['Maximum payout', '100,000 per parlay'],
@@ -934,7 +941,11 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
             />
             <P muted>
               Minimum stake, maximum payout, fee and the combined-odds cap are defaults the owner can change with{' '}
-              <C>set_parlay_config</C>; the 100× leg cap and the 110% coverage are fixed.
+              <C>set_parlay_config</C>; the 100× leg cap and the 110% coverage are fixed. Leg odds are read from the
+              markets&apos; own pools, so a ticket is only as sound as its legs: the owner approves leg markets with{' '}
+              <C>set_parlay_leg</C> (<C>ERR_LEG_NOT_ELIGIBLE</C> otherwise), and a ticket that would pay more than the
+              leg cap fails with <C>ERR_LEG_LIQUIDITY</C>. A pool pushed to one side has a small reserve, so the legs
+              with the most extreme odds carry the smallest tickets.
             </P>
             <H3>Payout pool</H3>
             <P muted>
@@ -1065,7 +1076,7 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
               rows={[
                 ['withdraw', 'recipient', 'balance (1)', 'nothing; pays the recipient. out_amount 0 merges two notes'],
                 ['buy', 'market_id, outcome, min_shares_out', 'balance (1) in the market token', 'shares (2)'],
-                ['sell', 'tokens_desired', 'shares (2); out_amount = most shares to use, and any not needed are burned', 'balance (1)'],
+                ['sell', 'tokens_desired', 'shares (2); out_amount = shares sold, all paid for; tokens_desired is the least the pool must release', 'balance (1)'],
                 ['add_liquidity', 'market_id, min_lp_shares', 'balance (1)', 'LP (3)'],
                 ['withdraw_lp', 'min_tokens_out', 'LP (3)', 'balance (1)'],
                 ['redeem', '—', 'winning shares (2)', 'balance (1)'],
@@ -1140,13 +1151,16 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
                 { name: 'fund_parlay_pool(token)', tag: 'payable', desc: <>Adds the attached NEAR to the pool (token must be 1). USDC uses ft_transfer_call with <C>{'{"fund_parlay_pool":{}}'}</C>.</> },
                 { name: 'withdraw_parlay_pool(token, amount, recipient)', tag: 'owner', desc: 'The pool must keep 110% of what open parlays are owed.' },
                 { name: 'set_parlay_config(min_stake?, max_payout?, fee_bps?, max_combined_odds_bps?, paused?)', tag: 'owner', desc: 'Arguments left out keep their value.' },
+                { name: 'set_parlay_leg(market_id, eligible)', tag: 'owner', desc: 'Approves a market as a parlay leg, or withdraws the approval. Open tickets are not affected.' },
+                { name: 'set_parlay_leg_cap(bps)', tag: 'owner', desc: 'The share of its thinnest leg\'s pool depth one ticket may pay (default 100 = 1%).' },
               ]}
             />
 
             <H3>Owner</H3>
             <MethodList
               methods={[
-                { name: 'set_governance_value(key, value)', tag: 'owner', desc: 'Keys: 1 protocol fee, 2 creator fee, 3 LP fee (bps), 4 min trade, 5 min liquidity, 6 pause (1) or unpause (0).' },
+                { name: 'set_governance_value(key, value)', tag: 'owner', desc: 'Keys: 1 protocol fee, 2 creator fee, 3 LP fee (bps, at most 1000 together), 4 min trade, 5 min liquidity, 6 pause (1) or unpause (0).' },
+                { name: 'set_resolution_config(vote_window?, dispute_window?, winner_claim_priority?, disputed_timeout?, vote_bond?, min_voters?, dispute_bond_multiplier?, committee_quorum?)', tag: 'owner', desc: 'Resolution windows (ticks), bond and quorums; arguments left out keep their value. Applies to votes, disputes and finalizations made afterwards.' },
                 { name: 'withdraw_treasury(token, amount, recipient)', tag: 'owner', desc: 'Pays out protocol fees and forfeited bonds.' },
                 { name: 'set_token_account(token, account_id)', tag: 'owner', desc: 'Points token slot 2 or 3 at a NEP-141 contract; allowed only while nothing is held in that token.' },
               ]}

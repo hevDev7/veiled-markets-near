@@ -131,7 +131,11 @@ endpoint when one times out or rate-limits.
 | What | Command |
 |---|---|
 | Circuit | `node --test near/circuits/test/spend.test.mjs` |
+| Contract rules (mocked host, fast) | `cd near/contract && cargo test -p veiled` |
 | Contract (near-workspaces sandbox) | `cd near/contract && cargo test -p integration-tests` |
+| In-place upgrade from the live build | `VEILED_WASM_OLD=<live wasm> cargo test -p integration-tests --test upgrade` |
+| Relayer checks | `cd backend && npx tsx --test src/relay-guards.test.ts` |
+| Browser note keys and math | `cd frontend && npm test` |
 | Live testnet smoke test | `cd backend && npx tsx scripts/testnet-smoke.ts` |
 
 ## Not on NEAR yet
@@ -141,8 +145,9 @@ Dispute escalation to the committee and parlays do work on NEAR.
 
 ## Parlays
 
-A parlay combines 2 to 4 outcomes on different markets and pays only if every leg wins. The contract prices each leg
-from the live market pools (at most 100× per leg and 1000× combined), so the quote in the app is the contract's own.
+A parlay combines 2 to 4 outcomes on different markets and pays only if every leg wins. Legs must be markets the
+owner approved for parlays. The contract prices each leg from the live market pools (at most 100× per leg and 1000×
+combined, and a payout of at most 1% of the thinnest leg's pool depth), so the quote in the app is the contract's own.
 Placing is a private action like a trade: the stake comes from your private balance and the contract gives you a
 private ticket note. A losing leg settles the ticket at once; otherwise it settles when every leg is final, and a
 cancelled leg refunds the stake. A winning ticket pays its payout minus 2%. Payouts come from a house pool that must
@@ -150,6 +155,31 @@ cover 110% of all open tickets; anyone can add to it on the My Parlays page.
 
 ## Known limits
 
+What the testnet deployment trusts, and what a production deployment still needs:
+
+- **Resolution.** A market resolves by bonded vote, then a dispute window, then (if disputed) a committee of five
+  accounts the operator runs. The testnet uses demo settings so a market resolves in minutes: one voter is enough, the
+  bond is 0.1 NEAR and each window is 5 minutes. With those settings one account can decide a market unless someone
+  disputes within 5 minutes. The owner can set production values with `set_resolution_config` (more voters, hour-long
+  windows, a real bond); correct voters and disputers are not yet paid from forfeited bonds, so honest resolution
+  still depends on bettors and the committee watching.
+- **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in (pro rata within that
+  outcome), so a refund cannot draw on another outcome's collateral. Markets created before that rule (ids up to
+  the upgrade) keep the old pro-rata refund.
+- **Parlay pool.** Leg odds are read from the markets' own pools, which anyone with capital can move. Only markets the
+  owner approved can be legs, and one ticket pays at most 1% of its thinnest leg's pool depth. The pool is still
+  operator-funded risk capital, not a guaranteed product.
+- **Turbo rounds.** Bets close for the last fifth of a round, because a shared pool cannot fairly take bets when the
+  result is all but known. The operator still supplies the baseline and closing price (see Turbo prices below).
+- **Storage and capacity.** Every private action adds two leaves and two nullifiers (about 700 bytes) that the
+  contract pays for from its own NEAR, and the note tree holds 524,288 actions in total. A production deployment needs
+  a storage fee per action and a deeper or rotating tree; the testnet contract is topped up by the operator.
+- **Private balance key.** The key is derived from a wallet signature and kept in the browser's storage. A wallet
+  that cannot sign messages gets a browser-only key, which the app tells you to back up. Sign the key message only on
+  veiledmarkets.xyz.
+- **Privacy.** Amounts are public; what is hidden is which account holds which position. A deposit made right before
+  a bet can be linked to it by timing, so fund the private balance ahead of time.
+- **Operator keys.** The contract account still has a full-access key and can be redeployed by the operator.
 - **Testnet trusted setup.** The circuit key comes from a single phase-2 contribution on top of the public
   Perpetual Powers of Tau. A mainnet launch needs a multi-party ceremony.
 - **Turbo prices.** The oracle operator submits prices, and the contract checks the operator and the price bounds.

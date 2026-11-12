@@ -81,6 +81,11 @@ Note pool:
     `withdraw{recipient}` (kind 1), `buy{market_id, outcome, min_shares_out}` (kind 1), `sell{tokens_desired}` (kind 2),
     `add_liquidity{market_id, min_lp_shares}` (kind 1), `redeem` (kind 2), `refund` (kind 2),
     `withdraw_lp{min_tokens_out}` (kind 3), `turbo_buy{market_id, side}` (kind 1), `turbo_claim` (kind 4).
+  - `sell` pays for every share offered: `tokens_desired` is the least the seller accepts and the pool releases as
+    much as the shares cover (the Aleo program released exactly `tokens_desired` and burned the rest). `refund`
+    returns, outcome by outcome, the collateral paid into that outcome (`get_market` → `outcome_collateral`), so
+    cheap shares of one outcome cannot draw on another outcome's collateral.
+  - Leaf memos are at most 400 bytes; every reserve of a pool keeps at least one unit.
   - Returns `{change_index, new_index, new_commitment, new_kind, new_asset, new_sub, new_amount}`.
 - Views: `get_tree_info() -> {next_index, root, depth}`, `get_leaves(from, limit) -> [{index, commitment, note?, memo}]`,
   `is_spent(nullifier)`, `is_known_root(root)`.
@@ -89,18 +94,22 @@ Markets (port of `veiled_markets_v37.aleo` with the working-tree fixes; one cont
 - `create_market(args)` payable (NEAR) or via `ft_transfer_call` (stablecoins). `CreateMarketArgs = {question_hash,
   category, num_outcomes, deadline, resolution_deadline, metadata (JSON text <= 2048 bytes: question, description,
   outcome labels, resolution source, image), lp_owner_blind, lp_memo}`. The creator's LP position is minted as an LP
-  note (private), as the Aleo program minted an LPToken record.
+  note (private), as the Aleo program minted an LPToken record. `resolution_deadline` must leave two vote windows
+  and one dispute window after `deadline`.
 - Public resolution calls from NEAR accounts (voters and disputers are public on Aleo too), bonds in NEAR:
   `close_market, vote_outcome (payable bond), finalize_votes, confirm_resolution, dispute_resolution (payable bond),
-  cancel_market, claim_voter_bond, claim_dispute_bond, withdraw_creator_fees`.
+  cancel_market, claim_voter_bond, claim_dispute_bond, withdraw_creator_fees`. A vote window that ends short of the
+  quorum reopens with the next vote, and a market with a voted outcome is confirmed or disputed, never cancelled.
+  The owner sets the windows, bond and quorums with `set_resolution_config`; total fees are capped at 10%.
 - Committee escalation (governance tier 2): `initiate_escalation, committee_vote_resolve, finalize_committee_vote,
   governance_resolve`.
 - Views mirror the Aleo mappings: `get_market, get_pool, get_fees, get_tally, get_dispute, get_market_credits,
   get_markets(from, limit), get_governance_values, has_voted(market_id, account), get_height`.
 
-Turbo (port of `veiled_turbo_v9.aleo`): operator calls `create_turbo_market, resolve_turbo_market, emergency_cancel,
-deposit_vault, withdraw_vault, withdraw_turbo_fees`; bets and claims are private via `transact`. Views
-`get_turbo_market, get_turbo_pool, get_turbo_markets(from, limit), get_vault`.
+Turbo (port of `veiled_turbo_v9.aleo`, pari-mutuel: winners split the round's pool, so there is no vault): the
+operator calls `create_turbo_market, resolve_turbo_market, emergency_cancel_turbo, prune_turbo`; bets and claims are
+private via `transact`. Bets are taken for the first four fifths of a round (`betting_deadline` in the view). Views
+`get_turbo_market, get_latest_turbo, get_turbo_markets(from, limit), get_turbo_count, get_turbo_exposure`.
 
 Market ids and turbo ids share one counter, so a `/market/:id` route is unambiguous.
 
@@ -118,6 +127,8 @@ Market ids and turbo ids share one counter, so a `/market/:id` route is unambigu
 
 Community governance proposals, resolver registry, reward epochs and the multisig treasury stay Aleo-only.
 Parlays were ported later (`near/contract/contracts/veiled/src/parlay.rs`, note kind 5 = parlay ticket; see the
-Parlays section of the in-app Docs page).
+Parlays section of the in-app Docs page). Legs are markets the owner approved (`set_parlay_leg`), and a ticket pays
+at most a set share of its thinnest leg's pool depth (`set_parlay_leg_cap`, 1% by default), because leg odds are
+read from the pools.
 Their pages render their existing empty states. A production deployment needs a multi-party phase-2 ceremony for the
 circuit key and a relayer fee market.
