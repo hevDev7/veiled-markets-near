@@ -53,6 +53,8 @@ const KEYWORD_IMAGES: Array<[string[], string]> = [
   [['x.ai', 'xai', 'grok'],         'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=80&h=80&fit=crop&q=60'],
 
   // ── Politics & Geopolitics ──
+  // A country's own election comes before the generic "presidential" entry, which shows the US Capitol.
+  [['nigeria'],                  'https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Flag_of_Nigeria.svg/120px-Flag_of_Nigeria.svg.png'],
   [['trump'],                    'https://images.unsplash.com/photo-1580128660010-fd027e1e587a?w=80&h=80&fit=crop&q=60'], // white house
   [['biden'],                    'https://images.unsplash.com/photo-1580128660010-fd027e1e587a?w=80&h=80&fit=crop&q=60'],
   [['us election', 'presidential', 'congress', 'senate', 'primary'], 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=80&h=80&fit=crop&q=60'], // capitol
@@ -83,7 +85,7 @@ const KEYWORD_IMAGES: Array<[string[], string]> = [
   [['disney'],                   'https://images.unsplash.com/photo-1597655601841-214a4cfe8b2c?w=80&h=80&fit=crop&q=60'], // castle
   [['spotify'],                  'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=80&h=80&fit=crop&q=60'], // music
   [['k-pop', 'kpop', 'bts', 'blackpink'], 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=80&h=80&fit=crop&q=60'],
-  [['oscar', 'academy award'],  'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=80&h=80&fit=crop&q=60'], // cinema
+  [['oscar', 'academy award', 'box office'], 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=80&h=80&fit=crop&q=60'], // cinema
   [['grammy'],                  'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=80&h=80&fit=crop&q=60'],
   [['streaming'],               'https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?w=80&h=80&fit=crop&q=60'],
 ]

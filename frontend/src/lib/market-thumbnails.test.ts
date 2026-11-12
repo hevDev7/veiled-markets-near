@@ -18,3 +18,17 @@ describe('thumbnailFallback', () => {
     expect(img.style.display).toBe('none');
   });
 });
+
+describe('getMarketThumbnail', () => {
+  it('gives an election outside the US its own country image, not the US Capitol', () => {
+    const nigeria = getMarketThumbnail("Who will win Nigeria's presidential election on January 16, 2027?", 1);
+    const us = getMarketThumbnail('Who will win the US presidential election?', 1);
+    expect(nigeria).toContain('Flag_of_Nigeria');
+    expect(nigeria).not.toBe(us);
+  });
+
+  it('shows a cinema for a box office market', () => {
+    const boxOffice = getMarketThumbnail('Will Avengers: Doomsday open above $300 million at the US box office?', 4);
+    expect(boxOffice).toBe(getMarketThumbnail('Who will win the Oscar for Best Picture?', 4));
+  });
+});
