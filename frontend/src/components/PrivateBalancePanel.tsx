@@ -5,7 +5,9 @@ import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, EyeOff, KeyRound, Loade
 import { useWalletStore } from '@/lib/store'
 import { cn, formatCredits } from '@/lib/utils'
 import { ENABLED_TOKEN_KEYS, TOKEN, USDC_FAUCET_URL, tokenLabel, txUrl } from '@/lib/near/config'
-import { cachedNoteKeys, exportNoteSeed, importNoteSeed, type NoteKeys } from '@/lib/near/notes/keys'
+import { cachedNoteKeys, exportNoteSeed, importNoteSeed, switchToWalletKey, type NoteKeys } from '@/lib/near/notes/keys'
+import { forgetNotes, unspent } from '@/lib/near/notes/store'
+import { signMessage } from '@/lib/near/near-wallet'
 import { deposit, noteKeys, refreshNotes, withdraw, type PrivateStep } from '@/lib/near/private'
 import { GAS_RESERVE_MICRO } from '@/lib/near/wallet-records'
 
@@ -48,6 +50,9 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
   const [keySource, setKeySource] = useState<NoteKeys['source'] | null>(null)
   const [backupNote, setBackupNote] = useState<string | null>(null)
   const [restoreText, setRestoreText] = useState('')
+  // Switching keys leaves the old key's notes behind, so the first click only reports them.
+  const [switchNote, setSwitchNote] = useState<string | null>(null)
+  const [switchArmed, setSwitchArmed] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -108,12 +113,51 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
     }
   }
 
+  /** Replaces the browser-only key with the one the wallet's signature gives (the same in every browser). */
+  const handleSwitchToWalletKey = async () => {
+    if (!wallet.address) return
+    begin('unlock')
+    try {
+      if (!switchArmed) {
+        setStatus(STEP_LABEL.syncing)
+        await refreshNotes(true)
+        const left = unspent(wallet.address).length
+        if (left > 0) {
+          setSwitchNote(
+            `${left} private ${left === 1 ? 'note is' : 'notes are'} still on this key (a balance, shares, an LP position ` +
+              'or a ticket). After switching they can be reached only by restoring the backup key, so copy it first. ' +
+              'Click again to switch.',
+          )
+          setSwitchArmed(true)
+          setStatus(null)
+          setBusy(null)
+          return
+        }
+      }
+      setStatus('Confirm the signature in your wallet…')
+      await switchToWalletKey(wallet.address, signMessage)
+      forgetNotes(wallet.address) // the notes listed here belong to the old key
+      setSwitchNote(null)
+      setSwitchArmed(false)
+      setBackupNote(null)
+      setStatus(STEP_LABEL.syncing)
+      await refreshNotes(true)
+      setStatus('The private balance key now comes from your wallet signature.')
+      await finish()
+    } catch (err) {
+      fail(err)
+    }
+  }
+
   const handleRestore = async () => {
     if (!wallet.address) return
     begin('unlock')
     try {
       await importNoteSeed(wallet.address, restoreText)
+      forgetNotes(wallet.address) // notes listed under the previous key are not this key's: scan again
       setRestoreText('')
+      setSwitchNote(null)
+      setSwitchArmed(false)
       setStatus(STEP_LABEL.syncing)
       await refreshNotes(true)
       setStatus('Private balance key restored from the backup.')
@@ -270,6 +314,39 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
             </button>
           </div>
           {backupNote && <p className="text-xs break-all">{backupNote}</p>}
+          <div className="pt-2 border-t border-amber-500/20 space-y-2">
+            <p>
+              Or switch to a key derived from your wallet&apos;s signature. Any browser with the same wallet gets it
+              back by signing again, so it survives cleared browser data.
+            </p>
+            <button
+              onClick={handleSwitchToWalletKey}
+              disabled={busy !== null}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 transition-colors disabled:opacity-50"
+            >
+              {switchArmed ? 'Switch now, leaving those notes on the old key' : 'Use my wallet\'s key instead'}
+            </button>
+            {switchNote && <p className="text-xs">{switchNote}</p>}
+          </div>
+        </div>
+      )}
+
+      {unlocked && keySource === 'signature' && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-surface-400">
+          <span>Have a backup key from a browser-only balance?</span>
+          <input
+            value={restoreText}
+            onChange={(e) => setRestoreText(e.target.value)}
+            placeholder="Paste it to use that key here"
+            className="flex-1 min-w-[12rem] px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-surface-200 placeholder:text-surface-500"
+          />
+          <button
+            onClick={handleRestore}
+            disabled={busy !== null || !restoreText.trim()}
+            className="px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] text-surface-200 transition-colors disabled:opacity-50"
+          >
+            Use it
+          </button>
         </div>
       )}
 

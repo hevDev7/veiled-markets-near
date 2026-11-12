@@ -51,20 +51,32 @@ export async function cachedNoteKeys(accountId: string): Promise<NoteKeys | null
   }
 }
 
+export type SignKeyMessage = (message: string, nonce: Uint8Array) => Promise<{ signature: string }>;
+
+/** The seed the wallet's signature over KEY_MESSAGE gives: the same in every browser for the same wallet key. */
+async function seedFromWallet(accountId: string, sign: SignKeyMessage): Promise<Uint8Array> {
+  const nonce = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`veiled-notes-v1:${accountId}`)));
+  const { signature } = await sign(KEY_MESSAGE, nonce);
+  const sigBytes = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', sigBytes));
+}
+
+function storeSeed(accountId: string, seed: Uint8Array, source: NoteKeys['source']) {
+  try {
+    localStorage.setItem(storageKey(accountId), JSON.stringify({ seed: hex(seed), source }));
+  } catch {
+    /* storage disabled: keys live for this tab only */
+  }
+}
+
 /** Unlocks the note keys, asking the wallet for the signature once. */
-export async function unlockNoteKeys(
-  accountId: string,
-  sign: (message: string, nonce: Uint8Array) => Promise<{ signature: string }>,
-): Promise<NoteKeys> {
+export async function unlockNoteKeys(accountId: string, sign: SignKeyMessage): Promise<NoteKeys> {
   const existing = await cachedNoteKeys(accountId);
   if (existing) return existing;
   let seed: Uint8Array;
   let source: NoteKeys['source'] = 'signature';
   try {
-    const nonce = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`veiled-notes-v1:${accountId}`)));
-    const { signature } = await sign(KEY_MESSAGE, nonce);
-    const sigBytes = Uint8Array.from(atob(signature), (c) => c.charCodeAt(0));
-    seed = new Uint8Array(await crypto.subtle.digest('SHA-256', sigBytes));
+    seed = await seedFromWallet(accountId, sign);
   } catch (err) {
     if ((err as { code?: string } | null)?.code !== SIGN_UNSUPPORTED) {
       throw new Error(
@@ -76,12 +88,31 @@ export async function unlockNoteKeys(
     seed = crypto.getRandomValues(new Uint8Array(32));
     source = 'local';
   }
-  try {
-    localStorage.setItem(storageKey(accountId), JSON.stringify({ seed: hex(seed), source }));
-  } catch {
-    /* storage disabled: keys live for this tab only */
-  }
+  storeSeed(accountId, seed, source);
   const keys = await fromSeed(accountId, seed, source);
+  cache.set(accountId, keys);
+  return keys;
+}
+
+/**
+ * Replaces the key stored in this browser with the one derived from the wallet's signature, which any browser
+ * with the same wallet can derive again. Nothing is replaced unless the wallet signs, so a declined request
+ * leaves the old key in place. Notes made under the old key stay with it: back it up first (exportNoteSeed).
+ */
+export async function switchToWalletKey(accountId: string, sign: SignKeyMessage): Promise<NoteKeys> {
+  let seed: Uint8Array;
+  try {
+    seed = await seedFromWallet(accountId, sign);
+  } catch (err) {
+    throw new Error(
+      (err as { code?: string } | null)?.code === SIGN_UNSUPPORTED
+        ? 'This wallet cannot sign messages, so the key cannot come from it. The key in this browser was kept.'
+        : 'The wallet did not sign the key message, so the key in this browser was kept. Approve the signature ' +
+          'request to switch; if no wallet window opened, allow pop-ups for this site.',
+    );
+  }
+  const keys = await fromSeed(accountId, seed, 'signature');
+  storeSeed(accountId, seed, 'signature');
   cache.set(accountId, keys);
   return keys;
 }
