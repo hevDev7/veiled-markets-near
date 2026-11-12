@@ -352,6 +352,7 @@ All contract tests use `assert_eq(actual, expected)` with exact computed values 
 ```bash
 git clone https://github.com/hevDev7/veiled-markets-near.git
 cd veiled-markets-near
+git checkout pre-hackathon   # the Aleo version, before the NEAR port
 
 # Frontend
 cd frontend && npm install --legacy-peer-deps && cp .env.example .env

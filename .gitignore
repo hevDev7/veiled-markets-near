@@ -89,3 +89,9 @@ node_modules
 
 # Circuit build output, symlinked to the external build cache
 near/circuits/build
+
+# Machine-specific build paths, sourced by near/env.sh
+near/env.local.sh
+
+# Background-shell tool state
+.bg-shell/

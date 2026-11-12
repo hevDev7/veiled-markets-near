@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds the spend circuit, the Groth16 keys, the Rust verifying-key file and the browser prover files.
-# Heavy intermediates live outside the repo (BUILD_CACHE) because /home is nearly full on the dev box.
+# Heavy intermediates live outside the repo, in BUILD_CACHE (set by near/env.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-BUILD_CACHE="${BUILD_CACHE:-$HOME/.cache/veiled-near}"
+source ../env.sh
 PTAU="${PTAU:-$BUILD_CACHE/ptau/ppot_0080_15.ptau}"   # PSE Perpetual Powers of Tau, 80 contributions, 2^15
 OUT_PUBLIC=../../frontend/public/zk
 OUT_RUST=../contract/contracts/veiled/src/vk.rs
