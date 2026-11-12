@@ -1,23 +1,27 @@
 import { Link } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
-  ArrowLeft, Package, Terminal, Code, BookOpen, Layers, Radio, Vote,
-  GitBranch, Database, Shield, Wallet, Cpu, Box, Network, ArrowRight,
-  ChevronRight,
+  Activity, AlertTriangle, ArrowLeft, BookOpen, ChevronRight, Code, Coins, Cpu, ExternalLink, FlaskConical,
+  Gavel, Globe, Info, Layers, Lightbulb, ListOrdered, Network, Radio, Send, Server, Shield, Terminal, Timer,
+  Wallet,
 } from 'lucide-react'
 import { Footer } from '../components/Footer'
-import { NearPortNotice } from '@/components/NearPortNotice'
 
 // ============================================================================
-// Docs — comprehensive documentation for the Veiled Markets protocol + SDK.
-// Replaces the old APIDocs.tsx: adds protocol overview, architecture,
-// per-client SDK reference, and real-world examples. Route: /docs
-// (with /api-docs still mapped for backward compat via App.tsx).
+// Docs: reference for Veiled Markets on NEAR testnet. Route /docs (/api-docs
+// redirects here). Facts follow near/contract/contracts/veiled/src,
+// docs/near/DESIGN.md and the testnet get_config; keep the numbers in sync.
 // ============================================================================
+
+const CONTRACT = 'v1.veiled-markets.testnet'
+const USDC = '3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af'
+const EXPLORER = 'https://testnet.nearblocks.io'
+
+// ---------------------------------------------------------------- building blocks
 
 function CodeBlock({ children, title }: { children: string; title?: string }) {
   return (
-    <div className="rounded-xl overflow-hidden border border-white/[0.04] not-prose">
+    <div className="rounded-xl overflow-hidden border border-white/[0.04] not-prose mb-4">
       {title && (
         <div className="px-4 py-2 bg-white/[0.04] border-b border-white/[0.04]">
           <span className="text-xs font-mono text-surface-400">{title}</span>
@@ -36,74 +40,349 @@ function SectionHeader({
   title,
 }: {
   id: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }>
   title: string
 }) {
   return (
     <div id={id} className="flex items-center gap-3 mb-4 scroll-mt-24">
-      <Icon className="w-5 h-5 text-brand-400" />
+      <Icon className="w-5 h-5 text-brand-400 shrink-0" />
       <h2 className="text-xl font-semibold text-white">{title}</h2>
     </div>
   )
 }
 
-// TOC entries — keep in sync with section ids below.
+function GroupHeading({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="mb-10 border-t border-white/[0.04] pt-10">
+      <h2 className="text-2xl font-display text-white mb-2">{title}</h2>
+      {children && <p className="text-sm text-surface-400 leading-relaxed">{children}</p>}
+    </div>
+  )
+}
+
+function H3({ children }: { children: ReactNode }) {
+  return <h3 className="text-sm font-semibold text-white mt-8 mb-3">{children}</h3>
+}
+
+function P({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
+  return <p className={`text-sm leading-relaxed mb-4 ${muted ? 'text-surface-400' : ''}`}>{children}</p>
+}
+
+/** Inline code. */
+function C({ children }: { children: ReactNode }) {
+  return <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded font-mono text-[0.85em] break-words">{children}</code>
+}
+
+function A({ href, children }: { href: string; children: ReactNode }) {
+  const external = href.startsWith('http')
+  return (
+    <a
+      href={href}
+      {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      className="text-brand-400 hover:text-brand-300 transition-colors"
+    >
+      {children}
+      {external && <ExternalLink className="inline w-3 h-3 ml-0.5 -mt-0.5" />}
+    </a>
+  )
+}
+
+function Bullets({ children }: { children: ReactNode }) {
+  return <ul className="list-disc pl-5 space-y-2 text-sm text-surface-400 leading-relaxed mb-4 marker:text-surface-600">{children}</ul>
+}
+
+function B({ children }: { children: ReactNode }) {
+  return <strong className="text-surface-300 font-semibold">{children}</strong>
+}
+
+function Table({ head, rows }: { head?: string[]; rows: ReactNode[][] }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-white/[0.04] mb-4">
+      <table className="w-full text-xs">
+        {head && (
+          <thead>
+            <tr className="bg-white/[0.03]">
+              {head.map((h) => (
+                <th key={h} className="px-3 py-2 text-left font-semibold text-surface-400 whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-t border-white/[0.04]">
+              {row.map((cell, j) => (
+                <td key={j} className={`px-3 py-2 align-top leading-relaxed ${!head && j === 0 ? 'text-surface-400 whitespace-nowrap' : 'text-surface-300'}`}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const calloutStyles = {
+  info: { icon: Info, box: 'border-brand-500/20 bg-brand-500/[0.05]', iconClass: 'text-brand-400' },
+  tip: { icon: Lightbulb, box: 'border-emerald-700/30 bg-emerald-500/5', iconClass: 'text-emerald-400' },
+  warn: { icon: AlertTriangle, box: 'border-yellow-500/[0.15] bg-yellow-500/[0.06]', iconClass: 'text-yellow-400' },
+} as const
+
+function Callout({ tone = 'info', children }: { tone?: keyof typeof calloutStyles; children: ReactNode }) {
+  const s = calloutStyles[tone]
+  return (
+    <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 mb-4 ${s.box}`}>
+      <s.icon className={`mt-0.5 h-4 w-4 shrink-0 ${s.iconClass}`} />
+      <div className="text-sm text-surface-300 leading-relaxed">{children}</div>
+    </div>
+  )
+}
+
+interface Method {
+  name: string
+  tag?: string
+  desc: ReactNode
+}
+
+function MethodList({ methods }: { methods: Method[] }) {
+  return (
+    <div className="space-y-2 mb-4">
+      {methods.map((m) => (
+        <div key={m.name} className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
+            <code className="text-sm font-mono text-brand-400 break-all">{m.name}</code>
+            {m.tag && <span className="text-[10px] uppercase tracking-wider text-surface-500">{m.tag}</span>}
+          </div>
+          <p className="text-xs text-surface-400 leading-relaxed">{m.desc}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Steps({ steps }: { steps: { title: string; body: ReactNode }[] }) {
+  return (
+    <ol className="space-y-3 mb-4">
+      {steps.map((s, i) => (
+        <li key={s.title} className="flex gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500/15 text-[11px] font-semibold text-brand-400 tabular-nums">
+            {i + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-white mb-1">{s.title}</div>
+            <div className="text-[13px] text-surface-400 leading-relaxed">{s.body}</div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+// ---------------------------------------------------------------- table of contents
+
+// Keep in sync with the SectionHeader ids below.
 const toc = [
   {
-    group: 'Getting Started',
+    group: 'Getting started',
     items: [
       { id: 'overview', label: 'Overview' },
+      { id: 'use-the-app', label: 'Use the app' },
       { id: 'architecture', label: 'Architecture' },
-      { id: 'installation', label: 'Installation' },
-      { id: 'quick-start', label: 'Quick Start' },
     ],
   },
   {
     group: 'Protocol',
     items: [
-      { id: 'protocol-famm', label: 'FAMM Markets' },
-      { id: 'protocol-turbo', label: 'Turbo Markets' },
-      { id: 'protocol-governance', label: 'Governance' },
-      { id: 'protocol-parlay', label: 'Parlay' },
-      { id: 'protocol-privacy', label: 'Privacy Model' },
-      { id: 'on-chain-programs', label: 'On-Chain Programs' },
+      { id: 'privacy', label: 'Privacy model' },
+      { id: 'markets', label: 'Prediction markets' },
+      { id: 'resolution', label: 'Resolution' },
+      { id: 'turbo', label: 'Turbo rounds' },
+      { id: 'parlays', label: 'Parlays' },
+      { id: 'tokens', label: 'Tokens' },
     ],
   },
   {
-    group: 'SDK Reference',
+    group: 'Reference',
     items: [
-      { id: 'sdk-client', label: 'VeiledMarketsClient' },
-      { id: 'sdk-turbo', label: 'TurboClient' },
-      { id: 'sdk-governance', label: 'VeiledGovernanceClient' },
-      { id: 'sdk-parlay', label: 'ParlayClient' },
-      { id: 'sdk-indexer', label: 'IndexerClient' },
-      { id: 'sdk-pyth', label: 'PythHermesClient' },
-      { id: 'sdk-wallets', label: 'Wallet Adapters' },
-      { id: 'sdk-executor', label: 'NodeExecutor' },
-      { id: 'sdk-types', label: 'Type Reference' },
-      { id: 'sdk-utils', label: 'Utilities' },
+      { id: 'contract-api', label: 'Contract API' },
+      { id: 'circuit', label: 'Circuit' },
+      { id: 'relayer-api', label: 'Relayer API' },
+      { id: 'oracle-api', label: 'Turbo oracle API' },
     ],
   },
   {
     group: 'Recipes',
     items: [
-      { id: 'recipe-buy-famm', label: 'Buy FAMM shares' },
-      { id: 'recipe-buy-turbo', label: 'Bet on Turbo' },
-      { id: 'recipe-verify-turbo', label: 'Verify Turbo with Pyth' },
-      { id: 'recipe-monitor-disputes', label: 'Monitor disputes' },
+      { id: 'recipe-read-markets', label: 'Read markets and prices' },
+      { id: 'recipe-stream-prices', label: 'Stream turbo prices' },
+      { id: 'recipe-verify-turbo', label: 'Verify a turbo round' },
+      { id: 'recipe-run-locally', label: 'Run it locally' },
     ],
   },
   {
     group: 'Deployment',
     items: [
-      { id: 'networks', label: 'Networks & Endpoints' },
-      { id: 'examples', label: 'Example Apps' },
+      { id: 'deployment', label: 'Testnet deployment' },
+      { id: 'limits', label: 'Limits and what is missing' },
     ],
   },
 ]
 
+const SECTION_IDS = toc.flatMap((g) => g.items.map((i) => i.id))
+
+/** The section whose header has scrolled past the sticky page header (the last one at the bottom of the page). */
+function useScrollSpy(ids: string[], offset = 120): string {
+  const [active, setActive] = useState(ids[0])
+  useEffect(() => {
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const doc = document.documentElement
+      if (window.innerHeight + window.scrollY >= doc.scrollHeight - 4) {
+        setActive(ids[ids.length - 1])
+        return
+      }
+      let current = ids[0]
+      for (const id of ids) {
+        const el = document.getElementById(id)
+        if (el && el.getBoundingClientRect().top - offset <= 0) current = id
+      }
+      setActive(current)
+    }
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(update)
+    }
+    update()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [ids, offset])
+  return active
+}
+
+function TocLinks({ active, onPick }: { active: string; onPick?: () => void }) {
+  return (
+    <>
+      {toc.map((group) => (
+        <div key={group.group} className="mb-6 last:mb-0">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-surface-500 mb-2">{group.group}</div>
+          <ul className="space-y-1">
+            {group.items.map((item) => (
+              <li key={item.id}>
+                <a
+                  href={`#${item.id}`}
+                  onClick={onPick}
+                  aria-current={active === item.id ? 'location' : undefined}
+                  className={`block text-sm py-1 border-l-2 pl-3 transition-colors ${
+                    active === item.id
+                      ? 'border-brand-400 text-white'
+                      : 'border-transparent text-surface-400 hover:text-white hover:border-white/[0.08]'
+                  }`}
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------- code samples
+
+const READ_MARKETS = `// Lists the active prediction markets and their prices. Node 18+: node read-markets.mjs
+const RPC = 'https://rpc.testnet.fastnear.com'
+const CONTRACT = 'v1.veiled-markets.testnet'
+
+async function view(method, args = {}) {
+  const res = await fetch(RPC, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'query',
+      params: {
+        request_type: 'call_function',
+        finality: 'final',
+        account_id: CONTRACT,
+        method_name: method,
+        args_base64: btoa(JSON.stringify(args)),
+      },
+    }),
+  }).then((r) => r.json())
+  if (res.error || res.result?.error) throw new Error(JSON.stringify(res.error ?? res.result.error))
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(res.result.result)))
+}
+
+const markets = await view('get_markets', { from: '0', limit: 50 })
+for (const m of markets.filter((m) => m.status === 1)) {
+  const { q } = JSON.parse(m.metadata)
+  // FPMM: an outcome's price is proportional to 1 / its reserve.
+  const inv = m.reserves.slice(0, m.num_outcomes).map((r) => 1 / Number(r))
+  const sum = inv.reduce((a, b) => a + b, 0)
+  const prices = inv.map((x) => x / sum)
+  console.log('#' + m.id + ' ' + q + '  ' + prices.map((p) => (p * 100).toFixed(1) + '%').join(' / '))
+}`
+
+const STREAM_PRICES = `// Runs in a browser. In Node: import { EventSource } from 'eventsource'
+const ORACLE = 'http://localhost:4090' // your VITE_TURBO_ORACLE_URL
+
+const es = new EventSource(ORACLE + '/stream?symbol=ETH')
+es.onmessage = (e) => {
+  const q = JSON.parse(e.data) // { symbol, feedId, price, conf, publishTime }
+  console.log(q.symbol, q.price.toFixed(2), new Date(q.publishTime).toISOString())
+}
+
+// The round the price is measured against, from the contract (view() as in the previous recipe).
+// symbol_id: 1 BTC, 2 ETH, 3 SOL. Prices on chain have 6 decimals; a tick is 4 s of block time.
+const round = await view('get_latest_turbo', { symbol_id: 2 })
+console.log('round', round.id, 'baseline', Number(round.baseline_price) / 1e6,
+  'closes', new Date(Number(round.deadline) * 4000).toISOString())`
+
+const VERIFY_TURBO = `// Cross-checks the prices the operator submitted for one round against Pyth Hermes. Node 18+.
+// view() is the helper from "Read markets and prices".
+const ORACLE = 'http://localhost:4090'          // your VITE_TURBO_ORACLE_URL
+const PYTH_KEY = process.env.PYTH_API_KEY       // your own key, free at app.pyth.com
+const FEEDS = {
+  1: '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', // BTC/USD
+  2: '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', // ETH/USD
+  3: '0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d', // SOL/USD
+}
+const ROUND = '161'
+
+// 1. What the contract stored (price × 10^6).
+const round = await view('get_turbo_market', { market_id: ROUND })
+console.log('contract baseline', Number(round.baseline_price) / 1e6, 'closing', Number(round.closing_price) / 1e6)
+
+// 2. The operator's audit rows: one per create / resolve, with the Pyth publish time of the price it used.
+const rows = await fetch(ORACLE + '/audit?market_id=eq.' + ROUND + 'field&order=id.asc').then((r) => r.json())
+
+// 3. Pyth's own price at each of those moments.
+for (const row of rows) {
+  const ts = Math.floor(new Date(row.pyth_publish_time).getTime() / 1000)
+  const url = 'https://hermes.pyth.network/v2/updates/price/' + ts + '?ids[]=' + FEEDS[round.symbol_id] + '&parsed=true'
+  const res = await fetch(url, { headers: { authorization: 'Bearer ' + PYTH_KEY } })
+  if (!res.ok) throw new Error('Hermes ' + res.status) // 401: no key or a bad one
+  const p = (await res.json()).parsed[0].price
+  console.log(row.event, 'operator', row.pyth_price, 'pyth', Number(p.price) * 10 ** Number(p.expo))
+}`
+
+// ---------------------------------------------------------------- page
+
 export function Docs() {
-  const [activeSection, setActiveSection] = useState<string>('overview')
+  const active = useScrollSpy(SECTION_IDS)
+  const mobileToc = useRef<HTMLDetailsElement>(null)
 
   return (
     <div className="min-h-screen bg-surface-950 text-surface-300">
@@ -115,68 +394,74 @@ export function Docs() {
           </Link>
           <div className="flex items-center gap-3">
             <span className="text-sm text-white font-semibold">Documentation</span>
-            <span className="px-2.5 py-1 rounded-lg bg-brand-500/15 text-brand-400 text-[11px] font-medium tabular-nums">
-              v0.5.0
+            <span className="px-2.5 py-1 rounded-lg bg-brand-500/15 text-brand-400 text-[11px] font-medium whitespace-nowrap">
+              NEAR testnet
             </span>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-10">
         {/* Sticky TOC sidebar */}
         <aside className="hidden lg:block">
-          <nav className="sticky top-24 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2">
-            {toc.map((group) => (
-              <div key={group.group} className="mb-6">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-surface-500 mb-2">
-                  {group.group}
-                </div>
-                <ul className="space-y-1">
-                  {group.items.map((item) => (
-                    <li key={item.id}>
-                      <a
-                        href={`#${item.id}`}
-                        onClick={() => setActiveSection(item.id)}
-                        className={`block text-sm py-1 border-l-2 pl-3 transition-colors ${
-                          activeSection === item.id
-                            ? 'border-brand-400 text-white'
-                            : 'border-transparent text-surface-400 hover:text-white hover:border-white/[0.08]'
-                        }`}
-                      >
-                        {item.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <nav aria-label="Table of contents" className="sticky top-24 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2 pb-6">
+            <TocLinks active={active} />
           </nav>
         </aside>
 
         {/* Main content */}
-        <main className="max-w-3xl">
+        <main className="max-w-3xl min-w-0">
           <h1 className="font-display text-3xl sm:text-4xl text-white mb-3">Veiled Markets Documentation</h1>
-          <NearPortNotice className="mb-6" />
-          <p className="text-surface-400 mb-10 leading-relaxed">
-            Complete reference for the Veiled Markets protocol on Aleo. Covers the contract
-            architecture, the TypeScript SDK, and practical recipes for building apps, bots,
-            and verification tools on top of it.
+          <p className="text-surface-400 mb-8 leading-relaxed">
+            How Veiled Markets works on NEAR testnet: the app, the contract <C>{CONTRACT}</C>, the zero-knowledge
+            circuit, the relayer and turbo oracle APIs, and recipes that read live testnet data.
           </p>
+
+          {/* Mobile TOC */}
+          <details ref={mobileToc} className="group lg:hidden mb-10 rounded-xl border border-white/[0.06] bg-white/[0.02]">
+            <summary className="flex cursor-pointer select-none list-none items-center justify-between px-4 py-3 text-sm font-medium text-white [&::-webkit-details-marker]:hidden">
+              On this page
+              <ChevronRight className="w-4 h-4 text-surface-500 transition-transform group-open:rotate-90" />
+            </summary>
+            <nav aria-label="Table of contents" className="px-4 pb-4 pt-1">
+              <TocLinks
+                active={active}
+                onPick={() => {
+                  if (mobileToc.current) mobileToc.current.open = false
+                }}
+              />
+            </nav>
+          </details>
 
           {/* ══════════════ GETTING STARTED ══════════════ */}
           <section className="mb-16">
             <SectionHeader id="overview" icon={BookOpen} title="Overview" />
-            <p className="text-sm leading-relaxed mb-4">
-              Veiled Markets is a privacy-preserving prediction market protocol deployed on
-              the Aleo blockchain. It combines four on-chain programs that share a single
-              user-facing surface:
-            </p>
+            <P>
+              Veiled Markets is a prediction market on NEAR testnet in which your balance and your positions are
+              private. One contract, <C>{CONTRACT}</C>, runs all of it:
+            </P>
             <div className="grid sm:grid-cols-2 gap-3 mb-4">
               {[
-                { icon: Layers, title: 'FAMM Markets', desc: 'Multi-outcome AMM markets in ALEO, USDCX, and USAD. FPMM curves with private share records.' },
-                { icon: Radio, title: 'Turbo Markets', desc: 'Rolling 5-minute UP/DOWN markets backed by the Pyth Network oracle.' },
-                { icon: Vote, title: 'Governance', desc: 'Multi-Voter Quorum with dispute escalation to committee/community tiers.' },
-                { icon: GitBranch, title: 'Parlay', desc: 'Multi-leg parlays that pay out only when every leg resolves in your favor.' },
+                {
+                  icon: Layers,
+                  title: 'Prediction markets',
+                  desc: '2 to 4 outcomes, priced by an FPMM market maker, in NEAR or USDC. Resolved by bonded votes, with a dispute window and a 5-member committee.',
+                },
+                {
+                  icon: Radio,
+                  title: 'Turbo rounds',
+                  desc: '5-minute UP/DOWN rounds on BTC, ETH and SOL, opened and resolved by the oracle operator. Winners split the pool.',
+                },
+                {
+                  icon: ListOrdered,
+                  title: 'Parlays',
+                  desc: '2 to 4 legs on different markets; every leg must win. Odds come from the live pools, and the contract settles from the leg markets.',
+                },
+                {
+                  icon: Shield,
+                  title: 'Private note pool',
+                  desc: 'Balances and positions are notes in a Poseidon Merkle tree. Each private action carries a Groth16 proof and is submitted by a relayer.',
+                },
               ].map((f) => (
                 <div key={f.title} className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                   <div className="flex items-center gap-2 mb-2">
@@ -187,917 +472,912 @@ export function Docs() {
                 </div>
               ))}
             </div>
-            <p className="text-sm text-surface-400 leading-relaxed">
-              All trades are encrypted using Aleo&apos;s zk-SNARKs — bet amounts, positions, and
-              balances are stored as encrypted records visible only to the owner. The SDK
-              abstracts the on-chain structure so third-party apps can integrate without
-              writing Leo literal parsers.
-            </p>
+            <P muted>
+              Trades, turbo bets, parlays, redemptions and claims are private: your browser proves that you own the notes
+              it spends, and a relayer submits the call, so your account never signs it. Deposits, withdrawals, market
+              creation and resolution votes are ordinary public calls from your wallet.
+            </P>
+            <Table
+              rows={[
+                ['Network', 'NEAR testnet (tokens have no monetary value)'],
+                ['Contract', <A key="c" href={`${EXPLORER}/address/${CONTRACT}`}>{CONTRACT}</A>],
+                ['Tokens', 'NEAR and USDC (Circle testnet USDC)'],
+                ['Wallets', 'Meteor Wallet, MyNearWallet'],
+                ['Explorer', <A key="e" href={EXPLORER}>testnet.nearblocks.io</A>],
+              ]}
+            />
+            <Callout>
+              Veiled Markets started on Aleo. This page documents the NEAR version only. Aleo features that are not
+              ported yet are listed under <A href="#limits">Limits</A>.
+            </Callout>
+          </section>
+
+          <section className="mb-16">
+            <SectionHeader id="use-the-app" icon={Wallet} title="Use the app" />
+            <Steps
+              steps={[
+                {
+                  title: 'Connect a wallet',
+                  body: (
+                    <>
+                      Meteor Wallet or MyNearWallet, on NEAR testnet. For USDC, use Circle&apos;s faucet at{' '}
+                      <A href="https://faucet.circle.com">faucet.circle.com</A> and choose NEAR Testnet. The faucet also
+                      registers your account with the USDC contract, which USDC withdrawals need.
+                    </>
+                  ),
+                },
+                {
+                  title: 'Unlock your private balance',
+                  body: (
+                    <>
+                      Settings → Private balance → <B>Unlock private balance (sign a message, no fee)</B>. This is a
+                      NEP-413 message signature, not a transaction. Your note key is derived from it, so the same wallet
+                      finds its notes on any device. If the wallet cannot sign messages, the app makes a random key and
+                      keeps it in this browser; notes made with that key can only be spent from this browser.
+                    </>
+                  ),
+                },
+                {
+                  title: 'Deposit',
+                  body: 'In the same panel, move NEAR or USDC from your wallet into your private balance (at least 0.01). The deposit is a public transaction from your account.',
+                },
+                {
+                  title: 'Trade',
+                  body: 'Open a market, pick an outcome and an amount, and confirm. Your browser builds a zero-knowledge proof in a few seconds and the relayer submits the trade, so no wallet approval is needed when your private balance covers the amount. If it does not, the wallet first asks you to approve a deposit for the difference.',
+                },
+                {
+                  title: 'Build a parlay',
+                  body: (
+                    <>
+                      Turn on <B>Parlay Mode</B> on the dashboard and pick one outcome in each of 2 to 4 markets, or use{' '}
+                      <B>Add &quot;…&quot; to Parlay</B> on a market page. Choose the stake token and amount in the Parlay
+                      Slip and confirm; this is private, like a trade. Your tickets are on{' '}
+                      <Link to="/my-parlays" className="text-brand-400 hover:text-brand-300">My Parlays</Link>.
+                    </>
+                  ),
+                },
+                {
+                  title: 'Bet on a turbo round',
+                  body: (
+                    <>
+                      Open <Link to="/turbo" className="text-brand-400 hover:text-brand-300">Turbo</Link>, choose BTC,
+                      ETH or SOL, pick UP or DOWN and an amount in NEAR.
+                    </>
+                  ),
+                },
+                {
+                  title: 'Collect',
+                  body: (
+                    <>
+                      When a market resolves, <Link to="/portfolio" className="text-brand-400 hover:text-brand-300">Portfolio</Link>{' '}
+                      shows <B>Redeem Winnings</B>; when it is cancelled, <B>Claim Refund</B>. Turbo winnings are claimed
+                      from Portfolio and parlay tickets from My Parlays. Every payout goes into your private balance.
+                    </>
+                  ),
+                },
+                {
+                  title: 'Withdraw',
+                  body: 'From the Private balance panel. The panel pays your connected account; the contract itself accepts any NEAR account as the recipient. Withdrawals are public.',
+                },
+              ]}
+            />
+            <Callout tone="tip">
+              Deposit before you trade. If your private balance is too small, the app tops it up from your wallet in the
+              same moment as the trade, and that timing links the trade to your account.
+            </Callout>
           </section>
 
           <section className="mb-16">
             <SectionHeader id="architecture" icon={Network} title="Architecture" />
-            <p className="text-sm leading-relaxed mb-4">
-              The system has three layers that the SDK orchestrates for you:
-            </p>
-            <CodeBlock title="layers">{`┌───────────────────────────────────────────────────────────┐
-│                       Your Application                      │
-│   (React app, Node.js bot, mobile, CLI tool, audit page)    │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-                          ▼
-┌───────────────────────────────────────────────────────────┐
-│                    @veiled-markets/sdk                       │
-│                                                              │
-│  • VeiledMarketsClient   — FAMM markets (v37/usdcx/usad)    │
-│  • TurboClient           — rolling 5-min markets (v9)        │
-│  • VeiledGovernanceClient — disputes + committee (v6)        │
-│  • ParlayClient          — multi-leg parlays (v3)            │
-│  • IndexerClient         — Supabase off-chain query layer    │
-│  • PythHermesClient      — Pyth price verification           │
-│  • Wallet adapters       — Shield / Puzzle / Leo             │
-│  • NodeExecutor          — Node.js tx submission via snarkos │
-└────────┬─────────────────┬──────────────────┬──────────────┘
-         │                 │                  │
-         ▼                 ▼                  ▼
-┌─────────────────┐ ┌─────────────┐ ┌─────────────────────┐
-│   Aleo RPC      │ │  Supabase   │ │    Pyth Hermes      │
-│ (programs,      │ │ (registry,  │ │  (historical prices) │
-│  mappings,      │ │  audit log, │ │                     │
-│  tx broadcast)  │ │  metadata)  │ │                     │
-└─────────────────┘ └─────────────┘ └─────────────────────┘
-         │
-         ▼
-┌───────────────────────────────────────────────────────────┐
-│                      Aleo Blockchain                          │
-│                                                                │
-│  • veiled_markets_v37.aleo       (ALEO FAMM)                  │
-│  • veiled_markets_usdcx_v7.aleo  (USDCX FAMM)                 │
-│  • veiled_markets_usad_v14.aleo  (USAD FAMM)                  │
-│  • veiled_governance_v6.aleo     (disputes + multisig)        │
-│  • veiled_parlay_v3.aleo         (multi-leg parlays)          │
-│  • veiled_turbo_v9.aleo          (rolling 5-min markets)      │
-└───────────────────────────────────────────────────────────┘`}</CodeBlock>
-            <p className="text-sm text-surface-400 leading-relaxed mt-4">
-              On-chain data (markets, pools, votes) lives in contract mappings and is queried
-              via the Aleo RPC explorer endpoint. Off-chain metadata (market question text,
-              turbo audit log, dispute state) lives in Supabase and is queried via
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">IndexerClient</code>.
-              Oracle price data for turbo markets lives at Pyth Hermes and can be cross-checked via
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">PythHermesClient</code>.
-            </p>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="installation" icon={Package} title="Installation" />
-            <CodeBlock title="terminal">{`npm install @veiled-markets/sdk @provablehq/sdk`}</CodeBlock>
-            <p className="mt-4 text-sm text-surface-400">
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">@provablehq/sdk</code> is a peer dependency for Aleo network primitives.
-              Node.js 18+ or modern browser with ES2020 support is required.
-            </p>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="quick-start" icon={Terminal} title="Quick Start" />
-            <p className="text-sm mb-3">Read on-chain state — works with no wallet:</p>
-            <CodeBlock title="typescript">{`import { createClient, createTurboClient } from '@veiled-markets/sdk'
-
-// FAMM market
-const client = createClient({ network: 'testnet' })
-const market = await client.getMarket('12345field')
-console.log(market?.prices)  // [0.45, 0.55] for binary
-
-// Turbo market
-const turbo = createTurboClient({ network: 'testnet' })
-const btc = await turbo.getMarket('7967815297...field')
-console.log(btc?.baselinePrice, btc?.closingPrice)`}</CodeBlock>
-
-            <p className="text-sm mt-6 mb-3">Submit a transaction from the browser:</p>
-            <CodeBlock title="typescript">{`import { detectWallet, createTurboClient, quoteBuyUpDown } from '@veiled-markets/sdk'
-
-const wallet = detectWallet()  // Shield / Puzzle / Leo
-if (!wallet) throw new Error('Install an Aleo wallet')
-
-await wallet.connect()
-
-const turbo = createTurboClient()
-const quote = quoteBuyUpDown(1_000_000n)  // 1 ALEO
-
-const call = turbo.buildBuyUpDownInputs({
-  marketId: '7967815297...field',
-  side: 'UP',
-  amountIn: quote.amountIn,
-  expectedShares: quote.expectedShares,
-  creditsRecord: await getRecordFromWallet(),  // wallet-specific
-})
-
-const result = await wallet.requestTransaction({
-  programId: call.programId,
-  functionName: call.functionName,
-  inputs: call.inputs,
-  fee: 1_500_000n,
-})
-console.log(result.transactionId)  // at1...`}</CodeBlock>
-
-            <p className="text-sm mt-6 mb-3">Submit a transaction from a Node.js bot:</p>
-            <CodeBlock title="typescript">{`import { createNodeExecutor, createTurboClient, quoteBuyUpDown } from '@veiled-markets/sdk'
-
-const executor = createNodeExecutor({
-  privateKey: process.env.ALEO_PRIVATE_KEY!,  // APrivateKey1zkp...
-  // DRY_RUN=1 env var also supported
-})
-
-const turbo = createTurboClient()
-const call = turbo.buildBuyUpDownInputs({ /* ... */ })
-const result = await executor.execute(call)
-console.log(\`Broadcast \${result.txId}\`)  // at1...`}</CodeBlock>
+            <CodeBlock title="components">{`Browser (React + Vite), frontend/src/lib/near/
+  wallet   NEAR Wallet Selector: Meteor Wallet, MyNearWallet
+  reads    contract view calls over NEAR RPC
+  notes    scans leaves, decrypts memos, builds Merkle paths
+  prover   snarkjs Groth16 in a web worker (/zk/spend.wasm, /zk/spend_final.zkey)
+   │
+   ├─ public calls signed by your wallet ────────┐
+   │  deposit_near, create_market, votes …       │
+   │                                             ▼
+   └─ proof + ext_data ─▶ Relayer ─ transact ─▶  v1.veiled-markets.testnet
+                          veiled-relayer.testnet  ├─ note pool: Poseidon tree, nullifiers
+                                                  ├─ markets: FPMM AMM, LP, fees
+Turbo oracle, veiled-oracle.testnet               ├─ resolution: votes, disputes, committee
+  Pyth prices ─ create / resolve rounds ───────▶  ├─ turbo rounds
+                                                  └─ parlays: tickets, pool, settlement
+USDC (Circle, NEP-141) ─ ft_transfer_call ─────▶
+                       ◀─ ft_transfer ─────────── withdrawals and USDC payouts`}</CodeBlock>
+            <P>
+              One contract holds the note pool and every market type, so each private action is a single synchronous
+              call. The only cross-contract calls are USDC transfers in (<C>ft_transfer_call</C>) and out (
+              <C>ft_transfer</C>) and NEAR transfers out. The market list and the market text come from the contract
+              itself (the metadata is stored on chain); a Supabase cache is optional.
+            </P>
+            <Table
+              head={['Call', 'Signed by', 'Public']}
+              rows={[
+                ['deposit_near, USDC ft_transfer_call', 'your account', 'account, token, amount'],
+                ['transact: trade, bet, parlay, redeem, claim, withdraw', 'the relayer', 'the action and its amounts, not your account'],
+                ['create_market, vote_outcome, dispute_resolution, bond and fee claims', 'your account', 'everything'],
+                ['close_market, finalize_votes, confirm_resolution, settle_parlay', 'anyone', 'everything'],
+                ['create_turbo_market, resolve_turbo_market', 'the oracle operator', 'everything'],
+              ]}
+            />
           </section>
 
           {/* ══════════════ PROTOCOL ══════════════ */}
-          <section className="mb-16">
-            <SectionHeader id="protocol-famm" icon={Layers} title="FAMM Markets" />
-            <p className="text-sm leading-relaxed mb-4">
-              FAMM (Fixed-Product Automated Market Maker) markets are the protocol&apos;s main
-              trading venue. Each market has 2–4 named outcomes and prices are determined
-              algorithmically using an FPMM curve. Winners redeem 1:1 after resolution.
-            </p>
-            <ul className="list-disc list-inside space-y-2 text-sm text-surface-400 mb-4">
-              <li>
-                <strong className="text-surface-300">Complete-set minting</strong> — every market is
-                fully collateralized across its outcomes at all times.
-              </li>
-              <li>
-                <strong className="text-surface-300">Token-denominated variants</strong> — ALEO
-                (v37), USDCX (v7), USAD (v14). Each token has its own deployed contract with
-                identical transitions but different record primitives.
-              </li>
-              <li>
-                <strong className="text-surface-300">Liquidity provision</strong> — anyone can add
-                liquidity to earn 1% LP fee. LP shares are non-transferable.
-              </li>
-              <li>
-                <strong className="text-surface-300">Resolution</strong> — Multi-Voter Quorum: any
-                wallet can vote by posting a 1-token bond; after quorum, a 3-hour dispute
-                window applies; after dispute window, outcome is confirmed and winners claim.
-              </li>
-            </ul>
-          </section>
+          <GroupHeading title="Protocol">
+            Contract behaviour, with the values the testnet deployment uses. Durations are in ticks: one tick is 4 seconds
+            of block time (<C>tick = floor(block_timestamp_ms / 4000)</C>, view <C>get_height</C>).
+          </GroupHeading>
 
           <section className="mb-16">
-            <SectionHeader id="protocol-turbo" icon={Radio} title="Turbo Markets" />
-            <p className="text-sm leading-relaxed mb-4">
-              Turbo markets are rolling 5-minute UP/DOWN prediction markets powered by the Pyth
-              Network oracle. A trusted operator backend creates a new round every 5 minutes
-              for each of 10 crypto symbols (BTC, ETH, SOL, DOGE, XRP, BNB, ADA, AVAX, LINK,
-              DOT), freezes the Pyth quote at deadline, and resolves on-chain automatically.
-            </p>
-            <ul className="list-disc list-inside space-y-2 text-sm text-surface-400 mb-4">
-              <li>
-                <strong className="text-surface-300">Parimutuel payouts</strong> — winners split the
-                entire pool (minus 0.5% protocol fee) proportionally to their bet. No FPMM curve.
-              </li>
-              <li>
-                <strong className="text-surface-300">Shared vault</strong> — all turbo rounds share a
-                single on-chain vault for liquidity. No per-round seed capital needed.
-              </li>
-              <li>
-                <strong className="text-surface-300">Automatic resolution</strong> — no voting, no
-                disputes. Resolution is driven by the oracle and can be publicly verified at
-                <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">/verify/turbo/&lt;market_id&gt;</code>.
-              </li>
-              <li>
-                <strong className="text-surface-300">Emergency cancel</strong> — if the operator fails
-                to resolve within 60 blocks (~4 min) past deadline, anyone can call
-                <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">emergency_cancel</code>
-                so bettors refund their stake.
-              </li>
-            </ul>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="protocol-governance" icon={Vote} title="Governance" />
-            <p className="text-sm leading-relaxed mb-4">
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_governance_v6.aleo</code>{' '}
-              is the coordination layer for disputes, committee decisions, and multisig treasury
-              management. It cross-program calls the market contracts to apply overrides on
-              escalated markets.
-            </p>
-            <ul className="list-disc list-inside space-y-2 text-sm text-surface-400 mb-4">
-              <li>
-                <strong className="text-surface-300">Dispute escalation</strong> — Tier 1 (challenge window),
-                Tier 2 (committee), Tier 3 (community). Each tier has different quorum and timelock.
-              </li>
-              <li>
-                <strong className="text-surface-300">Committee decisions</strong> — 5-member committee
-                votes on disputed outcomes. Majority wins after the committee window expires.
-              </li>
-              <li>
-                <strong className="text-surface-300">Multisig treasury</strong> — 3-of-N signatures required
-                for treasury withdrawals, fee changes, and parameter updates.
-              </li>
-              <li>
-                <strong className="text-surface-300">Emergency pause</strong> — governance can pause trading
-                at 5% quorum. Unpause requires the same quorum.
-              </li>
-            </ul>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="protocol-parlay" icon={GitBranch} title="Parlay" />
-            <p className="text-sm leading-relaxed mb-4">
-              Multi-leg parlays combine multiple market outcomes into a single ticket. A parlay
-              pays out only when every leg resolves in your favor. The{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_parlay_v3.aleo</code>{' '}
-              contract validates all legs at settlement time and issues a single payout record.
-            </p>
-            <ul className="list-disc list-inside space-y-2 text-sm text-surface-400">
-              <li>2 to 8 legs per parlay</li>
-              <li>Combined odds = product of individual leg prices</li>
-              <li>2% protocol fee on winnings</li>
-              <li>~12-hour dispute window per underlying market must clear before payout</li>
-            </ul>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="protocol-privacy" icon={Shield} title="Privacy Model" />
-            <p className="text-sm leading-relaxed mb-4">
-              All trades are encrypted using Aleo&apos;s zk-SNARKs. The privacy boundary is clear:
-            </p>
+            <SectionHeader id="privacy" icon={Shield} title="Privacy model" />
+            <P>
+              A note is a hidden UTXO: a commitment in a depth-20 Poseidon Merkle tree held by the contract. Only the
+              holder of the note key can spend it, and spending publishes a nullifier, not the note.
+            </P>
+            <CodeBlock title="notes (circomlib Poseidon on BN254)">{`sk          note secret key, derived from your wallet signature
+pk          = Poseidon(sk)
+ownerBlind  = Poseidon(pk, blinding)
+commitment  = Poseidon(kind, asset, sub, amount, ownerBlind)
+nullifier   = Poseidon(sk, commitment)     published when the note is spent`}</CodeBlock>
+            <Table
+              head={['kind', 'Note', 'asset', 'sub', 'amount']}
+              rows={[
+                ['1', 'Private balance', 'token id (1 NEAR, 3 USDC)', '0', 'micro units'],
+                ['2', 'Outcome shares', 'market id', 'outcome 1–4', 'shares'],
+                ['3', 'LP position', 'market id', '0', 'LP shares'],
+                ['4', 'Turbo bet', 'round id', '1 UP, 2 DOWN', 'stake after the fee'],
+                ['5', 'Parlay ticket', 'parlay id', '0', 'potential payout'],
+              ]}
+            />
+            <P muted>
+              Every private action spends up to two notes of the same kind, asset and sub, uses <C>out_amount</C> of their
+              total, and returns the rest to you as a change note. The contract then mints one new note for the result
+              (shares, a balance, a ticket) to the owner named in the action. It never learns which leaves were spent.
+            </P>
             <div className="grid sm:grid-cols-2 gap-3 mb-4">
               <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-700/30">
                 <div className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-2">Private</div>
                 <ul className="text-xs text-surface-300 space-y-1 leading-relaxed">
-                  <li>• Bet amounts</li>
-                  <li>• Which outcome you bought</li>
-                  <li>• Your share balances per market</li>
-                  <li>• Credits records (transfer history)</li>
-                  <li>• LP share balances</li>
+                  <li>• Which account holds which shares, LP note, turbo bet or parlay ticket</li>
+                  <li>• Who placed each trade, bet or parlay</li>
+                  <li>• Your private balance</li>
+                  <li>• Your history of trades and claims</li>
                 </ul>
               </div>
               <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-700/30">
                 <div className="text-xs font-semibold text-rose-400 uppercase tracking-wider mb-2">Public</div>
                 <ul className="text-xs text-surface-300 space-y-1 leading-relaxed">
-                  <li>• Market existence + question</li>
-                  <li>• Total pool liquidity</li>
-                  <li>• Current outcome prices</li>
-                  <li>• Resolution outcome</li>
-                  <li>• Fee rates + governance state</li>
+                  <li>• Deposits and withdrawals: account, token, amount</li>
+                  <li>• Each trade: market, outcome, amount (the AMM pool is public)</li>
+                  <li>• Each turbo bet: round, side, amount</li>
+                  <li>• Each parlay: legs, stake, potential payout, status</li>
+                  <li>• Market creation, votes, disputes and bonds</li>
                 </ul>
               </div>
             </div>
-            <p className="text-sm text-surface-400 leading-relaxed">
-              Off-chain data (like market question text stored in Supabase) is public by design —
-              only the per-user financial data is encrypted.
-            </p>
+            <H3>Finding your notes</H3>
+            <P muted>
+              Each leaf carries a memo encrypted with AES-256-GCM under a key derived (HKDF) from your note seed. Your
+              browser reads the leaves with <C>get_leaves</C> and keeps the ones it can decrypt, so your notes can be
+              recovered from the chain alone. The seed comes from the NEP-413 signature and is cached in this
+              browser&apos;s local storage for your account.
+            </P>
+            <Callout tone="warn">
+              Timing and amounts are not hidden. A deposit of 1.37 NEAR followed seconds later by a 1.37 NEAR trade is
+              easy to link. The relayer also sees the IP address a request comes from, though not your account.
+            </Callout>
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="on-chain-programs" icon={Box} title="On-Chain Programs" />
-            <div className="space-y-3">
-              {[
-                { id: 'veiled_markets_v37.aleo', tag: '25 transitions', desc: 'ALEO-denominated FAMM market contract. Primary venue.' },
-                { id: 'veiled_markets_usdcx_v7.aleo', tag: '25 transitions', desc: 'USDCX-denominated variant. Uses Token records + MerkleProof.' },
-                { id: 'veiled_markets_usad_v14.aleo', tag: '25 transitions', desc: 'USAD-denominated variant. Same mechanism as USDCX.' },
-                { id: 'veiled_governance_v6.aleo', tag: '31 transitions (at limit)', desc: 'Disputes, committee votes, multisig treasury, emergency pause.' },
-                { id: 'veiled_parlay_v3.aleo', tag: 'multi-leg', desc: 'Composes multiple market outcomes into a single parlay slip.' },
-                { id: 'veiled_turbo_v9.aleo', tag: '10 transitions', desc: 'Rolling 5-min Pyth-backed UP/DOWN markets. Single shared vault.' },
-              ].map((p) => (
-                <div key={p.id} className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                  <div className="flex items-center justify-between mb-2">
-                    <code className="font-mono text-sm text-white">{p.id}</code>
-                    <span className="text-[10px] text-surface-500 uppercase tracking-wider">{p.tag}</span>
-                  </div>
-                  <p className="text-xs text-surface-400 leading-relaxed">{p.desc}</p>
-                </div>
-              ))}
-            </div>
-          </section>
+            <SectionHeader id="markets" icon={Layers} title="Prediction markets" />
+            <P>
+              Anyone can create a market with 2, 3 or 4 outcomes. The initial liquidity is split equally across the
+              outcome reserves, and the creator receives it as a private LP note.
+            </P>
+            <Table
+              head={['Rule', 'Value']}
+              rows={[
+                ['Collateral', <>NEAR attached to <C>create_market</C>, or USDC through <C>ft_transfer_call</C> with a <C>create_market</C> message</>],
+                ['Initial liquidity', 'at least 0.01 (min_liquidity = 10,000 micro units)'],
+                ['Deadlines', 'ticks; the deadline must be in the future and the resolution deadline after it'],
+                ['Metadata', <>JSON text up to 2048 bytes, stored on chain: <C>q</C> question, <C>d</C> description, <C>s</C> resolution source, <C>o</C> outcome labels, <C>i</C> image</>],
+                ['question_hash', 'up to 96 characters'],
+              ]}
+            />
+            <H3>Pricing</H3>
+            <P muted>
+              Each market is a fixed-product market maker (FPMM) with the same integer math as the Aleo program. An
+              outcome&apos;s price is proportional to the inverse of its reserve:
+            </P>
+            <CodeBlock title="FPMM">{`price_i = (1 / r_i) / Σ_k (1 / r_k)
 
-          {/* ══════════════ SDK REFERENCE ══════════════ */}
-          <div className="mb-10 border-t border-white/[0.04] pt-10">
-            <h2 className="text-2xl font-display text-white mb-2">SDK Reference</h2>
-            <p className="text-sm text-surface-400 leading-relaxed">
-              Each client class is a typed wrapper around one contract family or off-chain service.
-              All transaction builders return a{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">(programId, functionName, inputs[])</code>{' '}
-              tuple — pass it to a wallet adapter or{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">NodeExecutor</code>{' '}
-              to submit.
-            </p>
-          </div>
-
-          <section className="mb-16">
-            <SectionHeader id="sdk-client" icon={Code} title="VeiledMarketsClient" />
-            <p className="text-sm leading-relaxed mb-4">
-              Main client for FAMM markets (ALEO / USDCX / USAD). Reads market/pool/resolution
-              state from the Aleo RPC and builds transaction inputs for all user flows.
-            </p>
-            <div className="space-y-3 mb-4">
-              {[
-                { name: 'getMarket(marketId)', returns: 'MarketWithStats | null', desc: 'Fetch a market with pool, resolution, fees, prices, and volume in one call.' },
-                { name: 'getAMMPool(marketId)', returns: 'AMMPool | null', desc: 'Raw pool reserves + totals (u128s). Use with contract-math helpers to quote trades.' },
-                { name: 'getMarketFees(marketId)', returns: 'MarketFees | null', desc: 'Accumulated protocol + creator fees for a market.' },
-                { name: 'getMarketDispute(marketId)', returns: 'DisputeData | null', desc: 'Dispute info including disputer, bond, and proposed outcome.' },
-                { name: 'getActiveMarkets(limit?)', returns: 'MarketWithStats[]', desc: 'List all markets from the indexer and enrich with live pool state. Requires setIndexer().' },
-                { name: 'setIndexer(indexer)', returns: 'void', desc: 'Attach a Supabase IndexerClient. Without it, list methods return empty arrays.' },
-                { name: 'searchMarkets(query, limit?)', returns: 'MarketWithStats[]', desc: 'Full-text ilike search on question text via indexer.' },
-                { name: 'getTrendingMarkets(limit?)', returns: 'MarketWithStats[]', desc: 'Top markets sorted by on-chain pool.totalVolume.' },
-                { name: 'buildCreateMarketInputs(params)', returns: 'MarketCall', desc: 'Build create_market[_token] tx inputs. Accepts deadline as Date.' },
-                { name: 'buildBuySharesInputs(params, tokenType?)', returns: 'MarketCall', desc: 'Build buy_shares_* tx inputs. expected_shares is a required contract input — quote first.' },
-                { name: 'buildSellSharesInputs(params, tokenType?)', returns: 'MarketCall', desc: 'Build sell_shares_* tx inputs with fee-bps snapshot.' },
-                { name: 'buildAddLiquidityInputs(params, tokenType?)', returns: 'MarketCall', desc: 'Build add_liquidity_* tx inputs.' },
-                { name: 'buildRedeemSharesInputs(shareRecord, tokenType?)', returns: 'MarketCall', desc: 'Redeem winning shares after resolution.' },
-                { name: 'buildClaimRefundInputs(shareRecord, tokenType?)', returns: 'MarketCall', desc: 'Claim refund for a cancelled market.' },
-              ].map((m) => (
-                <div key={m.name} className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
-                    <code className="text-sm font-mono text-brand-400">{m.name}</code>
-                    <span className="text-xs text-surface-500">→ {m.returns}</span>
-                  </div>
-                  <p className="text-xs text-surface-400">{m.desc}</p>
-                </div>
-              ))}
-            </div>
-            <CodeBlock title="typescript">{`import { createClient, createIndexerClient } from '@veiled-markets/sdk'
-
-const client = createClient({ network: 'testnet' })
-client.setIndexer(createIndexerClient({
-  supabaseUrl: process.env.SUPABASE_URL!,
-  supabaseKey: process.env.SUPABASE_ANON_KEY!,
-}))
-
-// Now list methods return real data
-const top = await client.getTrendingMarkets(10)
-const search = await client.searchMarkets('bitcoin')`}</CodeBlock>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="sdk-turbo" icon={Radio} title="TurboClient" />
-            <p className="text-sm leading-relaxed mb-4">
-              Builds transactions and reads state for{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_turbo_v9.aleo</code>.
-              Only user-callable transitions are exposed — create/resolve are operator-only.
-            </p>
-            <div className="space-y-3 mb-4">
-              {[
-                { name: 'buildBuyUpDownInputs(params)', desc: 'Bet on UP or DOWN. Returns shareNonce — persist it alongside the resulting TurboShare.' },
-                { name: 'buildClaimWinningsInputs(params)', desc: 'Claim payout on a winning share. declaredPayout must match the contract formula EXACTLY.' },
-                { name: 'buildClaimRefundInputs(params)', desc: 'Refund after emergency_cancel. expectedAmount = TurboShare.refund amount.' },
-                { name: 'buildEmergencyCancelInputs(marketId)', desc: 'Permissionless cancel after resolution_deadline (300 blocks past deadline).' },
-                { name: 'getMarket(marketId)', desc: 'Fetch the on-chain TurboMarket struct.' },
-                { name: 'getPool(marketId)', desc: 'Fetch the TurboPool with total_up/down_shares and total_up/down_amount.' },
-                { name: 'getMarketPayouts(marketId)', desc: 'market_payouts[market_id] — total pool committed at resolve.' },
-                { name: 'getVaultBalance()', desc: 'Shared vault_balance[0u8] across all turbo markets.' },
-                { name: 'isShareRedeemed(shareId)', desc: 'Check share_redeemed mapping to guard duplicate claims.' },
-              ].map((m) => (
-                <div key={m.name} className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                  <code className="text-sm font-mono text-brand-400 block mb-1">{m.name}</code>
-                  <p className="text-xs text-surface-400">{m.desc}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-sm text-surface-400 mb-3">
-              Off-chain quote helpers that mirror contract arithmetic 1:1:
-            </p>
-            <CodeBlock title="typescript">{`import { quoteBuyUpDown, quoteTurboPayout } from '@veiled-markets/sdk'
-
-// Quote a buy — mirrors buy_up_down_fin exactly
-const quote = quoteBuyUpDown(1_000_000n)  // 1 ALEO
-// → { protocolFee: 5000n, amountToPool: 995000n, expectedShares: 995000n }
-
-// Quote a claim_winnings payout — mirrors claim_winnings_fin exactly
-const payout = quoteTurboPayout(
-  shareClaimUnits,      // your TurboShare.claimUnits
-  marketPayouts,        // from getMarketPayouts()
-  totalWinningShares,   // pool.totalUpShares OR totalDownShares (claim units)
-)
-// Contract asserts declaredPayout == payout strictly — use this value.`}</CodeBlock>
+buy outcome i with a tokens (after fees):
+  x = r_i
+  for every other outcome k:   x = x × r_k / (r_k + a)
+  shares_out = r_i + a − x
+  new reserves:  r_i = x,  r_k = r_k + a`}</CodeBlock>
+            <H3>Fees</H3>
+            <Table
+              head={['', 'Protocol', 'Creator', 'LP', 'Total']}
+              rows={[
+                ['Buy (of the amount in)', '0.5%', '0.5%', '—', '1.0%'],
+                ['Sell (of tokens_desired)', '0.5%', '0.5%', '1.0%', '2.0%'],
+              ]}
+            />
+            <P muted>
+              Protocol fees go to the treasury. Creator fees accumulate in the market, and the creator collects them once
+              with <C>withdraw_creator_fees</C> after resolution. The LP fee stays in the pool. The owner can change the
+              rates with <C>set_governance_value</C>; their sum must stay below 100%.
+            </P>
+            <H3>Trading rules</H3>
+            <Bullets>
+              <li>Minimum trade 0.001 (min_trade = 1,000 micro units), for buys and for the amount a sell asks for.</li>
+              <li>Buying, selling and adding liquidity are open while the market is Active and the current tick is at or before the deadline.</li>
+              <li>
+                Slippage guards: <C>min_shares_out</C> (buy), the note amount offered (sell), <C>min_lp_shares</C> and{' '}
+                <C>min_tokens_out</C>. A trade that would fall short fails with <C>ERR_SLIPPAGE</C>.
+              </li>
+              <li>
+                While the owner has paused the contract, creating markets, trading, adding liquidity, turbo bets and new
+                parlays stop. Redemptions, refunds, claims, deposits and withdrawals keep working.
+              </li>
+            </Bullets>
+            <H3>Liquidity and payouts</H3>
+            <Bullets>
+              <li><B>add_liquidity</B>: at least 0.01; LP shares = amount × total LP shares / sum of reserves, and the amount is spread over the reserves in proportion.</li>
+              <li><B>redeem</B>: on a Resolved market, winning shares pay 1:1 in the market&apos;s token.</li>
+              <li><B>refund</B>: on a Cancelled market, shares pay their share of the traders&apos; collateral (shares × trader collateral / outstanding shares).</li>
+              <li>
+                <B>withdraw_lp</B>: on a Resolved market, after the dispute deadline plus the winner-claim priority window
+                (75 ticks on testnet), LPs receive their share of what is left once unredeemed winning shares and unclaimed
+                creator fees are reserved. On a Cancelled market, their share of what is left after the traders&apos;
+                collateral.
+              </li>
+            </Bullets>
+            <H3>Market statuses</H3>
+            <Table
+              head={['status', 'Name', 'Meaning']}
+              rows={[
+                ['1', 'Active', 'trading open until the deadline'],
+                ['2', 'Closed', 'close_market was called after the deadline'],
+                ['5', 'Pending resolution', 'at least one vote; the voting window is running'],
+                ['6', 'Pending finalization', 'votes finalized; the dispute window is running'],
+                ['7', 'Disputed', 'waiting for the committee or the timeout'],
+                ['3', 'Resolved', 'the winning outcome is final; redeem is open'],
+                ['4', 'Cancelled', 'refunds are open'],
+              ]}
+            />
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-governance" icon={Vote} title="VeiledGovernanceClient" />
-            <p className="text-sm leading-relaxed mb-4">
-              Reads dispute state, committee decisions, and resolver profiles from{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_governance_v6.aleo</code>.
-              Also exposes the initiate-escalation flow (split per token type) and the
-              cross-program governance_resolve calls.
-            </p>
-            <div className="space-y-3">
-              {[
-                { name: 'getCommitteeDecision(marketId)', desc: 'Committee vote tally + finalization status.' },
-                { name: 'getMarketDisputeState(marketId, tokenType)', desc: 'Full dispute state including disputer, bond, tier, and final outcome.' },
-                { name: 'getCommitteeVoteCount(marketId)', desc: 'Number of votes cast so far (0–5).' },
-                { name: 'getCommitteeMembers()', desc: 'List of 5 committee addresses (set by governance multisig).' },
-                { name: 'buildInitiateEscalationInputs(marketId, tokenType)', desc: 'Escalate a disputed market to the committee tier.' },
-                { name: 'buildGovernanceResolveInputs(marketId, tokenType, outcome, tier)', desc: 'Cross-program resolve call from governance to the market contract.' },
-              ].map((m) => (
-                <div key={m.name} className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                  <code className="text-sm font-mono text-brand-400 block mb-1">{m.name}</code>
-                  <p className="text-xs text-surface-400">{m.desc}</p>
-                </div>
-              ))}
-            </div>
+            <SectionHeader id="resolution" icon={Gavel} title="Resolution" />
+            <P>
+              Markets resolve by bonded voting from ordinary NEAR accounts, with a dispute window and a 5-member committee
+              as the last step. Bonds are paid in NEAR for every market, whatever its collateral. The testnet windows are
+              short, so a demo market resolves in about ten minutes.
+            </P>
+            <Steps
+              steps={[
+                {
+                  title: 'Close',
+                  body: <>After the deadline anyone calls <C>close_market</C>. Voting also accepts an Active market whose deadline has passed.</>,
+                },
+                {
+                  title: 'Vote',
+                  body: <><C>vote_outcome(market_id, outcome)</C> with exactly 0.1 NEAR attached, one vote per account, until the resolution deadline. The first vote starts the voting window (75 ticks, 5 minutes).</>,
+                },
+                {
+                  title: 'Finalize',
+                  body: <>After the window, <C>finalize_votes</C> needs at least min_voters votes (1 on testnet). The outcome with the largest total bond wins; a tie goes to the lower outcome number. This starts the dispute window (75 ticks).</>,
+                },
+                {
+                  title: 'Confirm or dispute',
+                  body: <>Without a dispute, <C>confirm_resolution</C> after the window resolves the market, and bonds on losing outcomes go to the treasury. To dispute, call <C>dispute_resolution(market_id, proposed_outcome)</C> inside the window, naming a different outcome and attaching at least 3 × the total voter bonds.</>,
+                },
+                {
+                  title: 'Committee',
+                  body: <>On a disputed market anyone calls <C>initiate_escalation</C>. The 5 committee members vote with <C>committee_vote_resolve</C>, one vote each. <C>finalize_committee_vote</C> succeeds when one outcome has at least 3 votes and no tie at the top, and <C>governance_resolve</C> then resolves the market. Bonds on other outcomes are forfeited, and so is the dispute bond if the committee chose an outcome other than the disputer&apos;s.</>,
+                },
+                {
+                  title: 'Timeout',
+                  body: <>A market Disputed for longer than disputed_timeout (900 ticks, 1 hour) can be cancelled by anyone.</>,
+                },
+              ]}
+            />
+            <H3>Bonds, fees and cancellation</H3>
+            <Bullets>
+              <li><B>claim_voter_bond(market_id)</B>: voters on the winning outcome once the market is Resolved; every voter once it is Cancelled.</li>
+              <li><B>claim_dispute_bond(market_id)</B>: the disputer, if the proposed outcome won or the market was cancelled.</li>
+              <li><B>withdraw_creator_fees(market_id)</B>: the creator, once, after the dispute deadline plus the winner-claim priority window.</li>
+              <li>
+                <B>cancel_market(market_id)</B>: the creator while the market is Active with no volume; anyone after the
+                resolution deadline unless the market is Resolved, Cancelled or Disputed; anyone when it has been Disputed
+                for longer than disputed_timeout.
+              </li>
+            </Bullets>
+            <Callout tone="warn">
+              Public payouts (bond refunds, creator fees, treasury and parlay pool withdrawals) are plain transfers. If one
+              fails, for example a USDC creator fee to an account that is not registered with the USDC contract, the
+              contract books the amount into the treasury and logs a <C>payout_failed</C> event.
+            </Callout>
+            <H3>Testnet configuration (get_config)</H3>
+            <Table
+              head={['Parameter', 'Value']}
+              rows={[
+                ['vote_window', '75 ticks (5 min)'],
+                ['dispute_window', '75 ticks (5 min)'],
+                ['winner_claim_priority', '75 ticks (5 min)'],
+                ['disputed_timeout', '900 ticks (1 h)'],
+                ['vote_bond', '100000 (0.1 NEAR)'],
+                ['min_voters', '1'],
+                ['dispute_bond_multiplier', '3'],
+                ['min_trade', '1000 (0.001)'],
+                ['min_liquidity', '10000 (0.01)'],
+                ['protocol_fee_bps / creator_fee_bps / lp_fee_bps', '50 / 50 / 100'],
+                ['committee_quorum', '3'],
+              ]}
+            />
+            <CodeBlock title="vote from the command line (near-cli-rs)">{`near contract call-function as-transaction v1.veiled-markets.testnet vote_outcome \\
+  json-args '{"market_id":"30","outcome":1}' prepaid-gas '30 Tgas' attached-deposit '0.1 NEAR' \\
+  sign-as <your-account>.testnet network-config testnet sign-with-keychain send`}</CodeBlock>
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-parlay" icon={GitBranch} title="ParlayClient" />
-            <p className="text-sm leading-relaxed mb-4">
-              Builders for{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_parlay_v3.aleo</code>{' '}
-              and off-chain quote helpers for combined odds computation.
-            </p>
-            <CodeBlock title="typescript">{`import {
-  createParlayClient,
-  calculateParlayQuote,
-  validateParlayLegs,
-  type ParlayLeg,
-} from '@veiled-markets/sdk'
-
-const legs: ParlayLeg[] = [
-  { marketId: 'abc...field', outcome: 1 },
-  { marketId: 'def...field', outcome: 2 },
-  { marketId: 'ghi...field', outcome: 1 },
-]
-
-const validation = validateParlayLegs(legs)
-if (!validation.valid) throw new Error(validation.error)
-
-const quote = calculateParlayQuote(legs, stakeInMicro, pricesByLeg)
-// → { combinedOddsBps, potentialPayout, fee }
-
-const parlay = createParlayClient({ network: 'testnet' })
-const call = parlay.buildCreateParlayInputs({
-  legs,
-  stake: stakeInMicro,
-  minPayout: quote.potentialPayout * 98n / 100n,  // 2% slippage
-})`}</CodeBlock>
+            <SectionHeader id="turbo" icon={Radio} title="Turbo rounds" />
+            <P>
+              Turbo rounds are short UP/DOWN markets on a crypto price. The oracle operator account{' '}
+              <C>veiled-oracle.testnet</C> opens a round per symbol every 5 minutes (75 ticks) and resolves it at the
+              deadline; each round&apos;s closing price becomes the next round&apos;s baseline. There is no voting and no
+              dispute. The trust sits with the operator, so the contract checks every price it submits and the operator
+              logs each one for public verification.
+            </P>
+            <Table
+              head={['Rule', 'Value']}
+              rows={[
+                ['Symbols', '1 BTC, 2 ETH, 3 SOL'],
+                ['Duration', '15 to 900 ticks (1 to 60 min); the app runs 75 ticks'],
+                ['Stake token', 'NEAR only'],
+                ['Minimum bet', '0.001 NEAR'],
+                ['Fee', '0.5% of each bet, to the treasury'],
+                ['Betting closes', 'at the deadline tick'],
+                ['Prices', 'USD with 6 decimals (price × 10^6)'],
+              ]}
+            />
+            <H3>What the contract checks</H3>
+            <Bullets>
+              <li>
+                <B>create_turbo_market(symbol_id, deadline, baseline_price, baseline_conf, baseline_block)</B>: operator
+                only; the baseline was observed at most 60 ticks ago; its confidence interval is at most 0.5% of the price.
+              </li>
+              <li>
+                <B>resolve_turbo_market(market_id, closing_price, closing_conf, closing_block)</B>: operator only; the
+                closing block lies between the deadline and the deadline + 60 ticks; the call comes no later than the
+                deadline + 300 ticks (20 min); the confidence is at most 0.5%; the close is within 50% of the baseline.
+              </li>
+              <li>UP wins if the close is above the baseline. Otherwise DOWN wins, so a tie goes to DOWN.</li>
+            </Bullets>
+            <H3>Payouts</H3>
+            <CodeBlock title="pari-mutuel">{`pool   = total_up + total_down              (stakes after the 0.5% fee)
+payout = your_stake × pool / winning_side_total`}</CodeBlock>
+            <P muted>
+              If nobody bet on the winning side, the round becomes Cancelled and every bet is refunded. Bets and claims are
+              private: <C>turbo_buy</C> spends a NEAR balance note and mints a turbo note (kind 4), and{' '}
+              <C>turbo_claim</C> turns a winning or cancelled turbo note into a NEAR balance note. Example: round 161 (BTC)
+              had a baseline of 73,769.812924 and closed at 73,613.086499, so DOWN won; its one bet of 0.1 NEAR staked
+              0.0995 after the fee and was paid 0.0995.
+            </P>
+            <H3>Cancellation and statuses</H3>
+            <Bullets>
+              <li><B>emergency_cancel_turbo(market_id)</B>: the operator after the resolution deadline (deadline + 300 ticks); anyone after a further 5000 ticks (about 5.5 h).</li>
+              <li><B>prune_turbo(market_ids)</B>: the operator or owner deletes finished rounds that had no bets (up to 100 per call). Rounds with bets are never removed.</li>
+              <li>Statuses: 1 Active, 2 Resolved, 3 Cancelled.</li>
+              <li><C>get_turbo_markets</C> lists only rounds that received a bet; <C>get_latest_turbo(symbol_id)</C> returns the current round.</li>
+            </Bullets>
+            <H3>Pyth price feeds</H3>
+            <Table
+              head={['Symbol', 'Pyth feed id']}
+              rows={[
+                ['BTC/USD', <C key="b">0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43</C>],
+                ['ETH/USD', <C key="e">0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace</C>],
+                ['SOL/USD', <C key="s">0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d</C>],
+              ]}
+            />
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-indexer" icon={Database} title="IndexerClient" />
-            <p className="text-sm leading-relaxed mb-4">
-              Typed wrapper around the Veiled Markets Supabase project. The Aleo RPC can&apos;t
-              enumerate markets (mappings are key-addressable only), so the frontend maintains a
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded mx-1">market_registry</code>
-              table off-chain that mirrors every create tx. IndexerClient wraps that table and
-              related ones (<code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">turbo_oracle_audit</code>).
-            </p>
-            <div className="space-y-3 mb-4">
-              {[
-                { name: 'listMarkets(opts)', desc: 'Paginated list with filters: category, creator, query (ilike), limit, offset.' },
-                { name: 'getMarket(marketId)', desc: 'Single market by field id.' },
-                { name: 'listTurboRounds(symbol, opts)', desc: 'Recently resolved turbo rounds for a symbol (BTC/ETH/…).' },
-                { name: 'listTurboRoundsJoined(symbol, opts)', desc: 'Rounds joined with their matching create event — one query, ready-to-render.' },
-                { name: 'listTurboEvents(symbol, opts)', desc: 'Raw audit events filterable by event type (create/resolve/cancel).' },
-                { name: 'getTurboMarketEvents(marketId)', desc: 'Full lifecycle of a specific turbo market, chronological order.' },
-                { name: 'countTurboRounds(symbol)', desc: 'Total resolved rounds — uses count=exact header for a single fast query.' },
-              ].map((m) => (
-                <div key={m.name} className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                  <code className="text-sm font-mono text-brand-400 block mb-1">{m.name}</code>
-                  <p className="text-xs text-surface-400">{m.desc}</p>
-                </div>
-              ))}
-            </div>
-            <CodeBlock title="typescript">{`import { createIndexerClient, MarketCategory } from '@veiled-markets/sdk'
-
-const indexer = createIndexerClient({
-  supabaseUrl: process.env.SUPABASE_URL!,
-  supabaseKey: process.env.SUPABASE_ANON_KEY!,   // anon, NOT service_role
-})
-
-const cryptoMarkets = await indexer.listMarkets({
-  category: MarketCategory.Crypto,
-  limit: 20,
-})
-
-const btcHistory = await indexer.listTurboRoundsJoined('BTC', { limit: 15 })
-btcHistory.forEach(({ resolve, create }) => {
-  console.log(\`Round \${resolve.marketId}: \${create?.pythPrice} → \${resolve.pythPrice}\`)
-})`}</CodeBlock>
+            <SectionHeader id="parlays" icon={ListOrdered} title="Parlays" />
+            <P>
+              A parlay combines 2 to 4 legs. Each leg is one outcome on a different prediction market, and every leg must
+              win for the ticket to pay. Placing and claiming are private. Settlement is read directly from the leg
+              markets, which live in the same contract.
+            </P>
+            <H3>Odds</H3>
+            <CodeBlock title="computed by the contract at placement">{`leg odds         = 1 / price of the outcome    (above 1×, at most 100×)
+combined odds    = leg odds × leg odds × …     (at most 1000×)
+potential payout = stake × combined odds
+net if won       = potential payout − 2% fee`}</CodeBlock>
+            <P muted>
+              Odds come from the live FPMM pools when the parlay is placed, so they match the prices the app shows.
+              The contract keeps them in basis points (20000 = 2×) and rounds down after each multiplication.{' '}
+              <C>min_payout</C> is the slippage guard: if prices move before the transaction lands and the payout would
+              be lower, the parlay fails with <C>ERR_SLIPPAGE</C>. Example: legs priced at 50% and 25% have odds of 2× and
+              4×, 8× combined, so a 1 NEAR stake has a potential payout of 8 NEAR before the fee.{' '}
+              <C>quote_parlay(token, stake, legs)</C> returns the same numbers without placing anything.
+            </P>
+            <Table
+              head={['Rule', 'Value']}
+              rows={[
+                ['Legs', '2 to 4, each on a different market that is Active and not past its deadline'],
+                ['Stake token', 'NEAR or USDC, paid from your private balance'],
+                ['Minimum stake', '0.1'],
+                ['Maximum payout', '100,000 per parlay'],
+                ['Fee', '2% of the payout of a winning ticket, to the treasury'],
+              ]}
+            />
+            <P muted>
+              Minimum stake, maximum payout, fee and the combined-odds cap are defaults the owner can change with{' '}
+              <C>set_parlay_config</C>; the 100× leg cap and the 110% coverage are fixed.
+            </P>
+            <H3>Payout pool</H3>
+            <P muted>
+              Payouts come from a parlay pool per token, which the operator funds with <C>fund_parlay_pool</C>. Stakes
+              join the pool. A new parlay is accepted only if the pool, including its stake, still covers 110% of what it
+              owes open tickets (potential payouts, and stakes of cancelled parlays not yet refunded); otherwise it fails
+              with <C>ERR_POOL_CAPACITY</C>. <C>quote_parlay</C> reports the largest stake the pool accepts right now as{' '}
+              <C>max_stake</C>, and <C>get_parlay_pool</C> shows the pool, what it owes and the limits.
+            </P>
+            <H3>Lifecycle</H3>
+            <Table
+              head={['Step', 'Call', 'What happens']}
+              rows={[
+                [
+                  'Place (private)',
+                  <C key="p">{'transact parlay_buy{legs, min_payout}'}</C>,
+                  'spends a balance note (kind 1) of the stake token and mints a ticket note (kind 5: asset = parlay id, sub = 0, amount = potential payout)',
+                ],
+                [
+                  'Settle (public, anyone)',
+                  <C key="s">settle_parlay(parlay_id)</C>,
+                  'reads the leg markets and sets Won, Lost or Cancelled; fails with ERR_PARLAY_NOT_READY while the result is open',
+                ],
+                [
+                  'Claim (private)',
+                  <C key="c">transact parlay_claim</C>,
+                  'spends the whole ticket and mints a balance note: the payout minus 2% if Won, the stake if Cancelled. Settles first if needed',
+                ],
+              ]}
+            />
+            <H3>Settlement rules</H3>
+            <Bullets>
+              <li>As soon as any leg market resolves to a different outcome, the parlay is <B>Lost</B>. The stake stays in the pool.</li>
+              <li>Otherwise it waits until every leg market is final (Resolved or Cancelled).</li>
+              <li>Then it is <B>Cancelled</B> if any leg market was cancelled (the stake is refunded), and <B>Won</B> if every leg won.</li>
+              <li>So the result never depends on when <C>settle_parlay</C> is called. Statuses: 1 Active, 2 Won, 3 Lost, 4 Cancelled.</li>
+            </Bullets>
+            <P muted>
+              The ticket&apos;s holder is hidden. Its legs, stake and potential payout are public, like an AMM trade.{' '}
+              <C>get_parlay(parlay_id)</C> shows each leg&apos;s live state (0 pending, 1 won, 2 lost, 3 cancelled) and{' '}
+              <C>settle_status</C>, the status that <C>settle_parlay</C> would set now.
+            </P>
+            <Callout>
+              Unlike the Aleo version, parlays on NEAR have no resolver submission and no dispute window: the leg
+              markets&apos; own resolution decides the parlay.
+            </Callout>
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-pyth" icon={Network} title="PythHermesClient" />
-            <p className="text-sm leading-relaxed mb-4">
-              Read-only client for the Pyth Network Hermes HTTP API. Used for turbo market
-              verification — fetches Pyth historical quotes at the exact timestamp the
-              operator committed on-chain and compares them to the contract state.
-            </p>
-            <CodeBlock title="typescript">{`import { createPythHermesClient, createTurboClient } from '@veiled-markets/sdk'
-
-const pyth = createPythHermesClient({ matchTolerance: 0.001 })  // 0.1%
-const turbo = createTurboClient()
-
-// Verify a single round against Pyth
-const result = await pyth.verifyTurboMarket(turbo, marketId, {
-  baselinePublishTimeMs: auditRow.pythPublishTime,
-})
-
-if (result.baseline && !result.baseline.match) {
-  console.error(\`MISMATCH on \${marketId}:\`, {
-    onChain: result.baseline.onChainPrice,
-    pyth: result.baseline.pythPrice,
-    delta: result.baseline.deltaFraction,
-  })
+            <SectionHeader id="tokens" icon={Coins} title="Tokens" />
+            <Table
+              head={['id', 'Token', 'Account', 'Used for']}
+              rows={[
+                ['1', 'NEAR', 'native', 'markets, turbo rounds, parlays, resolution bonds'],
+                ['2', 'retired', <C key="m">usdcx.veiled-tokens.testnet</C>, 'an early mock token; not offered'],
+                ['3', 'USDC', <C key="u">{USDC}</C>, 'markets, parlays'],
+              ]}
+            />
+            <P muted>
+              Every amount in the contract is in 6-decimal micro units. 1 NEAR = 1,000,000 micro, so 1 micro NEAR =
+              10^18 yoctoNEAR and an attached NEAR deposit must be a whole number of micro units. USDC has 6 decimals, so
+              its micro unit is its own smallest unit. The smallest deposit is 0.01 of either token.
+            </P>
+            <H3>USDC</H3>
+            <P muted>
+              The app uses Circle&apos;s official testnet USDC on NEAR. Get it at{' '}
+              <A href="https://faucet.circle.com">faucet.circle.com</A> (choose NEAR Testnet); the faucet registers your
+              account with the USDC contract.
+            </P>
+            <Bullets>
+              <li>
+                <B>Deposit</B>: <C>ft_transfer_call</C> on the USDC contract to <C>{CONTRACT}</C> with msg{' '}
+                <C>{'{"deposit":{"owner_blind":"…","memo":"…"}}'}</C>. The app fills in <C>owner_blind</C> and{' '}
+                <C>memo</C> from your note key; a note with an owner blind you did not derive from your key cannot be found
+                or spent by the app.
+              </li>
+              <li><B>Create a USDC market</B>: <C>ft_transfer_call</C> with msg <C>{'{"create_market":{…CreateMarketArgs}}'}</C>; the amount is the initial liquidity.</li>
+              <li><B>Fund the parlay pool</B>: <C>ft_transfer_call</C> with msg <C>{'{"fund_parlay_pool":{}}'}</C>.</li>
+              <li>
+                <B>Withdraw</B>: the contract pays with <C>ft_transfer</C>, so the receiving account must be registered
+                with the USDC contract (NEP-145 <C>storage_deposit</C>); an account that used the faucet already is. If
+                the transfer fails, the amount comes back to your private balance as a new note.
+              </li>
+              <li>Transfers from any other token contract are rejected (<C>ERR_TOKEN</C>), and the token contract refunds them.</li>
+            </Bullets>
+            <CodeBlock title="USDC deposit arguments (the app builds these)">{`// call ft_transfer_call on 3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af
+// with 1 yoctoNEAR attached
+{
+  receiver_id: 'v1.veiled-markets.testnet',
+  amount: '5000000',                                   // 5 USDC
+  msg: JSON.stringify({ deposit: { owner_blind, memo } }),
 }`}</CodeBlock>
-            <p className="text-sm text-surface-400 mt-4">
-              Direct historical/latest fetch methods are also exposed:{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">fetchLatest(symbol)</code>{' '}
-              and{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">fetchHistorical(symbol, unixSeconds)</code>.
-              Supports 10 symbols via{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">PYTH_FEED_IDS</code> export.
-            </p>
+          </section>
+
+          {/* ══════════════ REFERENCE ══════════════ */}
+          <GroupHeading title="Reference">
+            Methods, data formats and HTTP endpoints. Everything here can be called directly; the app is one client of it.
+          </GroupHeading>
+
+          <section className="mb-16">
+            <SectionHeader id="contract-api" icon={Code} title="Contract API" />
+            <P>
+              Account <C>{CONTRACT}</C>. Arguments are JSON. u64 and u128 values (ids, amounts, ticks) are strings; u8
+              values (outcome, side, token, kind) are numbers; field elements (owner blinds, roots, nullifiers) are
+              decimal strings. A failed call panics with an <C>ERR_*</C> code such as <C>ERR_SLIPPAGE</C>,{' '}
+              <C>ERR_MIN_TRADE</C>, <C>ERR_STATUS</C> or <C>ERR_DEADLINE</C>.
+            </P>
+
+            <H3>Private actions: transact</H3>
+            <P muted>
+              <C>transact(proof, public, ext_data)</C> verifies a Groth16 proof, marks both nullifiers spent and performs{' '}
+              <C>ext_data.action</C>. Anyone may call it; in practice the relayer does. <C>ext_data</C> is the exact JSON
+              text whose sha256 is bound into the proof, so nobody can change the action, the recipient, the fee or the
+              owner of the minted note after the proof is made.
+            </P>
+            <CodeBlock title="ext_data (a buy)">{`{
+  "action": {
+    "type": "buy", "market_id": "30", "outcome": 1, "min_shares_out": "1800000"
+  },
+  "new_owner_blind": "<field: owner of the minted note>",
+  "new_memo": "<encrypted memo for the minted note>",
+  "change_memo": "<encrypted memo for the change note>",
+  "relayer": null,
+  "fee": "0"
+}`}</CodeBlock>
+            <Table
+              head={['action.type', 'Fields', 'Spends', 'Mints']}
+              rows={[
+                ['withdraw', 'recipient', 'balance (1)', 'nothing; pays the recipient. out_amount 0 merges two notes'],
+                ['buy', 'market_id, outcome, min_shares_out', 'balance (1) in the market token', 'shares (2)'],
+                ['sell', 'tokens_desired', 'shares (2); out_amount = most shares to use, and any not needed are burned', 'balance (1)'],
+                ['add_liquidity', 'market_id, min_lp_shares', 'balance (1)', 'LP (3)'],
+                ['withdraw_lp', 'min_tokens_out', 'LP (3)', 'balance (1)'],
+                ['redeem', '—', 'winning shares (2)', 'balance (1)'],
+                ['refund', '—', 'shares (2) of a cancelled market', 'balance (1)'],
+                ['turbo_buy', 'market_id, side (1 UP, 2 DOWN)', 'NEAR balance (1)', 'turbo (4)'],
+                ['turbo_claim', '—', 'turbo (4)', 'NEAR balance (1)'],
+                ['parlay_buy', 'legs [{market_id, outcome}], min_payout', 'balance (1)', 'parlay ticket (5)'],
+                ['parlay_claim', '—', 'parlay ticket (5), whole', 'balance (1)'],
+              ]}
+            />
+            <P muted>
+              <C>fee</C> and <C>relayer</C> are allowed only on <C>withdraw</C> (<C>ERR_FEE_ACTION</C> otherwise), and the
+              testnet relayer requires <C>&quot;fee&quot;: &quot;0&quot;</C>. The call returns{' '}
+              <C>{'{change_index, new_index, new_commitment, new_kind, new_asset, new_sub, new_amount}'}</C>.
+            </P>
+
+            <H3>Note pool</H3>
+            <MethodList
+              methods={[
+                { name: 'deposit_near(owner_blind, memo)', tag: 'payable', desc: 'Mints a NEAR balance note for the attached deposit (a whole number of micro units, at least 0.01 NEAR). Returns the leaf index.' },
+                { name: 'ft_on_transfer(sender_id, amount, msg)', tag: 'called by the USDC contract', desc: <>The NEP-141 receiver. msg is <C>{'{"deposit":{…}}'}</C>, <C>{'{"create_market":{…}}'}</C> or <C>{'{"fund_parlay_pool":{}}'}</C>.</> },
+                { name: 'transact(proof, public, ext_data)', tag: 'anyone (the relayer)', desc: 'Private actions, above.' },
+              ]}
+            />
+
+            <H3>Markets and resolution</H3>
+            <MethodList
+              methods={[
+                { name: 'create_market(args)', tag: 'payable', desc: 'Creates a NEAR market with the attached deposit as liquidity; returns the market id. USDC markets use ft_transfer_call.' },
+                { name: 'close_market(market_id)', tag: 'anyone', desc: 'Active → Closed after the deadline.' },
+                { name: 'vote_outcome(market_id, outcome)', tag: 'payable, 0.1 NEAR', desc: 'One bonded vote per account, until the resolution deadline.' },
+                { name: 'finalize_votes(market_id)', tag: 'anyone', desc: 'After the voting window; picks the winner and opens the dispute window.' },
+                { name: 'confirm_resolution(market_id)', tag: 'anyone', desc: 'After the dispute window, without a dispute: Resolved.' },
+                { name: 'dispute_resolution(market_id, proposed_outcome)', tag: 'payable', desc: 'Inside the dispute window, with at least 3 × the total voter bonds.' },
+                { name: 'initiate_escalation(market_id)', tag: 'anyone', desc: 'Sends a disputed market to the committee.' },
+                { name: 'committee_vote_resolve(market_id, outcome)', tag: 'committee', desc: 'One vote per committee member.' },
+                { name: 'finalize_committee_vote(market_id)', tag: 'anyone', desc: 'Needs one outcome with at least 3 votes and no tie at the top.' },
+                { name: 'governance_resolve(market_id)', tag: 'anyone', desc: 'Applies the committee decision: Resolved.' },
+                { name: 'cancel_market(market_id)', tag: 'creator or anyone', desc: 'See Resolution for the three cases.' },
+                { name: 'claim_voter_bond(market_id)', tag: 'voter', desc: 'Pays the bond back to the voter; returns the amount.' },
+                { name: 'claim_dispute_bond(market_id)', tag: 'disputer', desc: 'Pays the dispute bond back if the proposed outcome won or the market was cancelled; returns the amount.' },
+                { name: 'withdraw_creator_fees(market_id)', tag: 'creator', desc: 'Once, after the winner-claim priority window.' },
+              ]}
+            />
+            <CodeBlock title="create_market arguments">{`{
+  "args": {
+    "question_hash": "<up to 96 characters>",
+    "category": 3,
+    "num_outcomes": 2,
+    "deadline": "448700000",              // tick
+    "resolution_deadline": "448750000",   // tick, after the deadline
+    "metadata": "{\\"v\\":1,\\"q\\":\\"Will …?\\",\\"o\\":[\\"Yes\\",\\"No\\"]}",
+    "lp_owner_blind": "<field: owner of the creator's LP note>",
+    "lp_memo": "<encrypted memo>"
+  }
+}`}</CodeBlock>
+
+            <H3>Turbo</H3>
+            <MethodList
+              methods={[
+                { name: 'create_turbo_market(symbol_id, deadline, baseline_price, baseline_conf, baseline_block)', tag: 'oracle operator', desc: 'Opens a round; returns its id.' },
+                { name: 'resolve_turbo_market(market_id, closing_price, closing_conf, closing_block)', tag: 'oracle operator', desc: 'Resolves a round; returns the new status.' },
+                { name: 'emergency_cancel_turbo(market_id)', tag: 'operator, later anyone', desc: 'Cancels an unresolved round after its resolution deadline.' },
+                { name: 'prune_turbo(market_ids)', tag: 'operator or owner', desc: 'Deletes up to 100 finished rounds that had no bets; returns how many went.' },
+              ]}
+            />
+
+            <H3>Parlays</H3>
+            <MethodList
+              methods={[
+                { name: 'settle_parlay(parlay_id)', tag: 'anyone', desc: 'Settles from the leg markets; returns the new status.' },
+                { name: 'fund_parlay_pool(token)', tag: 'payable', desc: <>Adds the attached NEAR to the pool (token must be 1). USDC uses ft_transfer_call with <C>{'{"fund_parlay_pool":{}}'}</C>.</> },
+                { name: 'withdraw_parlay_pool(token, amount, recipient)', tag: 'owner', desc: 'The pool must keep 110% of what open parlays are owed.' },
+                { name: 'set_parlay_config(min_stake?, max_payout?, fee_bps?, max_combined_odds_bps?, paused?)', tag: 'owner', desc: 'Arguments left out keep their value.' },
+              ]}
+            />
+
+            <H3>Owner</H3>
+            <MethodList
+              methods={[
+                { name: 'set_governance_value(key, value)', tag: 'owner', desc: 'Keys: 1 protocol fee, 2 creator fee, 3 LP fee (bps), 4 min trade, 5 min liquidity, 6 pause (1) or unpause (0).' },
+                { name: 'withdraw_treasury(token, amount, recipient)', tag: 'owner', desc: 'Pays out protocol fees and forfeited bonds.' },
+                { name: 'set_token_account(token, account_id)', tag: 'owner', desc: 'Points token slot 2 or 3 at a NEP-141 contract; allowed only while nothing is held in that token.' },
+              ]}
+            />
+
+            <H3>Views</H3>
+            <Table
+              head={['View', 'Returns']}
+              rows={[
+                [<C key="1">get_markets(from, limit)</C>, 'up to 100 markets in creation order'],
+                [<C key="2">get_market(market_id)</C>, 'one market or null: status, reserves, deadlines, token_type, metadata, fees, tally, dispute, committee state'],
+                [<C key="3">get_market_count()</C>, 'number of prediction markets'],
+                [<C key="4">get_vote(market_id, account_id)</C>, '{outcome, bond, claimed} or null'],
+                [<C key="5">get_turbo_market(market_id)</C>, 'one round or null'],
+                [<C key="6">get_latest_turbo(symbol_id)</C>, 'the current round for a symbol'],
+                [<C key="7">get_turbo_markets(from, limit)</C>, 'up to 100 rounds that received a bet'],
+                [<C key="8">get_turbo_count()</C>, 'number of rounds that received a bet'],
+                [<C key="9">get_turbo_exposure()</C>, 'stake owed to unclaimed turbo bets'],
+                [<C key="10">get_parlay(parlay_id)</C>, 'legs with live state, stake, potential_payout, combined_odds_bps, status, settle_status, claimed'],
+                [<C key="11">get_parlays(from, limit)</C>, 'up to 100 parlays in creation order (parlay ids start at 1)'],
+                [<C key="12">get_parlay_count()</C>, 'number of parlays'],
+                [<C key="13">get_parlay_pool()</C>, 'pool and exposure per token, limits, fee, paused'],
+                [<C key="14">quote_parlay(token, stake, legs)</C>, 'leg_odds_bps, combined_odds_bps, potential_payout, fee_if_won, net_if_won, max_stake'],
+                [<C key="15">get_tree_info()</C>, '{next_index, root, depth}'],
+                [<C key="16">get_leaves(from, limit)</C>, 'up to 500 leaves: {index, commitment, note?, memo}'],
+                [<C key="17">is_spent(nullifier), is_known_root(root)</C>, 'booleans'],
+                [<C key="18">get_config(), get_governance_values()</C>, 'parameters; governance values include paused'],
+                [<C key="19">get_treasury(), get_program_credits()</C>, 'amounts per token id (index 0 unused)'],
+                [<C key="20">get_token_accounts()</C>, 'the token contracts of slots 2 and 3'],
+                [<C key="21">get_height()</C>, 'the current tick'],
+                [<C key="22">get_next_id()</C>, 'the next market or round id (markets and turbo rounds share one counter)'],
+              ]}
+            />
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-wallets" icon={Wallet} title="Wallet Adapters" />
-            <p className="text-sm leading-relaxed mb-4">
-              Browser-only adapters that wrap Aleo wallet extensions behind a common{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">WalletAdapter</code>{' '}
-              interface. Use{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">detectWallet()</code>{' '}
-              to auto-pick whichever is installed.
-            </p>
-            <CodeBlock title="typescript">{`import {
-  detectWallet,
-  listInstalledWallets,
-  ShieldWalletAdapter,
-  PuzzleWalletAdapter,
-  LeoWalletAdapter,
-} from '@veiled-markets/sdk'
+            <SectionHeader id="circuit" icon={Cpu} title="Circuit" />
+            <P>
+              One circuit, <C>near/circuits/spend.circom</C>, covers every private action: Groth16 on BN254 with circomlib
+              Poseidon. It proves that the spender owns two notes of the same (kind, asset, sub) under a known root (a
+              zero-amount input is a dummy and skips the tree check), that the nullifiers belong to those notes, that{' '}
+              <C>outAmount</C> is at most their total, and that <C>changeCommitment</C> holds the rest for the same owner.
+            </P>
+            <CodeBlock title="public signals, in order">{`root, nullifier1, nullifier2, changeCommitment, kind, asset, sub, outAmount, extDataHash
 
-// Auto-detect (preference order: Shield → Puzzle → Leo)
-const wallet = detectWallet()
-if (!wallet) {
-  alert('Install Shield, Puzzle, or Leo wallet')
-}
-
-// Or force a specific wallet if installed
-const wallet2 = detectWallet('puzzle')
-
-// Or instantiate directly
-const shield = new ShieldWalletAdapter()
-await shield.connect()
-
-// All adapters implement the same interface
-await wallet!.connect()                          // returns { address, network, ... }
-await wallet!.requestTransaction({ ... })        // submits tx via extension popup
-const records = await wallet!.getRecords(programId)  // list private records
-
-// Inspect installed wallets (for wallet selector UI)
-console.log(listInstalledWallets())  // ['shield', 'puzzle']`}</CodeBlock>
+extDataHash = sha256(ext_data as UTF-8), read big-endian, top 3 bits cleared`}</CodeBlock>
+            <Bullets>
+              <li>Tree depth 20. Leaves are inserted in pairs (change note, minted note); a deposit inserts (note, 0). The zero leaf is 0 and <C>zeros[i+1] = Poseidon(zeros[i], zeros[i])</C>.</li>
+              <li>The contract accepts any of the last 32 roots, so a proof stays valid while a few other transactions land.</li>
+              <li>Proofs are <C>{'{a, b, c}'}</C> as decimal strings in snarkjs order without the projective coordinate.</li>
+              <li>The app serves the circuit files at <C>/zk/spend.wasm</C>, <C>/zk/spend_final.zkey</C> and <C>/zk/verification_key.json</C>.</li>
+              <li>Trusted setup: PSE Perpetual Powers of Tau (2^15) plus a single phase-2 contribution. Mainnet would need a multi-party ceremony.</li>
+            </Bullets>
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-executor" icon={Cpu} title="NodeExecutor" />
-            <p className="text-sm leading-relaxed mb-4">
-              Node.js-only executor that wraps{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">snarkos developer execute</code>{' '}
-              as a child process. Lets backend bots and schedulers submit transactions without
-              a wallet popup. Requires{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">snarkos</code> CLI in $PATH and
-              an Aleo private key in env.
-            </p>
-            <CodeBlock title="typescript">{`import { createNodeExecutor, createTurboClient, quoteBuyUpDown } from '@veiled-markets/sdk'
+            <SectionHeader id="relayer-api" icon={Send} title="Relayer API" />
+            <P>
+              The relayer (<C>backend/src/near-relayer.ts</C>, account <C>veiled-relayer.testnet</C>) submits{' '}
+              <C>transact</C> with 300 TGas and charges no fee on testnet. It can refuse a request but cannot change one,
+              because the proof binds the action. The app reads its address from <C>VITE_RELAYER_URL</C> (default{' '}
+              <C>http://localhost:4100</C>). CORS is open.
+            </P>
+            <Table
+              head={['Endpoint', 'Response']}
+              rows={[
+                [<C key="h">GET /health</C>, '{ok, relayer, contract, rpc, balanceNear}'],
+                [<C key="r">POST /relay</C>, 'body {proof, public, ext_data}; 200 {ok: true, txHash, result}'],
+                ['', '422 {ok: false, txHash, error}: the contract rejected it; error is the ERR_* code'],
+                ['', '400: malformed body, unknown action, a fee other than "0", an unknown root or a spent nullifier (checked before sending)'],
+                ['', '429: more than 30 requests per minute from one IP; 502: the RPC failed'],
+              ]}
+            />
+            <CodeBlock title="terminal">{`curl -s $RELAYER/health
 
-const executor = createNodeExecutor({
-  privateKey: process.env.ALEO_PRIVATE_KEY!,
-  // Defaults (override if needed):
-  // queryEndpoint: 'https://api.explorer.provable.com/v1',
-  // broadcastUrl: 'https://api.explorer.provable.com/v1/testnet/transaction/broadcast',
-  // priorityFee: 1_000_000,
-  // networkId: '1',  // '0' for mainnet
-  // maxRetries: 5,
-  // retryBaseMs: 4000,  // exponential backoff: 4s → 8s → 16s → 32s → 60s
-  dryRun: process.env.DRY_RUN === '1',  // print inputs, don't broadcast
-})
-
-const turbo = createTurboClient()
-const quote = quoteBuyUpDown(1_000_000n)
-const call = turbo.buildBuyUpDownInputs({ /* ... */ })
-const result = await executor.execute(call)
-console.log(\`Broadcast tx \${result.txId}\`)  // at1...`}</CodeBlock>
-            <p className="text-sm text-surface-400 mt-4">
-              The executor auto-retries on Cloudflare 5xx, ECONNRESET, ETIMEDOUT, and a few other
-              transient errors with exponential backoff. Fatal errors (invalid inputs, assertion
-              failures, rejected tx) throw immediately.
-            </p>
+curl -s -X POST $RELAYER/relay -H 'content-type: application/json' \\
+  -d '{"proof":{"a":[…],"b":[[…],[…]],"c":[…]},"public":{"root":"…", …},"ext_data":"{\\"action\\":…}"}'`}</CodeBlock>
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="sdk-types" icon={BookOpen} title="Type Reference" />
-            <CodeBlock title="typescript">{`// Enums
-enum MarketStatus { Active = 1, Closed = 2, Resolved = 3, Cancelled = 4, PendingResolution = 5 }
-enum Outcome { One = 1, Two = 2, Three = 3, Four = 4, Yes = 1, No = 2 }
-enum TokenType { ALEO = 1, USDCX = 2, USAD = 3 }
-enum MarketCategory { Politics = 1, Sports = 2, Crypto = 3, Entertainment = 4, Science = 5, Economics = 6, Other = 99 }
-enum TurboMarketStatus { Active = 1, Resolved = 2, Cancelled = 3 }
-type TurboSide = 'UP' | 'DOWN'
-type TurboSymbol = 'BTC' | 'ETH' | 'SOL' | 'DOGE' | 'XRP' | 'BNB' | 'ADA' | 'AVAX' | 'LINK' | 'DOT'
-
-// Core FAMM
-interface Market { id: string; creator: string; questionHash: string; category: MarketCategory; numOutcomes: number; deadline: bigint; /*…*/ }
-interface AMMPool { marketId: string; reserve1: bigint; reserve2: bigint; reserve3: bigint; reserve4: bigint; totalLiquidity: bigint; totalLPShares: bigint; totalVolume: bigint }
-interface MarketWithStats extends Market { pool: AMMPool; prices: number[]; totalVolume: bigint; /*…*/ }
-interface MarketResolution { marketId: string; winningOutcome: number; finalized: boolean; /*…*/ }
-interface DisputeData { marketId: string; disputer: string; proposedOutcome: number; bondAmount: bigint; disputedAt: bigint }
-
-// Turbo
-interface TurboMarket { id: string; creator: string; symbolId: number; baselinePrice: bigint; baselineBlock: bigint; deadline: bigint; resolutionDeadline: bigint; closingPrice: bigint; winningOutcome: number; status: TurboMarketStatus; createdAt: bigint }
-interface TurboPool { marketId: string; totalUpAmount: bigint; totalDownAmount: bigint; totalUpShares: bigint; totalDownShares: bigint; totalVolume: bigint }
-interface TurboShare { owner: string; marketId: string; side: TurboSide; quantity: bigint; claimUnits: bigint; shareNonce: string; plaintext?: string }
-interface TurboBuyQuote { amountIn: bigint; protocolFee: bigint; amountToPool: bigint; expectedShares: bigint }
-
-// Indexer
-interface MarketRegistryRow { marketId: string; questionText: string | null; description: string | null; category: MarketCategory | null; creatorAddress: string | null; createdAt: number | null; outcomeLabels: string[] | null }
-interface TurboAuditRow { id: number; createdAt: string; event: 'create' | 'resolve' | 'cancel'; marketId: string; symbol: string; pythPrice: number; pythConf: number; pythPublishTime: string; aleoBlock: bigint; aleoTxId: string | null }
-
-// Pyth
-interface PythQuote { symbol: string; feedId: string; price: number; conf: number; publishTime: number }
-interface TurboVerificationResult { marketId: string; symbol: string; event: 'baseline' | 'closing'; onChainPrice: number; pythPrice: number; delta: number; deltaFraction: number; match: boolean; pythPublishTime: number | null }`}</CodeBlock>
-          </section>
-
-          <section className="mb-16">
-            <SectionHeader id="sdk-utils" icon={Code} title="Utilities" />
-            <p className="text-sm leading-relaxed mb-4">
-              Pure functions for formatting, validation, and contract-parity math.
-            </p>
-            <CodeBlock title="typescript">{`import {
-  // Formatting
-  formatCredits,        // 1000000n → "1.00"
-  parseCredits,         // "1.5" → 1500000n
-  formatPercentage,     // 0.7523 → "75.2%"
-  formatTimeRemaining,  // Date → "2h 15m"
-  shortenAddress,       // "aleo1abc...xyz" → "aleo1a...xyz"
-
-  // Validation
-  isValidAleoAddress,
-  validateTradeAmount,
-  validateMarketDeadline,
-  validateMarketQuestion,
-  validateNumOutcomes,
-
-  // Hashing
-  hashToField,          // string → field element
-
-  // AMM math (contract-parity)
-  calculateContractAllPrices,
-  calculateContractOutcomePrice,
-  calculateContractTradeFees,
-  quoteContractBuy,
-  quoteContractSell,
-  quoteContractAddLiquidity,
-  calculateMinSharesOut,
-
-  // Fee constants
-  PROTOCOL_FEE_BPS,     // 50n
-  CREATOR_FEE_BPS,      // 50n
-  LP_FEE_BPS,           // 100n
-  TOTAL_FEE_BPS,        // 200n (2%)
-  FEE_DENOMINATOR,      // 10000n
-  MIN_TRADE_AMOUNT,     // 1000n (0.001 tokens)
-} from '@veiled-markets/sdk'`}</CodeBlock>
+            <SectionHeader id="oracle-api" icon={Timer} title="Turbo oracle API" />
+            <P>
+              The turbo oracle (<C>backend/src/near-turbo-oracle.ts</C>, operator <C>veiled-oracle.testnet</C>) streams
+              prices, opens and resolves rounds, and keeps the audit trail. The app reads it from{' '}
+              <C>VITE_TURBO_ORACLE_URL</C> (default <C>http://localhost:4090</C>). CORS is open.
+            </P>
+            <Table
+              head={['Endpoint', 'Response']}
+              rows={[
+                [<C key="h">GET /health</C>, '{ok, ts, chain, contract, price_source}; price_source is pyth or coingecko'],
+                [<C key="q">GET /quote?symbol=BTC</C>, '{symbol, feedId, price, conf, publishTime}; price in USD, publishTime in Unix ms; 503 without a fresh quote'],
+                [<C key="s">GET /stream?symbol=BTC</C>, 'server-sent events, each data: line a quote; paused while a round of that symbol is being resolved'],
+                [<C key="c">GET /chain</C>, 'the current round of every symbol'],
+                [<C key="cs">GET /chain/symbol?symbol=BTC</C>, 'the current round of one symbol; 404 if none'],
+                [<C key="a">GET /audit</C>, 'audit rows, filtered PostgREST-style, for example ?symbol=eq.ETH&order=id.desc&limit=20'],
+              ]}
+            />
+            <P muted>
+              Audit rows have <C>id</C>, <C>event</C> (create, resolve or cancel), <C>market_id</C>, <C>symbol</C>,{' '}
+              <C>pyth_price</C>, <C>pyth_conf</C>, <C>pyth_publish_time</C>, <C>operator_address</C>, <C>price_source</C>{' '}
+              and the transaction. Some column names are kept from the Aleo version: <C>aleo_block</C> holds the
+              contract tick and <C>aleo_tx_id</C> the NEAR transaction hash. Round ids carry the Aleo suffix{' '}
+              <C>field</C> (<C>161field</C>), and the verify page takes the same form: <C>/verify/turbo/161field</C>.
+            </P>
           </section>
 
           {/* ══════════════ RECIPES ══════════════ */}
-          <div className="mb-10 border-t border-white/[0.04] pt-10">
-            <h2 className="text-2xl font-display text-white mb-2">Recipes</h2>
-            <p className="text-sm text-surface-400 leading-relaxed">
-              End-to-end code snippets for common flows. Each recipe is self-contained and can
-              be copy-pasted into your app.
-            </p>
-          </div>
+          <GroupHeading title="Recipes">
+            Short programs against the live testnet contract. They need no wallet and no API key unless stated.
+          </GroupHeading>
 
-          <section className="mb-12">
-            <SectionHeader id="recipe-buy-famm" icon={ArrowRight} title="Buy FAMM shares" />
-            <CodeBlock title="typescript">{`import {
-  createClient, quoteContractBuy, calculateMinSharesOut, detectWallet, TokenType,
-} from '@veiled-markets/sdk'
-
-const wallet = detectWallet()!
-await wallet.connect()
-
-const client = createClient({ network: 'testnet' })
-const market = await client.getMarket('12345field')
-if (!market) throw new Error('Market not found')
-
-// Quote using contract-parity math
-const amountIn = 1_000_000n  // 1 ALEO
-const quote = quoteContractBuy(
-  { reserve1: market.pool.reserve1, reserve2: market.pool.reserve2,
-    reserve3: market.pool.reserve3, reserve4: market.pool.reserve4,
-    numOutcomes: market.numOutcomes },
-  1,  // outcome
-  amountIn,
-)
-
-// Apply 1% slippage tolerance
-const minSharesOut = calculateMinSharesOut(quote.sharesOut, 100)  // 100 bps
-
-// Build tx
-const call = client.buildBuySharesInputs({
-  marketId: '12345field',
-  outcome: 1,
-  amountIn,
-  expectedShares: quote.sharesOut,
-  minSharesOut,
-}, TokenType.ALEO)
-
-// Wallet appends the credits record at signing time
-await wallet.requestTransaction({
-  programId: call.programId,
-  functionName: call.functionName,
-  inputs: call.inputs,
-  fee: 1_500_000n,
-})`}</CodeBlock>
-          </section>
-
-          <section className="mb-12">
-            <SectionHeader id="recipe-buy-turbo" icon={Radio} title="Bet on a Turbo round" />
-            <CodeBlock title="typescript">{`import { createTurboClient, quoteBuyUpDown, detectWallet } from '@veiled-markets/sdk'
-
-const wallet = detectWallet()!
-await wallet.connect()
-
-// 1. Fetch current active market from operator backend
-const oracleUrl = 'http://localhost:4090'
-const res = await fetch(\`\${oracleUrl}/chain/symbol?symbol=BTC\`)
-const { market_id } = await res.json() as { market_id: string }
-
-// 2. Verify on-chain that market is still active
-const turbo = createTurboClient()
-const market = await turbo.getMarket(market_id)
-if (market?.status !== 1) throw new Error('Market not active')
-
-// 3. Quote and build
-const quote = quoteBuyUpDown(1_000_000n)  // 1 ALEO
-
-// 4. Fetch a private credits record from wallet (wallet-specific API)
-const records = await wallet.getRecords('credits.aleo')
-const creditsRecord = (records[0] as any)?.plaintext
-
-const call = turbo.buildBuyUpDownInputs({
-  marketId: market_id,
-  side: 'UP',
-  amountIn: quote.amountIn,
-  expectedShares: quote.expectedShares,
-  creditsRecord,
-})
-
-// 5. Submit via wallet — persist call.shareNonce for later claim
-localStorage.setItem(\`nonce-\${market_id}\`, call.shareNonce)
-await wallet.requestTransaction({
-  programId: call.programId,
-  functionName: call.functionName,
-  inputs: call.inputs,
-  fee: 1_500_000n,
-})`}</CodeBlock>
-          </section>
-
-          <section className="mb-12">
-            <SectionHeader id="recipe-verify-turbo" icon={Shield} title="Verify a Turbo round against Pyth" />
-            <CodeBlock title="typescript">{`import {
-  createTurboClient, createPythHermesClient, createIndexerClient,
-} from '@veiled-markets/sdk'
-
-const turbo = createTurboClient({ network: 'testnet' })
-const pyth = createPythHermesClient({ matchTolerance: 0.001 })
-const indexer = createIndexerClient({
-  supabaseUrl: process.env.SUPABASE_URL!,
-  supabaseKey: process.env.SUPABASE_ANON_KEY!,
-})
-
-// 1. Fetch audit log for the market (has the real Pyth publish_time)
-const events = await indexer.getTurboMarketEvents(marketId)
-const createEvent = events.find(e => e.event === 'create')
-const resolveEvent = events.find(e => e.event === 'resolve')
-
-// 2. Verify against Pyth at the EXACT publish times from audit log
-const result = await pyth.verifyTurboMarket(turbo, marketId, {
-  baselinePublishTimeMs: createEvent
-    ? new Date(createEvent.pythPublishTime).getTime()
-    : undefined,
-  closingPublishTimeMs: resolveEvent
-    ? new Date(resolveEvent.pythPublishTime).getTime()
-    : undefined,
-})
-
-if (result.baseline?.match && result.closing?.match) {
-  console.log('✓ Market verified — operator committed correct prices')
-} else {
-  console.error('✗ Mismatch detected:', result)
-}`}</CodeBlock>
+          <section className="mb-16">
+            <SectionHeader id="recipe-read-markets" icon={Terminal} title="Read markets and prices" />
+            <P muted>
+              A view call is a JSON-RPC <C>query</C> with base64 arguments. This lists the active markets with their
+              outcome prices, computed from the reserves as in <A href="#markets">Pricing</A>.
+            </P>
+            <CodeBlock title="read-markets.mjs">{READ_MARKETS}</CodeBlock>
+            <CodeBlock title="output (testnet, 12 Nov 2026)">{`#30 Will Bitcoin trade above $80,000 on December 31, 2026?  54.7% / 45.3%
+#31 Will NEAR trade above $4 on December 31, 2026?  50.0% / 50.0%
+#32 Where will ETH close on November 30, 2026?  25.0% / 25.0% / 25.0% / 25.0%`}</CodeBlock>
           </section>
 
           <section className="mb-16">
-            <SectionHeader id="recipe-monitor-disputes" icon={Vote} title="Monitor disputes" />
-            <CodeBlock title="typescript">{`import {
-  createGovernanceClient, createIndexerClient, TokenType,
-} from '@veiled-markets/sdk'
+            <SectionHeader id="recipe-stream-prices" icon={Activity} title="Stream turbo prices" />
+            <P muted>
+              The oracle relays one price stream to every client, so all charts show the same price. The round&apos;s
+              baseline and deadline come from the contract.
+            </P>
+            <CodeBlock title="stream.mjs">{STREAM_PRICES}</CodeBlock>
+          </section>
 
-const gov = createGovernanceClient({ network: 'testnet' })
-const indexer = createIndexerClient({ supabaseUrl, supabaseKey })
+          <section className="mb-16">
+            <SectionHeader id="recipe-verify-turbo" icon={FlaskConical} title="Verify a turbo round" />
+            <P muted>
+              Anyone can check that the operator submitted the price Pyth published. The page{' '}
+              <C>/verify/turbo/&lt;id&gt;field</C> does this in the app: it shows the audit trail and the contract values,
+              and compares them with Pyth Hermes using your own Pyth API key, which stays in your browser&apos;s local
+              storage and is sent only to Hermes. Hermes answers HTTP 401 without a key. The same check as a script:
+            </P>
+            <CodeBlock title="verify-turbo.mjs">{VERIFY_TURBO}</CodeBlock>
+            <Callout>
+              When the oracle runs without a Pyth key it uses CoinGecko (<C>price_source</C> is <C>coingecko</C>), and the
+              comparison with Pyth is only approximate.
+            </Callout>
+          </section>
 
-const seen = new Set<string>()
+          <section className="mb-16">
+            <SectionHeader id="recipe-run-locally" icon={Server} title="Run it locally" />
+            <P muted>Requires Node.js 20 or newer and a NEAR testnet account in Meteor Wallet or MyNearWallet.</P>
+            <CodeBlock title="terminal">{`# 1. Relayer (port 4100). Key: RELAYER_PRIVATE_KEY, or ~/.near-credentials/testnet/<RELAYER_ACCOUNT>.json
+cd backend && npm install
+npx tsx src/near-relayer.ts
 
-async function tick() {
-  const markets = await indexer.listMarkets({ limit: 50 })
+# 2. Turbo oracle (port 4090). Key: ORACLE_PRIVATE_KEY, or ~/.near-credentials/testnet/veiled-oracle.testnet.json
+#    Prices come from Pyth Hermes when backend/.env has PYTH_API_KEY, otherwise from CoinGecko.
+npx tsx src/near-turbo-oracle.ts --serve --auto-create
 
-  for (const m of markets) {
-    for (const token of [TokenType.ALEO, TokenType.USDCX, TokenType.USAD]) {
-      const state = await gov.getMarketDisputeState(m.marketId, token)
-      if (!state || state.disputer === '') continue
-
-      const key = \`\${m.marketId}-\${state.disputedAt}\`
-      if (seen.has(key)) continue
-      seen.add(key)
-
-      console.log(\`New dispute: \${m.questionText ?? m.marketId}\`)
-      console.log(\`  Bond: \${Number(state.disputeBond) / 1_000_000}\`)
-      console.log(\`  Tier: \${state.escalatedTier}\`)
-    }
-  }
-}
-
-setInterval(tick, 60_000)  // poll every minute`}</CodeBlock>
+# 3. Frontend (http://localhost:3100)
+cd ../frontend && npm install
+cp .env.example .env.local   # the NEAR section at the top has working testnet defaults
+npm run dev`}</CodeBlock>
+            <Bullets>
+              <li>The frontend reads markets from the deployed contract without steps 1 and 2. Private actions need a relayer, and turbo rounds need the oracle.</li>
+              <li>Any NEAR account can run a relayer: set <C>RELAYER_ACCOUNT</C> and <C>RELAYER_PRIVATE_KEY</C>, and point <C>VITE_RELAYER_URL</C> at it.</li>
+              <li>The contract accepts turbo rounds only from <C>veiled-oracle.testnet</C>, so a second oracle needs its own contract deployment.</li>
+              <li>
+                A demo market: <C>cd backend && npx tsx scripts/quick-market.ts create 6</C> opens a question that closes in
+                6 minutes; after it closes, <C>npx tsx scripts/quick-market.ts resolve &lt;id&gt; &lt;1=Yes|2=No&gt;</C> votes,
+                finalizes and confirms it.
+              </li>
+              <li><C>NEAR_RPC_URL</C> takes a comma-separated list for the relayer, the oracle and the scripts; a call moves to the next endpoint on a timeout or rate limit.</li>
+            </Bullets>
           </section>
 
           {/* ══════════════ DEPLOYMENT ══════════════ */}
-          <div className="mb-10 border-t border-white/[0.04] pt-10">
-            <h2 className="text-2xl font-display text-white mb-2">Deployment</h2>
-          </div>
+          <GroupHeading title="Deployment" />
 
           <section className="mb-16">
-            <SectionHeader id="networks" icon={Network} title="Networks & Endpoints" />
-            <CodeBlock title="typescript">{`// Testnet (default)
-const client = createClient({
-  network: 'testnet',
-  rpcUrl: 'https://api.explorer.provable.com/v1/testnet',
-  explorerUrl: 'https://testnet.explorer.provable.com',
-})
-
-// Mainnet
-const client = createClient({
-  network: 'mainnet',
-  rpcUrl: 'https://api.explorer.provable.com/v1/mainnet',
-  explorerUrl: 'https://explorer.provable.com',
-})
-
-// Shortcut — use the network name and let the SDK pick endpoints
-const client = createClient({ network: 'testnet' })  // uses NETWORK_CONFIG.testnet`}</CodeBlock>
-            <p className="text-sm text-surface-400 mt-4">
-              Contract program IDs are network-independent — the same{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">PROGRAM_IDS.ALEO_MARKET</code>{' '}
-              value (<code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">veiled_markets_v37.aleo</code>)
-              resolves to the deployment on whichever network you query.
-            </p>
+            <SectionHeader id="deployment" icon={Globe} title="Testnet deployment" />
+            <Table
+              head={['Account', 'Role']}
+              rows={[
+                [<C key="v">{CONTRACT}</C>, 'the contract'],
+                [<C key="o">veiled-markets.testnet</C>, 'owner: parameters, pause, treasury, parlay pool'],
+                [<C key="r">veiled-relayer.testnet</C>, 'submits private transactions (fee 0)'],
+                [<C key="or">veiled-oracle.testnet</C>, 'opens and resolves turbo rounds'],
+                [<C key="c">c1 … c5.veiled-markets.testnet</C>, 'the dispute committee'],
+                [<C key="u">{USDC}</C>, 'USDC (Circle testnet)'],
+              ]}
+            />
+            <Table
+              head={['Frontend variable', 'Default']}
+              rows={[
+                [<C key="1">VITE_NEAR_CONTRACT</C>, CONTRACT],
+                [<C key="2">VITE_NEAR_RPC_URLS</C>, 'https://test.rpc.fastnear.com, https://near-testnet.drpc.org'],
+                [<C key="3">VITE_RELAYER_URL</C>, 'http://localhost:4100'],
+                [<C key="4">VITE_RELAYER_ACCOUNT</C>, 'veiled-relayer.testnet'],
+                [<C key="5">VITE_TURBO_ORACLE_URL</C>, 'http://localhost:4090'],
+              ]}
+            />
+            <H3>Deploy your own contract</H3>
+            <P muted>
+              Build the wasm, then run <C>near/scripts/deploy-testnet.sh v2</C>: it creates the committee accounts and
+              deploys and initializes <C>v2.veiled-markets.testnet</C> with the testnet configuration above. Then, as the
+              registers the contract on Circle USDC, which it puts in token slot 3. (The live <C>v1</C> contract got it with
+              <C>set_token_account(3, &quot;{USDC}&quot;)</C> after its upgrade; that is allowed only while nothing is held in
+              the slot.) To rebuild the circuit, run{' '}
+              <C>cd near/circuits && npm run build</C>.
+            </P>
+            <Table
+              head={['Tests', 'Command']}
+              rows={[
+                ['Circuit', <C key="1">node --test near/circuits/test/spend.test.mjs</C>],
+                ['Contract (near-workspaces sandbox)', <C key="2">cd near/contract && cargo test -p integration-tests</C>],
+                ['Live testnet smoke test', <C key="3">cd backend && npx tsx scripts/testnet-smoke.ts</C>],
+              ]}
+            />
           </section>
 
-          <section className="mb-20">
-            <SectionHeader id="examples" icon={Terminal} title="Example Apps" />
-            <p className="text-sm leading-relaxed mb-4">
-              The SDK repository ships 3 complete example apps showing real-world usage. Find
-              them at{' '}
-              <code className="text-surface-300 bg-white/[0.04] px-1.5 py-0.5 rounded">sdk/examples/</code>:
-            </p>
-            <div className="space-y-3">
-              {[
-                {
-                  name: 'turbo-bot',
-                  stack: 'Node.js + tsx',
-                  desc: 'Auto-bet scheduler that polls the operator backend, detects new turbo rounds, and submits buy_up_down via NodeExecutor. Demonstrates quote math, SDK + wallet integration, and DRY_RUN mode.',
-                },
-                {
-                  name: 'market-dashboard',
-                  stack: 'React + Vite',
-                  desc: 'Minimal standalone web app. Reads FAMM markets via IndexerClient, displays top 10 by volume, and shows current Turbo market state. ~200 lines total — no design system dependencies.',
-                },
-                {
-                  name: 'governance-monitor',
-                  stack: 'Node.js CLI',
-                  desc: 'Daemon that polls for new disputes, enriches with market metadata from IndexerClient, and posts alerts to a Discord webhook. Cron-friendly --once flag.',
-                },
-              ].map((e) => (
-                <div key={e.name} className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                  <div className="flex items-baseline gap-3 mb-2">
-                    <code className="text-sm font-mono text-brand-400">{e.name}</code>
-                    <span className="text-[10px] text-surface-500">{e.stack}</span>
-                  </div>
-                  <p className="text-xs text-surface-400 leading-relaxed">{e.desc}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-6 p-4 rounded-xl bg-brand-500/[0.04] border border-brand-500/[0.1] flex items-center justify-between">
+          <section className="mb-16">
+            <SectionHeader id="limits" icon={AlertTriangle} title="Limits and what is missing" />
+            <H3>Not on NEAR yet</H3>
+            <P muted>
+              These parts of the Aleo version are not ported: community governance proposals, resolver staking and the
+              resolver registry, reward epochs, and the multisig treasury. On NEAR the owner account holds the
+              treasury and the parameters, and disputed markets go to the 5-member committee, which does work.
+            </P>
+            <H3>Known limits</H3>
+            <Bullets>
+              <li><B>Testnet only.</B> Tokens have no value, and the contract may be redeployed.</li>
+              <li><B>Trusted setup.</B> The circuit key comes from a single phase-2 contribution.</li>
+              <li><B>Turbo operator trust.</B> The operator submits prices. The contract checks its identity, the price range, the confidence and the maximum move, and the audit trail is public, but it cannot prove the price itself.</li>
+              <li><B>One relayer.</B> If it is down, private actions wait. It pays the gas and cannot alter a trade.</li>
+              <li><B>Central roles.</B> The owner can pause, change fees and minimums, and withdraw the treasury and spare parlay pool funds. The operator funds the parlay pool; when it runs low, new parlays are refused. The team holds the contract account&apos;s key and can deploy new contract code.</li>
+              <li><B>Timing.</B> The note pool hides who trades, not when or how much. See <A href="#privacy">Privacy model</A>.</li>
+              <li><B>Your note key.</B> It is derived from your wallet. If you lose the wallet, you lose the notes; if the wallet cannot sign messages, the key lives only in this browser.</li>
+            </Bullets>
+
+            <div className="mt-8 p-4 rounded-xl bg-brand-500/[0.04] border border-brand-500/[0.1] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white mb-1">Ready to build?</div>
-                <div className="text-xs text-surface-400">
-                  Clone the repo and start with the example that matches your stack.
-                </div>
+                <div className="text-sm font-semibold text-white mb-1">Try it on testnet</div>
+                <div className="text-xs text-surface-400">Connect a NEAR testnet wallet, unlock your private balance and place a trade.</div>
               </div>
               <Link
                 to="/dashboard"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-500 text-white text-xs font-semibold hover:bg-brand-400 transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-brand-500 text-white text-xs font-semibold hover:bg-brand-400 transition-colors whitespace-nowrap"
               >
                 Open the app <ChevronRight className="w-3.5 h-3.5" />
               </Link>

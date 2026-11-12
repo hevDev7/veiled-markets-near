@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Footer } from '../components/Footer'
-import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function TermsOfService() {
   return (
@@ -19,16 +18,15 @@ export function TermsOfService() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Terms of Service</h1>
-        <p className="text-sm text-surface-500 mb-12">Last updated: April 9, 2026</p>
-        <NearPortNotice className="mb-12" />
+        <p className="text-sm text-surface-500 mb-12">Last updated: November 12, 2026</p>
 
         <div className="space-y-10 text-sm leading-relaxed">
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">1. Acceptance of Terms</h2>
             <p>
               By accessing or using Veiled Markets ("the Protocol"), you agree to be bound by these Terms of Service.
-              If you do not agree to these terms, do not use the Protocol. Veiled Markets is a decentralized
-              prediction market protocol built on the Aleo blockchain. Your use of the Protocol is at your own risk.
+              If you do not agree to these terms, do not use the Protocol. Veiled Markets is a prediction market
+              protocol built on the NEAR blockchain. Your use of the Protocol is at your own risk.
             </p>
           </section>
 
@@ -46,14 +44,15 @@ export function TermsOfService() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">3. Nature of the Protocol</h2>
             <p className="mb-3">
-              Veiled Markets is a decentralized, non-custodial prediction market protocol. The Protocol:
+              Veiled Markets is a prediction market protocol with private positions. The Protocol:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li>Operates on the Aleo blockchain using zero-knowledge proofs for privacy.</li>
-              <li>Does not custody, control, or manage any user funds.</li>
-              <li>Provides a front-end interface to interact with on-chain smart contracts.</li>
+              <li>Runs as a smart contract on NEAR and uses zero-knowledge proofs to keep positions private.</li>
+              <li>Holds deposits in that smart contract as private notes, which only the holder of the note key can spend. The Risk Disclosure describes the powers of the contract owner, including upgrades.</li>
+              <li>Submits private transactions through a relayer, which cannot change them.</li>
+              <li>Provides a front-end interface to interact with the smart contract.</li>
               <li>Uses an Automated Market Maker (AMM) based on the Fixed Product Market Maker (FPMM) model.</li>
-              <li>Is currently deployed on the Aleo Testnet and may not reflect final production behavior.</li>
+              <li>Is currently deployed on NEAR testnet and may not reflect final production behavior.</li>
             </ul>
           </section>
 
@@ -61,7 +60,7 @@ export function TermsOfService() {
             <h2 className="text-lg font-semibold text-white mb-4">4. User Responsibilities</h2>
             <p className="mb-3">You are solely responsible for:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li>Securing your wallet, private keys, and view keys.</li>
+              <li>Securing your wallet, its private keys, and the browser that holds your note key.</li>
               <li>Understanding the risks associated with blockchain transactions, including irreversibility.</li>
               <li>Ensuring compliance with all applicable laws and regulations in your jurisdiction.</li>
               <li>Any taxes or reporting obligations arising from your use of the Protocol.</li>
@@ -88,40 +87,41 @@ export function TermsOfService() {
               The Protocol charges fees on trading activities. The current fee structure is:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Protocol Fee:</strong> 0.5% per buy transaction, sent to the protocol treasury.</li>
-              <li><strong className="text-surface-300">Market Creator Fee:</strong> 0.5% per buy transaction, sent to the market creator.</li>
-              <li><strong className="text-surface-300">Liquidity Provider Fee:</strong> 1.0% per buy transaction, retained in the AMM pool.</li>
-              <li><strong className="text-surface-300">Total:</strong> 2.0% per buy transaction.</li>
+              <li><strong className="text-surface-300">Protocol Fee:</strong> 0.5% of every buy and sell, sent to the protocol treasury.</li>
+              <li><strong className="text-surface-300">Market Creator Fee:</strong> 0.5% of every buy and sell, collected by the market creator after resolution.</li>
+              <li><strong className="text-surface-300">Liquidity Provider Fee:</strong> 1.0% of every sell, retained in the AMM pool.</li>
+              <li><strong className="text-surface-300">Total:</strong> 1.0% per buy and 2.0% per sell.</li>
+              <li><strong className="text-surface-300">Turbo Fee:</strong> 0.5% of every turbo bet, sent to the protocol treasury.</li>
+              <li><strong className="text-surface-300">Parlay Fee:</strong> 2% of the payout of a winning parlay, sent to the protocol treasury.</li>
             </ul>
             <p className="mt-3 text-surface-400">
-              Fee rates may be modified through the governance process. Changes require a governance proposal with a 20% quorum threshold and 72-hour timelock period.
+              The contract owner may change these rates. Changes apply to transactions made after the change.
             </p>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-white mb-4">7. Governance</h2>
+            <h2 className="text-lg font-semibold text-white mb-4">7. Resolution and Administration</h2>
             <p className="mb-3">
-              The Protocol includes an on-chain governance system (veiled_governance_v6.aleo) that enables community decision-making. Governance features include:
+              Market outcomes and protocol parameters are decided as follows:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li>Dispute resolution overrides for contested market outcomes.</li>
-              <li>Fee structure modifications.</li>
-              <li>Treasury fund management via 3-of-N multisig.</li>
-              <li>Protocol parameter updates.</li>
-              <li>Emergency pause capabilities.</li>
-              <li>ALEO-native on-chain governance workflows available through the testnet app.</li>
+              <li>Prediction markets are resolved by bonded voting from NEAR accounts, with a dispute window.</li>
+              <li>Disputed markets are decided by a 5-member committee; a market the committee does not decide in time can be cancelled and refunded.</li>
+              <li>Turbo rounds are resolved by the oracle operator from market price data, without voting or disputes.</li>
+              <li>Parlays settle from the outcomes of their leg markets.</li>
+              <li>The contract owner can pause trading, change fees and minimum amounts, manage the treasury and the parlay payout pool, and upgrade the contract.</li>
             </ul>
             <p className="mt-3 text-surface-400">
-              Governance proposals require staking ALEO tokens and are subject to quorum thresholds, voting periods, and timelock delays. By using the Protocol, you acknowledge that governance decisions may affect your positions and experience.
+              Community governance proposals and token voting are not available on NEAR. By using the Protocol, you acknowledge that resolution outcomes and administrative decisions may affect your positions and experience.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">8. Intellectual Property</h2>
             <p>
-              The Veiled Markets brand, logo, user interface design, and documentation are proprietary.
-              The underlying smart contracts are deployed on-chain and are subject to the Aleo blockchain's
-              open-source licensing. You may not copy, modify, or distribute the front-end interface without permission.
+              The Veiled Markets name and logo identify the Protocol and may not be used to imply endorsement.
+              The source code of the smart contract, the zero-knowledge circuit and the front-end interface is
+              published under the MIT License, which governs its use.
             </p>
           </section>
 

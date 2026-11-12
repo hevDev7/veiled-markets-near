@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Shield, Clock, ArrowRight } from 'lucide-react'
 import { Footer } from '../components/Footer'
-import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function BugBounty() {
   return (
@@ -29,7 +28,6 @@ export function BugBounty() {
           </div>
 
           <h1 className="font-display text-3xl sm:text-4xl text-white mb-4">Bug Bounty Program</h1>
-          <NearPortNotice className="mb-6" />
           <p className="text-surface-400 leading-relaxed mb-8">
             We're building a formal bug bounty program to reward security researchers who help keep
             Veiled Markets safe. The program will cover smart contract vulnerabilities, front-end
@@ -43,19 +41,23 @@ export function BugBounty() {
               {[
                 {
                   title: 'Smart Contract Scope',
-                  desc: 'veiled_markets_v37.aleo (25 transitions), veiled_markets_usdcx_v7.aleo (25 transitions), veiled_markets_usad_v14.aleo (25 transitions), veiled_governance_v6.aleo (31 transitions), veiled_parlay_v3.aleo (multi-leg parlays), and veiled_turbo_v9.aleo (rolling 5-min Pyth-backed markets, 10 transitions)',
+                  desc: 'The NEAR contract v1.veiled-markets.testnet: the private note pool, FPMM prediction markets, bonded resolution and committee escalation, turbo rounds, parlays and the parlay payout pool, NEAR and USDC deposits and withdrawals',
                 },
                 {
-                  title: 'Oracle & Operator Scope',
-                  desc: 'Pyth Hermes integration for Turbo markets, operator backend (create/resolve flow), audit log integrity at /verify/turbo/:marketId, price manipulation or snapshot divergence between on-chain commitment and Pyth historical data',
+                  title: 'Zero-Knowledge Scope',
+                  desc: 'The spend circuit (Groth16, Poseidon note commitments and nullifiers), its binding of the action data, and the verifier in the contract',
+                },
+                {
+                  title: 'Relayer, Oracle & Operator Scope',
+                  desc: 'The relayer that submits private transactions, the turbo oracle (Pyth Hermes prices, create/resolve flow), audit log integrity at /verify/turbo/:marketId, and divergence between on-chain prices and Pyth historical data',
                 },
                 {
                   title: 'Frontend Scope',
-                  desc: 'XSS, injection, key exposure, and encryption bypass vulnerabilities',
+                  desc: 'XSS, injection, note key exposure, and encryption bypass vulnerabilities',
                 },
                 {
                   title: 'Privacy Scope',
-                  desc: 'Information leakage, metadata analysis, and zero-knowledge proof weaknesses',
+                  desc: 'Information that links an account to its positions: leakage, metadata analysis, and note discovery weaknesses',
                 },
                 {
                   title: 'Tiered Rewards',

@@ -19,8 +19,11 @@ only the NEAR integration below is new.
 
 - Amounts: 6-decimal micro units for every token, identical to the Aleo microcredit math, so the frontend's AMM math
   (`frontend/src/lib/amm.ts`, `sdk/src/contract-math.ts`) is reused unchanged.
-  NEAR: 1 micro = 10^18 yoctoNEAR. USDCX/USAD mock tokens: 6 decimals, 1 token unit = 1 micro.
-- Token types: 1 = NEAR (the frontend keeps its internal key `ALEO`, displayed as `NEAR`), 2 = USDCX, 3 = USAD.
+  NEAR: 1 micro = 10^18 yoctoNEAR. USDC (and the retired mock token): 6 decimals, 1 token unit = 1 micro.
+- Token types: 1 = NEAR, 2 = the early mock USDCX (retired: it still holds old balances, so it was not re-pointed),
+  3 = Circle's testnet USDC `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af`, set on the live
+  contract with the owner-only `set_token_account(3, …)`. The frontend's internal key for slot 3 is `USDCX` (shown as
+  USDC) and for slot 2 `USAD`; see `TOKEN` in `frontend/src/lib/near/config.ts`.
 - Height: virtual height `h = floor(block_timestamp_ms / 4000)` (one tick per 4 s, the Aleo testnet block time the
   frontend already assumes). All deadlines and windows are in ticks. View `get_height()`.
 
@@ -69,8 +72,8 @@ vote_bond, min_voters, min_trade, min_liquidity, protocol_fee_bps, creator_fee_b
 
 Note pool:
 - `deposit_near(owner_blind, memo)` payable; attached deposit must be a positive multiple of 10^18 yocto.
-- `ft_on_transfer(sender_id, amount, msg)` from the USDCX/USAD contracts; `msg` = `{"deposit":{"owner_blind","memo"}}`
-  or `{"create_market":{...CreateMarketArgs}}`.
+- `ft_on_transfer(sender_id, amount, msg)` from the slot 2/3 token contracts; `msg` = `{"deposit":{"owner_blind","memo"}}`,
+  `{"create_market":{...CreateMarketArgs}}` or `{"fund_parlay_pool":{}}`.
 - `transact(proof, public, ext_data) -> TransactResult`
   - `proof = {a:[x,y], b:[[x0,x1],[y0,y1]], c:[x,y]}` decimal strings in snarkjs order.
   - `public = {root, nullifier1, nullifier2, change_commitment, kind, asset, sub, out_amount, ext_data_hash}`.
@@ -113,6 +116,8 @@ Market ids and turbo ids share one counter, so a `/market/:id` route is unambigu
 
 ## 6. Out of scope for the hackathon build
 
-Parlay, community governance proposals, resolver registry, reward epochs and the multisig treasury stay Aleo-only.
+Community governance proposals, resolver registry, reward epochs and the multisig treasury stay Aleo-only.
+Parlays were ported later (`near/contract/contracts/veiled/src/parlay.rs`, note kind 5 = parlay ticket; see the
+Parlays section of the in-app Docs page).
 Their pages render their existing empty states. A production deployment needs a multi-party phase-2 ceremony for the
 circuit key and a relayer fee market.

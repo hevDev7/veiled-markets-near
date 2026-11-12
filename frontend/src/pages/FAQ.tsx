@@ -40,12 +40,12 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'What tokens can I use?',
-    answer: 'NEAR, USDCX and USAD. USDCX and USAD are 6-decimal test stablecoins on NEAR testnet. One contract runs markets in all three tokens, and each market uses one of them.',
+    answer: 'NEAR and USDC. USDC is Circle\'s official testnet USDC on NEAR; get it at faucet.circle.com and choose NEAR Testnet. One contract runs markets in both tokens, and each market uses one of them. Turbo rounds use NEAR.',
   },
   {
     category: 'Trading',
     question: 'What fees are charged?',
-    answer: 'Each buy pays 2.0% in total: 0.5% protocol fee, 0.5% to the market creator, and 1.0% to the liquidity providers (it stays in the pool). Sells pay fees too.',
+    answer: 'A buy pays 1.0%: 0.5% protocol fee and 0.5% to the market creator. A sell pays 2.0%: the same 1.0% plus 1.0% to the liquidity providers, which stays in the pool. Turbo rounds charge 0.5%, and a winning parlay pays 2% of its payout.',
   },
   {
     category: 'Trading',
@@ -60,7 +60,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'Can I combine multiple markets into a parlay?',
-    answer: 'Not on NEAR yet. Parlays exist in the Aleo version of Veiled Markets and are hidden in the NEAR app.',
+    answer: 'Yes. A parlay combines 2 to 4 legs, each one outcome on a different market, and pays only if every leg wins. Turn on Parlay Mode on the dashboard (or use Add to Parlay on a market page), set a stake in NEAR or USDC (at least 0.1) and confirm. The contract prices each leg from the live market (odds = 1 / price, at most 100× per leg and 1000× combined), and a winning ticket pays its potential payout minus a 2% fee. Placing and claiming are private; the parlay\'s legs and stake are public, like a trade. One losing leg loses the parlay; if a leg market is cancelled, the stake is refunded once every leg is final. Track and claim your tickets on My Parlays.',
   },
   // Markets
   {
@@ -92,7 +92,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Liquidity',
     question: 'How does liquidity provision work?',
-    answer: 'You can add liquidity to any active market by depositing tokens. You receive LP shares proportional to your deposit relative to the pool size. LP providers earn 1.0% of every trade as fees, which are automatically added to the pool reserves.',
+    answer: 'You can add liquidity to any active market by depositing tokens. You receive LP shares proportional to your deposit relative to the pool size. LP providers earn a 1.0% fee on every sell, which stays in the pool reserves.',
   },
   {
     category: 'Liquidity',

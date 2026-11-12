@@ -43,7 +43,7 @@ The work is separated in git: tag `pre-hackathon` is the Aleo product before the
 Your private balance and your positions are **notes**: hidden entries in a Merkle tree inside the contract. Only
 your browser can read them.
 
-1. **Deposit.** You move NEAR (or USDCX/USAD) from your wallet into your private balance. This step is public.
+1. **Deposit.** You move NEAR (or USDC) from your wallet into your private balance. This step is public.
 2. **Trade.** Your browser builds a zero-knowledge proof that you own enough notes. A **relayer** submits the proof.
    The trade is not signed by your account, so nobody can see which account bought which position.
 3. **Withdraw.** You move funds back to any NEAR account. This step is public.
@@ -89,7 +89,7 @@ One contract holds everything, so each private action is a single call with no c
 | `v1.veiled-markets.testnet` | The contract |
 | `veiled-relayer.testnet` | Submits private trades (fee 0 on testnet) |
 | `veiled-oracle.testnet` | Opens and resolves turbo rounds |
-| `usdcx.veiled-tokens.testnet`, `usad.veiled-tokens.testnet` | Mock 6-decimal stablecoins |
+| `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` | Circle's official testnet USDC (token slot 3). Get it at [faucet.circle.com](https://faucet.circle.com), choosing NEAR Testnet |
 
 Testnet settings: the vote and dispute windows are 5 minutes each, so a demo market resolves quickly. The vote bond
 is 0.1 NEAR.
@@ -136,8 +136,17 @@ endpoint when one times out or rate-limits.
 
 ## Not on NEAR yet
 
-Parlays, governance proposals, resolver staking and rewards still exist only on Aleo. The app hides their buttons on
-NEAR. Dispute escalation to the committee does work on NEAR.
+Governance proposals, resolver staking and rewards still exist only on Aleo. The app hides their buttons on NEAR.
+Dispute escalation to the committee and parlays do work on NEAR.
+
+## Parlays
+
+A parlay combines 2 to 4 outcomes on different markets and pays only if every leg wins. The contract prices each leg
+from the live market pools (at most 100× per leg and 1000× combined), so the quote in the app is the contract's own.
+Placing is a private action like a trade: the stake comes from your private balance and the contract gives you a
+private ticket note. A losing leg settles the ticket at once; otherwise it settles when every leg is final, and a
+cancelled leg refunds the stake. A winning ticket pays its payout minus 2%. Payouts come from a house pool that must
+cover 110% of all open tickets; anyone can add to it on the My Parlays page.
 
 ## Known limits
 

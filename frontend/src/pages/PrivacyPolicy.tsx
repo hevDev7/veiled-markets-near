@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { Footer } from '../components/Footer'
-import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function PrivacyPolicy() {
   return (
@@ -19,61 +18,63 @@ export function PrivacyPolicy() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Privacy Policy</h1>
-        <p className="text-sm text-surface-500 mb-12">Last updated: April 9, 2026</p>
-        <NearPortNotice className="mb-12" />
+        <p className="text-sm text-surface-500 mb-12">Last updated: November 12, 2026</p>
 
         <div className="space-y-10 text-sm leading-relaxed">
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">1. Introduction</h2>
             <p>
-              Veiled Markets ("the Protocol") is a privacy-preserving prediction market built on the Aleo
-              blockchain. Privacy is at the core of our design. This Privacy Policy explains how we handle
-              information when you interact with the Protocol's front-end interface.
+              Veiled Markets ("the Protocol") is a privacy-preserving prediction market built on NEAR. Privacy is at
+              the core of its design. This Privacy Policy explains how information is handled when you use the
+              Protocol&apos;s front-end interface and the services it talks to.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">2. Privacy by Design</h2>
             <p className="mb-3">
-              Veiled Markets leverages Aleo's zero-knowledge proof technology to ensure maximum privacy:
+              Veiled Markets uses a private note pool and zero-knowledge proofs to separate your account from your positions:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Zero-Knowledge Proofs:</strong> All transactions are verified using zk-SNARKs, meaning your bets, positions, and balances remain private on-chain.</li>
-              <li><strong className="text-surface-300">Private Records:</strong> Your holdings are stored as encrypted records on the Aleo blockchain, visible only to you with your view key. ALEO markets use private credits records, while USDCX and USAD markets use Token records with MerkleProof verification for private trading.</li>
-              <li><strong className="text-surface-300">Non-Custodial:</strong> We never have access to your private keys, view keys, or wallet credentials.</li>
-              <li><strong className="text-surface-300">Client-Side Encryption:</strong> Any data stored locally is encrypted with AES-256-GCM before storage.</li>
+              <li><strong className="text-surface-300">Private Notes:</strong> Your private balance and your positions are notes in the smart contract&apos;s Merkle tree. Only your note key links them to you.</li>
+              <li><strong className="text-surface-300">Zero-Knowledge Proofs:</strong> Trades, turbo bets, parlays, redemptions, claims and withdrawals carry a Groth16 proof made in your browser and are submitted by a relayer, so they are not signed by your NEAR account.</li>
+              <li><strong className="text-surface-300">Encrypted Memos:</strong> Each of your notes carries a memo encrypted with AES-256-GCM under a key derived from your note key, so only your browser can find your notes on chain.</li>
+              <li><strong className="text-surface-300">What Stays Public:</strong> Deposits and withdrawals (account and amount), market creation, resolution votes, disputes and bonds, and each trade&apos;s market, outcome and amount (without the account) are public on NEAR.</li>
+              <li><strong className="text-surface-300">Your Wallet Keys:</strong> We never have access to your wallet&apos;s private keys.</li>
             </ul>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">3. Information We Collect</h2>
-            <p className="mb-4">We minimize data collection. Here is what the front-end may process:</p>
+            <p className="mb-4">We minimize data collection. Here is what the front end and its services process:</p>
 
             <h3 className="text-base font-medium text-white mb-2">3.1 Information You Provide</h3>
             <ul className="list-disc list-inside space-y-2 text-surface-400 mb-4">
-              <li><strong className="text-surface-300">Wallet Address:</strong> Your public Aleo address when you connect your wallet. This is necessary to interact with on-chain contracts.</li>
-              <li><strong className="text-surface-300">Transaction Data:</strong> Transaction parameters you submit through the interface. These are processed client-side and sent directly to the Aleo network.</li>
+              <li><strong className="text-surface-300">NEAR Account ID:</strong> Your account when you connect your wallet. It is needed to sign public calls such as deposits, and to show your wallet balances.</li>
+              <li><strong className="text-surface-300">Message Signature:</strong> Unlocking your private balance asks your wallet to sign a fixed message (NEP-413). Your browser derives your note key from the signature. Neither the signature nor the key is sent to us.</li>
+              <li><strong className="text-surface-300">Transaction Data:</strong> Public calls go from your wallet to NEAR. Private actions (a proof and the action) go from your browser to the relayer, which submits them to NEAR; they contain no account ID.</li>
             </ul>
 
-            <h3 className="text-base font-medium text-white mb-2">3.2 Automatically Collected Information</h3>
+            <h3 className="text-base font-medium text-white mb-2">3.2 Automatically Processed Information</h3>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Local Storage:</strong> The interface stores encrypted preferences and cached data in your browser's localStorage, including wallet connection state, market question mappings, and Zustand store persistence.</li>
-              <li><strong className="text-surface-300">Session Storage:</strong> Temporary encryption key cache (wallet-derived signature) is stored in sessionStorage and cleared when you close the browser tab.</li>
+              <li><strong className="text-surface-300">Local Storage:</strong> The interface stores data in your browser&apos;s localStorage: the seed of your note key for each account you unlock, a cache of your notes, wallet connection state, preferences and cached market data.</li>
+              <li><strong className="text-surface-300">Network Requests:</strong> The relayer, the turbo price service and the server that delivers the front end receive your IP address with each request, as any web server does. The relayer keeps IP addresses in memory for one minute to limit request rates and does not write them to its logs.</li>
             </ul>
             <p className="mt-3 text-surface-500 italic">
-              Note: The Protocol does not currently implement any analytics or tracking services. No usage data, page views, or feature interactions are collected.
+              Note: The Protocol does not use any analytics or tracking services. No usage data, page views, or feature interactions are collected.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">4. Information We Do NOT Collect</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li>Private keys or view keys</li>
-              <li>Bet amounts or positions (these are private on-chain)</li>
+              <li>Wallet private keys</li>
+              <li>Your note key (it never leaves your browser)</li>
+              <li>Which positions you hold</li>
               <li>Personal identification information (name, email, phone number)</li>
-              <li>IP addresses for tracking purposes</li>
               <li>Browsing history outside the Protocol</li>
             </ul>
+            <p className="mt-3 text-surface-400">We do not use IP addresses to track you.</p>
           </section>
 
           <section>
@@ -90,9 +91,9 @@ export function PrivacyPolicy() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">6. Data Storage</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">On-Chain Data:</strong> Transaction data is stored on the Aleo blockchain as encrypted records. Only you can decrypt your own records using your view key.</li>
-              <li><strong className="text-surface-300">Local Data:</strong> Cached data is stored in your browser's localStorage with AES-256-GCM encryption. You can clear this data at any time through your browser settings or the Protocol's Settings page.</li>
-              <li><strong className="text-surface-300">Supabase (Optional):</strong> If configured, betting history and pending transactions may be persisted in a Supabase database. All sensitive fields (amounts, outcomes, shares, payouts) are encrypted client-side with AES-256-GCM before transmission — the server never sees plaintext sensitive data. Non-sensitive fields such as market ID, wallet address, and timestamps are stored unencrypted. Market registry and price snapshot data are public and stored unencrypted. Supabase integration is optional and can be disabled entirely.</li>
+              <li><strong className="text-surface-300">On-Chain Data:</strong> The NEAR contract stores note commitments with their encrypted memos, and every public call. Anyone can read the chain; only your note key decrypts your memos.</li>
+              <li><strong className="text-surface-300">Local Data:</strong> Your note key seed and note cache are stored in your browser&apos;s localStorage. Anyone with access to this browser profile could read them and spend your notes, so use a device you trust. You can remove them by clearing this site&apos;s data in your browser. If your note key was derived from a wallet signature, signing again restores it; if it was created in the browser because your wallet cannot sign messages, clearing the data makes those notes unspendable.</li>
+              <li><strong className="text-surface-300">Supabase (Optional):</strong> The NEAR deployment reads markets from the contract and needs no database. If an operator configures a Supabase database, the app may store market data, price snapshots and your bet history there. Sensitive bet fields (amounts, outcomes, shares, payouts) are encrypted in your browser with AES-256-GCM before they are sent; the market ID, your account ID and timestamps are stored unencrypted, which links your account to the markets you traded.</li>
             </ul>
           </section>
 
@@ -100,12 +101,13 @@ export function PrivacyPolicy() {
             <h2 className="text-lg font-semibold text-white mb-4">7. Third-Party Services</h2>
             <p className="mb-3">The Protocol may interact with the following third-party services:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Aleo Network:</strong> Blockchain infrastructure for transaction processing via Provable Explorer API.</li>
-              <li><strong className="text-surface-300">Wallet Providers:</strong> Third-party wallet extensions (Shield, Puzzle, Leo, Fox, Soter) for key management. Each wallet extension operates independently and may have its own data practices.</li>
-              <li><strong className="text-surface-300">Vercel:</strong> Front-end hosting and deployment.</li>
-              <li><strong className="text-surface-300">Supabase:</strong> Optional backend database for encrypted data persistence.</li>
-              <li><strong className="text-surface-300">CoinGecko:</strong> Public API used for cryptocurrency price data. No user data is sent to CoinGecko.</li>
-              <li><strong className="text-surface-300">Pinata/IPFS (Optional):</strong> If configured, used for storing public market metadata. No private user data is uploaded.</li>
+              <li><strong className="text-surface-300">NEAR Network and RPC Providers:</strong> Your browser reads the contract through public NEAR testnet RPC endpoints (FastNEAR and dRPC by default), and your wallet sends your public transactions through them.</li>
+              <li><strong className="text-surface-300">Wallet Providers:</strong> Meteor Wallet and MyNearWallet manage your keys. Each operates independently and has its own data practices.</li>
+              <li><strong className="text-surface-300">Pyth Network:</strong> The turbo price service reads prices from Pyth Hermes. If you verify a turbo round with your own Pyth API key, your browser sends it only to Pyth Hermes.</li>
+              <li><strong className="text-surface-300">CoinGecko:</strong> Public API used for cryptocurrency price data and charts. No account data is sent to CoinGecko.</li>
+              <li><strong className="text-surface-300">Circle:</strong> USDC on NEAR testnet is Circle&apos;s token, and its faucet is Circle&apos;s website. We share no data with Circle.</li>
+              <li><strong className="text-surface-300">NearBlocks:</strong> Transaction and account links open the NearBlocks testnet explorer.</li>
+              <li><strong className="text-surface-300">Supabase (Optional):</strong> Database for cached data, only if configured.</li>
             </ul>
             <p className="mt-3">
               Each third-party service has its own privacy policy. We encourage you to review them.
@@ -117,7 +119,7 @@ export function PrivacyPolicy() {
             <p className="mb-3">You have the right to:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li>Disconnect your wallet at any time.</li>
-              <li>Clear all locally stored data through your browser or the Settings page.</li>
+              <li>Clear all locally stored data through your browser.</li>
               <li>Use the Protocol without providing any personal information beyond a wallet address.</li>
               <li>Request deletion of any off-chain data we may hold associated with your wallet address.</li>
             </ul>
@@ -126,9 +128,9 @@ export function PrivacyPolicy() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">9. Security</h2>
             <p>
-              We implement industry-standard security measures including client-side AES-256-GCM encryption,
-              secure HTTPS connections, and regular security reviews. However, no system is completely secure.
-              You are responsible for maintaining the security of your wallet and private keys.
+              We use client-side AES-256-GCM encryption for note memos and optional database fields, zero-knowledge
+              proofs for private actions, and HTTPS connections. However, no system is completely secure. You are
+              responsible for the security of your wallet and of the browser that holds your note key.
             </p>
           </section>
 

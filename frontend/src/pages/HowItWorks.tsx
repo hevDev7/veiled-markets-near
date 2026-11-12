@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Wallet, Target, Lock, Zap, Shield, BarChart3, Users, ArrowRight, GitBranch, Vote, Coins, Radio } from 'lucide-react'
+import { ArrowLeft, Wallet, Target, Lock, Zap, Shield, BarChart3, Users, ArrowRight, GitBranch, Vote, Coins, Radio, Ticket } from 'lucide-react'
 import { Footer } from '../components/Footer'
 
 const steps = [
@@ -14,7 +14,7 @@ const steps = [
     number: '02',
     icon: Target,
     title: 'Fund Your Private Balance',
-    description: 'Deposit NEAR, USDCX or USAD into your private balance in Settings. The deposit is public; what you do with it afterwards is not.',
+    description: 'Deposit NEAR or USDC into your private balance in Settings. The deposit is public; what you do with it afterwards is not.',
     detail: 'If you skip this step, the app tops up your private balance right before your first trade.',
   },
   {
@@ -42,7 +42,7 @@ const mechanisms = [
       'Complete-set minting keeps every market fully collateralized',
       'Outcome prices are derived from the reserves of 2, 3 or 4 outcomes',
       'Slippage grows with the size of a trade relative to the pool',
-      'Fees per trade: 1.0% to liquidity providers, 0.5% to the market creator, 0.5% to the protocol',
+      'Fees: 0.5% to the protocol and 0.5% to the market creator on every trade, plus 1.0% to liquidity providers on sells',
     ],
   },
   {
@@ -75,18 +75,18 @@ const mechanisms = [
     description: 'Anyone can add liquidity to a market and earn trading fees:',
     items: [
       'Add tokens from your private balance and receive a private LP position',
-      'Earn the 1.0% LP fee on every trade',
+      'Earn the 1.0% LP fee on every sell',
       'Withdraw your liquidity after the market resolves',
     ],
   },
   {
     icon: Coins,
     title: 'Supported Tokens',
-    description: 'One NEAR contract runs markets in three tokens:',
+    description: 'One NEAR contract runs markets in two tokens:',
     items: [
       'NEAR, the native token',
-      'USDCX and USAD, 6-decimal test stablecoins on NEAR testnet',
-      'All amounts use 6 decimals, so every token works with the same market math',
+      'USDC, Circle’s official testnet USDC on NEAR; get it at faucet.circle.com (choose NEAR Testnet)',
+      'All amounts use 6 decimals, so both tokens work with the same market math',
     ],
   },
   {
@@ -103,12 +103,25 @@ const mechanisms = [
     ],
   },
   {
+    icon: Ticket,
+    title: 'Parlays (2 to 4 legs)',
+    description: 'Combine outcomes from different markets into one ticket that pays only if every leg wins:',
+    items: [
+      'Pick one outcome in each of 2 to 4 markets with Parlay Mode, then stake NEAR or USDC (at least 0.1) from your private balance',
+      'The contract prices each leg from the live market (odds = 1 / price, at most 100× per leg, 1000× combined)',
+      'Placing and claiming are private; the parlay’s legs and stake are public, like a trade',
+      'Settlement reads the leg markets: one losing leg loses the parlay; a cancelled leg refunds the stake once every leg is final',
+      'Winning tickets pay from a pool funded by the operator, minus a 2% fee; track and claim them on My Parlays',
+    ],
+  },
+  {
     icon: Vote,
     title: 'Not on NEAR yet',
     description: 'These features of the Aleo version are not part of the NEAR deployment yet:',
     items: [
-      'Multi-leg parlays',
-      'Governance proposals, resolver staking and rewards',
+      'Community governance proposals',
+      'Resolver staking and registry, and reward epochs',
+      'The multisig treasury',
     ],
   },
 ]

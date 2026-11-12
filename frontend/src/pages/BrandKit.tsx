@@ -119,12 +119,12 @@ export function BrandKit() {
               </div>
               <div className="p-5 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                 <p className="text-xs text-surface-500 mb-2">Body Text</p>
-                <p className="text-base text-surface-300">Privacy-preserving prediction market built on Aleo. Predict freely, bet privately.</p>
+                <p className="text-base text-surface-300">Privacy-preserving prediction market built on NEAR. Predict freely, bet privately.</p>
                 <p className="text-xs text-surface-500 mt-2">Font: System sans-serif stack</p>
               </div>
               <div className="p-5 rounded-xl bg-white/[0.02] border border-white/[0.04]">
                 <p className="text-xs text-surface-500 mb-2">Code / Technical</p>
-                <p className="font-mono text-base text-surface-300">veiled_markets_v37.aleo</p>
+                <p className="font-mono text-base text-surface-300">v1.veiled-markets.testnet</p>
                 <p className="text-xs text-surface-500 mt-2">Font: Monospace stack (configured as <code className="bg-white/[0.04] px-1 rounded">font-mono</code>)</p>
               </div>
             </div>
@@ -164,7 +164,7 @@ export function BrandKit() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {[
                 'Predict freely, bet privately.',
-                'Privacy-preserving prediction markets on Aleo.',
+                'Privacy-preserving prediction markets on NEAR.',
                 'Your bets, your business.',
                 'ZK-powered predictions.',
               ].map((tagline) => (

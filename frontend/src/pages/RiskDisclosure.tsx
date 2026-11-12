@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeft, AlertTriangle } from 'lucide-react'
 import { Footer } from '../components/Footer'
-import { NearPortNotice } from '@/components/NearPortNotice'
 
 export function RiskDisclosure() {
   return (
@@ -19,8 +18,7 @@ export function RiskDisclosure() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <h1 className="font-display text-3xl sm:text-4xl text-white mb-2">Risk Disclosure</h1>
-        <p className="text-sm text-surface-500 mb-8">Last updated: April 9, 2026</p>
-        <NearPortNotice className="mb-8" />
+        <p className="text-sm text-surface-500 mb-8">Last updated: November 12, 2026</p>
 
         {/* Warning Banner */}
         <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/[0.06] border border-yellow-500/[0.12] mb-12">
@@ -45,39 +43,53 @@ export function RiskDisclosure() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">2. Smart Contract Risk</h2>
             <p className="mb-3">
-              The Protocol is powered by smart contracts deployed on the Aleo blockchain. These contracts carry inherent risks:
+              The Protocol runs on one smart contract on NEAR testnet, v1.veiled-markets.testnet. It holds the private
+              note pool, the prediction markets, market resolution, turbo rounds and parlays. This carries inherent risks:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Code Vulnerabilities:</strong> Despite testing and review, smart contracts may contain undiscovered bugs or vulnerabilities that could result in loss of funds.</li>
-              <li><strong className="text-surface-300">Immutability:</strong> Once deployed, smart contract code cannot be easily modified. Fixes may require deploying new contracts and migrating state.</li>
-              <li><strong className="text-surface-300">Composability Risk:</strong> The Protocol interacts with multiple on-chain programs (veiled_markets_v37.aleo for ALEO markets, veiled_markets_usdcx_v7.aleo for USDCX markets, veiled_markets_usad_v14.aleo for USAD markets, veiled_governance_v6.aleo for governance, veiled_parlay_v3.aleo for multi-leg parlays, and veiled_turbo_v9.aleo for rolling 5-minute oracle markets). Issues in any component could affect the entire system.</li>
-              <li><strong className="text-surface-300">Transition Limits:</strong> The Aleo snarkVM imposes a 31-transition limit per program. Each market contract uses up to 25 transitions, the governance contract uses 31 transitions (at the limit), and the turbo contract uses 10 transitions.</li>
+              <li><strong className="text-surface-300">Code Vulnerabilities:</strong> Despite testing and review, the contract may contain undiscovered bugs that could result in loss of funds.</li>
+              <li><strong className="text-surface-300">Single Contract:</strong> Every deposit, market, turbo round and parlay pool is held by the same contract, so a flaw in one part could affect funds held for the others.</li>
+              <li><strong className="text-surface-300">Zero-Knowledge Circuit:</strong> Private actions are verified with a Groth16 proof. A flaw in the circuit or in its trusted setup, which on testnet comes from a single phase-2 contribution, could allow invalid spends.</li>
+              <li><strong className="text-surface-300">Upgrades and Redeployment:</strong> The team holds the key of the contract account and can deploy new code or a new contract version. A new version may not carry over testnet balances or markets.</li>
+              <li><strong className="text-surface-300">Owner Controls:</strong> The owner account can pause trading, change fees and minimum amounts, withdraw protocol fees and forfeited bonds from the treasury, withdraw parlay pool funds that open parlays do not need, and change the parlay limits.</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-white mb-4">2a. Turbo Market & Oracle Risk</h2>
+            <h2 className="text-lg font-semibold text-white mb-4">2a. Turbo Market &amp; Oracle Risk</h2>
             <p className="mb-3">
-              Turbo markets (veiled_turbo_v9.aleo) introduce additional risks beyond the main FAMM markets:
+              Turbo rounds are 5-minute UP/DOWN markets on BTC, ETH and SOL. They carry risks beyond the prediction markets:
             </p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Operator Trust:</strong> Turbo markets are created and resolved by a single trusted operator wallet (ORACLE_OPERATOR hardcoded in the contract) that subscribes to Pyth Network and pushes price snapshots on-chain. If the operator is offline, compromised, or malicious, rounds may fail to resolve, resolve to incorrect outcomes, or get stuck requiring emergency_cancel.</li>
-              <li><strong className="text-surface-300">Oracle Dependency:</strong> Price data comes from the Pyth Network Hermes stream. A Pyth outage, manipulation, or mispricing affects every turbo round in that window. Pyth confidence intervals are checked on-chain but don't guarantee correctness.</li>
-              <li><strong className="text-surface-300">No Dispute Window:</strong> Unlike FAMM markets, turbo markets have NO Multi-Voter Quorum and NO dispute period. Resolution is fully automated — once the operator submits resolve_turbo_market, the outcome is final. Your only recourse for suspected misbehavior is the public audit trail at /verify/turbo/:marketId and the bug bounty program.</li>
-              <li><strong className="text-surface-300">Shared Vault Exposure:</strong> All turbo markets share a single vault. A bug or exploit affecting one round could potentially drain funds committed to other rounds. Contract sanity rails (max price move, vault balance checks) mitigate but do not eliminate this risk.</li>
-              <li><strong className="text-surface-300">Short Resolution Window:</strong> Turbo rounds run every 5 minutes on testnet (75 blocks). If the operator fails to resolve within RESOLUTION_WINDOW_BLOCKS (60 blocks ≈ 4 minutes past deadline), the round becomes eligible for emergency_cancel and all bettors refund. This is permissionless — anyone can call it — but there is a window during which funds are locked.</li>
-              <li><strong className="text-surface-300">Price Snapshot Divergence:</strong> The frontend chart displays live Pyth prices streaming through the backend. The "frozen price" captured at deadline is the last broadcast value, but there can be a small gap (sub-second) between the on-chain committed closing price and what a user last saw on their screen. The value written on-chain is authoritative — NOT the dot on your chart.</li>
-              <li><strong className="text-surface-300">Operator Fee Runway:</strong> The operator pays ~1 ALEO gas per create and per resolve. If the operator wallet runs out of ALEO, new rounds stop. Existing active rounds will still be resolvable as long as there's gas.</li>
+              <li><strong className="text-surface-300">Operator Trust:</strong> Rounds are created and resolved only by the oracle operator account (veiled-oracle.testnet), which reads prices from Pyth Network, or from CoinGecko when it has no Pyth API key. If the operator is offline, compromised or malicious, rounds may fail to resolve or resolve to the wrong outcome. The contract checks the operator&apos;s identity, the price range, a confidence interval of at most 0.5% of the price, and that the closing price is within 50% of the baseline, but it cannot verify the price itself.</li>
+              <li><strong className="text-surface-300">Oracle Dependency:</strong> A Pyth outage or mispricing affects every round in that window. CoinGecko prices refresh only about once a minute.</li>
+              <li><strong className="text-surface-300">No Dispute Window:</strong> Turbo rounds have no voting and no dispute period. Once the operator resolves a round, the outcome is final. Your recourse for suspected misbehavior is the public audit trail at /verify/turbo/:marketId and the bug bounty program.</li>
+              <li><strong className="text-surface-300">Pool-Based Payouts:</strong> Winners split the stakes of both sides in proportion to their own stake, so your payout depends on how much others bet. If nobody bet on the winning side, the round is cancelled and every bet is refunded.</li>
+              <li><strong className="text-surface-300">Late Resolution:</strong> The operator must resolve a round within 20 minutes of its deadline. If it does not, the operator can cancel the round, and after about 5.5 more hours anyone can. Every bet is then refundable, but your stake is locked until that happens.</li>
+              <li><strong className="text-surface-300">Price Snapshot Divergence:</strong> The chart shows live prices streamed by the operator service. There can be a small gap between the closing price committed on chain and the last price you saw. The value stored in the contract is authoritative, not the dot on your chart.</li>
+              <li><strong className="text-surface-300">Operator Runway:</strong> The operator pays NEAR gas for every create and resolve. If its account runs out of NEAR, new rounds stop.</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-white mb-4">3. Blockchain & Network Risk</h2>
+            <h2 className="text-lg font-semibold text-white mb-4">2b. Parlay Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Network Congestion:</strong> High network activity may cause transaction delays or failures.</li>
-              <li><strong className="text-surface-300">Transaction Fees:</strong> Aleo transactions require gas fees that may vary. Failed transactions may still incur fees.</li>
-              <li><strong className="text-surface-300">Testnet Risk:</strong> The Protocol is currently deployed on the Aleo Testnet. Testnet tokens have no real value, and the network may be reset at any time.</li>
-              <li><strong className="text-surface-300">Network Upgrades:</strong> Aleo network upgrades or hard forks could affect the Protocol's functionality or your holdings.</li>
+              <li><strong className="text-surface-300">All Legs Must Win:</strong> A parlay combines 2 to 4 legs. If any leg resolves to a different outcome, the whole stake is lost.</li>
+              <li><strong className="text-surface-300">Inherited Resolution:</strong> Each leg follows its market&apos;s resolution, including votes, disputes, committee decisions and cancellations. A parlay with a cancelled leg is refunded only after every leg market is final, which can take until the last leg resolves.</li>
+              <li><strong className="text-surface-300">Odds at Placement:</strong> Odds are fixed from the live market prices when the parlay is placed. Prices can move before your transaction lands; the minimum payout you confirm protects you, and the parlay fails rather than accept less.</li>
+              <li><strong className="text-surface-300">Payout Pool:</strong> Winning parlays are paid from a pool funded by the operator. A new parlay is accepted only while the pool covers 110% of what open parlays are owed, and new parlays are refused when it does not. A contract flaw could still affect the pool.</li>
+              <li><strong className="text-surface-300">Fee:</strong> 2% of the payout of a winning parlay goes to the protocol treasury.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold text-white mb-4">3. Blockchain &amp; Network Risk</h2>
+            <ul className="list-disc list-inside space-y-2 text-surface-400">
+              <li><strong className="text-surface-300">Testnet Risk:</strong> The Protocol is deployed on NEAR testnet. Testnet tokens have no monetary value, and the network or the contract may be reset at any time.</li>
+              <li><strong className="text-surface-300">Relayer Dependency:</strong> Private actions (trades, bets, parlays, redemptions, claims and withdrawals) are submitted by a relayer. If the relayer is offline, you cannot perform them until it returns. The relayer cannot change or redirect a transaction, because the proof binds it.</li>
+              <li><strong className="text-surface-300">Network Congestion and RPC Outages:</strong> Busy or unavailable NEAR RPC endpoints may delay or fail transactions.</li>
+              <li><strong className="text-surface-300">Transaction Fees:</strong> Public calls from your wallet (deposits, market creation, votes, disputes) cost NEAR gas. Failed transactions may still cost gas. The relayer pays the gas of private actions.</li>
+              <li><strong className="text-surface-300">Network Upgrades:</strong> NEAR protocol upgrades could affect the Protocol&apos;s behavior.</li>
               <li><strong className="text-surface-300">Finality:</strong> Blockchain transactions are irreversible. Once a transaction is confirmed, it cannot be undone.</li>
             </ul>
           </section>
@@ -85,47 +97,47 @@ export function RiskDisclosure() {
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">4. Market Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Price Volatility:</strong> Market share prices are determined by the FPMM (Fixed Product Market Maker) algorithm and can change rapidly based on trading activity.</li>
-              <li><strong className="text-surface-300">Liquidity Risk:</strong> Markets with low liquidity may result in high slippage, meaning you may receive significantly less value than expected.</li>
-              <li><strong className="text-surface-300">Resolution Risk:</strong> Markets are resolved through a Multi-Voter Quorum system (not automated oracles). After a market closes, anyone can vote on the outcome by posting a 1 ALEO bond, requiring a minimum of 3 voters to reach quorum. After the voting window (~3 hours), votes are finalized, followed by a dispute window (~3 hours) where anyone can override the result by posting 3x the total bonds. Voters who vote with the majority can claim rewards, while those who vote against the majority lose their bond (slashing). The process is human-initiated and may be subject to errors or disputes.</li>
-              <li><strong className="text-surface-300">Voter Slashing Risk:</strong> If you participate in market resolution voting and your vote does not match the final outcome, your 1 ALEO bond is slashed. Only vote on outcomes you are confident about.</li>
-              <li><strong className="text-surface-300">Impermanent Loss:</strong> Liquidity providers face impermanent loss risk when the market price diverges from the initial provision ratio. The FPMM formula (x * y = k) means LP value may decrease as outcomes become more certain.</li>
-              <li><strong className="text-surface-300">LP Share Non-Transferability:</strong> LP shares are currently non-transferable due to claim key constraints. You cannot transfer your liquidity position to another wallet.</li>
+              <li><strong className="text-surface-300">Price Volatility:</strong> Share prices are set by the FPMM (Fixed Product Market Maker) and can change rapidly with trading activity.</li>
+              <li><strong className="text-surface-300">Liquidity Risk:</strong> In markets with low liquidity, large trades suffer high slippage, so you may receive significantly less than expected.</li>
+              <li><strong className="text-surface-300">Resolution Risk:</strong> Markets are resolved by bonded voting, not by an automated oracle. After the deadline anyone can vote on the outcome by posting a 0.1 NEAR bond. On testnet one voter is enough, and the voting and dispute windows last 5 minutes each, so a single account can decide a market if nobody disputes in time. A dispute requires 3 times the total voter bonds and moves the decision to a 5-member committee; if the committee does not decide within 1 hour on testnet, the market can be cancelled and refunded. The process is human-driven and may produce errors.</li>
+              <li><strong className="text-surface-300">Voter Bond Risk:</strong> If you vote and your outcome does not win, your 0.1 NEAR bond is forfeited to the treasury. A disputer whose outcome the committee rejects forfeits the dispute bond.</li>
+              <li><strong className="text-surface-300">Impermanent Loss:</strong> Liquidity providers face impermanent loss when prices move away from where they provided liquidity. LP value can fall as an outcome becomes more certain.</li>
+              <li><strong className="text-surface-300">LP Withdrawal Timing:</strong> Liquidity can only be withdrawn after the market resolves (after a short priority window for winners) or is cancelled.</li>
             </ul>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">5. Fee Risk</h2>
-            <p className="mb-3">
-              The Protocol charges a total trading fee of 2.0% on each buy transaction, distributed as follows:
-            </p>
+            <p className="mb-3">The Protocol charges the following fees:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Protocol Fee:</strong> 0.5% — sent to the protocol treasury.</li>
-              <li><strong className="text-surface-300">Creator Fee:</strong> 0.5% — sent to the market creator.</li>
-              <li><strong className="text-surface-300">LP Fee:</strong> 1.0% — retained in the AMM pool as rewards for liquidity providers.</li>
+              <li><strong className="text-surface-300">Buying shares:</strong> 1.0% in total: 0.5% protocol fee to the treasury and 0.5% to the market creator.</li>
+              <li><strong className="text-surface-300">Selling shares:</strong> 2.0% in total: 0.5% protocol fee, 0.5% to the market creator, and 1.0% to liquidity providers (it stays in the pool).</li>
+              <li><strong className="text-surface-300">Turbo bets:</strong> 0.5% of each bet, to the treasury.</li>
+              <li><strong className="text-surface-300">Parlays:</strong> 2% of the payout of a winning parlay, to the treasury.</li>
             </ul>
             <p className="mt-3 text-surface-400">
-              Fees are deducted before the AMM pool calculation. Fee rates may be changed through governance proposals (requires 20% quorum and 72-hour timelock).
+              The contract owner can change the market fee rates and the parlay fee at any time, without a vote.
             </p>
           </section>
 
           <section>
             <h2 className="text-lg font-semibold text-white mb-4">6. Stablecoin Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">USAD & USDCX:</strong> The Protocol supports three tokens, each with its own market contract: native ALEO (veiled_markets_v37.aleo), USDCX (veiled_markets_usdcx_v7.aleo), and USAD (veiled_markets_usad_v14.aleo). These test stablecoin tokens may not maintain their peg to USD and have no guaranteed backing.</li>
-              <li><strong className="text-surface-300">De-peg Risk:</strong> Stablecoins can lose their peg due to market conditions, smart contract issues, or governance failures.</li>
-              <li><strong className="text-surface-300">Two-Transaction Flow:</strong> Buying shares with USDCX or USAD requires two sequential blockchain transactions (deposit to public, then buy). If the first transaction succeeds but the second fails, your funds may be temporarily locked in the contract's public balance until you retry.</li>
-              <li><strong className="text-surface-300">Separate Contract Risk:</strong> Each token type operates through its own smart contract (ALEO via veiled_markets_v37.aleo, USDCX via veiled_markets_usdcx_v7.aleo, USAD via veiled_markets_usad_v14.aleo). This multi-contract architecture adds composability risk.</li>
+              <li><strong className="text-surface-300">USDC on Testnet:</strong> The Protocol supports NEAR and USDC. USDC here is Circle&apos;s testnet USDC on NEAR, obtained from Circle&apos;s faucet; it has no monetary value, and its contract is operated by Circle, not by Veiled Markets.</li>
+              <li><strong className="text-surface-300">De-peg and Issuer Risk:</strong> Stablecoins can lose their peg or be frozen by their issuer.</li>
+              <li><strong className="text-surface-300">Account Registration:</strong> USDC payments out of the contract require the receiving account to be registered with the USDC contract. If a withdrawal to an unregistered account fails, the amount returns to your private balance. If another USDC payout fails, such as creator fees to an unregistered account, the amount is booked into the protocol treasury.</li>
+              <li><strong className="text-surface-300">Two-Step Trades:</strong> If your private balance is too small, the app first asks your wallet for a deposit and then submits the trade. If the trade fails after the deposit, the deposit stays in your private balance until you use or withdraw it.</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold text-white mb-4">7. Privacy & Security Risk</h2>
+            <h2 className="text-lg font-semibold text-white mb-4">7. Privacy &amp; Security Risk</h2>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Key Management:</strong> If you lose your private keys or view keys, you will permanently lose access to your funds and cannot recover them.</li>
+              <li><strong className="text-surface-300">Note Key:</strong> Your private balance and positions can only be spent with your note key, which is derived from a message your wallet signs. If you lose access to your NEAR account, you lose access to your notes. If your wallet cannot sign messages, the key is created in your browser instead, and clearing the browser&apos;s data deletes it and the notes with it.</li>
+              <li><strong className="text-surface-300">Key Stored in the Browser:</strong> The note key is cached in your browser&apos;s local storage. Anyone who can read that storage, such as malware, a malicious extension or another user of the same browser profile, can spend your notes without your wallet.</li>
               <li><strong className="text-surface-300">Wallet Security:</strong> The security of your funds depends on the security of your wallet software and the device you use.</li>
-              <li><strong className="text-surface-300">Privacy Limitations:</strong> While Aleo provides strong privacy guarantees, metadata analysis or user behavior patterns could potentially compromise privacy.</li>
-              <li><strong className="text-surface-300">Phishing:</strong> Always verify you are accessing the official Veiled Markets website. Phishing attacks may attempt to steal your credentials.</li>
+              <li><strong className="text-surface-300">Privacy Limitations:</strong> The note pool hides which account holds which position, not the timing or size of transactions. A deposit followed shortly by a trade of the same amount can be linked. Deposits, withdrawals, votes and market creation are public. The relayer and RPC providers can see the IP address your requests come from.</li>
+              <li><strong className="text-surface-300">Phishing:</strong> Always verify you are using the official Veiled Markets website. Phishing sites may try to obtain your wallet signature, which would reveal your note key.</li>
             </ul>
           </section>
 
