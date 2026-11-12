@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as snarkjs from 'snarkjs';
 import {
-  initPoseidon, poseidon, MerkleTree, ownerBlind, noteCommitment, spendInput, proveSpend, extDataHash,
+  initPoseidon, poseidon, MerkleTree, ownerBlind, noteCommitment, spendInput, proveSpend, extDataHash, VKEY,
 } from '../lib/notes.mjs';
 
-const vkey = JSON.parse(readFileSync(new URL('../build/verification_key.json', import.meta.url)));
+const vkey = JSON.parse(readFileSync(VKEY));
 const SK = 123456789n;
 const NEAR = { kind: 1, asset: 1, sub: 0 };
 const EXT = '{"action":{"type":"withdraw","recipient":"bob.test.near"},"new_owner_blind":"0","new_memo":"","change_memo":"","fee":"0"}';

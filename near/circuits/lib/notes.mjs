@@ -3,6 +3,7 @@
 import { buildPoseidon } from 'circomlibjs';
 import * as snarkjs from 'snarkjs';
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -10,8 +11,14 @@ export const DEPTH = 20;
 export const FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const WASM = path.join(here, '../build/spend_js/spend.wasm');
-export const ZKEY = path.join(here, '../build/spend_final.zkey');
+// The circuit's proving files. A local build (scripts/build.sh) is used when there is one. A fresh clone has none,
+// so it uses the files committed for the browser prover, which belong to the deployed contract's verifying key.
+const built = (file) => path.join(here, '../build', file);
+const committed = (file) => path.join(here, '../../../frontend/public/zk', file);
+const artifact = (builtFile, committedFile) => (existsSync(built(builtFile)) ? built(builtFile) : committed(committedFile));
+export const WASM = artifact('spend_js/spend.wasm', 'spend.wasm');
+export const ZKEY = artifact('spend_final.zkey', 'spend_final.zkey');
+export const VKEY = artifact('verification_key.json', 'verification_key.json');
 
 let P;
 export async function initPoseidon() {
