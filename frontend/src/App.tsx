@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, Docs, BrandKit, BugBounty } from './pages'
 import { MyParlays } from './pages/MyParlays'
@@ -47,6 +47,18 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// A new page opens at the top. Back and forward (POP) keep the browser's own scroll handling.
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  const navigationType = useNavigationType()
+
+  useEffect(() => {
+    if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+  }, [pathname, navigationType])
+
+  return null
+}
+
 function App() {
   // Initialize market IDs from indexer on app startup
   useEffect(() => {
@@ -55,6 +67,7 @@ function App() {
 
   return (
     <ErrorBoundary>
+      <ScrollToTop />
       <Routes>
         {/* Landing Page - shown when not connected */}
         <Route path="/" element={<Landing />} />

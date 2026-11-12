@@ -20,6 +20,10 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		-Server
 	}
+	# Hashed bundles never change. Everything else (index.html, og.png, the zk files) is revalidated on each visit,
+	# so a new deploy shows up right away.
+	@mutable not path /assets/*
+	header @mutable Cache-Control "no-cache"
 	header /assets/* Cache-Control "public, max-age=31536000, immutable"
 
 	try_files {path} /index.html
