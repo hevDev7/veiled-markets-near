@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { TokenIcon } from '@/components/TokenSelect'
 import { useWalletStore, useBetsStore, type Market, outcomeToIndex } from '@/lib/store'
 import { useRealMarketsStore } from '@/lib/market-store'
 import { useWalletModal } from '@provablehq/aleo-wallet-adaptor-react-ui'
@@ -73,14 +74,18 @@ export function Dashboard() {
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid')
     const [pendingInfo, setPendingInfo] = useState<PendingMarketInfo>({ count: 0, questions: [], statuses: [], retryCounts: [] })
     const [isResolvingPending, setIsResolvingPending] = useState(false)
-    const [tokenFilter, setTokenFilter] = useState<'all' | 'NEAR' | 'USDCX' | 'USAD'>('all')
+    // ?token=NEAR|USDCX preselects the token filter (the trade panel links here).
+    const [tokenFilter, setTokenFilter] = useState<'all' | 'NEAR' | 'USDCX' | 'USAD'>(() => {
+        const t = new URLSearchParams(window.location.search).get('token')
+        return t === 'NEAR' || t === 'USDCX' ? t : 'all'
+    })
     const [marketTypeFilter, setMarketTypeFilter] = useState<'all' | 'binary' | 'multi' | 'scalar' | 'conditional'>('all')
     const [visibleCount, setVisibleCount] = useState(12)
     const [expandPositions, setExpandPositions] = useState(false)
     const [notifications, setNotifications] = useState<Notification[]>([])
     const [showNotifications, setShowNotifications] = useState(false)
     const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([])
-    const [showFilters, setShowFilters] = useState(false)
+    const [showFilters, setShowFilters] = useState(() => new URLSearchParams(window.location.search).has('token'))
     const [parlayMode, setParlayMode] = useState(false)
     const HERO_SYMBOLS = ['BTC', 'ETH', 'SOL'] as const
     const [turboMarkets, setTurboMarkets] = useState<Record<string, TurboHeroMarket>>({})
@@ -519,7 +524,8 @@ export function Dashboard() {
                                             <div className="flex gap-2">
                                                 {(['all', ...ENABLED_TOKEN_KEYS] as const).map((t) => (
                                                     <button key={t} onClick={() => setTokenFilter(t)}
-                                                        className={cn('px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200', tokenFilter === t ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]' : 'bg-white/[0.02] text-surface-400 border border-white/[0.04] hover:bg-white/[0.04]')}>
+                                                        className={cn('flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200', tokenFilter === t ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]' : 'bg-white/[0.02] text-surface-400 border border-white/[0.04] hover:bg-white/[0.04]')}>
+                                                        {t !== 'all' && <TokenIcon token={t} className="h-4 w-4" />}
                                                         {t === 'all' ? 'All' : tokenLabel(t)}
                                                     </button>
                                                 ))}

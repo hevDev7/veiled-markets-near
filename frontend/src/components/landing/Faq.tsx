@@ -7,7 +7,7 @@ export function Faq() {
   const facts = useProtocolFacts()
   const fee =
     facts.feePct !== null && facts.lpFeePct !== null && facts.creatorFeePct !== null && facts.protocolFeePct !== null
-      ? `Each trade pays a ${formatPct(facts.feePct)} fee: ${formatPct(facts.lpFeePct)} to liquidity providers, ${formatPct(facts.creatorFeePct)} to the market’s creator and ${formatPct(facts.protocolFeePct)} to the protocol.`
+      ? `A buy pays ${formatPct(facts.feePct)}: ${formatPct(facts.creatorFeePct)} to the market’s creator and ${formatPct(facts.protocolFeePct)} to the protocol. A sell pays the same plus ${formatPct(facts.lpFeePct)} to liquidity providers.`
       : 'Each trade pays a small fee, split between liquidity providers, the market’s creator and the protocol.'
 
   const items = [

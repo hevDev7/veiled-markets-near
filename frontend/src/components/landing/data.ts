@@ -209,7 +209,8 @@ export function useProtocolFacts(): ProtocolFacts {
           lpFeePct: lp,
           creatorFeePct: creator,
           protocolFeePct: protocol,
-          feePct: lp !== null && creator !== null && protocol !== null ? lp + creator + protocol : null,
+          // A buy pays protocol + creator fees; the LP fee is charged on sells only (markets.rs).
+          feePct: creator !== null && protocol !== null ? creator + protocol : null,
         })
       },
     )

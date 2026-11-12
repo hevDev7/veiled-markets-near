@@ -71,6 +71,7 @@ import {
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { OutcomeSelector } from '@/components/OutcomeSelector'
+import { TokenIcon, TokenSelect } from '@/components/TokenSelect'
 import { ProbabilityDonut } from '@/components/ProbabilityDonut'
 import { LiquidityPanel } from '@/components/LiquidityPanel'
 // DisputePanel removed in v33 — challenge integrated in ResolvePanel
@@ -439,6 +440,9 @@ export function MarketDetail() {
   const totalFeePercent = Number(
     governanceConfig.protocolFeeBps + governanceConfig.creatorFeeBps + governanceConfig.lpFeeBps
   ) / 100
+  // Buys pay only the protocol and creator fees; the LP fee is charged on sells (markets.rs act_buy / act_sell).
+  const buyFeePercent = Number(governanceConfig.protocolFeeBps + governanceConfig.creatorFeeBps) / 100
+  const feeSummary = `${buyFeePercent.toFixed(1)}% buy · ${totalFeePercent.toFixed(1)}% sell`
 
   // Live countdown with seconds
   const liveTimeRemaining = useLiveCountdown(market?.deadlineTimestamp, market?.timeRemaining)
@@ -1396,7 +1400,7 @@ export function MarketDetail() {
                         <div className="space-y-2">
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Token</span>
-                            <span className="text-white font-medium">{tokenSymbol}</span>
+                            <span className="flex items-center gap-1.5 text-white font-medium"><TokenIcon token={tokenType} className="h-4 w-4" />{tokenSymbol}</span>
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Outcomes</span>
@@ -1404,7 +1408,7 @@ export function MarketDetail() {
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Trading Fees</span>
-                            <span className="text-white font-medium">{totalFeePercent.toFixed(2)}%</span>
+                            <span className="text-white font-medium">{feeSummary}</span>
                           </div>
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-surface-400">Contract</span>
@@ -1672,20 +1676,18 @@ export function MarketDetail() {
                         animate={{ opacity: 1, height: 'auto' }}
                         className="mb-6"
                       >
-                        <label className="text-sm text-surface-400 mb-2 block">Amount ({tokenSymbol})</label>
+                        <label className="text-sm text-surface-400 mb-2 block">Amount</label>
                         <div className="relative">
                           <input
                             type="number"
                             value={buyAmount}
                             onChange={(e) => setBuyAmount(e.target.value)}
                             placeholder="0.00"
-                            className="input-field w-full pr-16 text-lg"
+                            className="input-field w-full pr-36 text-lg"
                             min="0"
                             step="0.1"
                           />
-                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400">
-                            {tokenSymbol}
-                          </span>
+                          <TokenSelect marketToken={tokenType} className="absolute right-3 top-1/2 -translate-y-1/2" />
                         </div>
 
                         {/* Quick Amount Buttons */}
@@ -1811,9 +1813,9 @@ export function MarketDetail() {
                           </span>
                         </div>
                         <div className="flex justify-between mb-2">
-                          <span className="text-surface-400 text-sm">Trading Fee ({totalFeePercent.toFixed(2)}%)</span>
+                          <span className="text-surface-400 text-sm">Trading Fee ({buyFeePercent.toFixed(2)}%)</span>
                           <span className="text-surface-300 font-medium text-sm">
-                            {formatCredits(tradePreview.fees.totalFees)} {tokenSymbol}
+                            {formatCredits(tradePreview.fees.protocolFee + tradePreview.fees.creatorFee)} {tokenSymbol}
                           </span>
                         </div>
                         <div className="flex justify-between pt-2 border-t border-white/[0.06]">
@@ -2036,7 +2038,7 @@ export function MarketDetail() {
                             animate={{ opacity: 1, height: 'auto' }}
                           >
                             <label className="text-sm text-surface-400 mb-2 block">
-                              Amount to Withdraw ({tokenSymbol})
+                              Amount to Withdraw
                             </label>
                             <div className="relative">
                               <input
@@ -2044,11 +2046,11 @@ export function MarketDetail() {
                                 value={sellTokensDesired}
                                 onChange={(e) => setSellTokensDesired(e.target.value)}
                                 placeholder="0.00"
-                                className="input-field w-full pr-24 text-lg"
+                                className="input-field w-full pr-44 text-lg"
                                 min="0"
                                 step="0.1"
                               />
-                              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                                 <button
                                   onClick={() => setSellTokensDesired(
                                     (Number(sellMaxTokens) / 1_000_000).toString()
@@ -2057,7 +2059,7 @@ export function MarketDetail() {
                                 >
                                   Max
                                 </button>
-                                <span className="text-surface-400 text-sm">{tokenSymbol}</span>
+                                <TokenSelect marketToken={tokenType} />
                               </div>
                             </div>
 
@@ -2283,7 +2285,7 @@ export function MarketDetail() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Token</span>
-                    <span className="text-xs font-medium text-white">{tokenSymbol}</span>
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-white"><TokenIcon token={tokenType} className="h-4 w-4" />{tokenSymbol}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Creator</span>
@@ -2302,7 +2304,7 @@ export function MarketDetail() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Fees</span>
-                    <span className="text-xs text-white">{totalFeePercent.toFixed(2)}%</span>
+                    <span className="text-xs text-white">{feeSummary}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Contract</span>

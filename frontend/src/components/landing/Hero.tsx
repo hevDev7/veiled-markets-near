@@ -248,7 +248,7 @@ function FactsStrip({ openMarkets }: { openMarkets: number | null }) {
     { value: facts.notes === null ? '—' : facts.notes.toLocaleString('en-US'), label: 'Notes in the private pool' },
     {
       value: facts.feePct === null ? '—' : formatPct(facts.feePct),
-      label: facts.lpFeePct === null ? 'Trading fee' : `Trading fee, ${formatPct(facts.lpFeePct)} to LPs`,
+      label: facts.lpFeePct === null ? 'Fee per buy' : `Fee per buy; sells add ${formatPct(facts.lpFeePct)} for LPs`,
     },
   ]
 
