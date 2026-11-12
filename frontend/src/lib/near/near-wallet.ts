@@ -153,7 +153,7 @@ export async function signMessage(message: string, nonce: Uint8Array): Promise<{
   const selector = await getSelector();
   const wallet = await selector.wallet();
   if (!('signMessage' in wallet) || typeof wallet.signMessage !== 'function') {
-    throw new WalletError('This wallet cannot sign messages.');
+    throw new WalletError('This wallet cannot sign messages.', 'SIGN_UNSUPPORTED');
   }
   const signed = await wallet.signMessage({
     message,

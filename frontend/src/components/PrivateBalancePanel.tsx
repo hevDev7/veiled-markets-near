@@ -5,7 +5,7 @@ import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, EyeOff, KeyRound, Loade
 import { useWalletStore } from '@/lib/store'
 import { cn, formatCredits } from '@/lib/utils'
 import { ENABLED_TOKEN_KEYS, TOKEN, USDC_FAUCET_URL, tokenLabel, txUrl } from '@/lib/near/config'
-import { cachedNoteKeys } from '@/lib/near/notes/keys'
+import { cachedNoteKeys, exportNoteSeed, importNoteSeed, type NoteKeys } from '@/lib/near/notes/keys'
 import { deposit, noteKeys, refreshNotes, withdraw, type PrivateStep } from '@/lib/near/private'
 import { GAS_RESERVE_MICRO } from '@/lib/near/wallet-records'
 
@@ -43,15 +43,24 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
+  // 'local' means the key exists only in this browser (the wallet cannot sign messages): it needs a backup.
+  const [keySource, setKeySource] = useState<NoteKeys['source'] | null>(null)
+  const [backupNote, setBackupNote] = useState<string | null>(null)
+  const [restoreText, setRestoreText] = useState('')
 
   useEffect(() => {
     let live = true
     if (!wallet.address) {
       setUnlocked(false)
+      setKeySource(null)
       return
     }
     cachedNoteKeys(wallet.address)
-      .then((k) => live && setUnlocked(!!k))
+      .then((k) => {
+        if (!live) return
+        setUnlocked(!!k)
+        setKeySource(k?.source ?? null)
+      })
       .catch(() => live && setUnlocked(false))
     return () => {
       live = false
@@ -79,8 +88,38 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
 
   const finish = async () => {
     setUnlocked(true)
+    if (wallet.address) {
+      const k = await cachedNoteKeys(wallet.address).catch(() => null)
+      setKeySource(k?.source ?? null)
+    }
     await refreshBalance()
     setBusy(null)
+  }
+
+  const handleBackup = async () => {
+    const seed = wallet.address ? exportNoteSeed(wallet.address) : null
+    if (!seed) return setError('No private balance key is stored in this browser.')
+    try {
+      await navigator.clipboard.writeText(seed)
+      setBackupNote('Backup key copied. Keep it somewhere safe and private: whoever has it can spend this balance.')
+    } catch {
+      setBackupNote(`Copy this backup key and keep it safe and private: ${seed}`)
+    }
+  }
+
+  const handleRestore = async () => {
+    if (!wallet.address) return
+    begin('unlock')
+    try {
+      await importNoteSeed(wallet.address, restoreText)
+      setRestoreText('')
+      setStatus(STEP_LABEL.syncing)
+      await refreshNotes(true)
+      setStatus('Private balance key restored from the backup.')
+      await finish()
+    } catch (err) {
+      fail(err)
+    }
   }
 
   const fail = (err: unknown) => {
@@ -199,6 +238,37 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
             <ExternalLink className="w-3 h-3" />
           </a>
         </p>
+      )}
+
+      {unlocked && keySource === 'local' && (
+        <div className="mb-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-200 space-y-2">
+          <p>
+            This wallet cannot sign messages, so the key to this private balance exists only in this browser. If the
+            browser data is cleared, the balance is lost. Back the key up before you deposit.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleBackup}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 transition-colors"
+            >
+              Copy backup key
+            </button>
+            <input
+              value={restoreText}
+              onChange={(e) => setRestoreText(e.target.value)}
+              placeholder="Paste a backup key to restore"
+              className="flex-1 min-w-[12rem] px-3 py-1.5 rounded-lg bg-black/20 border border-amber-500/20 text-amber-100 placeholder:text-amber-200/40"
+            />
+            <button
+              onClick={handleRestore}
+              disabled={busy !== null || !restoreText.trim()}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 transition-colors disabled:opacity-50"
+            >
+              Restore
+            </button>
+          </div>
+          {backupNote && <p className="text-xs break-all">{backupNote}</p>}
+        </div>
       )}
 
       {!unlocked ? (
