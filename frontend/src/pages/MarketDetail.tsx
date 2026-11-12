@@ -943,7 +943,7 @@ export function MarketDetail() {
           } else {
             throw new Error(
               `Not enough USDC for this trade (need ${Number(buyAmountMicro) / 1_000_000} USDC). ` +
-              `Add USDC to your wallet or private balance (Settings) first.`
+              `Add USDC to your wallet or private balance (Portfolio) first.`
             )
           }
         }
@@ -964,7 +964,7 @@ export function MarketDetail() {
           } else {
             throw new Error(
               `Not enough ${getTokenSymbol(tokenType)} for this trade (need ${Number(buyAmountMicro) / 1_000_000} ${getTokenSymbol(tokenType)}). ` +
-              `Add ${getTokenSymbol(tokenType)} to your wallet or private balance (Settings) first.`
+              `Add ${getTokenSymbol(tokenType)} to your wallet or private balance (Portfolio) first.`
             )
           }
         }

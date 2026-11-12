@@ -22,7 +22,6 @@ const NAV_ITEMS = [
   { path: '/dashboard', label: 'Markets' },
   { path: '/portfolio', label: 'Portfolio' },
   { path: '/governance', label: 'Govern' },
-  { path: '/settings', label: 'Settings' },
 ]
 
 export function Header() {

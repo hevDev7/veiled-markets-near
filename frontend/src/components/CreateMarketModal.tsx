@@ -145,7 +145,7 @@ function getCreateMarketBalanceError(
       `Need ${formatCredits(liquidityMicro)} ${label}, ` +
       `but only have ${formatCredits(publicStableBalance)} public ${label}.` +
       (privateStableBalance > 0n
-        ? ` Private ${label} available: ${formatCredits(privateStableBalance)}. Withdraw it from your private balance (Settings) first.`
+        ? ` Private ${label} available: ${formatCredits(privateStableBalance)}. Withdraw it from your private balance (Portfolio) first.`
         : '')
     )
   }
@@ -187,7 +187,7 @@ async function getStablecoinCreateFundingError(
         `Market creation funds the initial liquidity from the ${label} in your wallet. ` +
         `Need ${formatCredits(liquidityMicro)} ${label}, but the stablecoin mapping shows ${formatCredits(livePublicBalance)} public ${label}.` +
         (privateStableBalance > 0n
-          ? ` You still have ${formatCredits(privateStableBalance)} private ${label}; withdraw it from your private balance (Settings) first.`
+          ? ` You still have ${formatCredits(privateStableBalance)} private ${label}; withdraw it from your private balance (Portfolio) first.`
           : '')
       )
     }

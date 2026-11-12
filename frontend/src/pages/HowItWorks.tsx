@@ -14,7 +14,7 @@ const steps = [
     number: '02',
     icon: Target,
     title: 'Fund Your Private Balance',
-    description: 'Deposit NEAR or USDC into your private balance in Settings. The deposit is public; what you do with it afterwards is not.',
+    description: 'Deposit NEAR or USDC into your private balance on the Portfolio page. The deposit is public; what you do with it afterwards is not.',
     detail: 'If you skip this step, the app tops up your private balance right before your first trade.',
   },
   {

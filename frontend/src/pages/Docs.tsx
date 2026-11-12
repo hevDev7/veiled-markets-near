@@ -510,7 +510,7 @@ export function Docs() {
                   title: 'Unlock your private balance',
                   body: (
                     <>
-                      Settings → Private balance → <B>Unlock private balance (sign a message, no fee)</B>. This is a
+                      Portfolio → Private balance → <B>Unlock private balance (sign a message, no fee)</B>. This is a
                       NEP-413 message signature, not a transaction. Your note key is derived from it, so the same wallet
                       finds its notes on any device. If the wallet cannot sign messages, the app makes a random key and
                       keeps it in this browser; notes made with that key can only be spent from this browser.

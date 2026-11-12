@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMarketTx } from './lib/near/market-tx'
 import { Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
-import { Landing, Dashboard, MyBets, History, MarketDetail, Settings, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, Docs, BrandKit, BugBounty } from './pages'
+import { Landing, Dashboard, MyBets, History, MarketDetail, Governance, CreateMarketPage, TermsOfService, PrivacyPolicy, RiskDisclosure, CookiesPolicy, HowItWorks, FAQ, Docs, BrandKit, BugBounty } from './pages'
 import { MyParlays } from './pages/MyParlays'
 import { VerifyTurbo } from './pages/VerifyTurbo'
 import { Turbo } from './pages/Turbo'
@@ -48,14 +48,29 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// A new page opens at the top. Back and forward (POP) keep the browser's own scroll handling.
+// A new page opens at the top, or at the element its #hash names once that has rendered. Back and forward (POP)
+// keep the browser's own scroll handling.
 function ScrollToTop() {
-  const { pathname } = useLocation()
+  const { pathname, hash } = useLocation()
   const navigationType = useNavigationType()
 
   useEffect(() => {
-    if (navigationType !== 'POP') window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
-  }, [pathname, navigationType])
+    if (navigationType === 'POP') return
+    if (!hash) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      return
+    }
+    let tries = 0
+    const timer = window.setInterval(() => {
+      const target = document.getElementById(decodeURIComponent(hash.slice(1)))
+      if (target || ++tries > 30) {
+        window.clearInterval(timer)
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        else window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior })
+      }
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [pathname, hash, navigationType])
 
   return null
 }
@@ -121,15 +136,8 @@ function App() {
           element={<MarketDetail />}
         />
 
-        {/* Settings Page */}
-        <Route
-          path="/settings"
-          element={
-            <ProtectedRoute>
-              <Settings />
-            </ProtectedRoute>
-          }
-        />
+        {/* The Settings page is gone; its private balance panel lives on Portfolio. */}
+        <Route path="/settings" element={<Navigate to="/portfolio" replace />} />
 
         {/* Governance Page — accessible without wallet for viewing */}
         <Route

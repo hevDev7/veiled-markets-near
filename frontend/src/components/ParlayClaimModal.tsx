@@ -40,7 +40,7 @@ export function ParlayClaimModal({ parlay, isOpen, onClose }: ParlayClaimModalPr
         setTicketMessage(
           currentParlay.claimed
             ? 'This ticket was already claimed.'
-            : 'The private ticket for this parlay is not in this wallet. Unlock your private balance in Settings with the wallet that placed it, then refresh.',
+            : 'The private ticket for this parlay is not in this wallet. Unlock your private balance on the Portfolio page with the wallet that placed it, then refresh.',
         )
         return
       }

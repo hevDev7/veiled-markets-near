@@ -81,7 +81,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Markets',
     question: 'How do I claim my winnings?',
-    answer: 'After the market resolves, open your Portfolio and click "Claim Winnings". Your winning shares are redeemed through the relayer, and the payout goes into your private balance. Withdraw it to any NEAR account from Settings.',
+    answer: 'After the market resolves, open your Portfolio and click "Claim Winnings". Your winning shares are redeemed through the relayer, and the payout goes into your private balance. Withdraw it to any NEAR account from the Private balance panel on the same page.',
   },
   {
     category: 'Markets',

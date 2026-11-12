@@ -112,7 +112,6 @@ export function CookiesPolicy() {
             <h2 className="text-lg font-semibold text-white mb-4">6. Managing Your Data</h2>
             <p className="mb-3">You have full control over locally stored data:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
-              <li><strong className="text-surface-300">Settings Page:</strong> Use the Protocol's Settings page to clear cached data and reset preferences.</li>
               <li><strong className="text-surface-300">Browser Settings:</strong> Clear localStorage and cookies through your browser's privacy settings.</li>
               <li><strong className="text-surface-300">Disconnect Wallet:</strong> Disconnecting your wallet removes the active session data.</li>
               <li><strong className="text-surface-300">Incognito Mode:</strong> Use your browser's private browsing mode to prevent any data from being stored persistently.</li>

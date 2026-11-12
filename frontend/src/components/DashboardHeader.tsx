@@ -9,7 +9,7 @@ import {
   LayoutDashboard,
   TrendingUp,
   Plus,
-  Settings,
+  EyeOff,
   Gamepad2,
   RefreshCw,
   Menu,
@@ -353,10 +353,10 @@ export function DashboardHeader() {
 
                     {/* Menu */}
                     <div className="p-1 mt-0.5 border-t border-white/[0.04]">
-                      <Link to="/settings" onClick={() => setShowDropdown(false)}
+                      <Link to="/portfolio#private-balance" onClick={() => setShowDropdown(false)}
                         className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs text-surface-300 hover:text-white hover:bg-white/[0.04] transition-colors">
-                        <Settings className="w-4 h-4" />
-                        Settings
+                        <EyeOff className="w-4 h-4" />
+                        Private balance
                       </Link>
                       {!wallet.isDemoMode && (
                         <a href={`https://testnet.nearblocks.io/address/${wallet.address}`}
