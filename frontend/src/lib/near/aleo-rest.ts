@@ -54,6 +54,8 @@ function poolStruct(m: NearMarket): string {
     ['total_liquidity', u128(m.total_liquidity)],
     ['total_lp_shares', u128(m.total_lp_shares)],
     ['total_volume', u128(m.total_volume)],
+    // Not an Aleo field: the NEAR contract counts every buy and sell of a market.
+    ['total_trades', u64(m.trades)],
   ]);
 }
 

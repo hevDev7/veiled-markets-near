@@ -29,7 +29,6 @@ import {
 import { calculateAllPrices, type AMMReserves } from './amm'
 import { config } from './config'
 import { devLog, devWarn } from './logger'
-import { fetchBetCountsForMarkets } from './supabase'
 
 interface MarketsState {
     markets: Market[]
@@ -165,7 +164,7 @@ async function transformMarketData(
 
         // Volume & trades
         totalVolume: pool.total_volume,
-        totalBets: 0, // v12 tracks volume, not bet count
+        totalBets: pool.total_trades, // the contract's own count of buys and sells
 
         // Shares issued (legacy - not tracked separately in v12)
         totalYesIssued: pool.reserve_1,
@@ -266,6 +265,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                     prev.yesReserve === m.yesReserve &&
                     prev.noReserve === m.noReserve &&
                     prev.totalVolume === m.totalVolume &&
+                    prev.totalBets === m.totalBets &&
                     prev.totalLiquidity === m.totalLiquidity &&
                     prev.status === m.status &&
                     prev.question === m.question &&
@@ -273,7 +273,7 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 ) {
                     return prev // keep same reference — no re-render
                 }
-                return { ...prev, ...m, totalBets: prev.totalBets || m.totalBets }
+                return { ...prev, ...m }
             })
 
             set({
@@ -283,17 +283,6 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                 lastFetchTime: Date.now()
             })
 
-            // Hydrate bet counts from Supabase (non-blocking)
-            const marketIds = markets.map(m => m.id)
-            fetchBetCountsForMarkets(marketIds).then(counts => {
-                if (Object.keys(counts).length === 0) return
-                set(state => ({
-                    markets: state.markets.map(m => ({
-                        ...m,
-                        totalBets: counts[m.id] ?? m.totalBets,
-                    }))
-                }))
-            })
         } catch (error) {
             if (isTransientNetworkError(error)) {
                 devWarn('[Markets] Transient network change while fetching markets')

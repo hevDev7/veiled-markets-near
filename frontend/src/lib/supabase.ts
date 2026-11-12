@@ -319,41 +319,6 @@ export async function removeUserBet(betId: string, address: string): Promise<voi
   }
 }
 
-export async function fetchBetCountByMarket(marketId: string): Promise<number> {
-  if (!supabase) return 0
-  try {
-    const { count, error } = await supabase
-      .from('user_bets')
-      .select('*', { count: 'exact', head: true })
-      .eq('market_id', marketId)
-    if (error) { devWarn('[Supabase] fetchBetCountByMarket error:', error.message); return 0 }
-    return count ?? 0
-  } catch (e) {
-    devWarn('[Supabase] fetchBetCountByMarket exception:', e)
-    return 0
-  }
-}
-
-/** Fetch bet counts for multiple markets in a single query. */
-export async function fetchBetCountsForMarkets(marketIds: string[]): Promise<Record<string, number>> {
-  if (!supabase || marketIds.length === 0) return {}
-  try {
-    const { data, error } = await supabase
-      .from('user_bets')
-      .select('market_id')
-      .in('market_id', marketIds)
-    if (error) { devWarn('[Supabase] fetchBetCountsForMarkets error:', error.message); return {} }
-    const counts: Record<string, number> = {}
-    for (const row of data || []) {
-      counts[row.market_id] = (counts[row.market_id] || 0) + 1
-    }
-    return counts
-  } catch (e) {
-    devWarn('[Supabase] fetchBetCountsForMarkets exception:', e)
-    return {}
-  }
-}
-
 export async function fetchCommitments(address: string, encryptionKey: CryptoKey | null = null): Promise<CommitmentRecord[]> {
   if (!supabase) return []
   try {

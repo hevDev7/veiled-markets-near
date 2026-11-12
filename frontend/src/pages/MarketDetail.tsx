@@ -81,7 +81,6 @@ import { cn, formatCredits, formatPercentage, getTokenSymbol } from '@/lib/utils
 import { getLeadingOutcome, getOutcomeSummaryForBet } from '@/lib/market-outcomes'
 import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
-import { fetchBetCountByMarket } from '@/lib/supabase'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { devWarn } from '../lib/logger'
@@ -338,8 +337,6 @@ export function MarketDetail() {
   const [fees, setFees] = useState<MarketFeesData | null>(null)
   const [, setDispute] = useState<DisputeDataResult | null>(null)
 
-  // Bet count from Supabase
-  const [betCount, setBetCount] = useState(0)
   const [createdTimestamp, setCreatedTimestamp] = useState<string | null>(null)
 
   // Active tab for extra panels
@@ -408,11 +405,8 @@ export function MarketDetail() {
     }
   }, [marketId, markets])
 
-  // Fetch bet count from Supabase
-  useEffect(() => {
-    if (!market?.id) return
-    fetchBetCountByMarket(market.id).then(setBetCount)
-  }, [market?.id])
+  // Buys and sells the contract has counted for this market.
+  const betCount = market?.totalBets ?? 0
 
   // Fetch created timestamp from explorer API
   useEffect(() => {

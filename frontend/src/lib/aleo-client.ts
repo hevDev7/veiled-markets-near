@@ -140,6 +140,8 @@ export interface AMMPoolData {
   total_liquidity: bigint;
   total_lp_shares: bigint;
   total_volume: bigint;
+  /** Buys and sells the contract has counted for this market. */
+  total_trades: number;
 }
 
 export interface MarketResolutionData {
@@ -839,6 +841,7 @@ export async function getAMMPool(marketId: string, programId?: string): Promise<
     total_liquidity: BigInt(parseAleoValue(data.total_liquidity || '0u128') as bigint),
     total_lp_shares: BigInt(parseAleoValue(data.total_lp_shares || '0u128') as bigint),
     total_volume: BigInt(parseAleoValue(data.total_volume || '0u128') as bigint),
+    total_trades: Number(parseAleoValue(data.total_trades || '0u64')),
   };
 }
 
