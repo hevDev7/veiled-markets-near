@@ -36,7 +36,8 @@ import {
 } from '@/lib/turbo-client'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useBetsStore, useWalletStore } from '@/lib/store'
-import { isChainTxId } from '@/lib/near/config'
+import { isChainTxId, SECONDS_PER_TICK } from '@/lib/near/config'
+import { getNearTurbo } from '@/lib/near/chain'
 
 // Note: price data now streams from the BACKEND operator (/stream endpoint),
 // not directly from Pyth Hermes. This ensures all users see identical prices
@@ -359,6 +360,8 @@ export function TurboMarketPanel({
   const { wallet } = useWalletStore()
   const [pool, setPool] = useState<TurboPoolView | null>(null)
   const [marketCredits, setMarketCredits] = useState<bigint | null>(null)
+  /** Wall-clock time at which the contract stops taking bets on this round (null until it is known). */
+  const [betCloseMs, setBetCloseMs] = useState<number | null>(null)
   const [shares, setShares] = useState<ParsedTurboShare[] | null>(null)
   const [pasteMode, setPasteMode] = useState(false)
   const [pastedRecord, setPastedRecord] = useState('')
@@ -514,6 +517,23 @@ export function TurboMarketPanel({
     }
     return () => es.close()
   }, [symbol, marketId, frozen, status])
+
+  // ── Betting cutoff: the contract takes bets only during the first four fifths of a round ──
+  useEffect(() => {
+    if (marketId.startsWith('pending_')) return
+    let cancelled = false
+    getNearTurbo(marketId)
+      .then((t) => {
+        if (cancelled || !t) return
+        const deadline = Number(t.deadline)
+        const closeTick = t.betting_deadline != null
+          ? Number(t.betting_deadline)
+          : deadline - Math.floor((deadline - Number(t.created_at)) / 5)
+        setBetCloseMs(closeTick * SECONDS_PER_TICK * 1000)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [marketId])
 
   // ── Pool + market_payouts polling (for payout calc) ──
   useEffect(() => {
@@ -833,6 +853,8 @@ export function TurboMarketPanel({
   const mins = Math.floor(secondsLeft / 60)
   const secs = secondsLeft % 60
   const isActive = status === 'active' && secondsLeft > 0
+  // Re-evaluated on every countdown tick (the component re-renders each second while a round is active).
+  const bettingOpen = isActive && (betCloseMs == null || Date.now() < betCloseMs)
   const direction =
     currentPrice == null
       ? null
@@ -947,7 +969,7 @@ export function TurboMarketPanel({
   }
 
   async function handleBet(side: TurboSide) {
-    if (!isActive) return
+    if (!bettingOpen) return
     const amountAleo = parseFloat(betAmount)
     if (!Number.isFinite(amountAleo) || amountAleo <= 0) return
     const amountMicro = BigInt(Math.round(amountAleo * 1_000_000))
@@ -1251,7 +1273,13 @@ export function TurboMarketPanel({
           - hideChart=true  → FAMM-style vertical layout (sidebar embed)
           - hideChart=false → compact row layout (dashboard hero overlay)
           Both share handleBet, busy, betAmount, and selectedSide state. */}
-      {!hideBetUI && isActive && (() => {
+      {!hideBetUI && isActive && !bettingOpen && (
+        <div className="px-4 py-3 border-t border-surface-700/30 text-sm text-surface-400">
+          Betting is closed for this round. The last fifth of a round takes no new bets; the result is set at the
+          deadline.
+        </div>
+      )}
+      {!hideBetUI && bettingOpen && (() => {
         const amountAleo = parseFloat(betAmount) || 0
         const amountMicro = Math.round(amountAleo * 1_000_000)
         const fee = Math.floor(amountMicro * 50 / 10000)

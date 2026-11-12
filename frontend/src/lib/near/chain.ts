@@ -48,6 +48,10 @@ export interface NearMarket {
   outstanding_shares: string;
   trader_collateral: string;
   outcome_shares: string[];
+  /** Net collateral behind each outcome's shares; null for markets older than that ledger. */
+  outcome_collateral?: string[] | null;
+  /** The owner approved this market as a parlay leg. */
+  parlay_leg?: boolean;
   creator_fees_claimed: boolean;
   trades: string;
   escalation_tier: number;
@@ -64,6 +68,8 @@ export interface NearTurbo {
   baseline_conf: string;
   baseline_block: string;
   deadline: string;
+  /** Bets are taken while the height is below this (absent on contract builds without the cutoff). */
+  betting_deadline?: string;
   resolution_deadline: string;
   closing_price: string;
   closing_conf: string;

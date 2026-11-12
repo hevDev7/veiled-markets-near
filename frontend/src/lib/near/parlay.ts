@@ -52,6 +52,8 @@ export interface NearParlayPool {
   max_combined_odds_bps: string;
   max_leg_odds_bps: string;
   safety_bps: string;
+  /** One ticket may pay at most this share (basis points) of its thinnest leg's pool depth. */
+  leg_payout_bps?: string;
   paused: boolean;
   count: string;
 }
