@@ -52,6 +52,8 @@ pub enum Action {
     WithdrawLp { min_tokens_out: U128 },
     TurboBuy { market_id: U64, side: u8 },
     TurboClaim,
+    ParlayBuy { legs: Vec<crate::parlay::LegArg>, min_payout: U128 },
+    ParlayClaim,
 }
 
 #[near(serializers = [json])]

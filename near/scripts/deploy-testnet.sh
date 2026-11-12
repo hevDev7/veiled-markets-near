@@ -5,7 +5,9 @@
 #   veiled-markets.testnet  owner; the contract lives in a versioned subaccount (v1, v2, ...)
 #   veiled-relayer.testnet  submits private `transact` calls (backend/src/near-relayer.ts)
 #   veiled-oracle.testnet   opens and resolves turbo rounds (backend/src/near-turbo-oracle.ts)
-#   veiled-tokens.testnet   parent of the USDCX / USAD faucet tokens
+#   veiled-tokens.testnet   parent of the mock USDCX token (slot 2, not offered in the app)
+#
+# Slot 3 is Circle's official testnet USDC (faucet.circle.com, "NEAR Testnet"), the only stablecoin the app offers.
 #
 # Usage: near/scripts/deploy-testnet.sh <version>     e.g. v1
 # Requires the wasm built first (see near/contract/README or the plan) and near-cli-rs.
@@ -18,7 +20,8 @@ CONTRACT=$VERSION.$OWNER
 ORACLE=veiled-oracle.testnet
 TOKENS=veiled-tokens.testnet
 USDCX=usdcx.$TOKENS
-USAD=usad.$TOKENS
+# Circle's testnet USDC. The live v1 contract got it by `set_token_account(3, …)` after its upgrade.
+USAD=3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af
 NET="network-config testnet-fastnear"
 WASM=$CARGO_TARGET_DIR/near/veiled/veiled.wasm
 FT_WASM=$CARGO_TARGET_DIR/near/mock_ft/mock_ft.wasm
@@ -35,8 +38,8 @@ subaccount() { # name funder amount
     sign-as "$2" $NET sign-with-legacy-keychain send
 }
 
-# Faucet tokens (deployed once; versions of the market contract share them).
-for t in "$USDCX:USD Coin X (testnet):USDCX" "$USAD:USAD Stable (testnet):USAD"; do
+# Mock faucet token for slot 2 (deployed once; versions of the market contract share it). Slot 3 is Circle's.
+for t in "$USDCX:USD Coin X (testnet):USDCX"; do
   IFS=: read -r acct name symbol <<<"$t"
   if exists "$acct"; then echo "exists: $acct"; continue; fi
   subaccount "$acct" "$TOKENS" '3 NEAR'
@@ -65,6 +68,10 @@ EOF
 )
 near contract deploy "$CONTRACT" use-file "$WASM" with-init-call new json-args "$INIT" \
   prepaid-gas '100 Tgas' attached-deposit '0 NEAR' $NET sign-with-legacy-keychain send
+
+# The contract must hold a storage deposit on Circle USDC to receive it.
+near contract call-function as-transaction "$USAD" storage_deposit json-args "{\"account_id\":\"$CONTRACT\",\"registration_only\":true}" \
+  prepaid-gas '30 Tgas' attached-deposit '0.00125 NEAR' sign-as "$OWNER" $NET sign-with-legacy-keychain send
 
 near contract call-function as-read-only "$CONTRACT" get_tree_info json-args '{}' $NET now
 echo "Deployed $CONTRACT"

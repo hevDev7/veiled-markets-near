@@ -7,6 +7,7 @@
 pub mod field;
 pub mod markets;
 pub mod math;
+pub mod parlay;
 pub mod poseidon;
 mod poseidon_constants;
 pub mod tree;
@@ -26,6 +27,7 @@ pub const KIND_BALANCE: u8 = 1;
 pub const KIND_SHARE: u8 = 2;
 pub const KIND_LP: u8 = 3;
 pub const KIND_TURBO: u8 = 4;
+pub const KIND_PARLAY: u8 = 5;
 
 pub const TOKEN_NEAR: u8 = 1;
 pub const TOKEN_USDCX: u8 = 2;
@@ -39,6 +41,7 @@ pub const MIN_DEPOSIT: u128 = 10_000;
 
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(15);
 const GAS_ON_WITHDRAW: Gas = Gas::from_tgas(60);
+const GAS_ON_PAYOUT: Gas = Gas::from_tgas(10);
 
 #[near(serializers = [borsh])]
 #[derive(BorshStorageKey)]
@@ -116,12 +119,14 @@ pub struct Veiled {
     pub turbo_exposure: u128,
 }
 
-/// `ft_transfer_call` message for USDCX/USAD: shield into a private note, or fund a new market.
+/// `ft_transfer_call` message for the stablecoin slots: shield into a private note, fund a new market, or add
+/// to the parlay pool (`{"fund_parlay_pool":{}}`).
 #[near(serializers = [json])]
 #[serde(rename_all = "snake_case")]
 pub enum FtMsg {
     Deposit { owner_blind: String, memo: String },
     CreateMarket(markets::CreateMarketArgs),
+    FundParlayPool {},
 }
 
 #[near]
@@ -197,6 +202,10 @@ impl Veiled {
             FtMsg::CreateMarket(args) => {
                 self.internal_create_market(sender_id, token, amount.0, args);
             }
+            FtMsg::FundParlayPool {} => {
+                require!(amount.0 > 0, "ERR_AMOUNT");
+                self.credit_parlay_pool(token, amount.0);
+            }
         }
         U128(0)
     }
@@ -255,6 +264,22 @@ impl Veiled {
             let mint = Mint { kind: KIND_BALANCE, asset: token as u64, sub: 0, amount: amount.0 };
             self.mint_single(&mint, &blind, "refund".to_string());
         }
+        false
+    }
+
+    /// Books a failed outgoing payment (a missing account, or one not registered with the token contract)
+    /// into the treasury: the contract still holds the tokens, so they stay accounted for.
+    #[private]
+    pub fn on_payout(&mut self, token: u8, amount: U128) -> bool {
+        if near_sdk::is_promise_success() {
+            return true;
+        }
+        self.program_credits[token as usize] += amount.0;
+        self.treasury[token as usize] += amount.0;
+        env::log_str(&format!(
+            "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"payout_failed\",\"data\":[{{\"token\":{token},\"amount\":\"{}\"}}]}}",
+            amount.0
+        ));
         false
     }
 
@@ -390,6 +415,19 @@ impl Veiled {
         }
     }
 
+    /// `pay` with `on_payout` as the fallback, for payments that have no refund path of their own.
+    pub(crate) fn pay_booked(&self, token: u8, to: &AccountId, amount: u128) {
+        self.pay(token, to, amount)
+            .then(
+                // Only the fixed gas: unused gas then goes straight back to the caller instead of riding along.
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_PAYOUT)
+                    .with_unused_gas_weight(0)
+                    .on_payout(token, U128(amount)),
+            )
+            .detach();
+    }
+
     fn act_withdraw(&mut self, s: &Spent, recipient: AccountId, refund_blind: &Felt) {
         require!(s.kind == KIND_BALANCE && s.sub == 0, "ERR_NOTE_KIND");
         let token = s.asset as u8;
@@ -402,7 +440,7 @@ impl Veiled {
         self.program_credits[token as usize] -= s.out_amount;
         if fee > 0 {
             let relayer = s.ext.relayer.clone().unwrap_or_else(|| env::panic_str("ERR_RELAYER"));
-            self.pay(token, &relayer, fee).detach();
+            self.pay_booked(token, &relayer, fee);
         }
         let net = s.out_amount - fee;
         if net > 0 {

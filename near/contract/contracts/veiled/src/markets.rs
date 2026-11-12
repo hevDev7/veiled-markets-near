@@ -396,7 +396,7 @@ impl Veiled {
         vote.claimed = true;
         let bond = vote.bond;
         self.program_credits[TOKEN_NEAR as usize] -= bond;
-        self.pay(TOKEN_NEAR, &caller, bond).detach();
+        self.pay(TOKEN_NEAR, &caller, bond).detach(); // NEAR to the signer itself cannot bounce
         U128(bond)
     }
 
@@ -416,7 +416,7 @@ impl Veiled {
         d.bond_claimed = true;
         let bond = d.dispute_bond;
         self.program_credits[TOKEN_NEAR as usize] -= bond;
-        self.pay(TOKEN_NEAR, &caller, bond).detach();
+        self.pay(TOKEN_NEAR, &caller, bond).detach(); // NEAR to the signer itself cannot bounce
         U128(bond)
     }
 
@@ -439,7 +439,7 @@ impl Veiled {
         let token = st.market.token_type;
         self.program_credits[token as usize] -= amount;
         if amount > 0 {
-            self.pay(token, &caller, amount).detach();
+            self.pay_booked(token, &caller, amount);
         }
         U128(amount)
     }
@@ -548,7 +548,7 @@ impl Veiled {
         require!(self.treasury[token as usize] >= amount.0, "ERR_TREASURY");
         self.treasury[token as usize] -= amount.0;
         self.program_credits[token as usize] -= amount.0;
-        self.pay(token, &recipient, amount.0).detach();
+        self.pay_booked(token, &recipient, amount.0);
     }
 
     // ------------------------------------------------------------ views
@@ -677,7 +677,7 @@ impl Veiled {
         id
     }
 
-    /// Private market actions (see DESIGN §4). Turbo actions are handled in turbo.rs.
+    /// Private market actions (see DESIGN §4). Turbo and parlay actions are handled in turbo.rs and parlay.rs.
     pub(crate) fn act_market(&mut self, s: &Spent) -> Option<Mint> {
         match &s.ext.action {
             Action::Buy { market_id, outcome, min_shares_out } => {
@@ -692,6 +692,8 @@ impl Veiled {
             Action::WithdrawLp { min_tokens_out } => Some(self.act_withdraw_lp(s, min_tokens_out.0)),
             Action::TurboBuy { market_id, side } => Some(self.act_turbo_buy(s, market_id.0, *side)),
             Action::TurboClaim => Some(self.act_turbo_claim(s)),
+            Action::ParlayBuy { legs, min_payout } => Some(self.act_parlay_buy(s, legs, min_payout.0)),
+            Action::ParlayClaim => Some(self.act_parlay_claim(s)),
             Action::Withdraw { .. } => unreachable!(),
         }
     }
