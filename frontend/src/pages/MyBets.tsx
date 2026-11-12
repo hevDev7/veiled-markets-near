@@ -756,19 +756,22 @@ export function MyBets() {
           </div>
 
           {/* ═══ PERFORMANCE CHART + PRIVATE BALANCE ═══ */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25 }}
-            className="glass-card rounded-2xl p-6 lg:col-span-2 min-w-0"
+            className="glass-card rounded-2xl p-6 lg:col-span-2 min-w-0 flex flex-col"
           >
             <div className="mb-4">
               <h2 className="text-base font-heading font-semibold text-white">Performance</h2>
               <p className="text-xs text-surface-500 mt-0.5">Market position value over time. Parlays are included in the activity feed below.</p>
             </div>
             {performanceData ? (
-              <div className="h-[200px] w-full min-w-0">
+              // The chart fills whatever height the row gives it (the Private balance card sets it on wide screens);
+              // it is absolutely positioned so it never props the row up itself.
+              <div className="relative flex-1 min-h-[200px] w-full min-w-0">
+                <div className="absolute inset-0">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <LineChart data={performanceData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                     <XAxis
@@ -806,9 +809,10 @@ export function MyBets() {
                     />
                   </LineChart>
                 </ResponsiveContainer>
+                </div>
               </div>
             ) : (
-              <div className="h-[160px] flex items-center justify-center text-surface-600 text-sm">
+              <div className="flex-1 min-h-[160px] flex items-center justify-center text-surface-600 text-sm">
                 Not enough data &mdash; place at least 2 bets to see your performance chart.
               </div>
             )}
@@ -820,9 +824,9 @@ export function MyBets() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="min-w-0"
+            className="min-w-0 flex flex-col scroll-mt-24"
           >
-            <PrivateBalancePanel />
+            <PrivateBalancePanel className="flex-1" />
           </motion.div>
           </div>
 

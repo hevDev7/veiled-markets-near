@@ -34,7 +34,7 @@ const microText = (v: bigint) => (Number(v) / 1_000_000).toString()
 
 type Busy = null | 'unlock' | 'deposit' | 'withdraw'
 
-export function PrivateBalancePanel() {
+export function PrivateBalancePanel({ className }: { className?: string } = {}) {
   const { wallet, refreshBalance } = useWalletStore()
   const [token, setToken] = useState<number>(TOKEN.NEAR)
   const [amount, setAmount] = useState('')
@@ -142,7 +142,7 @@ export function PrivateBalancePanel() {
   }
 
   return (
-    <div className="glass-card p-6">
+    <div className={cn('glass-card p-6', className)}>
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center">
           <EyeOff className="w-5 h-5 text-brand-400" />
