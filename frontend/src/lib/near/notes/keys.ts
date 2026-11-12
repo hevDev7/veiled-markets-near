@@ -69,7 +69,7 @@ export async function unlockNoteKeys(
     if ((err as { code?: string } | null)?.code !== SIGN_UNSUPPORTED) {
       throw new Error(
         'The wallet did not sign the key message, so your private balance key was not unlocked. ' +
-          'Approve the signature request to continue.',
+          'Approve the signature request to continue; if no wallet window opened, allow pop-ups for this site.',
       );
     }
     console.warn('[notes] this wallet cannot sign messages; using a key kept in this browser');

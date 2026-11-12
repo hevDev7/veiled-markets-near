@@ -43,7 +43,8 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
-  // 'local' means the key exists only in this browser (the wallet cannot sign messages): it needs a backup.
+  // 'local' means the key exists only in this browser: the wallet cannot sign messages, or the key dates from when a
+  // failed signature request silently fell back to a random key. Either way it needs a backup.
   const [keySource, setKeySource] = useState<NoteKeys['source'] | null>(null)
   const [backupNote, setBackupNote] = useState<string | null>(null)
   const [restoreText, setRestoreText] = useState('')
@@ -243,8 +244,9 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
       {unlocked && keySource === 'local' && (
         <div className="mb-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-sm text-amber-200 space-y-2">
           <p>
-            This wallet cannot sign messages, so the key to this private balance exists only in this browser. If the
-            browser data is cleared, the balance is lost. Back the key up before you deposit.
+            The key to this private balance exists only in this browser: it was not derived from your wallet&apos;s
+            signature. If this browser&apos;s data is cleared, the balance and every private position are lost. Copy
+            the backup key and keep it somewhere safe and private; pasting it here restores them in another browser.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
