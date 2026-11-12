@@ -734,7 +734,11 @@ impl Veiled {
     }
 
     /// Sells shares: the spend releases `max_shares_used` (out_amount); the pool needs `shares_needed`
-    /// of them and burns the rest, as on Aleo. Pays `tokens_desired − fees` into a balance note.
+    /// of them and burns the rest, as on Aleo. The pool releases the full `tokens_desired` and the seller gets
+    /// it minus all three fees in a balance note. The protocol fee goes to the treasury; the creator and LP
+    /// fees stay in the market's collateral, where the creator fee is set aside and the LP fee becomes part of
+    /// what LPs withdraw. (Aleo released only `tokens_desired − lp_fee` and priced the shares on that, so the
+    /// seller paid no LP fee at all and LPs earned nothing from sells.)
     fn act_sell(&mut self, s: &Spent, tokens_desired: u128) -> Mint {
         require!(s.kind == KIND_SHARE, "ERR_NOTE_KIND");
         let h = self.height();
@@ -756,20 +760,20 @@ impl Veiled {
         let creator_fee = fee(tokens_desired, cfb);
         let lp_fee = fee(tokens_desired, lfb);
         let net = tokens_desired - protocol_fee - creator_fee - lp_fee;
-        let p = tokens_desired - lp_fee;
-        let (shares_needed, reserves) = math::fpmm_sell(st.pool.reserves, m.num_outcomes, outcome, p);
+        let (shares_needed, reserves) = math::fpmm_sell(st.pool.reserves, m.num_outcomes, outcome, tokens_desired);
         require!(shares_needed > 0 && shares_needed <= max_shares_used, "ERR_SLIPPAGE");
 
         st.protocol_fees += protocol_fee;
         st.creator_fees += creator_fee;
         st.pool.reserves = reserves;
-        st.pool.total_liquidity -= p;
+        st.pool.total_liquidity = st.pool.total_liquidity.saturating_sub(tokens_desired);
         st.pool.total_volume += tokens_desired;
-        let market_exit = p.saturating_sub(creator_fee);
+        // What leaves the market: the seller's net and the protocol fee.
+        let market_exit = net + protocol_fee;
         require!(st.market_credits >= market_exit, "ERR_MARKET_CREDITS");
         st.market_credits -= market_exit;
         st.outstanding_shares = st.outstanding_shares.saturating_sub(max_shares_used);
-        st.trader_collateral = st.trader_collateral.saturating_sub(p);
+        st.trader_collateral = st.trader_collateral.saturating_sub(tokens_desired);
         let o = (outcome - 1) as usize;
         st.outcome_shares[o] = st.outcome_shares[o].saturating_sub(max_shares_used);
         st.trades += 1;

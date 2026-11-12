@@ -185,7 +185,7 @@ export function calculateBuySharesOut(
 /**
  * Calculate shares needed to withdraw tokens_desired (gross) from the pool.
  * FPMM complete-set burning (step division):
- *   pool_out = tokensDesired - lpFee
+ *   pool_out = tokensDesired (the seller gets it minus all fees; the LP fee stays in the market)
  *   r_i_new = r_i * prod(r_k / (r_k - pool_out)) for active k != i
  *   shares_needed = r_i_new - r_i + pool_out
  */

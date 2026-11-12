@@ -91,17 +91,22 @@ async fn market_lifecycle_with_private_trades() -> anyhow::Result<()> {
     let shares2 = buy2.minted.unwrap();
     let bal = buy2.change.unwrap();
 
-    // Private sell of part of the outcome-1 shares for 0.5 NEAR gross, using exactly the shares needed.
+    // Private sell of part of the outcome-1 shares for 0.5 NEAR gross, using exactly the shares needed. The pool
+    // releases the full 0.5 NEAR; one share short of that fails.
     let m = market(&env, id).await?;
     let tokens = 500_000u128;
-    let p = tokens - tokens * 100 / 10_000;
-    let needed = fpmm_sell_needed(&reserves(&m), 2, 1, p);
+    let needed = fpmm_sell_needed(&reserves(&m), 2, 1, tokens);
+    let short = w.spend(&env, &[&shares], needed - 1, json!({ "type": "sell", "tokens_desired": s(tokens) })).await?;
+    assert_fails_with(&short.result, "ERR_SLIPPAGE");
     let sell = w.spend(&env, &[&shares], needed, json!({ "type": "sell", "tokens_desired": s(tokens) })).await?;
     assert!(sell.result.is_success(), "{:?}", sell.result.failures());
     let proceeds = sell.minted.unwrap();
     assert_eq!((proceeds.kind, proceeds.asset, proceeds.amount), (1, 1, tokens - 2500 - 2500 - 5000));
     let shares = sell.change.unwrap();
     assert_eq!(shares.amount, expected_shares - needed);
+    // Only the seller's net and the protocol fee leave the market; the creator and LP fees stay.
+    let after = market(&env, id).await?;
+    assert_eq!(u(&m["market_credits"]) - u(&after["market_credits"]), proceeds.amount + 2500);
 
     // Add liquidity with the proceeds' note merged... (a second balance note) → LP note.
     let add = w

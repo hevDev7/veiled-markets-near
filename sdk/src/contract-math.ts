@@ -196,7 +196,9 @@ export function quoteContractSell(
   feeConfig?: Partial<ContractFeeConfig>,
 ): ContractSellQuote {
   const { protocolFee, creatorFee, lpFee, amountAfterFees } = calculateContractTradeFees(tokensDesired, feeConfig);
-  const poolTokensOut = tokensDesired - lpFee;
+  // The pool releases the full tokens_desired; the seller receives it minus all fees, and the creator and
+  // LP fees stay in the market (near/contract/contracts/veiled/src/markets.rs act_sell).
+  const poolTokensOut = tokensDesired;
   const netTokens = amountAfterFees;
   const activeReserves = getActiveReserves(reserves);
   const rI = getOutcomeReserve(activeReserves, outcome);
@@ -264,7 +266,7 @@ export function calculateContractMaxTokensDesired(
 
   const resolvedFees = resolveFeeConfig(feeConfig);
   let low = 0n;
-  let high = (maxPoolTokensOut * FEE_DENOMINATOR) / (FEE_DENOMINATOR - resolvedFees.lpFeeBps);
+  let high = maxPoolTokensOut;
   let best = 0n;
 
   for (let iteration = 0; iteration < 60 && low <= high; iteration += 1) {

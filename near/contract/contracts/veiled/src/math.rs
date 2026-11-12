@@ -26,7 +26,8 @@ pub fn fpmm_buy(r: [u128; 4], n: u8, outcome: u8, a: u128) -> (u128, [u128; 4]) 
     (shares_out, out)
 }
 
-/// Leo `sell_shares_finalize` (main.leo:380-430). `p` = tokens_desired − lp_fee leaves the pool.
+/// Leo `sell_shares_finalize` (main.leo:380-430). `p` is the collateral that leaves the pool: the seller's
+/// gross `tokens_desired` (the Leo contract passed tokens_desired − lp_fee).
 /// Returns (shares_needed, new reserves). A zero denominator for outcome 3/4 is replaced by 1 as in Leo;
 /// for outcome 1/2 it cannot occur because `r_k >= p` is asserted and r_k > p when the pool is live.
 pub fn fpmm_sell(r: [u128; 4], n: u8, outcome: u8, p: u128) -> (u128, [u128; 4]) {
@@ -113,7 +114,7 @@ mod tests {
     #[test]
     fn sell_inverts_buy_up_to_rounding() {
         let (shares, r) = fpmm_buy([10_000, 10_000, 0, 0], 2, 1, 1000);
-        // Selling back p = 990 (1000 − 1% LP fee) needs fewer shares than were bought.
+        // Releasing p = 990 from the pool needs fewer shares than were bought.
         let (needed, r2) = fpmm_sell(r, 2, 1, 990);
         // x = 9090 * 11000 / 10010 = 9989 ; needed = 9989 − 9090 + 990 = 1889
         assert_eq!(needed, 1889);

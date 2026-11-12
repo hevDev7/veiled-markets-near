@@ -86,10 +86,11 @@ describe('contract math parity', () => {
     expect(quote.protocolFee).toBe(5n);
     expect(quote.creatorFee).toBe(5n);
     expect(quote.lpFee).toBe(10n);
-    expect(quote.poolTokensOut).toBe(990n);
+    // The pool releases the full tokens_desired; the 1% LP fee stays in the market.
+    expect(quote.poolTokensOut).toBe(1_000n);
     expect(quote.netTokens).toBe(980n);
-    expect(quote.sharesNeeded).toBe(1_741n);
-    expect(quote.updatedReserves).toEqual([9_098n, 10_990n, 0n, 0n]);
+    expect(quote.sharesNeeded).toBe(1_760n);
+    expect(quote.updatedReserves).toEqual([9_107n, 10_980n, 0n, 0n]);
   });
 
   it('matches sell-from-shares parity helpers', () => {
@@ -99,8 +100,10 @@ describe('contract math parity', () => {
       numOutcomes: 2,
     };
 
-    expect(calculateContractMaxTokensDesired(reserves, 1, 1_741n)).toBe(1_000n);
-    expect(calculateContractSellTokensOut(reserves, 1, 1_741n)).toBe(980n);
+    expect(calculateContractMaxTokensDesired(reserves, 1, 1_760n)).toBe(1_000n);
+    expect(calculateContractSellTokensOut(reserves, 1, 1_760n)).toBe(980n);
+    expect(calculateContractMaxTokensDesired(reserves, 1, 1_741n)).toBe(990n);
+    expect(calculateContractSellTokensOut(reserves, 1, 1_741n)).toBe(973n);
   });
 
   it('matches uneven-pool LP minting', () => {
@@ -146,9 +149,9 @@ describe('contract math parity', () => {
     expect(buyQuote.sharesOut).toBe(12_005n);
     expect(buyQuote.updatedReserves).toEqual([15_940n, 3_935n, 15_940n, 0n]);
     expect(sellQuote.netTokens).toBe(1_960n);
-    expect(sellQuote.poolTokensOut).toBe(1_980n);
-    expect(sellQuote.sharesNeeded).toBe(3_175n);
-    expect(sellQuote.updatedReserves).toEqual([13_960n, 5_130n, 13_960n, 0n]);
+    expect(sellQuote.poolTokensOut).toBe(2_000n);
+    expect(sellQuote.sharesNeeded).toBe(3_209n);
+    expect(sellQuote.updatedReserves).toEqual([13_940n, 5_144n, 13_940n, 0n]);
   });
 
   it('matches resolution helper math', () => {
@@ -173,8 +176,8 @@ describe('contract math parity', () => {
     const maxTokensDesired = calculateContractMaxTokensDesired(postBuyReserves, 1, buyQuote.sharesOut);
     const roundTripNet = calculateContractSellTokensOut(postBuyReserves, 1, buyQuote.sharesOut);
 
-    expect(maxTokensDesired).toBe(2_000n);
-    expect(roundTripNet).toBe(1_960n);
+    expect(maxTokensDesired).toBe(1_980n);
+    expect(roundTripNet).toBe(1_943n);
     expect(roundTripNet).toBeLessThan(2_000n);
   });
 
@@ -206,7 +209,7 @@ describe('contract math parity', () => {
 
     expect(initialPrices[1]).toBeCloseTo(0.333333, 5);
     expect(postBuyPrices[1]).toBeCloseTo(0.669466, 5);
-    expect(postSellPrices[1]).toBeCloseTo(0.576383, 5);
+    expect(postSellPrices[1]).toBeCloseTo(0.575367, 5);
     expect(postBuyPrices[1]).toBeGreaterThan(initialPrices[1]);
     expect(postSellPrices[1]).toBeLessThan(postBuyPrices[1]);
     expect(postSellPrices[1]).toBeGreaterThan(initialPrices[1]);
@@ -247,9 +250,9 @@ describe('contract math parity', () => {
       amountToPool: 1_960n,
     });
     expect(buyQuote.sharesOut).toBe(3_599n);
-    expect(sellQuote.poolTokensOut).toBe(980n);
+    expect(sellQuote.poolTokensOut).toBe(1_000n);
     expect(sellQuote.netTokens).toBe(960n);
-    expect(sellQuote.sharesNeeded).toBe(1_723n);
+    expect(sellQuote.sharesNeeded).toBe(1_760n);
   });
 
   it('keeps four-outcome liquidity additions proportional and fully allocated', () => {
