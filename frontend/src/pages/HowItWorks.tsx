@@ -7,7 +7,7 @@ const steps = [
     number: '01',
     icon: Wallet,
     title: 'Connect Your Wallet',
-    description: 'Connect a NEAR testnet wallet: Meteor Wallet or MyNearWallet. Your keys never leave your wallet.',
+    description: 'Connect Meteor Wallet with a NEAR testnet account. Your keys never leave your wallet.',
     detail: 'One signed message (no fee) unlocks your private balance on any device.',
   },
   {

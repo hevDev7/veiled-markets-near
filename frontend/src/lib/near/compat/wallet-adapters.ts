@@ -12,7 +12,7 @@ class AleoOnlyAdapter {
     this.name = name;
   }
   async connect(..._args: unknown[]): Promise<void> {
-    throw new Error(`${this.name} is an Aleo wallet. Veiled Markets on NEAR connects NEAR wallets (Meteor, MyNearWallet).`);
+    throw new Error(`${this.name} is an Aleo wallet. Veiled Markets on NEAR connects Meteor Wallet.`);
   }
   async disconnect(): Promise<void> {}
   async requestRecords(..._args: unknown[]): Promise<unknown[]> {

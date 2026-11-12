@@ -102,7 +102,7 @@ export function PrivacyPolicy() {
             <p className="mb-3">The Protocol may interact with the following third-party services:</p>
             <ul className="list-disc list-inside space-y-2 text-surface-400">
               <li><strong className="text-surface-300">NEAR Network and RPC Providers:</strong> Your browser reads the contract through public NEAR testnet RPC endpoints (FastNEAR and dRPC by default), and your wallet sends your public transactions through them.</li>
-              <li><strong className="text-surface-300">Wallet Providers:</strong> Meteor Wallet and MyNearWallet manage your keys. Each operates independently and has its own data practices.</li>
+              <li><strong className="text-surface-300">Wallet Providers:</strong> Meteor Wallet manages your keys. It operates independently and has its own data practices.</li>
               <li><strong className="text-surface-300">Pyth Network:</strong> The turbo price service reads prices from Pyth Hermes. If you verify a turbo round with your own Pyth API key, your browser sends it only to Pyth Hermes.</li>
               <li><strong className="text-surface-300">CoinGecko:</strong> Public API used for cryptocurrency price data and charts. No account data is sent to CoinGecko.</li>
               <li><strong className="text-surface-300">Circle:</strong> USDC on NEAR testnet is Circle&apos;s token, and its faucet is Circle&apos;s website. We share no data with Circle.</li>

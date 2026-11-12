@@ -11,7 +11,7 @@
 	root * /srv
 	encode zstd gzip
 
-	# No COOP/COEP: wallet popups (Meteor, MyNearWallet) need window.opener, and the prover does not need
+	# No COOP/COEP: wallet popups (Meteor) need window.opener, and the prover does not need
 	# SharedArrayBuffer (same as the dev server in vite.config.ts).
 	header {
 		# Scripts only from this origin (plus WebAssembly for the prover): an injected <script>, inline handler or

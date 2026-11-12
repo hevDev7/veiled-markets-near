@@ -482,7 +482,7 @@ export function Docs() {
                 ['Network', 'NEAR testnet (tokens have no monetary value)'],
                 ['Contract', <A key="c" href={`${EXPLORER}/address/${CONTRACT}`}>{CONTRACT}</A>],
                 ['Tokens', 'NEAR and USDC (Circle testnet USDC)'],
-                ['Wallets', 'Meteor Wallet, MyNearWallet'],
+                ['Wallet', 'Meteor Wallet'],
                 ['Explorer', <A key="e" href={EXPLORER}>testnet.nearblocks.io</A>],
               ]}
             />
@@ -500,7 +500,7 @@ export function Docs() {
                   title: 'Connect a wallet',
                   body: (
                     <>
-                      Meteor Wallet or MyNearWallet, on NEAR testnet. For USDC, use Circle&apos;s faucet at{' '}
+                      Meteor Wallet, on NEAR testnet. For USDC, use Circle&apos;s faucet at{' '}
                       <A href="https://faucet.circle.com">faucet.circle.com</A> and choose NEAR Testnet. The faucet also
                       registers your account with the USDC contract, which USDC withdrawals need.
                     </>
@@ -570,7 +570,7 @@ export function Docs() {
           <section className="mb-16">
             <SectionHeader id="architecture" icon={Network} title="Architecture" />
             <CodeBlock title="components">{`Browser (React + Vite), frontend/src/lib/near/
-  wallet   NEAR Wallet Selector: Meteor Wallet, MyNearWallet
+  wallet   NEAR Wallet Selector: Meteor Wallet
   reads    contract view calls over NEAR RPC
   notes    scans leaves, decrypts memos, builds Merkle paths
   prover   snarkjs Groth16 in a web worker (/zk/spend.wasm, /zk/spend_final.zkey)
@@ -1310,7 +1310,7 @@ curl -s -X POST $RELAYER/relay -H 'content-type: application/json' \\
 
           <section className="mb-16">
             <SectionHeader id="recipe-run-locally" icon={Server} title="Run it locally" />
-            <P muted>Requires Node.js 20 or newer and a NEAR testnet account in Meteor Wallet or MyNearWallet.</P>
+            <P muted>Requires Node.js 20 or newer and a NEAR testnet account in Meteor Wallet.</P>
             <CodeBlock title="terminal">{`# 1. Relayer (port 4100). Key: RELAYER_PRIVATE_KEY, or ~/.near-credentials/testnet/<RELAYER_ACCOUNT>.json
 cd backend && npm install
 npx tsx src/near-relayer.ts

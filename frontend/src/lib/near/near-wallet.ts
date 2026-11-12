@@ -1,4 +1,4 @@
-// NEAR Wallet Selector glue (Meteor + MyNearWallet on testnet), loaded lazily. Public actions (deposits, market
+// NEAR Wallet Selector glue (Meteor Wallet on testnet), loaded lazily. Public actions (deposits, market
 // creation, bonded votes, claims) are signed here by the user's own account; private actions never come through
 // this file: they are proven in the browser and submitted by the relayer (./private.ts).
 import type { Wallet, WalletSelector, WalletSelectorState } from '@near-wallet-selector/core';
@@ -12,12 +12,12 @@ let modalPromise: Promise<WalletSelectorModal> | null = null;
 export function getSelector(): Promise<WalletSelector> {
   if (!selectorPromise) {
     const attempt = (async () => {
-      const [{ setupWalletSelector }, { setupMeteorWallet }, { setupMyNearWallet }] = await Promise.all([
+      const [{ setupWalletSelector }, { setupMeteorWallet }] = await Promise.all([
         import('@near-wallet-selector/core'),
         import('@near-wallet-selector/meteor-wallet'),
-        import('@near-wallet-selector/my-near-wallet'),
       ]);
-      return setupWalletSelector({ network: 'testnet', modules: [setupMeteorWallet(), setupMyNearWallet()] });
+      // Meteor is the only wallet offered for now: it is the one the private balance flow has been run with.
+      return setupWalletSelector({ network: 'testnet', modules: [setupMeteorWallet()] });
     })();
     attempt.catch(() => {
       if (selectorPromise === attempt) selectorPromise = null;

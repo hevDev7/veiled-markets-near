@@ -56,7 +56,6 @@ export default defineConfig({
       '@near-wallet-selector/core',
       '@near-wallet-selector/modal-ui',
       '@near-wallet-selector/meteor-wallet',
-      '@near-wallet-selector/my-near-wallet',
     ],
   },
   build: {
@@ -74,7 +73,7 @@ export default defineConfig({
     fs: {
       allow: [searchForWorkspaceRoot(process.cwd()), nodeModules, resolve(__dirname, '../near')],
     },
-    // No COOP/COEP: wallet popups (Meteor, MyNearWallet) need window.opener, and the Groth16 prover does not
+    // No COOP/COEP: wallet popups (Meteor) need window.opener, and the Groth16 prover does not
     // need SharedArrayBuffer.
   },
 })

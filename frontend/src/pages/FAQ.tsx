@@ -24,7 +24,7 @@ const faqs: FAQItem[] = [
   {
     category: 'General',
     question: 'Which wallets are supported?',
-    answer: 'Meteor Wallet and MyNearWallet on NEAR testnet. Your keys stay in your wallet. The app asks you to sign one message (no fee) to unlock your private balance.',
+    answer: 'Meteor Wallet on NEAR testnet. Your keys stay in your wallet. The app asks you to sign one message (no fee) to unlock your private balance.',
   },
   {
     category: 'General',

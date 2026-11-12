@@ -8,7 +8,7 @@ export function NearPortNotice({ className = '' }: { className?: string }) {
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand-400" />
       <p className="leading-relaxed">
         This page was written for the Aleo version of Veiled Markets. The app now runs on NEAR testnet: trades stay
-        private through a note pool and a relayer, the wallets are Meteor and MyNearWallet, and parlays and
+        private through a note pool and a relayer, the wallet is Meteor, and parlays and
         governance proposals are not deployed yet.{' '}
         <Link to="/how-it-works" className="text-brand-400 hover:text-brand-300">
           How it works on NEAR

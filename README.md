@@ -67,7 +67,7 @@ only be spent from this browser.
 ```
 Browser (React, same pages as the Aleo app)
   └─ frontend/src/lib/near/
-       ├─ wallet:   NEAR Wallet Selector (Meteor, MyNearWallet)
+       ├─ wallet:   NEAR Wallet Selector (Meteor Wallet)
        ├─ reads:    contract views, served to the pages in the shape they already expect
        ├─ notes:    scan and decrypt your notes, build the Merkle path
        └─ prover:   snarkjs Groth16 proof in a web worker
@@ -96,7 +96,7 @@ is 0.1 NEAR.
 
 ## Run it
 
-Requirements: Node.js 20 or newer, and a NEAR testnet account in Meteor Wallet or MyNearWallet.
+Requirements: Node.js 20 or newer, and a NEAR testnet account in Meteor Wallet.
 
 ```bash
 # 1. Relayer (port 4100). Key: RELAYER_PRIVATE_KEY or ~/.near-credentials/testnet/veiled-relayer.testnet.json
