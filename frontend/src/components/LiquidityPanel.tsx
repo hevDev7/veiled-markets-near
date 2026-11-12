@@ -18,6 +18,8 @@ import {
 } from '@/lib/aleo-client'
 import { calculateAddLiquidityQuote, type AMMReserves } from '@/lib/amm'
 import { fetchLPTokenRecords, type ParsedLPToken } from '@/lib/credits-record'
+import { getNearMarket, type NearMarket } from '@/lib/near/chain'
+import { addLiquidityOutlook, lpWithdrawAmount } from '@/lib/near/lp-math'
 import { TransactionLink } from './TransactionLink'
 
 interface LiquidityPanelProps {
@@ -54,6 +56,23 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
   const [showManualPaste, setShowManualPaste] = useState(false)
   const [currentBlock, setCurrentBlock] = useState<bigint | null>(null)
   const lpFetchedRef = useRef(false)
+  // The contract's own view of the market: positions, credits and fees the LP math needs.
+  const [nearMarket, setNearMarket] = useState<NearMarket | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      getNearMarket(market.id)
+        .then((m) => { if (!cancelled) setNearMarket(m) })
+        .catch(() => {})
+    }
+    load()
+    const intervalId = window.setInterval(load, 15_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [market.id, transactionId])
 
   const fetchLPTokens = useCallback(async () => {
     if (!wallet.connected) return
@@ -182,6 +201,24 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     return calculateAddLiquidityQuote(ammReserves, totalLPShares, amountMicro)?.mintedLPShares ?? 0n
   }, [amountMicro, ammReserves, governanceConfig.pauseState, meetsMinLiquidity, totalLPShares])
 
+  // What the deposit would withdraw under each outcome if the market resolved with today's positions.
+  const addOutlook = useMemo(
+    () => (nearMarket && amountMicro > 0n ? addLiquidityOutlook(nearMarket, amountMicro) : null),
+    [nearMarket, amountMicro],
+  )
+  const outcomeLabel = (i: number) => market.outcomeLabels?.[i] || `Outcome ${i + 1}`
+  const worstCase = useMemo(() => {
+    if (!addOutlook) return null
+    let index = 0
+    addOutlook.payoutIfWins.forEach((v, i) => { if (v < addOutlook.payoutIfWins[index]) index = i })
+    return { index, amount: addOutlook.payoutIfWins[index] }
+  }, [addOutlook])
+  // Warn once the worst outcome would return less than 90% of the deposit.
+  const lopsidedWarning = worstCase !== null && amountMicro > 0n && worstCase.amount * 10n < amountMicro * 9n
+
+  const selectedLPShares = lpTokens.length > 0 && selectedLPIndex >= 0 ? lpTokens[selectedLPIndex].lpShares : 0n
+  const withdrawEstimate = nearMarket && selectedLPShares > 0n ? lpWithdrawAmount(nearMarket, selectedLPShares) : null
+
   const handleAddLiquidity = async () => {
     if (!amount || amountMicro <= 0n) return
 
@@ -252,12 +289,12 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
       // CRITICAL: min_tokens_out is used as the ACTUAL transfer amount in the transition.
       // Estimate LP share value from on-chain pool data, apply 2% slippage buffer.
       // For cancelled markets, each LP share = proportional to total_liquidity / total_lp_shares.
-      const selectedLP = lpTokens.length > 0 && selectedLPIndex >= 0 ? lpTokens[selectedLPIndex] : null
-      const lpSharesForWithdraw = selectedLP ? selectedLP.lpShares : 0n
-      const estimatedOut = totalLPShares > 0n
-        ? (lpSharesForWithdraw * displayLiquidity) / totalLPShares
-        : 0n
-      const slippageBuffer = estimatedOut * 2n / 100n // 2% slippage for resolved/cancelled
+      // The contract pays LP shares × (credits − unredeemed winning shares − unclaimed creator fees) ÷ total LP
+      // shares (cancelled: credits − trader collateral). Redemptions, creator-fee claims and other LP exits keep
+      // that per-share amount, so a 1% buffer only absorbs rounding.
+      const estimatedOut = withdrawEstimate
+        ?? (totalLPShares > 0n ? (selectedLPShares * displayLiquidity) / totalLPShares : 0n)
+      const slippageBuffer = estimatedOut / 100n
       const minTokensOut = estimatedOut > slippageBuffer ? estimatedOut - slippageBuffer : 1n
       const builder = isCancelled ? buildClaimLpRefundInputs : buildWithdrawLpResolvedInputs
       const { functionName, inputs } = builder(
@@ -417,6 +454,20 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                   tokenSymbol={tokenSymbol}
                 />
 
+                {withdrawEstimate !== null && (
+                  <div className="p-4 rounded-xl bg-white/[0.03]">
+                    <div className="flex justify-between items-center">
+                      <span className="text-surface-400 text-sm">You receive (est.)</span>
+                      <span className="text-white font-semibold">
+                        {formatCredits(withdrawEstimate)} {tokenSymbol}
+                      </span>
+                    </div>
+                    <p className="text-xs text-surface-500 mt-2">
+                      Paid into your private balance. Winning shares not yet redeemed and unclaimed creator fees stay set aside.
+                    </p>
+                  </div>
+                )}
+
                 {/* Non-creator notice */}
                 {!isCreator && wallet.connected && (
                   <div className="flex items-start gap-2.5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
@@ -502,12 +553,39 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                     <div className="flex justify-between items-center mt-2">
                       <span className="text-surface-400 text-sm">Share of Pool</span>
                       <span className="text-surface-300 text-sm">
-                        {totalLiquidity > 0n
-                          ? ((Number(amountMicro) / Number(totalLiquidity + amountMicro)) * 100).toFixed(2)
-                          : '100.00'
+                        {addOutlook
+                          ? (addOutlook.poolShare * 100).toFixed(2)
+                          : totalLiquidity > 0n
+                            ? ((Number(amountMicro) / Number(totalLiquidity + amountMicro)) * 100).toFixed(2)
+                            : '100.00'
                         }%
                       </span>
                     </div>
+                    {addOutlook && (
+                      <div className="mt-3 pt-3 border-t border-white/[0.06] space-y-1.5">
+                        <p className="text-xs text-surface-500">If the market resolved with today&apos;s positions, you would withdraw:</p>
+                        {addOutlook.payoutIfWins.map((payout, i) => (
+                          <div key={i} className="flex justify-between items-center">
+                            <span className="text-surface-400 text-sm">If {outcomeLabel(i)} wins</span>
+                            <span className={cn('text-sm font-medium', payout < amountMicro ? 'text-yellow-300' : 'text-surface-200')}>
+                              {formatCredits(payout)} {tokenSymbol}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {lopsidedWarning && worstCase && (
+                  <div className="flex items-start gap-2.5 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <AlertCircle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-yellow-300 leading-relaxed">
+                      This market is lopsided. Liquidity is spread across the outcomes in proportion to the pool&apos;s reserves,
+                      so most of a deposit made now backs the outcomes traders expect to lose. If {outcomeLabel(worstCase.index)} wins,
+                      you would get back about {formatCredits(worstCase.amount)} of {formatCredits(amountMicro)} {tokenSymbol}, and
+                      the difference goes to the earlier LPs. LP fees from later sells would add to it.
+                    </p>
                   </div>
                 )}
 
@@ -532,8 +610,8 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
                 {/* Info */}
                 <div className="p-3 rounded-lg bg-brand-500/5 border border-brand-500/20">
                   <p className="text-xs text-surface-400">
-                    Adding liquidity earns you {lpFeePercent.toFixed(2)}% of each trade routed to LPs, proportional to your share.
-                    Liquidity is split evenly across all outcomes.
+                    LPs earn the {lpFeePercent.toFixed(2)}% LP fee on every sell, in proportion to their share, and carry the
+                    outcome risk of the pool. Liquidity stays locked until the market is resolved or cancelled.
                   </p>
                 </div>
 
