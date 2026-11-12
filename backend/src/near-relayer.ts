@@ -28,6 +28,7 @@ const RATE_PER_MIN = Number(process.env.RELAYER_RATE_PER_MIN ?? 30);
 
 const ACTIONS = new Set([
   'withdraw', 'buy', 'sell', 'add_liquidity', 'redeem', 'refund', 'withdraw_lp', 'turbo_buy', 'turbo_claim',
+  'parlay_buy', 'parlay_claim',
 ]);
 const DEC = /^[0-9]{1,78}$/;
 
