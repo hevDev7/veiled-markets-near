@@ -14,6 +14,12 @@
 	# No COOP/COEP: wallet popups (Meteor, MyNearWallet) need window.opener, and the prover does not need
 	# SharedArrayBuffer (same as the dev server in vite.config.ts).
 	header {
+		# Scripts only from this origin (plus WebAssembly for the prover): an injected <script>, inline handler or
+		# remote script cannot run, which matters because the private-balance key is kept in this origin's storage.
+		# 'unsafe-eval' stays until the prover is confirmed to run without it. Images, RPC, relayer, oracle and
+		# wallet connections are open to any https host: market thumbnails and wallets come from many.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin

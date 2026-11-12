@@ -33,19 +33,8 @@
 
   <title>Veiled Markets | Private prediction markets on NEAR</title>
 
-  <script>
-    // Prevent FOUC: apply saved theme before first paint
-    (function() {
-      try {
-        var stored = JSON.parse(localStorage.getItem('veiled-markets-ui') || '{}');
-        var theme = (stored.state && stored.state.theme) || 'dark';
-        document.documentElement.classList.toggle('dark', theme === 'dark');
-        document.documentElement.classList.toggle('light', theme === 'light');
-      } catch(e) {
-        document.documentElement.classList.add('dark');
-      }
-    })();
-  </script>
+  <!-- Applies the saved theme before first paint. A file, not inline: the CSP allows no inline scripts. -->
+  <script src="/theme-init.js"></script>
   <style>
     /* Prevent FOUC */
     html.dark { background: #08090c; }
