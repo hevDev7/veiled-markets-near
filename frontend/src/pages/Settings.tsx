@@ -14,11 +14,11 @@ import {
   Loader2,
 } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
-import { PrivateBalancePanel } from '@/components/PrivateBalancePanel'
 import { cn, formatCredits } from '@/lib/utils'
 import { clearAllStaleData } from '@/lib/aleo-client'
 
@@ -187,13 +187,22 @@ export function Settings() {
               </div>
             </motion.div>
 
-            {/* Private balance (shielded note pool) */}
+            {/* The private balance (deposit / withdraw) lives on the Portfolio page. */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 }}
             >
-              <PrivateBalancePanel />
+              <Link
+                to="/portfolio#private-balance"
+                className="glass-card p-5 flex items-center justify-between gap-4 hover:bg-white/[0.04] transition-colors"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-white">Private balance</p>
+                  <p className="text-sm text-surface-400">Deposit and withdraw NEAR or USDC on the Portfolio page.</p>
+                </div>
+                <span className="text-sm text-brand-400 whitespace-nowrap">Open Portfolio →</span>
+              </Link>
             </motion.div>
 
             {/* Preferences Section */}

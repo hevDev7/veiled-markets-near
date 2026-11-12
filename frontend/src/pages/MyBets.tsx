@@ -35,6 +35,7 @@ import { Footer } from '@/components/Footer'
 import { ClaimWinningsModal } from '@/components/ClaimWinningsModal'
 import { ParlayClaimModal } from '@/components/ParlayClaimModal'
 import { EmptyState } from '@/components/EmptyState'
+import { PrivateBalancePanel } from '@/components/PrivateBalancePanel'
 import { useRepairParlayExplorerIds } from '@/hooks/useRepairParlayExplorerIds'
 import { cn, formatCredits, getTokenSymbol } from '@/lib/utils'
 import { syncTurboBetStatus, isTurboMarket } from '@/lib/turbo-client'
@@ -754,12 +755,13 @@ export function MyBets() {
             })()}
           </div>
 
-          {/* ═══ PERFORMANCE CHART ═══ */}
+          {/* ═══ PERFORMANCE CHART + PRIVATE BALANCE ═══ */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 items-start">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25 }}
-            className="glass-card rounded-2xl p-6 mb-8"
+            className="glass-card rounded-2xl p-6 lg:col-span-2 min-w-0"
           >
             <div className="mb-4">
               <h2 className="text-base font-heading font-semibold text-white">Performance</h2>
@@ -811,6 +813,18 @@ export function MyBets() {
               </div>
             )}
           </motion.div>
+
+          {/* Deposit to and withdraw from the private balance that trades spend from. */}
+          <motion.div
+            id="private-balance"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="min-w-0"
+          >
+            <PrivateBalancePanel />
+          </motion.div>
+          </div>
 
           {/* Filter Tabs — premium style */}
           <div className="flex items-center gap-1 p-1 mb-8 rounded-xl bg-white/[0.02] border border-white/[0.04] w-fit">
