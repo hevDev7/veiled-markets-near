@@ -13,6 +13,16 @@ A prediction market on NEAR where prices are public and positions are private.
 ![Proofs](https://img.shields.io/badge/proofs-Groth16-0b0d12?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-0b0d12?style=flat-square)
 
+![NEAR Protocol](https://img.shields.io/badge/NEAR%20Protocol-0b0d12?style=for-the-badge&logo=near&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-0b0d12?style=for-the-badge&logo=rust&logoColor=DEA584)
+![WebAssembly](https://img.shields.io/badge/WebAssembly-0b0d12?style=for-the-badge&logo=webassembly&logoColor=654FF0)
+![TypeScript](https://img.shields.io/badge/TypeScript-0b0d12?style=for-the-badge&logo=typescript&logoColor=3178C6)
+![React](https://img.shields.io/badge/React-0b0d12?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-0b0d12?style=for-the-badge&logo=vite&logoColor=646CFF)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0b0d12?style=for-the-badge&logo=tailwindcss&logoColor=06B6D4)
+![Node.js](https://img.shields.io/badge/Node.js-0b0d12?style=for-the-badge&logo=nodedotjs&logoColor=5FA04E)
+![Docker](https://img.shields.io/badge/Docker-0b0d12?style=for-the-badge&logo=docker&logoColor=2496ED)
+
 </div>
 
 | | |
@@ -142,18 +152,6 @@ Testnet settings: the vote and dispute windows are five minutes each and the vot
 resolves in minutes. A buy pays 1% (half to the market's creator, half to the protocol); a sell pays that plus 1% to
 liquidity providers.
 
-## Tech stack
-
-| Layer | |
-|---|---|
-| **Chain** | ![NEAR](https://img.shields.io/badge/NEAR%20Protocol-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![Rust](https://img.shields.io/badge/Rust-0b0d12?style=for-the-badge&logo=rust&logoColor=DEA584) ![near-sdk](https://img.shields.io/badge/near--sdk--rs%205.30-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![WebAssembly](https://img.shields.io/badge/WebAssembly-0b0d12?style=for-the-badge&logo=webassembly&logoColor=654FF0) |
-| **Zero knowledge** | ![Circom](https://img.shields.io/badge/Circom%202.1-0b0d12?style=for-the-badge) ![snarkjs](https://img.shields.io/badge/snarkjs%200.7-0b0d12?style=for-the-badge) ![Groth16](https://img.shields.io/badge/Groth16%20on%20BN254-0b0d12?style=for-the-badge) ![Poseidon](https://img.shields.io/badge/Poseidon%20hash-0b0d12?style=for-the-badge) |
-| **App** | ![TypeScript](https://img.shields.io/badge/TypeScript-0b0d12?style=for-the-badge&logo=typescript&logoColor=3178C6) ![React](https://img.shields.io/badge/React%2018-0b0d12?style=for-the-badge&logo=react&logoColor=61DAFB) ![Vite](https://img.shields.io/badge/Vite%205-0b0d12?style=for-the-badge&logo=vite&logoColor=646CFF) ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0b0d12?style=for-the-badge&logo=tailwindcss&logoColor=06B6D4) ![Framer Motion](https://img.shields.io/badge/Framer%20Motion-0b0d12?style=for-the-badge&logo=framer&logoColor=white) ![React Router](https://img.shields.io/badge/React%20Router-0b0d12?style=for-the-badge&logo=reactrouter&logoColor=CA4245) |
-| **Wallet** | ![NEAR Wallet Selector](https://img.shields.io/badge/NEAR%20Wallet%20Selector%2010-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![Meteor Wallet](https://img.shields.io/badge/Meteor%20Wallet-0b0d12?style=for-the-badge) ![NEP-413](https://img.shields.io/badge/NEP--413%20signMessage-0b0d12?style=for-the-badge) |
-| **Services** | ![Node.js](https://img.shields.io/badge/Node.js%2022-0b0d12?style=for-the-badge&logo=nodedotjs&logoColor=5FA04E) ![near-api-js](https://img.shields.io/badge/near--api--js%207-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![Pyth](https://img.shields.io/badge/Pyth%20Hermes%20prices-0b0d12?style=for-the-badge) |
-| **Tokens** | ![NEAR](https://img.shields.io/badge/NEAR-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![USDC](https://img.shields.io/badge/Circle%20USDC%20(NEP--141)-0b0d12?style=for-the-badge&logo=circle&logoColor=white) |
-| **Hosting and tests** | ![Docker](https://img.shields.io/badge/Docker-0b0d12?style=for-the-badge&logo=docker&logoColor=2496ED) ![Railway](https://img.shields.io/badge/Railway-0b0d12?style=for-the-badge&logo=railway&logoColor=white) ![Caddy](https://img.shields.io/badge/Caddy-0b0d12?style=for-the-badge&logo=caddy&logoColor=1F88C0) ![Vitest](https://img.shields.io/badge/Vitest-0b0d12?style=for-the-badge&logo=vitest&logoColor=6E9F18) ![near-workspaces](https://img.shields.io/badge/near--workspaces-0b0d12?style=for-the-badge&logo=near&logoColor=white) |
-
 ## Run it locally
 
 Requirements: Node.js 20 or newer. Rust is needed only for the contract tests.
@@ -253,7 +251,8 @@ those reads.
 | Contract | `near-sdk` 5.30.1, `ark-bn254` and `ark-ff` 0.5 (field arithmetic); tests with `near-workspaces` 0.24 |
 | Circuit | Circom 2.1.6, `circomlib` 2.0.5, `circomlibjs` 0.1.7, `snarkjs` 0.7.5, and the public Perpetual Powers of Tau |
 | App | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, Framer Motion 11, React Router 6, Zustand 4, Recharts 3, `lucide-react`, NEAR Wallet Selector 10.1.4 with its Meteor Wallet module, `@near-js/transactions`, `snarkjs`, `poseidon-lite` |
-| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx` |
+| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx`; turbo prices from Pyth Hermes, or CoinGecko without a Pyth key |
+| Hosting | Docker images on Railway; the app is served by Caddy |
 
 The team's own pre-hackathon code is the baseline listed above. Parts of the code were written with the help of AI
 coding assistants.
