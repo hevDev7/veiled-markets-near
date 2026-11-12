@@ -1,0 +1,12 @@
+{
+  "question": "Will SpaceX launch Starship from Florida before February 1, 2027?",
+  "description": "Resolves YES if a full Starship stack (Super Heavy booster and Ship) lifts off from a Florida launch pad, at Kennedy Space Center or Cape Canaveral, before 00:00 UTC on February 1, 2027, whatever happens after liftoff; otherwise NO. Static fires and other tests without a liftoff do not count. FAA planning documents pointed to December 10, 2026 for this first Florida flight; SpaceX has not confirmed a date. Collateral: NEAR.",
+  "resolutionSource": "https://www.spacex.com/launches/",
+  "outcomes": [
+    "Yes",
+    "No"
+  ],
+  "category": 7,
+  "closes": "2027-02-01T00:00:00Z",
+  "resolveDays": 14
+}

@@ -1,0 +1,12 @@
+{
+  "question": "Will Copernicus rank 2026 as the warmest year on record?",
+  "description": "Resolves YES if the Copernicus Climate Change Service (C3S) reports in its Global Climate Highlights 2026, expected in mid-January 2027, that 2026 was the warmest calendar year in its ERA5 record, alone or jointly with another year; otherwise NO. The year to beat is 2024. After October 2026, C3S called second place the most likely result. Trading closes when the year ends, at 00:00 UTC on January 1, 2027. Collateral: NEAR.",
+  "resolutionSource": "https://climate.copernicus.eu/global-climate-highlights",
+  "outcomes": [
+    "Yes",
+    "No"
+  ],
+  "category": 8,
+  "closes": "2027-01-01T00:00:00Z",
+  "resolveDays": 30
+}

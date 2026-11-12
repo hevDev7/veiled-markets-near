@@ -2,14 +2,16 @@
 //   create   opens "Will NEAR trade above $<current price> at <HH:MM> UTC?", closing in a few minutes.
 //   resolve  after the deadline: bonded vote, vote window, finalize, dispute window, confirm, then reclaims
 //            the vote bond. Takes about ten minutes on the testnet config (75-tick windows, 4 s per tick).
-// Both sign with the account's key in ~/.near-credentials. Creating attaches 0.05 NEAR of liquidity (its LP note
-// goes to backend/.seed-lp-notes.json); the 0.1 NEAR vote bond comes back at the end of `resolve`.
+// Both sign with the account's key in ~/.near-credentials. Creating attaches 0.05 NEAR of liquidity unless --near
+// or --usdc says otherwise (its LP note goes to backend/.seed-lp-notes.json); the 0.1 NEAR vote bond comes back
+// at the end of `resolve`.
 //
 // Usage (from backend/):
 //   npx tsx scripts/quick-market.ts create [minutes=6] [--account=veiled-markets.testnet]
 //       [--coin=<CoinGecko id, default near>] [--category=<n, default 3 Crypto>] [--usdc=<USDC of liquidity>]
-//   npx tsx scripts/quick-market.ts open <spec.json> [--usdc=<USDC of liquidity>]     a market of any length, e.g.
-//       scripts/markets/nvda-close-2026-11-16.json ({ question, description, resolutionSource, category, closes })
+//   npx tsx scripts/quick-market.ts open <spec.json> [--near=<NEAR of liquidity> | --usdc=<USDC of liquidity>]
+//       a market of any length, e.g. scripts/markets/nvda-close-2026-11-16.json
+//       ({ question, description, resolutionSource, outcomes?, category, closes, resolveDays? })
 //   npx tsx scripts/quick-market.ts resolve <marketId> <outcome: 1=Yes, 2=No> [--account=veiled-markets.testnet]
 // --usdc funds the market with Circle testnet USDC (ft_transfer_call) instead of NEAR; the account must hold it.
 import { readFileSync } from 'node:fs';
@@ -26,7 +28,7 @@ import { initPoseidon, ownerBlind } from '../../near/circuits/lib/notes.mjs';
 const CONTRACT = process.env.VEILED_CONTRACT ?? 'v1.veiled-markets.testnet';
 // Comma-separated; the free endpoints rate-limit (429), so a second one keeps a long `resolve` alive.
 const RPCS = (process.env.NEAR_RPC_URL ?? 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org').split(',');
-const LIQUIDITY_MICRO = 50_000n; // 0.05 NEAR
+const DEFAULT_LIQUIDITY_MICRO = 50_000n; // 0.05 NEAR
 const MS_PER_TICK = 4000;
 const RESOLUTION_TICKS = 1800n; // two hours after the deadline to finish resolving
 const GAS = 100_000_000_000_000n;
@@ -40,6 +42,7 @@ const accountId = option('account') ?? 'veiled-markets.testnet';
 const COIN = option('coin') ?? 'near';
 const CATEGORY = Number(option('category') ?? 3);
 const USDC_LIQUIDITY = option('usdc') ? BigInt(Math.round(Number(option('usdc')) * 1e6)) : null; // micro USDC
+const LIQUIDITY_MICRO = option('near') ? BigInt(Math.round(Number(option('near')) * 1e6)) : DEFAULT_LIQUIDITY_MICRO;
 const USDC_TOKEN = process.env.USDC_TOKEN ?? '3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af';
 const USDC_SLOT = 3;
 const [command, ...rest] = positional;

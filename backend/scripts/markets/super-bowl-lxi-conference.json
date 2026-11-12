@@ -1,0 +1,12 @@
+{
+  "question": "Which conference's champion will win Super Bowl LXI?",
+  "description": "Resolves to the conference of the team that wins Super Bowl LXI, scheduled for February 14, 2027 at SoFi Stadium in Inglewood, California, according to the NFL's official final score. If the game is postponed, the market resolves on the rescheduled game, provided it is played by February 28, 2027. Trading closes at the scheduled kickoff, 23:30 UTC on February 14, 2027. Collateral: Circle testnet USDC.",
+  "resolutionSource": "https://www.nfl.com/super-bowl/",
+  "outcomes": [
+    "AFC champion",
+    "NFC champion"
+  ],
+  "category": 2,
+  "closes": "2027-02-14T23:30:00Z",
+  "resolveDays": 14
+}

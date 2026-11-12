@@ -1,0 +1,12 @@
+{
+  "question": "Will Avengers: Doomsday open above $300 million at the US box office?",
+  "description": "Resolves YES if Box Office Mojo's actual domestic (US and Canada) gross for the film's three-day opening weekend, December 18-20, 2026 with Thursday previews included, is above $300,000,000; otherwise NO. Studio estimates do not count: the actual figure is normally posted on the Monday after the weekend. If the release moves past December 31, 2026, it resolves NO. Trading closes before the first previews, at 20:00 UTC on December 17, 2026. Collateral: Circle testnet USDC.",
+  "resolutionSource": "https://www.boxofficemojo.com/weekend/2026W51/",
+  "outcomes": [
+    "Yes",
+    "No"
+  ],
+  "category": 4,
+  "closes": "2026-12-17T20:00:00Z",
+  "resolveDays": 14
+}

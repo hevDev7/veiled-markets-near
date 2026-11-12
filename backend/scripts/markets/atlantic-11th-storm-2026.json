@@ -1,0 +1,12 @@
+{
+  "question": "Will an 11th named storm form in the Atlantic before the 2026 hurricane season ends?",
+  "description": "Resolves YES if the U.S. National Hurricane Center names an 11th Atlantic tropical or subtropical storm of 2026 (the next name on the list is Kyle) in an advisory issued before 00:00 UTC on December 1, 2026; otherwise NO. Ten storms had been named when this market opened; the latest was Subtropical Storm Josephine on October 21. Collateral: NEAR.",
+  "resolutionSource": "https://www.nhc.noaa.gov/archive/2026/",
+  "outcomes": [
+    "Yes",
+    "No"
+  ],
+  "category": 8,
+  "closes": "2026-12-01T00:00:00Z",
+  "resolveDays": 14
+}

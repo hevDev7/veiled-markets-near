@@ -1,0 +1,14 @@
+{
+  "question": "Who will win Nigeria's presidential election on January 16, 2027?",
+  "description": "Resolves to the candidate that Nigeria's Independent National Electoral Commission (INEC) declares the winner of the presidential election scheduled for January 16, 2027. If no candidate meets the constitutional threshold and a run-off is held, it resolves to the winner of the run-off. A candidate who is not listed resolves to \"Another candidate\". If INEC has declared no winner by March 17, 2027, the market can be cancelled and every position refunded. Trading closes when polls open, at 07:30 UTC on January 16, 2027. Collateral: Circle testnet USDC.",
+  "resolutionSource": "https://www.inecnigeria.org/",
+  "outcomes": [
+    "Bola Tinubu (APC)",
+    "Atiku Abubakar (ADC)",
+    "Peter Obi (NDC)",
+    "Another candidate"
+  ],
+  "category": 1,
+  "closes": "2027-01-16T07:30:00Z",
+  "resolveDays": 60
+}

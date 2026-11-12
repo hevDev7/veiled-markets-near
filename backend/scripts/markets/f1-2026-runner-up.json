@@ -1,0 +1,14 @@
+{
+  "question": "Who will finish second in the 2026 Formula 1 drivers' championship?",
+  "description": "Resolves to the driver classified second in the final 2026 FIA Formula One World Drivers' Championship standings, however many rounds are run. Kimi Antonelli leads on 390 points, out of reach with three rounds left; after the São Paulo Grand Prix the chase behind him was Verstappen 279, Russell 262, Hamilton 261. Any driver who is not listed resolves to \"Another driver\". Trading closes at the scheduled start of the Abu Dhabi Grand Prix, 13:00 UTC on December 6, 2026. Collateral: NEAR.",
+  "resolutionSource": "https://www.formula1.com/en/results/2026/drivers",
+  "outcomes": [
+    "Max Verstappen",
+    "George Russell",
+    "Lewis Hamilton",
+    "Another driver"
+  ],
+  "category": 2,
+  "closes": "2026-12-06T13:00:00Z",
+  "resolveDays": 14
+}
