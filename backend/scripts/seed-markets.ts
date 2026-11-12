@@ -4,13 +4,14 @@
 // withdrawn later. Markets whose question is already on chain are skipped, so the script can be re-run.
 //
 // Usage (from backend/): npx tsx scripts/seed-markets.ts [creator=veiled-markets.testnet] [--dry-run]
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Account, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
 import { metadataOf, questionHash, type MarketText } from './market-meta';
+import { confirmLpNote, recordPendingLpNote } from './lp-notes';
 // @ts-ignore -- plain ESM helper shared with the circuit tests
 import { initPoseidon, ownerBlind } from '../../near/circuits/lib/notes.mjs';
 
@@ -86,7 +87,6 @@ const ticksUntil = (iso: string) => height + BigInt(Math.floor((Date.parse(iso) 
 
 const key = JSON.parse(readFileSync(path.join(homedir(), '.near-credentials', 'testnet', `${creator}.json`), 'utf8')).private_key;
 const account = new Account(creator, provider, KeyPairSigner.fromSecretKey(key));
-const saved: unknown[] = existsSync(NOTES_FILE) ? JSON.parse(readFileSync(NOTES_FILE, 'utf8')) : [];
 
 console.log(`contract ${CONTRACT}, creator ${creator}, height ${height}, ${count} markets on chain`);
 for (const s of SEEDS) {
@@ -111,6 +111,11 @@ for (const s of SEEDS) {
     console.log('dry run:', JSON.stringify(args));
     continue;
   }
+  // The LP note has no memo: its secrets live only in the notes file, so they go there before anything is sent.
+  recordPendingLpNote(NOTES_FILE, {
+    questionHash: qh, question: s.question, sk: sk.toString(), blinding: blinding.toString(),
+    liquidity: LIQUIDITY_MICRO.toString(),
+  });
   const tx: any = await account.signAndSendTransaction({
     receiverId: CONTRACT,
     actions: [actions.functionCall('create_market', { args }, 100_000_000_000_000n, LIQUIDITY_MICRO * 10n ** 18n)],
@@ -120,6 +125,5 @@ for (const s of SEEDS) {
   if (value === undefined) throw new Error(`create_market failed: ${JSON.stringify(tx.status)}`);
   const marketId = JSON.parse(Buffer.from(value, 'base64').toString());
   console.log(`market ${marketId}: ${s.question}  tx ${tx.transaction_outcome.id}`);
-  saved.push({ marketId, question: s.question, sk: sk.toString(), blinding: blinding.toString(), liquidity: LIQUIDITY_MICRO.toString() });
-  writeFileSync(NOTES_FILE, JSON.stringify(saved, null, 2) + '\n', { mode: 0o600 });
+  confirmLpNote(NOTES_FILE, qh, String(marketId));
 }

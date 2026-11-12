@@ -12,13 +12,14 @@
 //       scripts/markets/nvda-close-2026-11-16.json ({ question, description, resolutionSource, category, closes })
 //   npx tsx scripts/quick-market.ts resolve <marketId> <outcome: 1=Yes, 2=No> [--account=veiled-markets.testnet]
 // --usdc funds the market with Circle testnet USDC (ft_transfer_call) instead of NEAR; the account must hold it.
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
 import { metadataOf, questionHash } from './market-meta';
+import { confirmLpNote, recordPendingLpNote } from './lp-notes';
 // @ts-ignore -- plain ESM helper shared with the circuit tests
 import { initPoseidon, ownerBlind } from '../../near/circuits/lib/notes.mjs';
 
@@ -168,8 +169,12 @@ async function openMarket(text: { question: string; description: string; resolut
     lp_owner_blind: ownerBlind(sk, blinding).toString(),
     lp_memo: '',
   };
+  // The LP note has no memo: its secrets live only in the notes file, so they go there before anything is sent.
+  recordPendingLpNote(NOTES_FILE, {
+    questionHash: args.question_hash, question: text.question, token: USDC_LIQUIDITY ? USDC_SLOT : 1,
+    sk: sk.toString(), blinding: blinding.toString(), liquidity: (USDC_LIQUIDITY ?? LIQUIDITY_MICRO).toString(),
+  });
   let marketId: string;
-  let liquidity: string;
   if (USDC_LIQUIDITY) {
     const account = signer();
     const balance = BigInt(await provider.callFunction({ contractId: USDC_TOKEN, method: 'ft_balance_of', args: { account_id: accountId } }) as string);
@@ -186,14 +191,11 @@ async function openMarket(text: { question: string; description: string; resolut
     const ids = createdMarketIds(tx);
     if (!ids.length) throw new Error(`no market created: ${JSON.stringify(tx.receipts_outcome.map((r: any) => r.outcome.status)).slice(0, 400)}`);
     console.log(`  ft_transfer_call create_market ok  tx ${tx.transaction_outcome.id}`);
-    [marketId, liquidity] = [ids[0], USDC_LIQUIDITY.toString()];
+    marketId = ids[0];
   } else {
     marketId = await call<string>(signer(), 'create_market', { args }, LIQUIDITY_MICRO);
-    liquidity = LIQUIDITY_MICRO.toString();
   }
-  const saved: unknown[] = existsSync(NOTES_FILE) ? JSON.parse(readFileSync(NOTES_FILE, 'utf8')) : [];
-  saved.push({ marketId, question: text.question, token: USDC_LIQUIDITY ? USDC_SLOT : 1, sk: sk.toString(), blinding: blinding.toString(), liquidity });
-  writeFileSync(NOTES_FILE, JSON.stringify(saved, null, 2) + '\n', { mode: 0o600 });
+  confirmLpNote(NOTES_FILE, args.question_hash, marketId);
   console.log(`market ${marketId}: ${text.question}`);
   return marketId;
 }

@@ -38,6 +38,9 @@ const only = new Set(argv.filter((a) => !a.startsWith('--')));
 
 interface SavedNote {
   marketId: string;
+  /** Written before the creating transaction; cleared once the market id is known (see lp-notes.ts). */
+  pending?: boolean;
+  questionHash?: string;
   question: string;
   token?: number;
   sk: string;
@@ -86,6 +89,17 @@ function saveNotes(notes: SavedNote[]) {
   const tmp = `${NOTES_FILE}.tmp`;
   writeFileSync(tmp, JSON.stringify(notes, null, 2) + '\n', { mode: 0o600 });
   renameSync(tmp, NOTES_FILE);
+}
+
+/** The id of the newest market with this question hash, or null. */
+async function marketIdByQuestionHash(hash: string): Promise<string | null> {
+  const count = Number(await view<string>('get_market_count'));
+  let found: string | null = null;
+  for (let from = 0; from < count; from += 100) {
+    const page = await view<{ id: string; question_hash: string }[]>('get_markets', { from: String(from), limit: 100 });
+    for (const m of page) if (m.question_hash === hash) found = m.id;
+  }
+  return found;
 }
 
 async function loadTree(): Promise<MerkleTree> {
@@ -154,6 +168,17 @@ async function main() {
   let tree: MerkleTree | null = null;
 
   for (const note of notes) {
+    if (!note.marketId) {
+      // The script that opened this market stopped before it learned the market id: look it up by question hash.
+      const found = note.questionHash ? await marketIdByQuestionHash(note.questionHash) : null;
+      if (!found) {
+        console.log(`pending note "${note.question.slice(0, 60)}": no market with its question hash on chain`);
+        continue;
+      }
+      note.marketId = found;
+      delete note.pending;
+      if (!dryRun) saveNotes(notes);
+    }
     if (only.size && !only.has(note.marketId)) continue;
     const label = `#${note.marketId} ${note.question.slice(0, 60)}`;
     const m = await view<MarketView | null>('get_market', { market_id: note.marketId });
