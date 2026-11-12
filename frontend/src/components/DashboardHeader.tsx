@@ -23,6 +23,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { useWalletStore } from '@/lib/store'
 import { cn, shortenAddress, formatCredits } from '@/lib/utils'
+import { AccountAvatar } from './AccountAvatar'
 
 const baseNavItems = [
   { name: 'Markets', href: '/dashboard', icon: LayoutDashboard, adminOnly: false },
@@ -224,11 +225,16 @@ export function DashboardHeader() {
                     showDropdown ? 'border-brand-400/30' : 'border-white/[0.06] hover:bg-white/[0.06]'
                   )}
                 >
-                  <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-yes-400/30 to-brand-400/30 flex items-center justify-center">
-                    <div className={cn('w-2 h-2 rounded-full animate-pulse',
-                      wallet.isDemoMode ? 'bg-brand-400' : 'bg-yes-400'
-                    )} />
-                  </div>
+                  {/* The account's own picture; the small dot says a wallet is connected. */}
+                  <span className="relative flex">
+                    <AccountAvatar accountId={wallet.connected ? wallet.address : null} size={24} />
+                    {wallet.connected && (
+                      <span className={cn(
+                        'absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-surface-950',
+                        wallet.isDemoMode ? 'bg-brand-400' : 'bg-yes-400'
+                      )} />
+                    )}
+                  </span>
                   <span className="text-sm font-medium text-white">
                     {shortenAddress(wallet.address || '', 4)}
                   </span>
@@ -289,7 +295,8 @@ export function DashboardHeader() {
                           {wallet.network}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <AccountAvatar accountId={wallet.address} size={30} />
                         <span className="text-xs font-mono text-surface-300 truncate flex-1">{wallet.address}</span>
                         <button onClick={handleCopy} className="p-1.5 rounded-lg hover:bg-white/[0.04] transition-colors flex-shrink-0">
                           {copied ? <Check className="w-3.5 h-3.5 text-yes-400" /> : <Copy className="w-3.5 h-3.5 text-surface-400" />}
