@@ -1,157 +1,268 @@
-# Veiled Markets on NEAR
-
 <div align="center">
 
-<img src="./logo-veiled-markets.png" alt="Veiled Markets logo" width="160"/>
+<img src="./logo-veiled-markets.png" alt="Veiled Markets" width="120"/>
 
-### Predict freely. Bet privately.
+# Veiled Markets
 
-Private prediction markets and 5-minute turbo markets on NEAR testnet.
+A prediction market on NEAR where prices are public and positions are private.
+
+[**Live demo**](https://veiledmarkets.xyz) · [Contract](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) · [Design](docs/near/DESIGN.md) · [Try it](#try-it) · [Run it locally](#run-it-locally)
+
+![NEAR testnet](https://img.shields.io/badge/NEAR-testnet-0b0d12?style=flat-square&logo=near&logoColor=white)
+![Track](https://img.shields.io/badge/NEAR%20HACKATHON-Privacy%20%26%20Private%20AI-c9a84c?style=flat-square)
+![Proofs](https://img.shields.io/badge/proofs-Groth16-0b0d12?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-0b0d12?style=flat-square)
 
 </div>
 
-- **Event:** NEAR HACKATHON 2026
-- **Network:** NEAR testnet. Contract [`v1.veiled-markets.testnet`](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet)
-- **Demo:** run it locally (see [Run it](#run-it)). Video: TODO, the X post tagging @NEARProtocol and #NEARHackathon goes here.
-- **Design:** [docs/near/DESIGN.md](docs/near/DESIGN.md) · **License:** [MIT](LICENSE)
-- **Sister project:** Verdict (see [below](#sister-project-verdict))
-
-## Built before the hackathon, and what is new
-
-Veiled Markets already exists as a product on **Aleo**. It was built before this hackathon. Its original README is
-kept at [docs/README-aleo.md](docs/README-aleo.md).
-
-For the hackathon we ported it to NEAR. The pages and components stay the same. NEAR now supplies the data, the
-wallet and the private trading that Aleo supplied before.
-
-| | Where |
+| | |
 |---|---|
-| **New: zero-knowledge circuit** (Groth16 note pool) | `near/circuits/` |
-| **New: NEAR smart contract** (note pool, markets, AMM, resolution, turbo) | `near/contract/` |
-| **New: relayer and turbo oracle** | `backend/src/near-relayer.ts`, `backend/src/near-turbo-oracle.ts` |
-| **New: NEAR data layer** (wallet, chain reads, prover, notes) | `frontend/src/lib/near/` |
-| **New: private balance panel** and NEAR wording in the UI | `frontend/src/components/PrivateBalancePanel.tsx` and small edits |
-| Pre-existing: React pages and components, AMM math, Aleo programs, SDK | everything else |
+| **Event** | NEAR HACKATHON, 1 to 14 November 2026 |
+| **Track** | Privacy & Private AI (private finance) |
+| **Live demo** | <https://veiledmarkets.xyz>, on NEAR testnet with test tokens only |
+| **Contract** | [`v1.veiled-markets.testnet`](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) |
+| **Built in the hackathon** | The NEAR contract, the zero-knowledge circuit, the relayer, the turbo oracle and the app's NEAR layer. The product existed on Aleo before: see [Hackathon disclosure](#hackathon-disclosure). |
 
-The work is separated in git: tag `pre-hackathon` is the Aleo product before the hackathon, and tag
-`hackathon-submission` is this submission. The full diff:
-[compare pre-hackathon...hackathon-submission](https://github.com/hevDev7/veiled-markets-near/compare/pre-hackathon...hackathon-submission)
-(locally: `git diff pre-hackathon hackathon-submission`).
+## What it is
 
-## How bets stay private
+**The problem.** On a public chain a bet is tied to the account that placed it. Anyone can read what an account
+holds, copy it or trade against it, and for some questions (an election, an employer, a court case) the bet itself
+is information its owner does not want published.
 
-Your private balance and your positions are **notes**: hidden entries in a Merkle tree inside the contract. Only
-your browser can read them.
+**The product.** Veiled Markets is a prediction market where the market stays public and the bettor does not. Prices,
+pool sizes and every trade's market, outcome and amount are on chain for anyone to check. Which account holds which
+position is not: a trade is proven in the browser with a zero-knowledge proof and submitted by a relayer, so the
+bettor's account never signs it.
 
-1. **Deposit.** You move NEAR (or USDC) from your wallet into your private balance. This step is public.
-2. **Trade.** Your browser builds a zero-knowledge proof that you own enough notes. A **relayer** submits the proof.
-   The trade is not signed by your account, so nobody can see which account bought which position.
-3. **Withdraw.** You move funds back to any NEAR account. This step is public.
+It has:
+
+- **Markets with two to four outcomes**, priced at all times by an on-chain market maker, in NEAR or USDC.
+- **Turbo rounds**: BTC, ETH or SOL up or down over five minutes, opened and settled by an oracle that logs every
+  price it used.
+- **Parlays** of two to four outcomes across markets, priced by the contract from the live pools.
+- **Liquidity provision**, with a fee on every sell going to the pool.
+- **Resolution** by bonded vote, a dispute window, and a committee when a result is disputed.
+
+| Landing page | Dashboard | A market |
+|---|---|---|
+| ![Landing page](docs/near/img/landing.jpg) | ![Dashboard](docs/near/img/dashboard.jpg) | ![Market page](docs/near/img/market.jpg) |
+
+## Try it
+
+The demo runs at <https://veiledmarkets.xyz> against NEAR testnet. Steps 1 and 2 need nothing. From step 3 you need
+[Meteor Wallet](https://wallet.meteorwallet.app) (extension or web) with a testnet account and a little testnet NEAR
+([near-faucet.io](https://near-faucet.io)).
+
+| # | Do | See |
+|---|---|---|
+| 1 | Open <https://veiledmarkets.xyz>. | Live markets with their odds, read from the contract. No wallet is asked for. |
+| 2 | Click **Try a 5-minute Turbo round**. | Live BTC, ETH and SOL prices, the open round's price to beat and its countdown. |
+| 3 | Click **Launch app** and connect Meteor Wallet. | The dashboard: every open market, the number of active markets and the total of bets counted by the contract. |
+| 4 | Open **Portfolio** and click **Unlock private balance (sign a message, no fee)**. Approve the signature in Meteor. | The private balance panel opens. No transaction is sent: the signature only derives the key that reads your notes. |
+| 5 | Type `0.5` and click **Deposit**. Approve the transaction. | A public transfer from your account to the contract. The panel then shows a private balance of 0.5 NEAR. |
+| 6 | Open a market, choose an outcome, type an amount and click **Buy … Shares**. | The browser builds a proof for a few seconds, then **Shares Purchased!** with a **View Transaction** link. No wallet prompt appears. |
+| 7 | Follow **View Transaction** to NearBlocks. | The transaction is signed by `veiled-relayer.testnet`, not by your account. Its arguments name the market, the outcome and the amount, and no trader. |
+| 8 | Return to **Portfolio**. | The position is listed under **Open Positions**. It is read from notes that only your browser can decrypt. |
+| 9 | Sell the shares on the market page, then click **Withdraw** in the private balance panel. | NEAR arrives back in your account in a public transaction. |
+
+For USDC markets, get test USDC from [faucet.circle.com](https://faucet.circle.com) (choose NEAR Testnet) and deposit
+it the same way.
+
+## How NEAR is used
+
+- **One contract holds everything**: the note pool, the markets and their market maker, resolution, parlays and
+  turbo rounds. A private action is a single call with no cross-contract step, so it either happens or does not.
+- **Proofs are verified on chain** with NEAR's `alt_bn128` host functions (Groth16 on BN254). One private action
+  costs about 67 TGas, which the relayer pays.
+- **USDC is Circle's NEP-141 token.** Deposits and USDC markets enter through `ft_transfer_call`, handled by the
+  contract's `ft_on_transfer`.
+- **The key to a private balance comes from the wallet**: one NEP-413 `signMessage` signature, so the same wallet
+  finds its notes again in any browser.
+- **Named accounts separate the roles**: the contract, the relayer that submits private actions and the oracle that
+  runs turbo rounds are three accounts with three keys.
+
+The project does not use TEEs or NEAR AI. Its place in the privacy track is private finance: hiding who holds a
+position while keeping the market itself auditable.
+
+## How a bet stays private
+
+A private balance and every position are **notes**: commitments in a Merkle tree inside the contract. Only the
+browser that holds the key can read them.
+
+1. **Deposit.** NEAR or USDC moves from your wallet into your private balance. This step is public.
+2. **Trade.** The browser builds a zero-knowledge proof that you own enough notes and sends it to the relayer, which
+   submits it. Your account does not sign the trade.
+3. **Withdraw.** Funds move back to any NEAR account. This step is public.
 
 | Public on NEAR | Private |
 |---|---|
-| Deposits and withdrawals (account and amount) | Which account holds which position |
-| Market prices and pool sizes (the AMM is public, as on Aleo) | Your balance inside the pool |
+| Deposits and withdrawals, with account and amount | Which account holds which position |
+| Market prices and pool sizes | Your balance inside the pool |
 | Each trade's market, outcome and amount | Who placed each trade |
 | Resolution votes and bonds | Your trading history |
 
-Tip: deposit before you trade. If your private balance is too small, the app tops it up from your wallet in the same
-moment as the trade, and that timing links the trade to you.
+Deposit before you trade. When a private balance is too small, the app tops it up from the wallet at the moment of
+the trade, and that timing links the trade to the account.
 
-Your note keys come from one wallet signature (NEP-413 `signMessage`), so the same wallet finds its notes again on any
-device. If the wallet declines to sign, the app keeps a random key in this browser instead, and the notes it owns can
-only be spent from this browser.
+The note key is derived from the wallet's signature, so a new browser recovers the same balance. A wallet that cannot
+sign messages gets a key kept only in that browser, which the app asks the user to back up; a declined signature is an
+error, never a silent fallback.
 
 ## Architecture
 
 ```
-Browser (React, same pages as the Aleo app)
+Browser (React)
   └─ frontend/src/lib/near/
-       ├─ wallet:   NEAR Wallet Selector (Meteor Wallet)
-       ├─ reads:    contract views, served to the pages in the shape they already expect
-       ├─ notes:    scan and decrypt your notes, build the Merkle path
-       └─ prover:   snarkjs Groth16 proof in a web worker
+       ├─ wallet   NEAR Wallet Selector (Meteor Wallet)
+       ├─ reads    contract views
+       ├─ notes    scans and decrypts the user's notes, builds the Merkle path
+       └─ prover   snarkjs Groth16 proof in a web worker
             │ proof + action
             ▼
 Relayer (backend/src/near-relayer.ts) ── transact ──▶ Contract v1.veiled-markets.testnet
-                                                        ├─ note pool (depth-20 Poseidon tree, nullifiers)
-Turbo oracle (backend/src/near-turbo-oracle.ts)          ├─ markets: FPMM AMM, LP, fees
-  opens and resolves 5-minute BTC/ETH/SOL rounds  ──▶   ├─ resolution: votes, disputes, committee
-                                                        └─ turbo rounds and vault
+                                                        ├─ note pool: depth-20 Poseidon tree, nullifiers
+Turbo oracle (backend/src/near-turbo-oracle.ts)          ├─ markets: FPMM market maker, liquidity, fees
+  opens and settles five-minute rounds           ──▶    ├─ resolution: votes, disputes, committee
+                                                        └─ parlays, turbo rounds and their vault
 ```
 
-One contract holds everything, so each private action is a single call with no cross-contract steps.
+The relayer checks each proof locally before it spends gas on it, and it cannot change a trade: the proof binds the
+action, the recipient and the fee. The full design is in [docs/near/DESIGN.md](docs/near/DESIGN.md).
 
 ### Deployed on NEAR testnet
 
-| Account | Role |
+| What | Where |
 |---|---|
-| `v1.veiled-markets.testnet` | The contract |
-| `veiled-relayer.testnet` | Submits private trades (fee 0 on testnet) |
-| `veiled-oracle.testnet` | Opens and resolves turbo rounds |
-| `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` | Circle's official testnet USDC (token slot 3). Get it at [faucet.circle.com](https://faucet.circle.com), choosing NEAR Testnet |
+| Contract | [`v1.veiled-markets.testnet`](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) |
+| Relayer account and service | [`veiled-relayer.testnet`](https://testnet.nearblocks.io/address/veiled-relayer.testnet), <https://relayer.veiledmarkets.xyz> |
+| Turbo oracle account and service | [`veiled-oracle.testnet`](https://testnet.nearblocks.io/address/veiled-oracle.testnet), <https://oracle.veiledmarkets.xyz> ([audit log](https://oracle.veiledmarkets.xyz/audit)) |
+| USDC | Circle's testnet token, `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` |
 
-Testnet settings: the vote and dispute windows are 5 minutes each, so a demo market resolves quickly. The vote bond
-is 0.1 NEAR.
+Testnet settings: the vote and dispute windows are five minutes each and the vote bond is 0.1 NEAR, so a demo market
+resolves in minutes. A buy pays 1% (half to the market's creator, half to the protocol); a sell pays that plus 1% to
+liquidity providers.
 
-## Run it
+## Tech stack
 
-Requirements: Node.js 20 or newer, and a NEAR testnet account in Meteor Wallet.
+| Layer | |
+|---|---|
+| **Chain** | ![NEAR](https://img.shields.io/badge/NEAR%20Protocol-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![Rust](https://img.shields.io/badge/Rust-0b0d12?style=for-the-badge&logo=rust&logoColor=DEA584) ![near-sdk](https://img.shields.io/badge/near--sdk--rs%205.30-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![WebAssembly](https://img.shields.io/badge/WebAssembly-0b0d12?style=for-the-badge&logo=webassembly&logoColor=654FF0) |
+| **Zero knowledge** | ![Circom](https://img.shields.io/badge/Circom%202.1-0b0d12?style=for-the-badge) ![snarkjs](https://img.shields.io/badge/snarkjs%200.7-0b0d12?style=for-the-badge) ![Groth16](https://img.shields.io/badge/Groth16%20on%20BN254-0b0d12?style=for-the-badge) ![Poseidon](https://img.shields.io/badge/Poseidon%20hash-0b0d12?style=for-the-badge) |
+| **App** | ![TypeScript](https://img.shields.io/badge/TypeScript-0b0d12?style=for-the-badge&logo=typescript&logoColor=3178C6) ![React](https://img.shields.io/badge/React%2018-0b0d12?style=for-the-badge&logo=react&logoColor=61DAFB) ![Vite](https://img.shields.io/badge/Vite%205-0b0d12?style=for-the-badge&logo=vite&logoColor=646CFF) ![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0b0d12?style=for-the-badge&logo=tailwindcss&logoColor=06B6D4) ![Framer Motion](https://img.shields.io/badge/Framer%20Motion-0b0d12?style=for-the-badge&logo=framer&logoColor=white) ![React Router](https://img.shields.io/badge/React%20Router-0b0d12?style=for-the-badge&logo=reactrouter&logoColor=CA4245) |
+| **Wallet** | ![NEAR Wallet Selector](https://img.shields.io/badge/NEAR%20Wallet%20Selector%2010-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![Meteor Wallet](https://img.shields.io/badge/Meteor%20Wallet-0b0d12?style=for-the-badge) ![NEP-413](https://img.shields.io/badge/NEP--413%20signMessage-0b0d12?style=for-the-badge) |
+| **Services** | ![Node.js](https://img.shields.io/badge/Node.js%2022-0b0d12?style=for-the-badge&logo=nodedotjs&logoColor=5FA04E) ![near-api-js](https://img.shields.io/badge/near--api--js%207-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![Pyth](https://img.shields.io/badge/Pyth%20Hermes%20prices-0b0d12?style=for-the-badge) |
+| **Tokens** | ![NEAR](https://img.shields.io/badge/NEAR-0b0d12?style=for-the-badge&logo=near&logoColor=white) ![USDC](https://img.shields.io/badge/Circle%20USDC%20(NEP--141)-0b0d12?style=for-the-badge&logo=circle&logoColor=white) |
+| **Hosting and tests** | ![Docker](https://img.shields.io/badge/Docker-0b0d12?style=for-the-badge&logo=docker&logoColor=2496ED) ![Railway](https://img.shields.io/badge/Railway-0b0d12?style=for-the-badge&logo=railway&logoColor=white) ![Caddy](https://img.shields.io/badge/Caddy-0b0d12?style=for-the-badge&logo=caddy&logoColor=1F88C0) ![Vitest](https://img.shields.io/badge/Vitest-0b0d12?style=for-the-badge&logo=vitest&logoColor=6E9F18) ![near-workspaces](https://img.shields.io/badge/near--workspaces-0b0d12?style=for-the-badge&logo=near&logoColor=white) |
+
+## Run it locally
+
+Requirements: Node.js 20 or newer. Rust is needed only for the contract tests.
+
+**The app, against the deployed contract and the hosted relayer and oracle:**
 
 ```bash
-# 1. Relayer (port 4100). Key: RELAYER_PRIVATE_KEY or ~/.near-credentials/testnet/veiled-relayer.testnet.json
-cd backend && npm install
-npx tsx src/near-relayer.ts
-
-# 2. Turbo oracle (port 4090). Key: ORACLE_PRIVATE_KEY or ~/.near-credentials/testnet/veiled-oracle.testnet.json
-#    Prices come from Pyth Hermes when backend/.env has PYTH_API_KEY=<key from app.pyth.com>, otherwise CoinGecko.
-npx tsx src/near-turbo-oracle.ts --serve --auto-create
-
-# 3. Frontend (http://localhost:3100)
-cd ../frontend && npm install
-cp .env.example .env.local   # the NEAR section at the top has working testnet defaults
-npm run dev
+git clone https://github.com/hevDev7/veiled-markets-near.git
+cd veiled-markets-near/frontend
+npm install
+VITE_RELAYER_URL=https://relayer.veiledmarkets.xyz \
+VITE_TURBO_ORACLE_URL=https://oracle.veiledmarkets.xyz \
+npm run dev            # http://localhost:3100
 ```
 
-The frontend works against the deployed contract without steps 1 and 2. You need the relayer for private trades and
-the oracle for turbo rounds.
+Then follow [Try it](#try-it) with `http://localhost:3100` in place of the demo address.
 
-To build and deploy your own contract: build the wasm, then run `near/scripts/deploy-testnet.sh v2`. To rebuild the
-circuit: `cd near/circuits && npm run build`.
+**Your own relayer and oracle** (optional; each needs the key of a funded testnet account):
 
-For a demo of the whole market lifecycle, `cd backend && npx tsx scripts/quick-market.ts create 6` opens a NEAR
-price question that closes in 6 minutes. After it closes, `npx tsx scripts/quick-market.ts resolve <id> <1=Yes|2=No>`
-votes, finalizes and confirms the result (about ten minutes on testnet). Winners can then redeem privately in the app.
+```bash
+cd backend && npm install
+RELAYER_PRIVATE_KEY=ed25519:… npm run relayer                                  # port 4100
+ORACLE_PRIVATE_KEY=ed25519:…  npm run turbo-oracle -- --serve --auto-create    # port 4090
+cd ../frontend && npm run dev          # without the two VITE_ variables it uses localhost:4100 and :4090
+```
 
-`NEAR_RPC_URL` accepts a comma-separated list for the relayer, the oracle and the scripts. Each call moves to the next
-endpoint when one times out or rate-limits.
+The oracle reads Pyth Hermes when `backend/.env` has `PYTH_API_KEY`, otherwise CoinGecko. `NEAR_RPC_URL` accepts a
+comma-separated list for the relayer, the oracle and the scripts. The relayer submits to the contract named by
+`VEILED_CONTRACT`, and only the account the contract names as its oracle operator can open or settle turbo rounds.
 
-### Tests
+**Your own contract:** build the wasm and run `near/scripts/deploy-testnet.sh v2`. Rebuilding the circuit
+(`cd near/circuits && npm run build`, which needs `circom`) makes new proving keys, so it goes with a new contract.
 
-| What | Command |
+**A whole market lifecycle in fifteen minutes** (operator keys needed): `cd backend && npx tsx scripts/quick-market.ts
+create 6` opens a NEAR price question that closes in six minutes; `npx tsx scripts/quick-market.ts resolve <id>
+<1=Yes|2=No>` then votes, finalizes and confirms the result. Winners redeem privately in the app. The other scripts
+are listed in [backend/README.md](backend/README.md).
+
+## Tests
+
+| What | Command | Expect |
+|---|---|---|
+| Circuit: valid spends prove, invalid ones do not | `cd near/circuits && npm install && node --test test/spend.test.mjs` | 6 pass |
+| Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 48 pass |
+| Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
+| Relayer request checks and LP note bookkeeping | `cd backend && npm install && npm test` | 10 pass |
+| App: note keys, wallet signature, market data, math | `cd frontend && npm install && npm test` | 34 pass |
+| Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
+
+The sandbox tests download a NEAR sandbox binary on first run, and the in-place upgrade test among them is skipped
+unless `VEILED_WASM_OLD` points at the previously deployed wasm.
+
+## Repository layout
+
+```
+near/contract/        Rust contract (near-sdk): note pool, markets, market maker, resolution, parlays, turbo
+near/circuits/        Circom spend circuit, its key build, Node proving helpers and tests
+near/scripts/         deploy and upgrade scripts
+backend/              relayer, turbo oracle and operator scripts (backend/README.md)
+frontend/             React app; the NEAR layer is frontend/src/lib/near/
+sdk/                  TypeScript SDK from the Aleo product; the app still imports its market maker math
+docs/near/            DESIGN.md and the screenshots above
+docs/README-aleo.md   README of the Aleo product, archived
+```
+
+## Hackathon disclosure
+
+### Built before the hackathon, and what is new
+
+Veiled Markets already existed as a product on **Aleo**, built before this hackathon. Its README is kept at
+[docs/README-aleo.md](docs/README-aleo.md). For the hackathon it was ported to NEAR: the pages and components are the
+same, and NEAR now supplies the data, the wallet and the private trading that Aleo supplied before.
+
+| | Where |
 |---|---|
-| Circuit | `node --test near/circuits/test/spend.test.mjs` |
-| Contract rules (mocked host, fast) | `cd near/contract && cargo test -p veiled` |
-| Contract (near-workspaces sandbox) | `cd near/contract && cargo test -p integration-tests` |
-| In-place upgrade from the live build | `VEILED_WASM_OLD=<live wasm> cargo test -p integration-tests --test upgrade` |
-| Relayer checks | `cd backend && npx tsx --test src/relay-guards.test.ts` |
-| Browser note keys and math | `cd frontend && npm test` |
-| Live testnet smoke test | `cd backend && npx tsx scripts/testnet-smoke.ts` |
+| **New:** zero-knowledge circuit (Groth16 note pool) | `near/circuits/` |
+| **New:** NEAR contract (note pool, markets, market maker, resolution, parlays, turbo) | `near/contract/` |
+| **New:** relayer, turbo oracle and operator scripts | `backend/src/near-relayer.ts`, `backend/src/near-turbo-oracle.ts`, `backend/scripts/` |
+| **New:** the app's NEAR layer (wallet, chain reads, prover, notes) | `frontend/src/lib/near/` |
+| **New:** private balance panel, landing page, account pictures and NEAR wording in the app | `frontend/src/components/` |
+| **Baseline:** React pages and components, market maker math, the SDK | the rest of `frontend/` and `sdk/` |
 
-## Not on NEAR yet
+The two are separated in git. Tag [`pre-hackathon`](https://github.com/hevDev7/veiled-markets-near/tree/pre-hackathon)
+is the Aleo product as it stood before the hackathon, and tag `hackathon-submission` is this submission. The diff:
+[pre-hackathon...hackathon-submission](https://github.com/hevDev7/veiled-markets-near/compare/pre-hackathon...hackathon-submission)
+(locally: `git diff pre-hackathon hackathon-submission`).
 
-Governance proposals, resolver staking and rewards still exist only on Aleo. The app hides their buttons on NEAR.
-Dispute escalation to the committee and parlays do work on NEAR.
+The Aleo programs, their deploy scripts and their documents are no longer in the working tree, because the NEAR app
+does not use them. They are unchanged in history and at the `pre-hackathon` tag. Some app code still carries Aleo
+names (`aleo-client.ts`, for example): the pages read data in the shape they always did, and the NEAR layer answers
+those reads.
 
-## Parlays
+### Libraries and tools
 
-A parlay combines 2 to 4 outcomes on different markets and pays only if every leg wins. Legs must be markets the
-owner approved for parlays. The contract prices each leg from the live market pools (at most 100× per leg and 1000×
-combined, and a payout of at most 1% of the thinnest leg's pool depth), so the quote in the app is the contract's own.
-Placing is a private action like a trade: the stake comes from your private balance and the contract gives you a
-private ticket note. A losing leg settles the ticket at once; otherwise it settles when every leg is final, and a
-cancelled leg refunds the stake. A winning ticket pays its payout minus 2%. Payouts come from a house pool that must
-cover 110% of all open tickets; anyone can add to it on the My Parlays page.
+| Part | Third-party code |
+|---|---|
+| Contract | `near-sdk` 5.30.1, `ark-bn254` and `ark-ff` 0.5 (field arithmetic); tests with `near-workspaces` 0.24 |
+| Circuit | Circom 2.1.6, `circomlib` 2.0.5, `circomlibjs` 0.1.7, `snarkjs` 0.7.5, and the public Perpetual Powers of Tau |
+| App | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, Framer Motion 11, React Router 6, Zustand 4, Recharts 3, `lucide-react`, NEAR Wallet Selector 10.1.4 with its Meteor Wallet module, `@near-js/transactions`, `snarkjs`, `poseidon-lite` |
+| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx` |
+
+The team's own pre-hackathon code is the baseline listed above. Parts of the code were written with the help of AI
+coding assistants.
+
+### Other submission by the same team
+
+**Verdict** is our other NEAR HACKATHON project: a prediction market that resolves itself by reading NEAR state with
+a view call, so no person or vote decides who won. The two are independent and answer different questions. Veiled
+Markets keeps private who holds a position. Verdict lets the chain decide who won.
 
 ## Known limits
 
@@ -159,43 +270,36 @@ What the testnet deployment trusts, and what a production deployment still needs
 
 - **Resolution.** A market resolves by bonded vote, then a dispute window, then (if disputed) a committee of five
   accounts the operator runs. The testnet uses demo settings so a market resolves in minutes: one voter is enough, the
-  bond is 0.1 NEAR and each window is 5 minutes. With those settings one account can decide a market unless someone
-  disputes within 5 minutes. The owner can set production values with `set_resolution_config` (more voters, hour-long
-  windows, a real bond); correct voters and disputers are not yet paid from forfeited bonds, so honest resolution
-  still depends on bettors and the committee watching.
-- **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in (pro rata within that
-  outcome), so a refund cannot draw on another outcome's collateral. Markets created before that rule (ids up to
-  the upgrade) keep the old pro-rata refund.
+  bond is 0.1 NEAR and each window is five minutes. With those settings one account can decide a market unless someone
+  disputes within five minutes. The owner can set production values with `set_resolution_config` (more voters,
+  hour-long windows, a real bond); correct voters and disputers are not yet paid from forfeited bonds, so honest
+  resolution still depends on bettors and the committee watching.
+- **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in, pro rata within that
+  outcome, so a refund cannot draw on another outcome's collateral. Markets created before that rule keep the older
+  pro-rata refund.
 - **Parlay pool.** Leg odds are read from the markets' own pools, which anyone with capital can move. Only markets the
-  owner approved can be legs, and one ticket pays at most 1% of its thinnest leg's pool depth. The pool is still
+  owner approved can be legs, and one ticket pays at most 1% of its thinnest leg's pool depth. The pool is
   operator-funded risk capital, not a guaranteed product.
 - **Turbo rounds.** Bets close for the last fifth of a round, because a shared pool cannot fairly take bets when the
-  result is all but known. The operator still supplies the baseline and closing price (see Turbo prices below).
+  result is all but known. The oracle operator supplies the baseline and the closing price; the contract checks the
+  operator and the price bounds.
 - **Storage and capacity.** Every private action adds two leaves and two nullifiers (about 700 bytes) that the
   contract pays for from its own NEAR, and the note tree holds 524,288 actions in total. A production deployment needs
-  a storage fee per action and a deeper or rotating tree; the testnet contract is topped up by the operator.
-- **Private balance key.** The key is derived from a wallet signature and kept in the browser's storage. A wallet
-  that cannot sign messages gets a browser-only key, which the app tells you to back up. Sign the key message only on
-  veiledmarkets.xyz.
+  a storage fee per action and a deeper or rotating tree.
+- **Private balance key.** The key is derived from a wallet signature and kept in the browser's storage. Sign the key
+  message only on veiledmarkets.xyz.
 - **Privacy.** Amounts are public; what is hidden is which account holds which position. A deposit made right before
-  a bet can be linked to it by timing, so fund the private balance ahead of time.
+  a bet can be linked to it by timing.
 - **Operator keys.** The contract account still has a full-access key and can be redeployed by the operator.
-- **Testnet trusted setup.** The circuit key comes from a single phase-2 contribution on top of the public
-  Perpetual Powers of Tau. A mainnet launch needs a multi-party ceremony.
-- **Turbo prices.** The oracle operator submits prices, and the contract checks the operator and the price bounds.
-  The oracle reads Pyth Hermes when it has an API key, and streams only the feeds that key is entitled to. Without
-  a key it falls back to CoinGecko spot prices, which refresh about once a minute.
-- **Relayer.** The relayer pays gas and cannot change a trade, because the proof binds the action, the recipient and the
-  fee. A production relayer would charge a fee.
+- **Trusted setup.** The circuit key comes from a single phase-2 contribution on top of the public Perpetual Powers
+  of Tau. A mainnet launch needs a multi-party ceremony.
+- **Relayer.** The relayer pays gas and charges nothing on testnet. A production relayer would charge a fee.
+- **Audit.** The code has not been audited.
 
-## Sister project: Verdict
+### Not on NEAR yet
 
-Verdict is our other NEAR HACKATHON 2026 project. It is a prediction market
-that resolves itself by reading NEAR state with a view call, so no person or vote decides who won.
-The two projects answer different questions:
-
-- **Veiled Markets:** who holds a position stays private.
-- **Verdict:** who won is decided by the chain, not by a resolver.
+Governance proposals, resolver staking and rewards exist only in the Aleo product. The app hides their controls on
+NEAR.
 
 ## License
 
