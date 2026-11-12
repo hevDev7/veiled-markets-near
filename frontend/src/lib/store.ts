@@ -402,17 +402,13 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
 
       // NEAR: the private balance is this account's unspent notes in the shielded pool, found and decrypted in
       // this browser with keys derived from one wallet signature (made when the wallet connects).
-      const { refreshNotes, privateBalance: notesBalance } = await import('./near/private')
+      const { refreshNotes, privateBalances } = await import('./near/private')
       try {
         await withTimeout(refreshNotes(false), 20_000, 'NEAR private note sync')
       } catch (err) {
         devWarn('[Balance] Private note sync failed; showing the last synced notes:', err)
       }
-      const [privateBalance, usdcxPrivate, usadPrivate] = await Promise.all([
-        notesBalance(1),
-        notesBalance(2),
-        notesBalance(3),
-      ])
+      const { private: privateBalance, usdcxPrivate, usadPrivate } = await privateBalances()
       const balance: WalletBalance = { public: publicBalance, private: privateBalance, usdcxPublic, usdcxPrivate, usadPublic, usadPrivate }
       devLog('[Balance] Final:', {
         public: `${Number(publicBalance) / 1_000_000} NEAR`,

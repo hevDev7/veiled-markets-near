@@ -276,6 +276,16 @@ export async function privateBalance(token: number): Promise<bigint> {
   return balanceOf(accountId, KIND.BALANCE, token, 0);
 }
 
+/** The wallet store's private balance fields, each read from its token's own slot ('usdcxPrivate' is Circle USDC). */
+export async function privateBalances(): Promise<{ private: bigint; usdcxPrivate: bigint; usadPrivate: bigint }> {
+  const [near, usdc, usad] = await Promise.all([
+    privateBalance(TOKEN.NEAR),
+    privateBalance(TOKEN.USDCX),
+    privateBalance(TOKEN.USAD),
+  ]);
+  return { private: near, usdcxPrivate: usdc, usadPrivate: usad };
+}
+
 /** Tops the private balance up from the wallet when it is short of `micro` (one public deposit). */
 export async function ensurePrivateBalance(token: number, micro: bigint): Promise<void> {
   const keys = await noteKeys();
