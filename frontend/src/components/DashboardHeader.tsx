@@ -27,7 +27,7 @@ import { cn, shortenAddress, formatCredits } from '@/lib/utils'
 const baseNavItems = [
   { name: 'Markets', href: '/dashboard', icon: LayoutDashboard, adminOnly: false },
   { name: 'Portfolio', href: '/portfolio', icon: TrendingUp, adminOnly: false },
-  { name: 'Parlays', href: '/my-parlays', icon: Ticket, adminOnly: false },
+  { name: 'Parlays', href: '/my-parlays', icon: Ticket, adminOnly: true },
   { name: 'Create', href: '/create', icon: Plus, adminOnly: false },
   { name: 'Govern', href: '/governance', icon: Vote, adminOnly: false },
 ]

@@ -60,7 +60,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'Can I combine multiple markets into a parlay?',
-    answer: 'Yes. A parlay combines 2 to 4 legs, each one outcome on a different market, and pays only if every leg wins. Turn on Parlay Mode on the dashboard (or use Add to Parlay on a market page), set a stake in NEAR or USDC (at least 0.1) and confirm. The contract prices each leg from the live market (odds = 1 / price, at most 100× per leg and 1000× combined), and a winning ticket pays its potential payout minus a 2% fee. Placing and claiming are private; the parlay\'s legs and stake are public, like a trade. One losing leg loses the parlay; if a leg market is cancelled, the stake is refunded once every leg is final. Track and claim your tickets on My Parlays.',
+    answer: 'Yes. A parlay combines 2 to 4 legs, each one outcome on a different market, and pays only if every leg wins. Turn on Parlay Mode on the dashboard (or use Add to Parlay on a market page), set a stake in NEAR or USDC (at least 0.1) and confirm. The contract prices each leg from the live market (odds = 1 / price, at most 100× per leg and 1000× combined), and a winning ticket pays its potential payout minus a 2% fee. Placing and claiming are private; the parlay\'s legs and stake are public, like a trade. One losing leg loses the parlay; if a leg market is cancelled, the stake is refunded once every leg is final. Track and claim your tickets on My Parlays (Portfolio → Parlay Details).',
   },
   // Markets
   {

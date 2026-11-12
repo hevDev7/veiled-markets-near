@@ -6,7 +6,7 @@ import { useWalletStore } from '@/lib/store'
 const allItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Markets', adminOnly: false },
   { href: '/portfolio', icon: TrendingUp, label: 'Portfolio', adminOnly: false },
-  { href: '/my-parlays', icon: Ticket, label: 'Parlays', adminOnly: false },
+  { href: '/my-parlays', icon: Ticket, label: 'Parlays', adminOnly: true },
   { href: '/create', icon: Plus, label: 'Create', adminOnly: false },
   { href: '/governance', icon: Vote, label: 'Govern', adminOnly: false },
 ]
