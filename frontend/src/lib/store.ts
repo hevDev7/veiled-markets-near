@@ -374,7 +374,7 @@ export const useWalletStore = create<WalletStore>((set, get) => ({
       // Public balances are fast and reliable, so publish them immediately.
       const [publicResult, usdcxPublicResult, usadPublicResult] = await Promise.allSettled([
         withTimeout(fetchPublicBalance(refreshAddress), 6_000, 'NEAR public balance'),
-        withTimeout(fetchUsdcxPublicBalance(refreshAddress), 6_000, 'USDCX public balance'),
+        withTimeout(fetchUsdcxPublicBalance(refreshAddress), 6_000, 'USDC public balance'),
         withTimeout(fetchUsdcxPublicBalance(refreshAddress, 'test_usad_stablecoin.aleo'), 6_000, 'USAD public balance'),
       ])
 
