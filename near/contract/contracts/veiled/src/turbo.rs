@@ -19,6 +19,9 @@ pub const BASELINE_LAG_TOLERANCE: u64 = 60;
 pub const LATE_CANCEL_GRACE: u64 = 5000;
 pub const TURBO_FEE_BPS: u128 = 50;
 pub const TURBO_MIN_TRADE: u128 = 1000;
+/// Bets close this fraction of the round before its deadline (the last fifth). In a shared pool, a bet placed
+/// when the result is all but known takes winnings from the bettors who carried the risk.
+pub const BET_CUTOFF_DIVISOR: u64 = 5;
 /// Aleo stores claim units = 2 × stake in the share record; kept for the views' parity.
 pub const CLAIM_UNIT_SCALE: u128 = 2;
 const CONF_DENOMINATOR_FRAC: u128 = 200;
@@ -64,6 +67,8 @@ pub struct TurboView {
     pub baseline_conf: U128,
     pub baseline_block: U64,
     pub deadline: U64,
+    /// Bets are taken while the height is below this.
+    pub betting_deadline: U64,
     pub resolution_deadline: U64,
     pub closing_price: U128,
     pub closing_conf: U128,
@@ -84,6 +89,11 @@ pub struct TurboView {
 }
 
 impl TurboMarket {
+    /// First tick at which bets are no longer taken.
+    pub fn betting_deadline(&self) -> u64 {
+        self.deadline - (self.deadline - self.created_at) / BET_CUTOFF_DIVISOR
+    }
+
     fn view(&self) -> TurboView {
         TurboView {
             id: U64(self.id),
@@ -93,6 +103,7 @@ impl TurboMarket {
             baseline_conf: U128(self.baseline_conf),
             baseline_block: U64(self.baseline_block),
             deadline: U64(self.deadline),
+            betting_deadline: U64(self.betting_deadline()),
             resolution_deadline: U64(self.resolution_deadline),
             closing_price: U128(self.closing_price),
             closing_conf: U128(self.closing_conf),
@@ -297,6 +308,7 @@ impl Veiled {
         let t = self.turbo_mut(market_id);
         require!(t.status == TURBO_ACTIVE, "ERR_STATUS");
         require!(h < t.deadline, "ERR_DEADLINE");
+        require!(h < t.betting_deadline(), "ERR_BETTING_CLOSED");
         let first_bet = t.up_bets == 0 && t.down_bets == 0;
         if side == UP {
             t.total_up += stake;

@@ -50,6 +50,10 @@ async fn parlay(env: &Env, id: u64) -> anyhow::Result<Value> {
     view(env, "get_parlay", json!({ "parlay_id": s(id) })).await
 }
 
+async fn market_leg(env: &Env, id: u64) -> anyhow::Result<bool> {
+    Ok(view(env, "get_market", json!({ "market_id": s(id) })).await?["parlay_leg"].as_bool().unwrap())
+}
+
 async fn pool(env: &Env) -> anyhow::Result<(u128, u128)> {
     let p = view(env, "get_parlay_pool", json!({})).await?;
     Ok((u(&p["pool"][1]), u(&p["exposure"][1])))
@@ -81,12 +85,32 @@ async fn parlays_win_lose_and_refund() -> anyhow::Result<()> {
     assert!(r.is_success(), "{:?}", r.failures());
     assert_eq!(pool(&env).await?, (20 * NEAR, 0));
 
-    // Even 2-outcome pools: each leg pays 2×, two legs 4×.
-    let q = view(&env, "quote_parlay", json!({ "token": 1, "stake": s(NEAR), "legs": legs(&[(a, 1), (b, 1)]) })).await?;
+    // Only markets the owner approved can be legs.
+    let quote_args = json!({ "token": 1, "stake": s(NEAR), "legs": legs(&[(a, 1), (b, 1)]) });
+    assert!(env.veiled.view("quote_parlay").args_json(quote_args.clone()).await.is_err());
+    let approve = |who: &near_workspaces::Account, id: u64| {
+        let (who, env) = (who.clone(), &env);
+        async move { call(env, &who, "set_parlay_leg", json!({ "market_id": s(id), "eligible": true }), 0).await }
+    };
+    assert_fails_with(&approve(&env.alice, a).await?, "ERR_OWNER");
+    for id in [a, b, c] {
+        assert!(approve(&env.root, id).await?.is_success());
+    }
+    assert!(market_leg(&env, a).await?);
+
+    // Even 2-outcome pools: each leg pays 2×, two legs 4×. A ticket may pay 1% of the thinnest leg's depth
+    // (10 NEAR), so at 4× the largest stake is 0.025 NEAR.
+    let q = view(&env, "quote_parlay", quote_args).await?;
     assert_eq!(q["leg_odds_bps"], json!(["20000", "20000"]));
     assert_eq!((u(&q["combined_odds_bps"]), u(&q["potential_payout"]), u(&q["fee_if_won"])), (40_000, 4 * NEAR, 80_000));
+    assert_eq!(u(&q["max_stake"]), 25_000);
 
     let bal = w.deposit(&env, &env.alice, 9 * NEAR).await?;
+    let capped = w.spend(&env, &[&bal], NEAR, buy(&[(a, 1), (b, 1)], 0)).await?;
+    assert_fails_with(&capped.result, "ERR_LEG_LIQUIDITY");
+    // The rest of this test is about settlement, so the owner lets a ticket pay up to the whole leg depth.
+    let r = call(&env, &env.root, "set_parlay_leg_cap", json!({ "bps": "10000" }), 0).await?;
+    assert!(r.is_success(), "{:?}", r.failures());
 
     // Validation, each refused before anything is spent.
     let one = w.spend(&env, &[&bal], NEAR, buy(&[(a, 1)], 0)).await?;

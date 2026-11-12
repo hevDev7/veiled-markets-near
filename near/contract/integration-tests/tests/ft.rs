@@ -78,7 +78,7 @@ async fn stablecoin_collateral_round_trip() -> anyhow::Result<()> {
     let lp_blinding = w.fresh();
     let r = transfer_call(&env, &usdcx, &env.alice, 10_000_000, json!({ "create_market": {
         "question_hash": "q", "category": 1, "num_outcomes": 2,
-        "deadline": s(h + 100), "resolution_deadline": s(h + 600),
+        "deadline": s(h + 100), "resolution_deadline": s(h + 100 + 8640),
         "metadata": "{}", "lp_owner_blind": w.owner_blind(lp_blinding), "lp_memo": ""
     }})).await?;
     assert!(r.is_success(), "{:?}", r.failures());
@@ -95,7 +95,7 @@ async fn stablecoin_collateral_round_trip() -> anyhow::Result<()> {
     assert!(buy.result.is_success(), "{:?}", buy.result.failures());
     let change = buy.change.unwrap();
     let near_market = call(&env, &env.alice, "create_market", json!({ "args": {
-        "question_hash": "q2", "category": 1, "num_outcomes": 2, "deadline": s(h + 100), "resolution_deadline": s(h + 600),
+        "question_hash": "q2", "category": 1, "num_outcomes": 2, "deadline": s(h + 100), "resolution_deadline": s(h + 100 + 8640),
         "metadata": "{}", "lp_owner_blind": w.owner_blind(9_999), "lp_memo": "" }}), 1_000_000).await?;
     let near_id: String = near_market.clone().json()?;
     let cross = w.spend(&env, &[&change], 1_000_000, json!({ "type": "buy", "market_id": near_id, "outcome": 1, "min_shares_out": "1" })).await?;

@@ -16,6 +16,26 @@ pub const STATUS_PENDING_FINALIZATION: u8 = 6;
 pub const STATUS_DISPUTED: u8 = 7;
 
 pub const MAX_METADATA: usize = 2048;
+/// Protocol + creator + LP fee may not exceed 10% of a trade.
+pub const MAX_TOTAL_FEE_BPS: u128 = 1000;
+
+const KEY_COLLATERAL: &[u8] = b"oc";
+
+pub(crate) fn collateral_key(market_id: u64) -> Vec<u8> {
+    [KEY_COLLATERAL, &market_id.to_le_bytes()].concat()
+}
+
+/// Net collateral behind each outcome's outstanding shares: what a cancelled market refunds, outcome by outcome.
+/// It always adds up to `trader_collateral`. Kept under its own storage key so the market record keeps its
+/// layout; markets created before the ledger existed have no entry and refund by share count.
+pub(crate) fn read_collateral(market_id: u64) -> Option<[u128; 4]> {
+    env::storage_read(&collateral_key(market_id))
+        .map(|b| near_sdk::borsh::from_slice(&b).unwrap_or_else(|_| env::panic_str("ERR_STATE")))
+}
+
+fn write_collateral(market_id: u64, oc: &[u128; 4]) {
+    env::storage_write(&collateral_key(market_id), &near_sdk::borsh::to_vec(oc).unwrap());
+}
 
 #[near(serializers = [borsh])]
 pub struct Market {
@@ -157,6 +177,10 @@ pub struct MarketView {
     pub outstanding_shares: U128,
     pub trader_collateral: U128,
     pub outcome_shares: [U128; 4],
+    /// Net collateral behind each outcome's shares (None for markets older than the ledger).
+    pub outcome_collateral: Option<[U128; 4]>,
+    /// The owner approved this market as a parlay leg.
+    pub parlay_leg: bool,
     pub creator_fees_claimed: bool,
     pub trades: U64,
     pub escalation_tier: u8,
@@ -231,6 +255,8 @@ impl MarketState {
             outstanding_shares: U128(self.outstanding_shares),
             trader_collateral: U128(self.trader_collateral),
             outcome_shares: u4(self.outcome_shares),
+            outcome_collateral: read_collateral(m.id).map(u4),
+            parlay_leg: crate::parlay::is_leg(m.id),
             creator_fees_claimed: self.creator_fees_claimed,
             trades: U64(self.trades),
             escalation_tier: self.escalation_tier,
@@ -279,7 +305,7 @@ impl Veiled {
         let voter = env::predecessor_account_id();
         let key = vote_key(market_id.0, &voter);
         require!(!self.votes.contains_key(&key), "ERR_ALREADY_VOTED");
-        let vote_window = self.config.vote_window;
+        let (vote_window, min_voters) = (self.config.vote_window, self.config.min_voters);
         let st = self.market_mut(market_id.0);
         let m = &st.market;
         require!(outcome >= 1 && outcome <= m.num_outcomes, "ERR_OUTCOME");
@@ -290,7 +316,9 @@ impl Veiled {
         );
         require!(h <= m.resolution_deadline, "ERR_RESOLUTION_EXPIRED");
         let tally = st.tally.get_or_insert_with(Tally::default);
-        if tally.total_voters == 0 {
+        // The first vote opens the window. A window that closed short of the quorum reopens with the next vote,
+        // so one early vote cannot leave the market with cancellation as its only way out.
+        if tally.total_voters == 0 || (h > tally.voting_deadline && tally.total_voters < min_voters) {
             tally.voting_deadline = h + vote_window;
         } else {
             require!(h <= tally.voting_deadline, "ERR_VOTING_CLOSED");
@@ -371,8 +399,13 @@ impl Veiled {
         let st = self.market_mut(market_id.0);
         let m = &st.market;
         let creator_path = caller == m.creator && m.status == STATUS_ACTIVE && st.pool.total_volume == 0;
+        // PENDING_FINALIZATION already has a voted outcome: it is confirmed (or disputed), never cancelled, so
+        // the side that lost the vote cannot void the market by waiting out the resolution deadline.
         let emergency_path = h > m.resolution_deadline
-            && !matches!(m.status, STATUS_RESOLVED | STATUS_CANCELLED | STATUS_DISPUTED);
+            && !matches!(
+                m.status,
+                STATUS_RESOLVED | STATUS_CANCELLED | STATUS_DISPUTED | STATUS_PENDING_FINALIZATION
+            );
         let dispute_timeout_path =
             m.status == STATUS_DISPUTED && st.dispute.as_ref().is_some_and(|d| h > d.disputed_at + timeout);
         require!(creator_path || emergency_path || dispute_timeout_path, "ERR_CANNOT_CANCEL");
@@ -524,7 +557,7 @@ impl Veiled {
                     2 => cr = v,
                     _ => l = v,
                 }
-                require!(p + cr + l < math::FEE_DENOMINATOR, "ERR_FEES");
+                require!(p + cr + l <= MAX_TOTAL_FEE_BPS, "ERR_FEES");
                 (c.protocol_fee_bps, c.creator_fee_bps, c.lp_fee_bps) = (U128(p), U128(cr), U128(l));
             }
             4 => {
@@ -540,6 +573,58 @@ impl Veiled {
                 self.paused = v == 1;
             }
             _ => env::panic_str("ERR_KEY"),
+        }
+    }
+
+    /// Owner only. The resolution windows (ticks), the vote bond, the quorums and the dispute multiplier; any
+    /// argument left out keeps its value. Votes, disputes and finalizations made afterwards use the new values;
+    /// deadlines and bonds already recorded do not change.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_resolution_config(
+        &mut self,
+        vote_window: Option<U64>,
+        dispute_window: Option<U64>,
+        winner_claim_priority: Option<U64>,
+        disputed_timeout: Option<U64>,
+        vote_bond: Option<U128>,
+        min_voters: Option<u8>,
+        dispute_bond_multiplier: Option<u8>,
+        committee_quorum: Option<u8>,
+    ) {
+        require!(env::predecessor_account_id() == self.owner, "ERR_OWNER");
+        let members = self.committee.len() as u8;
+        let c = &mut self.config;
+        if let Some(v) = vote_window {
+            require!(v.0 > 0, "ERR_VALUE");
+            c.vote_window = v.0;
+        }
+        if let Some(v) = dispute_window {
+            require!(v.0 > 0, "ERR_VALUE");
+            c.dispute_window = v.0;
+        }
+        if let Some(v) = winner_claim_priority {
+            c.winner_claim_priority = v.0;
+        }
+        if let Some(v) = disputed_timeout {
+            require!(v.0 > 0, "ERR_VALUE");
+            c.disputed_timeout = v.0;
+        }
+        if let Some(v) = vote_bond {
+            require!(v.0 > 0, "ERR_VALUE");
+            c.vote_bond = v;
+        }
+        if let Some(v) = min_voters {
+            require!(v > 0, "ERR_VALUE");
+            c.min_voters = v;
+        }
+        if let Some(v) = dispute_bond_multiplier {
+            require!(v > 0, "ERR_VALUE");
+            c.dispute_bond_multiplier = v;
+        }
+        if let Some(v) = committee_quorum {
+            // More than half of the committee, so two different outcomes cannot both reach it.
+            require!(v > members / 2 && v <= members, "ERR_VALUE");
+            c.committee_quorum = v;
         }
     }
 
@@ -624,7 +709,12 @@ impl Veiled {
         require!(liquidity >= self.config.min_liquidity.0, "ERR_MIN_LIQUIDITY");
         let h = self.height();
         require!(args.deadline.0 > h, "ERR_DEADLINE");
-        require!(args.resolution_deadline.0 > args.deadline.0, "ERR_RESOLUTION_DEADLINE");
+        // Resolution needs a vote window, a dispute window, and one more vote window for the first vote to arrive.
+        let room = 2 * self.config.vote_window + self.config.dispute_window;
+        require!(
+            args.resolution_deadline.0 > args.deadline.0 && args.resolution_deadline.0 - args.deadline.0 >= room,
+            "ERR_RESOLUTION_DEADLINE"
+        );
         require!(args.metadata.len() <= MAX_METADATA, "ERR_METADATA_LEN");
         require!(args.question_hash.len() <= 96, "ERR_QUESTION_HASH");
         let lp_blind = parse_fr(&args.lp_owner_blind);
@@ -667,6 +757,7 @@ impl Veiled {
             committee_finalized: false,
         };
         self.markets.insert(id, state);
+        write_collateral(id, &[0; 4]);
         self.market_ids.push(id);
         self.program_credits[token as usize] += liquidity;
         let lp = Mint { kind: KIND_LP, asset: id, sub: 0, amount: liquidity };
@@ -718,6 +809,13 @@ impl Veiled {
         let (shares_out, reserves) = math::fpmm_buy(st.pool.reserves, m.num_outcomes, outcome, a);
         require!(shares_out > 0 && shares_out >= min_shares_out, "ERR_SLIPPAGE");
 
+        // A market from before the ledger gets one only while nobody holds shares; otherwise it stays on the
+        // old refund rule, because what its existing shares cost is not known.
+        let ledger = read_collateral(market_id).or((st.outstanding_shares == 0).then_some([0; 4]));
+        if let Some(mut oc) = ledger {
+            oc[(outcome - 1) as usize] += a;
+            write_collateral(market_id, &oc);
+        }
         st.protocol_fees += protocol_fee;
         st.creator_fees += creator_fee;
         st.pool.reserves = reserves;
@@ -733,12 +831,13 @@ impl Veiled {
         Mint { kind: KIND_SHARE, asset: market_id, sub: outcome, amount: shares_out }
     }
 
-    /// Sells shares: the spend releases `max_shares_used` (out_amount); the pool needs `shares_needed`
-    /// of them and burns the rest, as on Aleo. The pool releases the full `tokens_desired` and the seller gets
-    /// it minus all three fees in a balance note. The protocol fee goes to the treasury; the creator and LP
-    /// fees stay in the market's collateral, where the creator fee is set aside and the LP fee becomes part of
-    /// what LPs withdraw. (Aleo released only `tokens_desired − lp_fee` and priced the shares on that, so the
-    /// seller paid no LP fee at all and LPs earned nothing from sells.)
+    /// Sells shares: the spend releases `shares` (out_amount) and the pool pays for all of them, the most
+    /// collateral they cover and never less than `tokens_desired` (the seller's floor). Only the remainder too
+    /// small to buy one more unit is dropped. (Aleo priced exactly `tokens_desired` and burned the shares offered
+    /// beyond that, so the slippage allowance was lost on every sell.) The seller gets the released collateral
+    /// minus all three fees in a balance note. The protocol fee goes to the treasury; the creator and LP fees stay
+    /// in the market's collateral, where the creator fee is set aside and the LP fee becomes part of what LPs
+    /// withdraw.
     fn act_sell(&mut self, s: &Spent, tokens_desired: u128) -> Mint {
         require!(s.kind == KIND_SHARE, "ERR_NOTE_KIND");
         let h = self.height();
@@ -747,7 +846,7 @@ impl Veiled {
             (self.config.protocol_fee_bps.0, self.config.creator_fee_bps.0, self.config.lp_fee_bps.0);
         let market_id = s.asset;
         let outcome = s.sub;
-        let max_shares_used = s.out_amount;
+        let shares = s.out_amount;
         let st = self.market_mut(market_id);
         let m = &st.market;
         require!(m.status == STATUS_ACTIVE, "ERR_STATUS");
@@ -756,26 +855,38 @@ impl Veiled {
         require!(h <= m.deadline, "ERR_DEADLINE");
         require!(tokens_desired >= min_trade, "ERR_MIN_TRADE");
 
-        let protocol_fee = fee(tokens_desired, pfb);
-        let creator_fee = fee(tokens_desired, cfb);
-        let lp_fee = fee(tokens_desired, lfb);
-        let net = tokens_desired - protocol_fee - creator_fee - lp_fee;
-        let (shares_needed, reserves) = math::fpmm_sell(st.pool.reserves, m.num_outcomes, outcome, tokens_desired);
-        require!(shares_needed > 0 && shares_needed <= max_shares_used, "ERR_SLIPPAGE");
+        let (tokens_out, shares_used, reserves) =
+            math::sell_max_tokens(st.pool.reserves, m.num_outcomes, outcome, shares, tokens_desired)
+                .unwrap_or_else(|| env::panic_str("ERR_SLIPPAGE"));
+        require!(shares_used > 0, "ERR_SLIPPAGE");
+        let protocol_fee = fee(tokens_out, pfb);
+        let creator_fee = fee(tokens_out, cfb);
+        let lp_fee = fee(tokens_out, lfb);
+        let net = tokens_out - protocol_fee - creator_fee - lp_fee;
 
         st.protocol_fees += protocol_fee;
         st.creator_fees += creator_fee;
         st.pool.reserves = reserves;
-        st.pool.total_liquidity = st.pool.total_liquidity.saturating_sub(tokens_desired);
-        st.pool.total_volume += tokens_desired;
+        st.pool.total_liquidity = st.pool.total_liquidity.saturating_sub(tokens_out);
+        st.pool.total_volume += tokens_out;
         // What leaves the market: the seller's net and the protocol fee.
         let market_exit = net + protocol_fee;
         require!(st.market_credits >= market_exit, "ERR_MARKET_CREDITS");
         st.market_credits -= market_exit;
-        st.outstanding_shares = st.outstanding_shares.saturating_sub(max_shares_used);
-        st.trader_collateral = st.trader_collateral.saturating_sub(tokens_desired);
+        st.outstanding_shares = st.outstanding_shares.saturating_sub(shares);
+        st.trader_collateral = st.trader_collateral.saturating_sub(tokens_out);
         let o = (outcome - 1) as usize;
-        st.outcome_shares[o] = st.outcome_shares[o].saturating_sub(max_shares_used);
+        st.outcome_shares[o] = st.outcome_shares[o].saturating_sub(shares);
+        if let Some(oc) = read_collateral(market_id) {
+            let mut oc = math::collateral_after_sell(oc, st.market.num_outcomes, outcome, tokens_out);
+            // The outcome's last shares are gone: collateral it still carried is nobody's refund any more and
+            // stays with the LPs.
+            if st.outcome_shares[o] == 0 && oc[o] > 0 {
+                st.trader_collateral = st.trader_collateral.saturating_sub(oc[o]);
+                oc[o] = 0;
+            }
+            write_collateral(market_id, &oc);
+        }
         st.trades += 1;
         let token = st.market.token_type;
         self.treasury[token as usize] += protocol_fee;
@@ -818,16 +929,33 @@ impl Veiled {
         Mint { kind: KIND_BALANCE, asset: st.market.token_type as u64, sub: 0, amount: q }
     }
 
-    /// Cancelled market: shares refund pro-rata to trader collateral.
+    /// Cancelled market: an outcome's shares get back the collateral that was paid into that outcome, pro rata
+    /// within it, so cheap shares of one outcome cannot draw on what another outcome's buyers paid. Markets
+    /// from before the per-outcome ledger refund pro rata to all trader collateral, as before.
     fn act_refund(&mut self, s: &Spent) -> Mint {
         require!(s.kind == KIND_SHARE, "ERR_NOTE_KIND");
         let q = s.out_amount;
         let st = self.market_mut(s.asset);
         require!(st.market.status == STATUS_CANCELLED, "ERR_STATUS");
-        require!(q > 0 && st.outstanding_shares >= q, "ERR_AMOUNT");
-        let refund = q * st.trader_collateral / st.outstanding_shares;
+        require!(q > 0, "ERR_AMOUNT");
+        let refund = match read_collateral(s.asset) {
+            Some(mut oc) => {
+                require!(s.sub >= 1 && s.sub <= st.market.num_outcomes, "ERR_OUTCOME");
+                let o = (s.sub - 1) as usize;
+                require!(st.outcome_shares[o] >= q, "ERR_AMOUNT");
+                let refund = q * oc[o] / st.outcome_shares[o];
+                oc[o] -= refund;
+                st.outcome_shares[o] -= q;
+                write_collateral(s.asset, &oc);
+                refund
+            }
+            None => {
+                require!(st.outstanding_shares >= q, "ERR_AMOUNT");
+                q * st.trader_collateral / st.outstanding_shares
+            }
+        };
         require!(refund > 0, "ERR_AMOUNT");
-        st.outstanding_shares -= q;
+        st.outstanding_shares = st.outstanding_shares.saturating_sub(q);
         st.trader_collateral = st.trader_collateral.saturating_sub(refund);
         require!(st.market_credits >= refund, "ERR_MARKET_CREDITS");
         st.market_credits -= refund;

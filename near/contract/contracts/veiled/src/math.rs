@@ -18,6 +18,8 @@ pub fn fpmm_buy(r: [u128; 4], n: u8, outcome: u8, a: u128) -> (u128, [u128; 4]) 
             x = x * r[k] / (r[k] + a);
         }
     }
+    // A reserve of 0 would price every other outcome at nothing: the pool keeps at least one unit of each.
+    require!(x > 0, "ERR_POOL_DEPLETED");
     let shares_out = r[i] + a - x;
     let mut out = [0u128; 4];
     for k in 0..(n as usize) {
@@ -26,32 +28,89 @@ pub fn fpmm_buy(r: [u128; 4], n: u8, outcome: u8, a: u128) -> (u128, [u128; 4]) 
     (shares_out, out)
 }
 
-/// Leo `sell_shares_finalize` (main.leo:380-430). `p` is the collateral that leaves the pool: the seller's
-/// gross `tokens_desired` (the Leo contract passed tokens_desired − lp_fee).
-/// Returns (shares_needed, new reserves). A zero denominator for outcome 3/4 is replaced by 1 as in Leo;
-/// for outcome 1/2 it cannot occur because `r_k >= p` is asserted and r_k > p when the pool is live.
-pub fn fpmm_sell(r: [u128; 4], n: u8, outcome: u8, p: u128) -> (u128, [u128; 4]) {
+/// Leo `sell_shares_finalize` (main.leo:380-430). `p` is the collateral that leaves the pool.
+/// Returns (shares_needed, new reserves), or None when the pool cannot release `p`: every other reserve must keep
+/// at least one unit (Leo replaced a zero denominator by 1 for outcomes 3 and 4, which emptied that reserve), and
+/// the products must fit in u128.
+pub fn try_sell(r: [u128; 4], n: u8, outcome: u8, p: u128) -> Option<(u128, [u128; 4])> {
     let i = (outcome - 1) as usize;
     let mut x = r[i];
     let mut out = [0u128; 4];
-    for k in 0..4 {
-        let active = (k as u8) < n;
-        if k != i && active {
-            require!(r[k] >= p, "ERR_POOL_UNDERFLOW");
-            let den = r[k] - p;
-            let den = if den == 0 {
-                require!(k >= 2, "ERR_POOL_UNDERFLOW");
-                1
-            } else {
-                den
-            };
-            x = x * r[k] / den;
+    for k in 0..(n as usize) {
+        if k != i {
+            if r[k] <= p {
+                return None;
+            }
+            x = x.checked_mul(r[k])? / (r[k] - p);
             out[k] = r[k] - p;
         }
     }
-    let shares_needed = x - r[i] + p;
+    let shares_needed = (x - r[i]).checked_add(p)?;
     out[i] = x;
-    (shares_needed, out)
+    Some((shares_needed, out))
+}
+
+/// `try_sell` for a fixed `p`; panics with `ERR_POOL_UNDERFLOW` when the pool cannot release it.
+pub fn fpmm_sell(r: [u128; 4], n: u8, outcome: u8, p: u128) -> (u128, [u128; 4]) {
+    try_sell(r, n, outcome, p).unwrap_or_else(|| near_sdk::env::panic_str("ERR_POOL_UNDERFLOW"))
+}
+
+/// The most collateral that `shares` of `outcome` take out of the pool, never less than `min_tokens`.
+/// Returns (tokens, shares the pool takes, new reserves), or None when the shares do not cover `min_tokens`.
+/// The shares needed grow with the tokens released, so the largest amount is found by bisection.
+pub fn sell_max_tokens(r: [u128; 4], n: u8, outcome: u8, shares: u128, min_tokens: u128) -> Option<(u128, u128, [u128; 4])> {
+    let i = (outcome - 1) as usize;
+    let cap = (0..n as usize).filter(|&k| k != i).map(|k| r[k]).min()?.checked_sub(1)?;
+    let fits = |p: u128| try_sell(r, n, outcome, p).filter(|(needed, _)| *needed <= shares);
+    if min_tokens > cap {
+        return None;
+    }
+    fits(min_tokens)?;
+    let (mut lo, mut hi) = (min_tokens, cap);
+    while lo < hi {
+        let mid = lo + (hi - lo + 1) / 2;
+        if fits(mid).is_some() {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    let (needed, reserves) = fits(lo)?;
+    Some((lo, needed, reserves))
+}
+
+/// Per-outcome collateral ledger after `p` leaves the pool for shares of `outcome`: the outcome's own collateral
+/// goes first; anything beyond it (the seller's gain) comes from the other outcomes in proportion to theirs, so
+/// the ledger keeps adding up to the traders' collateral.
+pub fn collateral_after_sell(mut oc: [u128; 4], n: u8, outcome: u8, p: u128) -> [u128; 4] {
+    let i = (outcome - 1) as usize;
+    let n = n as usize;
+    let own = p.min(oc[i]);
+    oc[i] -= own;
+    let mut rest = p - own;
+    if rest == 0 {
+        return oc;
+    }
+    let others: u128 = (0..n).filter(|&k| k != i).map(|k| oc[k]).sum();
+    if rest >= others {
+        for k in (0..n).filter(|&k| k != i) {
+            oc[k] = 0;
+        }
+        return oc;
+    }
+    let before = oc;
+    for k in (0..n).filter(|&k| k != i) {
+        let take = rest * before[k] / others;
+        oc[k] -= take;
+    }
+    rest -= (0..n).filter(|&k| k != i).map(|k| before[k] - oc[k]).sum::<u128>();
+    // What flooring left over (less than one unit per outcome) comes from the first outcomes that have any.
+    for k in (0..n).filter(|&k| k != i) {
+        let take = rest.min(oc[k]);
+        oc[k] -= take;
+        rest -= take;
+    }
+    oc
 }
 
 /// Leo `add_liq_finalize` (main.leo:490-503), with the rounding dust going to the last active reserve
@@ -128,6 +187,59 @@ mod tests {
         assert_eq!(lp, 1000);
         assert_eq!(r, [3333 + 333, 3333 + 333, 3334 + 334, 0]);
         assert_eq!(r[3], 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_POOL_DEPLETED")]
+    fn a_buy_that_would_empty_a_reserve_is_refused() {
+        // Four reserves of 2.5 tokens; 400 tokens on one outcome divides its reserve down to 0.
+        fpmm_buy([2_500_000; 4], 4, 4, 400_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_POOL_UNDERFLOW")]
+    fn a_sell_that_would_empty_a_reserve_is_refused() {
+        // Releasing 3000 would take the third reserve from 3000 to 0.
+        fpmm_sell([9000, 9000, 3000, 0], 3, 1, 3000);
+    }
+
+    #[test]
+    fn sell_max_tokens_finds_the_most_the_offered_shares_cover() {
+        // Pool after the 1000 buy above. p = 1000: x = 9090 * 11000 / 10000 = 9999, needs 9999 - 9090 + 1000 = 1909.
+        // p = 1001: x = 9090 * 11000 / 9999 = 10000, needs 1911.
+        assert_eq!(sell_max_tokens([9090, 11_000, 0, 0], 2, 1, 1910, 990), Some((1000, 1909, [9999, 10_000, 0, 0])));
+    }
+
+    #[test]
+    fn sell_max_tokens_is_none_when_the_shares_do_not_cover_the_minimum() {
+        // 990 needs 1889 shares (the test above this one's pool, see sell_inverts_buy_up_to_rounding).
+        assert_eq!(sell_max_tokens([9090, 11_000, 0, 0], 2, 1, 1888, 990), None);
+        assert_eq!(sell_max_tokens([9090, 11_000, 0, 0], 2, 1, 1889, 990), Some((990, 1889, [9989, 10_010, 0, 0])));
+    }
+
+    #[test]
+    fn sell_max_tokens_never_empties_another_reserve() {
+        // Far more shares than the pool can absorb: the other reserve keeps 1.
+        let (p, _, r) = sell_max_tokens([9090, 11_000, 0, 0], 2, 1, u64::MAX as u128, 1000).unwrap();
+        assert_eq!((p, r[1]), (10_999, 1));
+    }
+
+    #[test]
+    fn a_sell_reduces_its_own_outcomes_collateral_first() {
+        assert_eq!(collateral_after_sell([100, 50, 0, 0], 2, 1, 30), [70, 50, 0, 0]);
+    }
+
+    #[test]
+    fn a_sell_above_its_outcomes_collateral_takes_the_rest_from_the_others_pro_rata() {
+        assert_eq!(collateral_after_sell([10, 90, 0, 0], 2, 1, 50), [0, 50, 0, 0]);
+        assert_eq!(collateral_after_sell([10, 60, 30, 0], 3, 1, 40), [0, 40, 20, 0]);
+        // 7 over (5, 5, 5): 2 each by floor, the remaining 1 from the first of them.
+        assert_eq!(collateral_after_sell([0, 5, 5, 5], 4, 1, 7), [0, 2, 3, 3]);
+    }
+
+    #[test]
+    fn a_sell_larger_than_all_collateral_leaves_none() {
+        assert_eq!(collateral_after_sell([3, 4, 0, 0], 2, 1, 10), [0, 0, 0, 0]);
     }
 
     #[test]

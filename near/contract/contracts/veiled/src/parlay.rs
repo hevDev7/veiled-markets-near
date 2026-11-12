@@ -42,6 +42,33 @@ const WEIGHT_SCALE: u128 = 1_000_000_000_000_000_000_000_000_000_000;
 
 const KEY_GLOBALS: &[u8] = b"pg";
 const KEY_PARLAY: &[u8] = b"pl";
+const KEY_LEG: &[u8] = b"pa";
+const KEY_LEG_CAP: &[u8] = b"pc";
+/// One ticket may pay at most this share (basis points) of its thinnest leg's pool depth. Leg odds are read from
+/// the pools, so a ticket must stay small next to what it costs to move those pools.
+pub const DEFAULT_LEG_PAYOUT_BPS: u128 = 100;
+
+fn leg_key(market_id: u64) -> Vec<u8> {
+    [KEY_LEG, &market_id.to_le_bytes()].concat()
+}
+
+/// Whether the owner approved this market as a parlay leg.
+pub(crate) fn is_leg(market_id: u64) -> bool {
+    env::storage_has_key(&leg_key(market_id))
+}
+
+fn leg_payout_bps() -> u128 {
+    env::storage_read(KEY_LEG_CAP)
+        .map(|b| borsh::from_slice(&b).unwrap_or_else(|_| env::panic_str("ERR_STATE")))
+        .unwrap_or(DEFAULT_LEG_PAYOUT_BPS)
+}
+
+/// Depth of a leg's pool: the number of outcomes times its smallest reserve. An even pool gives its whole
+/// funding; a pool pushed to one side gives far less, so the legs with the most extreme odds carry the
+/// smallest tickets.
+pub fn leg_depth(reserves: [u128; 4], n: u8) -> u128 {
+    reserves[..n as usize].iter().min().copied().unwrap_or(0) * n as u128
+}
 
 #[near(serializers = [borsh])]
 #[derive(Clone)]
@@ -137,6 +164,8 @@ pub struct ParlayPoolView {
     pub max_combined_odds_bps: U128,
     pub max_leg_odds_bps: U128,
     pub safety_bps: U128,
+    /// One ticket may pay at most this share (basis points) of its thinnest leg's pool depth.
+    pub leg_payout_bps: U128,
     pub paused: bool,
     pub count: U64,
 }
@@ -289,6 +318,7 @@ impl Veiled {
             max_combined_odds_bps: U128(g.max_combined_odds_bps),
             max_leg_odds_bps: U128(MAX_LEG_ODDS),
             safety_bps: U128(SAFETY_BPS),
+            leg_payout_bps: U128(leg_payout_bps()),
             paused: g.paused,
             count: U64(g.count),
         }
@@ -298,7 +328,7 @@ impl Veiled {
     pub fn quote_parlay(&self, token: u8, stake: U128, legs: Vec<LegArg>) -> ParlayQuote {
         require!((TOKEN_NEAR..=TOKEN_USAD).contains(&token), "ERR_TOKEN");
         let g = self.parlay_globals();
-        let legs = self.price_legs(&legs);
+        let (legs, depth) = self.price_legs(&legs);
         let odds: Vec<u128> = legs.iter().map(|l| l.odds_bps).collect();
         let combined = combine_odds(&odds);
         require!(combined <= g.max_combined_odds_bps, "ERR_COMBINED_ODDS");
@@ -310,14 +340,39 @@ impl Veiled {
         let per_stake = (combined * SAFETY_BPS / ODDS_PRECISION).saturating_sub(ODDS_PRECISION).max(1);
         let by_pool = room / per_stake;
         let by_cap = g.max_payout * ODDS_PRECISION / combined;
+        let by_leg = depth * leg_payout_bps() / FEE_DENOMINATOR * ODDS_PRECISION / combined;
         ParlayQuote {
             leg_odds_bps: odds.into_iter().map(U128).collect(),
             combined_odds_bps: U128(combined),
             potential_payout: U128(payout),
             fee_if_won: U128(fee),
             net_if_won: U128(payout - fee),
-            max_stake: U128(by_pool.min(by_cap)),
+            max_stake: U128(by_pool.min(by_cap).min(by_leg)),
         }
+    }
+
+    /// Owner only. Approves a market as a parlay leg, or withdraws the approval. Leg odds come straight from the
+    /// market's pool and its result from its resolution, so only markets the operator stands behind (real
+    /// question, real liquidity, independent resolution) may back a ticket. Open tickets are not affected.
+    pub fn set_parlay_leg(&mut self, market_id: U64, eligible: bool) {
+        require!(env::predecessor_account_id() == self.owner, "ERR_OWNER");
+        self.market_ref(market_id.0);
+        if eligible {
+            env::storage_write(&leg_key(market_id.0), &[1]);
+        } else {
+            env::storage_remove(&leg_key(market_id.0));
+        }
+    }
+
+    /// Owner only. The share (basis points) of its thinnest leg's pool depth that one ticket may pay.
+    pub fn set_parlay_leg_cap(&mut self, bps: U128) {
+        require!(env::predecessor_account_id() == self.owner, "ERR_OWNER");
+        require!(bps.0 > 0 && bps.0 <= FEE_DENOMINATOR, "ERR_VALUE");
+        env::storage_write(KEY_LEG_CAP, &borsh::to_vec(&bps.0).unwrap());
+    }
+
+    pub fn is_parlay_leg(&self, market_id: U64) -> bool {
+        is_leg(market_id.0)
     }
 
     /// Owner only. Points token slot 2 or 3 at a NEP-141 contract (for example Circle's testnet USDC). Allowed
@@ -374,22 +429,26 @@ impl Veiled {
         pool
     }
 
-    /// Validates the legs against live markets and prices them.
-    fn price_legs(&self, legs: &[LegArg]) -> Vec<Leg> {
+    /// Validates the legs against live, approved markets and prices them. Also returns the depth of the
+    /// thinnest leg's pool, which bounds the ticket's payout.
+    fn price_legs(&self, legs: &[LegArg]) -> (Vec<Leg>, u128) {
         require!((MIN_LEGS..=MAX_LEGS).contains(&legs.len()), "ERR_LEG_COUNT");
         let h = self.height();
         let mut out: Vec<Leg> = Vec::with_capacity(legs.len());
+        let mut depth = u128::MAX;
         for l in legs {
             require!(out.iter().all(|o| o.market_id != l.market_id.0), "ERR_DUPLICATE_LEG");
             let st = self.market_ref(l.market_id.0);
             let m = &st.market;
+            require!(is_leg(m.id), "ERR_LEG_NOT_ELIGIBLE");
             require!(m.status == STATUS_ACTIVE && h <= m.deadline, "ERR_LEG_CLOSED");
             require!(l.outcome >= 1 && l.outcome <= m.num_outcomes, "ERR_OUTCOME");
             let odds = leg_odds_bps(st.pool.reserves, m.num_outcomes, l.outcome);
             require!(odds > ODDS_PRECISION && odds <= MAX_LEG_ODDS, "ERR_LEG_ODDS");
+            depth = depth.min(leg_depth(st.pool.reserves, m.num_outcomes));
             out.push(Leg { market_id: l.market_id.0, outcome: l.outcome, odds_bps: odds });
         }
-        out
+        (out, depth)
     }
 
     fn leg_state(&self, l: &Leg) -> u8 {
@@ -453,7 +512,7 @@ impl Veiled {
         let stake = s.out_amount;
         require!(stake >= g.min_stake, "ERR_MIN_STAKE");
 
-        let legs = self.price_legs(legs);
+        let (legs, depth) = self.price_legs(legs);
         let odds: Vec<u128> = legs.iter().map(|l| l.odds_bps).collect();
         let combined = combine_odds(&odds);
         require!(combined <= g.max_combined_odds_bps, "ERR_COMBINED_ODDS");
@@ -465,6 +524,7 @@ impl Veiled {
         let exposure = g.exposure[t] + payout;
         let pool = g.pool[t] + stake;
         require!(pool * ODDS_PRECISION >= exposure * SAFETY_BPS, "ERR_POOL_CAPACITY");
+        require!(payout * FEE_DENOMINATOR <= depth * leg_payout_bps(), "ERR_LEG_LIQUIDITY");
         g.pool[t] = pool;
         g.exposure[t] = exposure;
         g.count += 1;

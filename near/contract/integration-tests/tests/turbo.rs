@@ -142,3 +142,32 @@ async fn empty_finished_rounds_are_pruned_traded_ones_stay() -> anyhow::Result<(
     assert_eq!(claim.minted.unwrap().amount, 199_000);
     Ok(())
 }
+
+#[tokio::test]
+async fn turbo_bets_stop_in_the_last_fifth_of_a_round() -> anyhow::Result<()> {
+    let env = setup(None).await?;
+    let mut w = Wallet::new(SK);
+    let r = open(&env, &env.oracle, 900, 0).await?;
+    assert!(r.is_success(), "{:?}", r.failures());
+    let id: u64 = r.clone().json::<String>()?.parse()?;
+    let t = turbo(&env, id).await?;
+    let (deadline, betting_deadline) = (u(&t["deadline"]) as u64, u(&t["betting_deadline"]) as u64);
+    // A 900-tick round takes bets for its first 720 ticks.
+    assert_eq!(deadline - betting_deadline, 180);
+
+    let bal = w.deposit(&env, &env.alice, 3_000_000).await?;
+    let early = w.spend(&env, &[&bal], 1_000_000, json!({ "type": "turbo_buy", "market_id": s(id), "side": 1 })).await?;
+    assert!(early.result.is_success(), "{:?}", early.result.failures());
+
+    // The sandbox clock moves in coarse steps: go most of the way at once, then creep past the betting deadline.
+    advance(&env, 550).await?;
+    while height(&env).await? < betting_deadline {
+        advance(&env, 10).await?;
+    }
+    assert!(height(&env).await? < deadline, "the round must still be open for this check");
+    let late = w
+        .spend(&env, &[&early.change.unwrap()], 1_000_000, json!({ "type": "turbo_buy", "market_id": s(id), "side": 1 }))
+        .await?;
+    assert_fails_with(&late.result, "ERR_BETTING_CLOSED");
+    Ok(())
+}

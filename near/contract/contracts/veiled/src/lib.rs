@@ -16,6 +16,9 @@ pub mod types;
 mod vk;
 pub mod zk;
 
+#[cfg(test)]
+mod behaviour_tests;
+
 use field::{ext_data_hash, parse_fr, to_dec, to_u128, Felt, ZERO};
 use near_sdk::json_types::{U128, U64};
 use near_sdk::store::{LookupMap, LookupSet, Vector};
@@ -35,7 +38,8 @@ pub const TOKEN_USAD: u8 = 3;
 
 pub const YOCTO_PER_MICRO: u128 = 1_000_000_000_000_000_000;
 pub const TICK_MS: u64 = 4000;
-pub const MAX_MEMO: usize = 1024;
+/// Memos the app writes are under 300 bytes; the cap bounds the storage a leaf can take from the contract.
+pub const MAX_MEMO: usize = 400;
 /// Smallest public deposit (0.01 of a token): every note costs the contract storage.
 pub const MIN_DEPOSIT: u128 = 10_000;
 
