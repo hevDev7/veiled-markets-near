@@ -1,5 +1,11 @@
 # Veiled Markets
 
+> **Archived.** This is the README of Veiled Markets on Aleo, the product as it stood before NEAR HACKATHON.
+> The programs, scripts and documents it links to are no longer in this tree; they are in the repository at tag
+> [`pre-hackathon`](https://github.com/hevDev7/veiled-markets-near/tree/pre-hackathon). The NEAR version is
+> described in the [main README](../README.md).
+
+
 <div align="center">
 
 <img src="../logo-veiled-markets.png" alt="Veiled Markets Logo" width="200"/>
