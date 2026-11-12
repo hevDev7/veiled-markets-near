@@ -7,7 +7,11 @@
 //
 // Usage (from backend/):
 //   npx tsx scripts/quick-market.ts create [minutes=6] [--account=veiled-markets.testnet]
+//       [--coin=<CoinGecko id, default near>] [--category=<n, default 3 Crypto>] [--usdc=<USDC of liquidity>]
+//   npx tsx scripts/quick-market.ts open <spec.json> [--usdc=<USDC of liquidity>]     a market of any length, e.g.
+//       scripts/markets/nvda-close-2026-11-16.json ({ question, description, resolutionSource, category, closes })
 //   npx tsx scripts/quick-market.ts resolve <marketId> <outcome: 1=Yes, 2=No> [--account=veiled-markets.testnet]
+// --usdc funds the market with Circle testnet USDC (ft_transfer_call) instead of NEAR; the account must hold it.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -30,7 +34,13 @@ const YOCTO_PER_MICRO = 10n ** 18n;
 
 const argv = process.argv.slice(2);
 const positional = argv.filter((a) => !a.startsWith('--'));
-const accountId = argv.find((a) => a.startsWith('--account='))?.slice('--account='.length) ?? 'veiled-markets.testnet';
+const option = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+const accountId = option('account') ?? 'veiled-markets.testnet';
+const COIN = option('coin') ?? 'near';
+const CATEGORY = Number(option('category') ?? 3);
+const USDC_LIQUIDITY = option('usdc') ? BigInt(Math.round(Number(option('usdc')) * 1e6)) : null; // micro USDC
+const USDC_TOKEN = process.env.USDC_TOKEN ?? '3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af';
+const USDC_SLOT = 3;
 const [command, ...rest] = positional;
 
 const provider = new FailoverRpcProvider(RPCS.map((url) => new JsonRpcProvider({ url: url.trim() })));
@@ -79,49 +89,113 @@ async function waitPast(tick: bigint, what: string) {
   }
 }
 
-async function nearPrice(): Promise<number> {
-  const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=near&vs_currencies=usd');
+/** A coin's name, ticker and current USD price on CoinGecko. */
+async function coinQuote(id: string): Promise<{ name: string; symbol: string; price: number }> {
+  const res = await fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error(`CoinGecko answered ${res.status}`);
-  const price = (await res.json())?.near?.usd;
-  if (typeof price !== 'number') throw new Error('CoinGecko returned no NEAR price');
-  return price;
+  const coin = (await res.json())?.[0];
+  if (typeof coin?.current_price !== 'number') throw new Error(`CoinGecko returned no price for ${id}`);
+  return { name: coin.name, symbol: String(coin.symbol).toUpperCase(), price: coin.current_price };
+}
+
+/** The ids of the markets a transaction created, from the contract's market_created events. */
+function createdMarketIds(tx: any): string[] {
+  const ids: string[] = [];
+  for (const r of tx.receipts_outcome ?? []) {
+    if (r.outcome?.executor_id !== CONTRACT) continue;
+    for (const log of r.outcome.logs ?? []) {
+      if (!log.startsWith('EVENT_JSON:')) continue;
+      const e = JSON.parse(log.slice('EVENT_JSON:'.length));
+      if (e?.event === 'market_created') ids.push(...(e.data ?? []).map((d: any) => String(d.market_id)));
+    }
+  }
+  return ids;
 }
 
 async function create(minutes: number) {
-  const price = await nearPrice();
-  const threshold = price.toFixed(2);
+  const coin = await coinQuote(COIN);
+  // Two significant decimals at least, so a sub-dollar coin still gets a meaningful threshold.
+  const threshold = coin.price >= 1 ? coin.price.toFixed(2) : coin.price.toPrecision(3);
   const closes = new Date(Date.now() + minutes * 60_000);
   const hhmm = closes.toISOString().slice(11, 16);
   const day = closes.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  // "NEAR" for NEAR Protocol, "Bittensor (TAO)" when the name does not carry the ticker.
+  const label = coin.name.toUpperCase().startsWith(coin.symbol) ? coin.symbol : `${coin.name} (${coin.symbol})`;
   const text = {
-    question: `Will NEAR trade above $${threshold} at ${hhmm} UTC on ${day}?`,
-    description: `Resolves YES if CoinGecko's NEAR/USD price is above $${threshold} at ${hhmm} UTC on ${day}. A short demo market on NEAR testnet.`,
-    resolutionSource: `CoinGecko NEAR/USD spot price at ${hhmm} UTC`,
+    question: `Will ${label} trade above $${threshold} at ${hhmm} UTC on ${day}?`,
+    description: `Resolves YES if CoinGecko's ${coin.symbol}/USD price is above $${threshold} at ${hhmm} UTC on ${day}. A short demo market on NEAR testnet.`,
+    resolutionSource: `CoinGecko ${coin.symbol}/USD spot price at ${hhmm} UTC`,
     outcomes: ['Yes', 'No'],
   };
+  const deadline = (await height()) + BigInt(Math.ceil((minutes * 60_000) / MS_PER_TICK));
+  const marketId = await openMarket(text, CATEGORY, deadline, deadline + RESOLUTION_TICKS);
+  console.log(`trading closes at tick ${deadline} (about ${minutes} min); then run: npx tsx scripts/quick-market.ts resolve ${marketId} <1|2>`);
+}
+
+/** A market described by a JSON file: { question, description, resolutionSource, outcomes?, category, closes, resolveDays? }. */
+async function openFromSpec(file: string) {
+  const spec = JSON.parse(readFileSync(file, 'utf8'));
+  const closesMs = Date.parse(spec.closes);
+  if (!spec.question || !Number.isFinite(closesMs)) throw new Error('spec needs question and closes (ISO time)');
+  if (closesMs <= Date.now()) throw new Error(`closes ${spec.closes} is in the past`);
+  // The contract's clock: one tick per 4 s of block time (lib.rs get_height).
+  const deadline = BigInt(Math.floor(closesMs / MS_PER_TICK));
+  const resolveTicks = BigInt(Math.round(((spec.resolveDays ?? 7) * 86_400_000) / MS_PER_TICK));
+  const text = {
+    question: spec.question,
+    description: spec.description ?? '',
+    resolutionSource: spec.resolutionSource ?? '',
+    outcomes: spec.outcomes ?? ['Yes', 'No'],
+  };
+  const marketId = await openMarket(text, Number(spec.category ?? CATEGORY), deadline, deadline + resolveTicks);
+  console.log(`trading closes ${new Date(closesMs).toISOString()} (tick ${deadline}); resolve with: npx tsx scripts/quick-market.ts resolve ${marketId} <outcome>`);
+}
+
+/** Opens a market funded with NEAR, or with Circle USDC when --usdc is given, and saves its LP note. */
+async function openMarket(text: { question: string; description: string; resolutionSource: string; outcomes: string[] },
+  category: number, deadline: bigint, resolutionDeadline: bigint): Promise<string> {
   await initPoseidon();
-  const h = await height();
-  const deadline = h + BigInt(Math.ceil((minutes * 60_000) / MS_PER_TICK));
   const rand = () => BigInt('0x' + randomBytes(31).toString('hex'));
   const sk = rand();
   const blinding = rand();
-  const marketId = await call<string>(signer(), 'create_market', {
-    args: {
-      question_hash: questionHash(text.question),
-      category: 3,
-      num_outcomes: 2,
-      deadline: deadline.toString(),
-      resolution_deadline: (deadline + RESOLUTION_TICKS).toString(),
-      metadata: metadataOf(text),
-      lp_owner_blind: ownerBlind(sk, blinding).toString(),
-      lp_memo: '',
-    },
-  }, LIQUIDITY_MICRO);
+  const args = {
+    question_hash: questionHash(text.question),
+    category,
+    num_outcomes: text.outcomes.length,
+    deadline: deadline.toString(),
+    resolution_deadline: resolutionDeadline.toString(),
+    metadata: metadataOf(text),
+    lp_owner_blind: ownerBlind(sk, blinding).toString(),
+    lp_memo: '',
+  };
+  let marketId: string;
+  let liquidity: string;
+  if (USDC_LIQUIDITY) {
+    const account = signer();
+    const balance = BigInt(await provider.callFunction({ contractId: USDC_TOKEN, method: 'ft_balance_of', args: { account_id: accountId } }) as string);
+    if (balance < USDC_LIQUIDITY) throw new Error(`${accountId} holds ${Number(balance) / 1e6} USDC, needs ${Number(USDC_LIQUIDITY) / 1e6}`);
+    const tx: any = await account.signAndSendTransaction({
+      receiverId: USDC_TOKEN,
+      actions: [actions.functionCall('ft_transfer_call', {
+        receiver_id: CONTRACT,
+        amount: USDC_LIQUIDITY.toString(),
+        msg: JSON.stringify({ create_market: args }),
+      }, 250_000_000_000_000n, 1n)],
+      waitUntil: 'EXECUTED_OPTIMISTIC',
+    });
+    const ids = createdMarketIds(tx);
+    if (!ids.length) throw new Error(`no market created: ${JSON.stringify(tx.receipts_outcome.map((r: any) => r.outcome.status)).slice(0, 400)}`);
+    console.log(`  ft_transfer_call create_market ok  tx ${tx.transaction_outcome.id}`);
+    [marketId, liquidity] = [ids[0], USDC_LIQUIDITY.toString()];
+  } else {
+    marketId = await call<string>(signer(), 'create_market', { args }, LIQUIDITY_MICRO);
+    liquidity = LIQUIDITY_MICRO.toString();
+  }
   const saved: unknown[] = existsSync(NOTES_FILE) ? JSON.parse(readFileSync(NOTES_FILE, 'utf8')) : [];
-  saved.push({ marketId, question: text.question, sk: sk.toString(), blinding: blinding.toString(), liquidity: LIQUIDITY_MICRO.toString() });
+  saved.push({ marketId, question: text.question, token: USDC_LIQUIDITY ? USDC_SLOT : 1, sk: sk.toString(), blinding: blinding.toString(), liquidity });
   writeFileSync(NOTES_FILE, JSON.stringify(saved, null, 2) + '\n', { mode: 0o600 });
   console.log(`market ${marketId}: ${text.question}`);
-  console.log(`trading closes at tick ${deadline} (about ${minutes} min); then run: npx tsx scripts/quick-market.ts resolve ${marketId} <1|2>`);
+  return marketId;
 }
 
 interface MarketView {
@@ -167,9 +241,11 @@ async function resolve(marketId: string, outcome: number) {
 
 if (command === 'create') {
   await create(Number(rest[0] ?? 6));
+} else if (command === 'open' && rest.length === 1) {
+  await openFromSpec(rest[0]);
 } else if (command === 'resolve' && rest.length === 2) {
   await resolve(rest[0], Number(rest[1]));
 } else {
-  console.error('usage: quick-market.ts create [minutes] | resolve <marketId> <outcome> [--account=<id>]');
+  console.error('usage: quick-market.ts create [minutes] | open <spec.json> | resolve <marketId> <outcome> [--account=<id>]');
   process.exit(1);
 }

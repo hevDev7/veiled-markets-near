@@ -1,0 +1,9 @@
+{
+  "question": "Will NVIDIA (NVDA) close above $170 on November 16, 2026?",
+  "description": "Resolves YES if NVIDIA Corporation's (NASDAQ: NVDA) official closing price on Monday, November 16, 2026 is above $170.00; otherwise NO. After-hours trades do not count. Trading closes at the 4:00 PM ET (21:00 UTC) closing bell. Collateral: Circle testnet USDC.",
+  "resolutionSource": "https://www.nasdaq.com/market-activity/stocks/nvda/historical",
+  "outcomes": ["Yes", "No"],
+  "category": 5,
+  "closes": "2026-11-16T21:00:00Z",
+  "resolveDays": 7
+}
