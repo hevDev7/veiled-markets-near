@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { useLiveCountdown as useGlobalCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryStrip, getCategoryColor, getTokenSymbol } from '@/lib/utils'
-import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
 
 import { Tooltip } from '@/components/ui/Tooltip'
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
@@ -94,7 +94,7 @@ export function MarketRow({
                             const useContain = isContainThumbnail(thumbUrl)
                             return (
                                 <div className={cn('w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-white/[0.06] bg-surface-800', useContain && 'p-1 flex items-center justify-center')}>
-                                    <img src={thumbUrl} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                    <img src={thumbUrl} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={thumbnailFallback(market.category)} />
                                 </div>
                             )
                         })()}

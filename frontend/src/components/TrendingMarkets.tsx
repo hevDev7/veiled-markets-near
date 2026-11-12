@@ -6,7 +6,7 @@ import { useRealMarketsStore } from '@/lib/market-store'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryColor, getTokenSymbol } from '@/lib/utils'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
-import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
 import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 
 // ── Single Trending Card (landing-specific, self-contained) ──
@@ -81,7 +81,7 @@ function TrendingCard({ market, index }: { market: Market; index: number }) {
               alt=""
               className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')}
               loading="lazy"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              onError={thumbnailFallback(market.category)}
             />
           </div>
           <h3 className="text-base font-semibold text-white line-clamp-2 group-hover:text-brand-300 transition-colors leading-snug">

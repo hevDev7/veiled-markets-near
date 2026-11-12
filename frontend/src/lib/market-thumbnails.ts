@@ -26,7 +26,7 @@ const KEYWORD_IMAGES: Array<[string[], string]> = [
   [['uniswap', 'uni'],       'https://assets.coingecko.com/coins/images/12504/small/uni.jpg'],
   [['stablecoin', 'usdt', 'usdc', 'tether'], 'https://assets.coingecko.com/coins/images/325/small/Tether.png'],
   [['defi', 'tvl'],          'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=80&h=80&fit=crop&q=60'],
-  [['nft'],                  'https://images.unsplash.com/photo-1646463623770-2a50b720d160?w=80&h=80&fit=crop&q=60'],
+  [['nft'],                  'https://images.unsplash.com/photo-1620321023374-d1a68fbc720d?w=80&h=80&fit=crop&q=60'],
 
   // ── Sports ──
   [['world cup', 'fifa'],        'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=80&h=80&fit=crop&q=60'], // soccer ball
@@ -35,7 +35,7 @@ const KEYWORD_IMAGES: Array<[string[], string]> = [
   [['nba', 'basketball'],       'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=80&h=80&fit=crop&q=60'], // basketball
   [['nfl', 'super bowl'],       'https://images.unsplash.com/photo-1566577739112-5180d4bf9390?w=80&h=80&fit=crop&q=60'], // american football
   [['formula 1', 'f1'],         'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=80&h=80&fit=crop&q=60'], // racing
-  [['olympics', 'olympic'],     'https://images.unsplash.com/photo-1461896836934-bd45ba8c0e78?w=80&h=80&fit=crop&q=60'], // stadium
+  [['olympics', 'olympic'],     'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=80&h=80&fit=crop&q=60'], // sprinter
   [['mma', 'ufc'],              'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=80&h=80&fit=crop&q=60'], // fighting
   [['tennis', 'wimbledon'],     'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=80&h=80&fit=crop&q=60'],
   [['cricket'],                 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=80&h=80&fit=crop&q=60'],
@@ -48,7 +48,7 @@ const KEYWORD_IMAGES: Array<[string[], string]> = [
   [['microsoft', 'copilot'],         'https://images.unsplash.com/photo-1633419461186-7d40a38105ec?w=80&h=80&fit=crop&q=60'], // microsoft
   [['meta', 'facebook', 'instagram'],'https://images.unsplash.com/photo-1636114673156-052a83459fc1?w=80&h=80&fit=crop&q=60'], // VR headset
   [['tesla'],                        'https://images.unsplash.com/photo-1560958089-b8a1929cea89?w=80&h=80&fit=crop&q=60'], // tesla car
-  [['nvidia'],                       'https://images.unsplash.com/photo-1555618254-5e7f05da3aa1?w=80&h=80&fit=crop&q=60'], // GPU
+  [['nvidia'],                       'https://images.unsplash.com/photo-1591488320449-011701bb6704?w=80&h=80&fit=crop&q=60'], // GPU
   [['spacex', 'starship'],           'https://images.unsplash.com/photo-1516849841032-87cbac4d88f7?w=80&h=80&fit=crop&q=60'], // rocket
   [['x.ai', 'xai', 'grok'],         'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=80&h=80&fit=crop&q=60'],
 
@@ -91,7 +91,7 @@ const KEYWORD_IMAGES: Array<[string[], string]> = [
 // ── Category fallback images ──
 const CATEGORY_THUMBS: Record<number, string> = {
   1: 'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=80&h=80&fit=crop&q=60', // Politics
-  2: 'https://images.unsplash.com/photo-1461896836934-bd45ba8c0e78?w=80&h=80&fit=crop&q=60', // Sports
+  2: 'https://images.unsplash.com/photo-1471295253337-3ceaaedca402?w=80&h=80&fit=crop&q=60', // Sports (stadium)
   3: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=80&h=80&fit=crop&q=60', // Crypto
   4: 'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=80&h=80&fit=crop&q=60', // Culture
   5: 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=80&h=80&fit=crop&q=60', // AI & Tech
@@ -136,6 +136,23 @@ export function getMarketThumbnail(question: string, category: number, customUrl
   const fallback = CATEGORY_THUMBS[category] || CATEGORY_THUMBS[99]
   cache.set(cacheKey, fallback)
   return fallback
+}
+
+/**
+ * onError for a market thumbnail <img>. Image hosts drop photos, so a broken thumbnail is swapped for the
+ * category image once, and hidden only if that fails too.
+ */
+export function thumbnailFallback(category: number) {
+  return (e: { currentTarget: HTMLImageElement }) => {
+    const img = e.currentTarget
+    const fallback = CATEGORY_THUMBS[category] || CATEGORY_THUMBS[99]
+    if (!img.dataset.fallback && img.src !== fallback) {
+      img.dataset.fallback = '1'
+      img.src = fallback
+    } else {
+      img.style.display = 'none'
+    }
+  }
 }
 
 /**

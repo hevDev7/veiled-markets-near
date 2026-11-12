@@ -79,7 +79,7 @@ import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
 import { cn, formatCredits, formatPercentage, getTokenSymbol } from '@/lib/utils'
 import { getLeadingOutcome, getOutcomeSummaryForBet } from '@/lib/market-outcomes'
-import { getMarketThumbnail, isContainThumbnail } from '@/lib/market-thumbnails'
+import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { fetchBetCountByMarket } from '@/lib/supabase'
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -1144,7 +1144,7 @@ export function MarketDetail() {
                     const useContain = isContainThumbnail(thumbUrl)
                     return (
                       <div className={cn('w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/[0.06] bg-surface-800', useContain && 'p-1.5 flex items-center justify-center')}>
-                        <img src={thumbUrl} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        <img src={thumbUrl} alt="" className={cn('w-full h-full', useContain ? 'object-contain' : 'object-cover')} loading="lazy" onError={thumbnailFallback(market.category)} />
                       </div>
                     )
                   })()}
