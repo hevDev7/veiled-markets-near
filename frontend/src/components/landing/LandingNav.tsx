@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { motion, useScroll } from 'framer-motion'
 import { ArrowRight, Menu, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { btnPrimary, btnSm, Container } from './shared'
@@ -40,6 +41,7 @@ function NavLink({ item, className, onClick }: { item: (typeof NAV)[number]; cla
 export function LandingNav({ app }: { app: LaunchApp }) {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(false)
+  const { scrollYProgress } = useScroll()
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8)
@@ -107,6 +109,13 @@ export function LandingNav({ app }: { app: LaunchApp }) {
           </button>
         </div>
       </Container>
+
+      {/* How far down the page the reader is. */}
+      <motion.div
+        aria-hidden
+        style={{ scaleX: scrollYProgress }}
+        className="absolute inset-x-0 -bottom-px h-px origin-left bg-gradient-to-r from-brand-500 via-brand-300 to-brand-200"
+      />
 
       {open && (
         <div id="landing-menu" className="border-t border-white/[0.06] lg:hidden">

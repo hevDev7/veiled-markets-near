@@ -1,6 +1,7 @@
+import { motion } from 'framer-motion'
 import { Gavel, KeyRound, Layers, Scale, ShieldCheck, Timer, type LucideIcon } from 'lucide-react'
 import { useTurboPriceSource } from '@/hooks/useTurboPriceSource'
-import { Container, Reveal, SectionHeading } from './shared'
+import { Container, Rule, SectionHeading, Stagger, StaggerItem } from './shared'
 
 interface Feature {
   icon: LucideIcon
@@ -51,7 +52,8 @@ export function Features() {
   ]
 
   return (
-    <section id="product" aria-labelledby="product-title" className="relative border-t border-white/[0.06] py-24 sm:py-32">
+    <section id="product" aria-labelledby="product-title" className="relative py-24 sm:py-32">
+      <Rule />
       <Container>
         <SectionHeading
           id="product-title"
@@ -61,18 +63,30 @@ export function Features() {
           lead="Everything you expect from a prediction market, running on a single NEAR contract."
         />
 
-        <ul className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.07] sm:grid-cols-2 lg:grid-cols-3">
-          {features.map((f, i) => (
+        <Stagger
+          as="ul"
+          gap={0.08}
+          className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.07] sm:grid-cols-2 lg:grid-cols-3"
+        >
+          {features.map((f) => (
             <li key={f.title} className="bg-[#08090c]">
-              <Reveal delay={(i % 3) * 0.06} className="flex h-full flex-col p-7 sm:p-8">
-                <f.icon className="h-6 w-6 text-brand-300" strokeWidth={1.6} aria-hidden />
+              <StaggerItem className="flex h-full flex-col p-7 sm:p-8">
+                <motion.span
+                  className="inline-flex origin-bottom-left"
+                  variants={{
+                    hidden: { scale: 0.6, rotate: -12, opacity: 0 },
+                    show: { scale: 1, rotate: 0, opacity: 1, transition: { type: 'spring', stiffness: 240, damping: 16, delay: 0.1 } },
+                  }}
+                >
+                  <f.icon className="h-6 w-6 text-brand-300" strokeWidth={1.6} aria-hidden />
+                </motion.span>
                 <h3 className="mt-6 text-[18px] font-semibold text-[#f3efe6]">{f.title}</h3>
                 <p className="mt-2.5 text-[15px] leading-relaxed text-[#c4c8d0]">{f.text}</p>
                 <p className="mt-auto pt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-[#8b919e]">{f.spec}</p>
-              </Reveal>
+              </StaggerItem>
             </li>
           ))}
-        </ul>
+        </Stagger>
       </Container>
     </section>
   )

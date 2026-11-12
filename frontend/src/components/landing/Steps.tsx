@@ -1,6 +1,7 @@
+import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowDownToLine, ArrowUpFromLine, Fingerprint } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Container, Reveal, SectionHeading, Tag } from './shared'
+import { Container, EASE, IN_VIEW, Reveal, Rule, SectionHeading, Stagger, StaggerItem, Tag } from './shared'
 
 const STEPS = [
   {
@@ -27,8 +28,10 @@ const STEPS = [
 ]
 
 export function Steps() {
+  const reduce = useReducedMotion()
   return (
-    <section id="how" aria-labelledby="how-title" className="relative border-t border-white/[0.06] py-24 sm:py-32">
+    <section id="how" aria-labelledby="how-title" className="relative py-24 sm:py-32">
+      <Rule />
       <Container>
         <SectionHeading
           id="how-title"
@@ -39,14 +42,18 @@ export function Steps() {
         />
 
         <div className="relative mt-14">
-          <div
+          {/* The path from deposit to withdrawal: it is drawn across as the three steps arrive. */}
+          <motion.div
             aria-hidden
-            className="absolute left-[16%] right-[16%] top-[50px] hidden h-px bg-gradient-to-r from-white/10 via-brand-400/50 to-white/10 lg:block"
+            className="absolute left-[16%] right-[16%] top-[50px] hidden h-px origin-left bg-gradient-to-r from-white/10 via-brand-400/50 to-white/10 lg:block"
+            initial={reduce ? false : { scaleX: 0 }}
+            whileInView={{ scaleX: 1 }}
+            viewport={IN_VIEW}
+            transition={{ duration: 1.5, ease: EASE, delay: 0.2 }}
           />
-          <ol className="relative grid gap-5 lg:grid-cols-3">
-          {STEPS.map((s, i) => (
-            <li key={s.n}>
-              <Reveal delay={i * 0.08} className="h-full">
+          <Stagger as="ol" gap={0.22} delay={0.15} className="relative grid gap-5 lg:grid-cols-3">
+          {STEPS.map((s) => (
+            <StaggerItem as="li" key={s.n}>
                 <div
                   className={cn(
                     'relative flex h-full flex-col rounded-2xl border p-6 sm:p-7',
@@ -56,27 +63,30 @@ export function Steps() {
                   )}
                 >
                   <div className="flex items-center justify-between">
-                    <span
+                    <motion.span
+                      variants={{
+                        hidden: { scale: 0.5, opacity: 0 },
+                        show: { scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 260, damping: 18, delay: 0.15 } },
+                      }}
                       className={cn(
                         'flex h-11 w-11 items-center justify-center rounded-full border bg-[#07080b]',
                         s.tone === 'private' ? 'border-brand-400/50 text-brand-300' : 'border-white/15 text-[#c4c8d0]',
                       )}
                     >
                       <s.icon className="h-5 w-5" aria-hidden />
-                    </span>
+                    </motion.span>
                     <Tag tone={s.tone}>{s.tone === 'private' ? 'Private' : 'Public'}</Tag>
                   </div>
                   <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.2em] text-[#8b919e]">Step {s.n}</p>
                   <h3 className="mt-2 font-display text-[28px] leading-tight text-[#f3efe6]">{s.title}</h3>
                   <p className="mt-3 text-[15px] leading-relaxed text-[#c4c8d0]">{s.text}</p>
                 </div>
-              </Reveal>
-            </li>
+            </StaggerItem>
           ))}
-          </ol>
+          </Stagger>
         </div>
 
-        <Reveal delay={0.1}>
+        <Reveal from="fade" delay={0.2}>
           <p className="mt-8 font-mono text-[12px] leading-relaxed text-[#8b919e]">
             Under the hood: a depth-20 Poseidon Merkle tree of notes · nullifiers stop double spends · Groth16 proofs
             built in a web worker in your browser · one contract holds the pool, the markets and the AMM

@@ -42,14 +42,65 @@
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* Hairline grid that fades out from the top of the hero. */
-.vl-grid {
-  background-image:
-    linear-gradient(var(--vl-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--vl-line) 1px, transparent 1px);
-  background-size: 72px 72px;
-  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 0%, #000 25%, transparent 75%);
-  mask-image: radial-gradient(ellipse 75% 65% at 50% 0%, #000 25%, transparent 75%);
+/* Hero backdrop: a warm glow from above, and soft bands of light that hang and sway like a veil. */
+.vl-hero-light {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.vl-hero-glow {
+  position: absolute;
+  left: 50%;
+  top: -420px;
+  width: min(1500px, 170vw);
+  height: 1040px;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    closest-side,
+    rgba(231, 191, 99, 0.2),
+    rgba(201, 168, 76, 0.09) 42%,
+    rgba(201, 168, 76, 0.025) 68%,
+    transparent
+  );
+}
+
+.vl-hero-beams {
+  position: absolute;
+  inset: -12% -18% 30% -18%;
+  filter: blur(26px);
+  background: repeating-linear-gradient(
+    98deg,
+    transparent 0 6%,
+    rgba(243, 239, 230, 0.075) 8% 10.5%,
+    transparent 13% 21%,
+    rgba(231, 191, 99, 0.13) 23.5% 27%,
+    transparent 30% 38%,
+    rgba(243, 239, 230, 0.055) 40% 41.5%,
+    transparent 44% 52%
+  );
+  -webkit-mask-image: linear-gradient(to bottom, #000, rgba(0, 0, 0, 0.55) 48%, transparent 92%);
+  mask-image: linear-gradient(to bottom, #000, rgba(0, 0, 0, 0.55) 48%, transparent 92%);
+  will-change: transform;
+  animation: vl-beams 22s ease-in-out infinite alternate;
+}
+
+@keyframes vl-beams {
+  from { transform: translate3d(-3.5%, 0, 0) skewX(-7deg); }
+  to { transform: translate3d(3.5%, 0, 0) skewX(-1deg); }
+}
+
+/* The veil over one word of the headline; it is drawn aside once, when the page loads. */
+.vl-veil-cover {
+  position: absolute;
+  inset: 0.2em -0.05em 0.02em -0.05em;
+  border-radius: 0.1em;
+  transform-origin: right center;
+  background:
+    repeating-linear-gradient(-45deg, rgba(231, 191, 99, 0.2) 0 3px, transparent 3px 9px),
+    linear-gradient(90deg, #2a2413, #4a3d18 50%, #2a2413);
+  box-shadow: inset 0 0 0 1px rgba(231, 191, 99, 0.32);
 }
 
 /* The veil: a redaction bar that stands in for what never reaches the chain. */
@@ -106,7 +157,8 @@
 @media (prefers-reduced-motion: reduce) {
   .vl-veil,
   .vl-tick-up,
-  .vl-tick-down {
+  .vl-tick-down,
+  .vl-hero-beams {
     animation: none;
   }
 

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react'
-import { cn, formatCredits, getCategoryName } from '@/lib/utils'
+import { cn, formatCredits, getCategoryName, getTokenSymbol } from '@/lib/utils'
 import { getMarketOutcomeSummaries } from '@/lib/market-outcomes'
 import { useGlobalTicker, useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { useTurboPriceSource } from '@/hooks/useTurboPriceSource'
 import type { Market } from '@/lib/store'
-import { Container, Reveal, SectionHeading } from './shared'
+import { Container, GrowBar, Reveal, SectionHeading, Stagger, StaggerItem } from './shared'
 import { formatClock, formatPct, formatUsd, useTurboBoard, type LaunchApp, type TurboRow } from './data'
 import { useMarketPath } from '@/lib/near/market-tx'
 
@@ -69,15 +69,13 @@ export function LiveMarkets({
                 <p className="mt-2 text-[14px] text-[#8b919e]">Turbo rounds open every five minutes. Try one on the right.</p>
               </div>
             ) : (
-              <ul className="grid gap-4 sm:grid-cols-2">
-                {shown.map((m, i) => (
-                  <li key={m.id}>
-                    <Reveal delay={i * 0.06} className="h-full">
-                      <MarketTile market={m} />
-                    </Reveal>
-                  </li>
+              <Stagger as="ul" gap={0.1} className="grid gap-4 sm:grid-cols-2">
+                {shown.map((m) => (
+                  <StaggerItem as="li" key={m.id}>
+                    <MarketTile market={m} />
+                  </StaggerItem>
                 ))}
-              </ul>
+              </Stagger>
             )}
 
             {markets.length > MAX_TILES && (
@@ -91,7 +89,7 @@ export function LiveMarkets({
             )}
           </div>
 
-          <Reveal delay={0.1}>
+          <Reveal from="right" delay={0.15}>
             <TurboBoard />
           </Reveal>
         </div>
@@ -103,7 +101,7 @@ export function LiveMarkets({
 function MarketTile({ market }: { market: Market }) {
   const outcomes = useMemo(() => getMarketOutcomeSummaries(market), [market])
   const timeLeft = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
-  const token = market.tokenType ?? 'NEAR'
+  const token = getTokenSymbol(market.tokenType)
   const marketHref = useMarketPath()
 
   return (
@@ -126,7 +124,7 @@ function MarketTile({ market }: { market: Market }) {
               {formatPct(Math.round(o.percentage * 10) / 10)}
             </span>
             <div className="col-span-2 mt-1 h-1 overflow-hidden rounded-full bg-white/[0.06]">
-              <div className={cn('h-full rounded-full', o.styles.bar)} style={{ width: `${Math.max(2, o.percentage)}%` }} />
+              <GrowBar pct={o.percentage} className={o.styles.bar} />
             </div>
           </div>
         ))}

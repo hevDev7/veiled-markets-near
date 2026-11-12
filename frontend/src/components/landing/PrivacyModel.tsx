@@ -1,5 +1,5 @@
 import { Eye, EyeOff, Info } from 'lucide-react'
-import { Container, Reveal, SectionHeading, Veil } from './shared'
+import { Container, Reveal, Rule, SectionHeading, Stagger, StaggerItem, VeilDraw } from './shared'
 
 const PUBLIC_ITEMS = [
   'Deposits and withdrawals, with account and amount',
@@ -17,7 +17,8 @@ const PRIVATE_ITEMS = [
 
 export function PrivacyModel() {
   return (
-    <section id="privacy" aria-labelledby="privacy-title" className="relative border-t border-white/[0.06] py-24 sm:py-32">
+    <section id="privacy" aria-labelledby="privacy-title" className="relative py-24 sm:py-32">
+      <Rule />
       <Container>
         <SectionHeading
           id="privacy-title"
@@ -33,7 +34,7 @@ export function PrivacyModel() {
         />
 
         <div className="mt-14 grid gap-5 md:grid-cols-2">
-          <Reveal>
+          <Reveal from="left">
             <div className="h-full rounded-2xl border border-white/[0.08] bg-[#0c0e13] p-6 sm:p-8">
               <div className="flex items-center gap-3">
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[0.05] text-[#c4c8d0]">
@@ -41,17 +42,17 @@ export function PrivacyModel() {
                 </span>
                 <h3 className="text-[18px] font-semibold text-[#f3efe6]">Anyone on NEAR can see</h3>
               </div>
-              <ul className="mt-6 divide-y divide-white/[0.06]">
+              <Stagger as="ul" gap={0.08} delay={0.25} className="mt-6 divide-y divide-white/[0.06]">
                 {PUBLIC_ITEMS.map((item) => (
-                  <li key={item} className="py-3.5 text-[15px] text-[#c4c8d0]">
+                  <StaggerItem as="li" from="fade" key={item} className="py-3.5 text-[15px] text-[#c4c8d0]">
                     {item}
-                  </li>
+                  </StaggerItem>
                 ))}
-              </ul>
+              </Stagger>
             </div>
           </Reveal>
 
-          <Reveal delay={0.08}>
+          <Reveal from="right" delay={0.08}>
             <div className="h-full rounded-2xl border border-brand-400/25 bg-[linear-gradient(180deg,rgba(201,168,76,0.07),rgba(12,14,19,0.95)_55%)] p-6 sm:p-8">
               <div className="flex items-center gap-3">
                 <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-400/[0.14] text-brand-300">
@@ -59,19 +60,24 @@ export function PrivacyModel() {
                 </span>
                 <h3 className="text-[18px] font-semibold text-[#f3efe6]">Only you can see</h3>
               </div>
-              <ul className="mt-6 divide-y divide-white/[0.06]">
+              <Stagger as="ul" gap={0.08} delay={0.33} className="mt-6 divide-y divide-white/[0.06]">
                 {PRIVATE_ITEMS.map((item, i) => (
-                  <li key={item} className="flex items-center justify-between gap-4 py-3.5 text-[15px] text-[#f3efe6]">
+                  <StaggerItem
+                    as="li"
+                    from="fade"
+                    key={item}
+                    className="flex items-center justify-between gap-4 py-3.5 text-[15px] text-[#f3efe6]"
+                  >
                     {item}
-                    <Veil label="Hidden from the chain" className={i % 2 ? 'w-[3.5em]' : 'w-[5em]'} />
-                  </li>
+                    <VeilDraw label="Hidden from the chain" className={i % 2 ? 'w-[3.5em]' : 'w-[5em]'} delay={0.5 + i * 0.12} />
+                  </StaggerItem>
                 ))}
-              </ul>
+              </Stagger>
             </div>
           </Reveal>
         </div>
 
-        <Reveal delay={0.12}>
+        <Reveal from="scale" delay={0.1}>
           <div className="mt-5 flex gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5 text-[14.5px] leading-relaxed text-[#c4c8d0] sm:p-6">
             <Info className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand-300" aria-hidden />
             <p>

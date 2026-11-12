@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowUpRight } from 'lucide-react'
 import { RELAYER_ACCOUNT, VEILED_CONTRACT } from '@/lib/near/config'
-import { Container, Reveal, SectionHeading } from './shared'
+import { Container, Reveal, Rule, SectionHeading, Stagger, StaggerItem } from './shared'
 import { LINKS, ORACLE_ACCOUNT } from './data'
 
 const ITEMS: { label: string; id: string; text: string; links: { href: string; text: string }[] }[] = [
@@ -35,7 +35,8 @@ const ITEMS: { label: string; id: string; text: string; links: { href: string; t
 
 export function Verify() {
   return (
-    <section id="verify" aria-labelledby="verify-title" className="relative border-t border-white/[0.06] py-24 sm:py-32">
+    <section id="verify" aria-labelledby="verify-title" className="relative py-24 sm:py-32">
+      <Rule />
       <Container>
         <SectionHeading
           id="verify-title"
@@ -45,10 +46,10 @@ export function Verify() {
           lead="Everything on this page runs in the open on NEAR testnet. Inspect the accounts, read the code, or audit any Turbo round."
         />
 
-        <ul className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {ITEMS.map((item, i) => (
-            <li key={item.label}>
-              <Reveal delay={i * 0.06} className="flex h-full flex-col rounded-2xl border border-white/[0.08] bg-[#0c0e13] p-6">
+        <Stagger as="ul" gap={0.1} className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {ITEMS.map((item) => (
+            <StaggerItem as="li" key={item.label}>
+              <div className="flex h-full flex-col rounded-2xl border border-white/[0.08] bg-[#0c0e13] p-6 transition-colors duration-300 hover:border-brand-400/30">
                 <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-brand-300">{item.label}</p>
                 <p className="mt-3 break-all font-mono text-[13px] text-[#f3efe6]">{item.id}</p>
                 <p className="mt-3 text-[14px] leading-relaxed text-[#c4c8d0]">{item.text}</p>
@@ -67,12 +68,12 @@ export function Verify() {
                     </a>
                   ))}
                 </div>
-              </Reveal>
-            </li>
+              </div>
+            </StaggerItem>
           ))}
-        </ul>
+        </Stagger>
 
-        <Reveal delay={0.1}>
+        <Reveal from="scale" delay={0.1}>
           <div className="mt-5 flex gap-4 rounded-2xl border border-[#ffa502]/25 bg-[#ffa502]/[0.04] p-6">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[#ffb733]" aria-hidden />
             <div className="text-[14.5px] leading-relaxed text-[#c4c8d0]">

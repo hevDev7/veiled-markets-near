@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Container } from './shared'
+import { Container, Reveal, Rule, Stagger, StaggerItem } from './shared'
 import { Wordmark } from './LandingNav'
 import { LINKS } from './data'
 
@@ -47,18 +47,20 @@ const linkClass = 'text-[14px] text-[#8b919e] transition-colors hover:text-[#f3e
 
 export function LandingFooter() {
   return (
-    <footer className="relative border-t border-white/[0.06] pb-10 pt-16">
+    <footer className="relative pb-10 pt-16">
+      <Rule />
       <Container>
         <div className="grid gap-12 lg:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]">
-          <div>
+          <Reveal from="fade">
             <Wordmark />
             <p className="mt-5 max-w-xs text-[14px] leading-relaxed text-[#8b919e]">
               Private prediction markets on NEAR. Predict freely, bet privately.
             </p>
-          </div>
-          <nav aria-label="Footer" className="grid grid-cols-2 gap-8 sm:grid-cols-4">
+          </Reveal>
+          <nav aria-label="Footer">
+            <Stagger gap={0.08} className="grid grid-cols-2 gap-8 sm:grid-cols-4">
             {COLUMNS.map((col) => (
-              <div key={col.title}>
+              <StaggerItem key={col.title}>
                 <p className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-[#c4c8d0]">{col.title}</p>
                 <ul className="mt-4 space-y-3">
                   {col.links.map((l) => (
@@ -79,8 +81,9 @@ export function LandingFooter() {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </StaggerItem>
             ))}
+            </Stagger>
           </nav>
         </div>
 

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight, Plus } from 'lucide-react'
-import { Container, Eyebrow, Reveal } from './shared'
+import { Container, Eyebrow, Reveal, Rule, Stagger, StaggerItem } from './shared'
 import { formatPct, useProtocolFacts } from './data'
 
 export function Faq() {
@@ -20,8 +20,8 @@ export function Faq() {
       a: 'No. Veiled Markets runs on NEAR testnet. You trade with testnet NEAR and Circle’s testnet USDC, and neither has any value. You can get test USDC from Circle’s faucet at faucet.circle.com (choose NEAR Testnet).',
     },
     {
-      q: 'Which wallets can I use?',
-      a: 'Meteor Wallet or MyNearWallet, through NEAR Wallet Selector. You need a NEAR testnet account.',
+      q: 'Which wallet can I use?',
+      a: 'Meteor Wallet, as a browser extension or in its web version. You need a NEAR testnet account.',
     },
     {
       q: 'Who decides how a market resolves?',
@@ -38,9 +38,10 @@ export function Faq() {
   ]
 
   return (
-    <section id="faq" aria-labelledby="faq-title" className="relative border-t border-white/[0.06] py-24 sm:py-32">
+    <section id="faq" aria-labelledby="faq-title" className="relative py-24 sm:py-32">
+      <Rule />
       <Container className="grid gap-12 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-16">
-        <Reveal>
+        <Reveal from="left">
           <Eyebrow index="06">FAQ</Eyebrow>
           <h2
             id="faq-title"
@@ -56,17 +57,19 @@ export function Faq() {
           </Link>
         </Reveal>
 
-        <Reveal delay={0.06} className="vl-faq divide-y divide-white/[0.07] border-y border-white/[0.07]">
+        <Stagger gap={0.07} delay={0.1} className="vl-faq divide-y divide-white/[0.07] border-y border-white/[0.07]">
           {items.map((item) => (
-            <details key={item.q} className="group">
+            <StaggerItem key={item.q}>
+            <details className="group">
               <summary className="flex items-center justify-between gap-6 py-5 text-left text-[17px] font-medium text-[#f3efe6] transition-colors hover:text-brand-200">
                 {item.q}
                 <Plus className="vl-faq-icon h-5 w-5 shrink-0 text-brand-300" aria-hidden />
               </summary>
               <p className="max-w-[60ch] pb-6 pr-10 text-[15.5px] leading-relaxed text-[#c4c8d0]">{item.a}</p>
             </details>
+            </StaggerItem>
           ))}
-        </Reveal>
+        </Stagger>
       </Container>
     </section>
   )
