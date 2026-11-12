@@ -8,12 +8,20 @@
 // Env: VEILED_CONTRACT (v1.veiled-markets.testnet), RELAYER_ACCOUNT (veiled-relayer.testnet),
 //      RELAYER_PRIVATE_KEY (ed25519:...; default: ~/.near-credentials/testnet/<account>.json),
 //      NEAR_RPC_URL (comma-separated, tried in order: https://test.rpc.fastnear.com,https://near-testnet.drpc.org),
-//      RELAYER_PORT (4100), RELAYER_ALLOW_ORIGIN (*).
+//      RELAYER_PORT (4100), RELAYER_ALLOW_ORIGIN (*),
+//      RELAYER_RATE_PER_MIN (30 per client), RELAYER_GLOBAL_PER_MIN (120 for everyone), RELAYER_MAX_QUEUE (20),
+//      RELAYER_TRUSTED_PROXIES (1): how many proxies sit in front of this service. The client address is taken
+//      that many entries from the right of X-Forwarded-For; the left end is whatever the client sent. Use 2 when
+//      a CDN proxies in front of the host's own edge, 0 when the service is reached directly.
+//
+// Nothing is sent on chain unless the proof verifies here first (the same Groth16 check the contract runs), so
+// a made-up proof cannot spend the relayer's gas.
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
+import { RateLimiter, clientIp, extDataHashOf, proofIsValid } from './relay-guards';
 
 const CONTRACT = process.env.VEILED_CONTRACT ?? 'v1.veiled-markets.testnet';
 const RELAYER = process.env.RELAYER_ACCOUNT ?? 'veiled-relayer.testnet';
@@ -25,6 +33,11 @@ const ALLOW_ORIGIN = process.env.RELAYER_ALLOW_ORIGIN ?? '*';
 const GAS = 300_000_000_000_000n;
 const MAX_BODY = 16 * 1024;
 const RATE_PER_MIN = Number(process.env.RELAYER_RATE_PER_MIN ?? 30);
+const GLOBAL_PER_MIN = Number(process.env.RELAYER_GLOBAL_PER_MIN ?? 120);
+const MAX_QUEUE = Number(process.env.RELAYER_MAX_QUEUE ?? 20);
+const TRUSTED_PROXIES = Number(process.env.RELAYER_TRUSTED_PROXIES ?? 1);
+// The verification key of near/circuits/spend.circom, the one compiled into the contract (vk.rs).
+const VK = JSON.parse(readFileSync(new URL('./zk/verification_key.json', import.meta.url), 'utf8'));
 
 const ACTIONS = new Set([
   'withdraw', 'buy', 'sell', 'add_liquidity', 'redeem', 'refund', 'withdraw_lp', 'turbo_buy', 'turbo_claim',
@@ -46,6 +59,7 @@ async function view<T>(method: string, args: Record<string, unknown>): Promise<T
 }
 
 class BadRequest extends Error {}
+class Busy extends Error {}
 
 /** Shape checks only; the contract re-checks everything. Returns the request reduced to the known fields. */
 function validate(body: unknown) {
@@ -91,15 +105,26 @@ function decodeSuccess(outcome: any): unknown {
   }
 }
 
-// One key, one nonce sequence: transactions are sent one at a time.
+// One key, one nonce sequence: transactions are sent one at a time. The queue is bounded so a burst cannot hold
+// later requests for minutes (their proofs would go stale against the contract's recent roots anyway).
 let queue: Promise<unknown> = Promise.resolve();
+let waiting = 0;
 function serial<T>(job: () => Promise<T>): Promise<T> {
-  const run = queue.then(job, job);
+  if (waiting >= MAX_QUEUE) throw new Busy('the relayer is busy, try again shortly');
+  waiting++;
+  const run = queue.then(job, job).finally(() => {
+    waiting--;
+  });
   queue = run.catch(() => undefined);
   return run;
 }
 
 async function relay(req: ReturnType<typeof validate>) {
+  // The contract would reject these, after the relayer has paid for the call.
+  if (extDataHashOf(req.ext_data) !== req.public.ext_data_hash) throw new BadRequest('ERR_EXT_DATA_HASH');
+  if (!(await proofIsValid(VK, req.proof as Parameters<typeof proofIsValid>[1], req.public))) {
+    throw new BadRequest('ERR_INVALID_PROOF');
+  }
   // Cheap pre-checks so an obviously dead spend never costs gas.
   const [knownRoot, spent1, spent2] = await Promise.all([
     view<boolean>('is_known_root', { root: req.public.root }),
@@ -126,14 +151,7 @@ async function relay(req: ReturnType<typeof validate>) {
 
 // ------------------------------------------------------------------ HTTP
 
-const hits = new Map<string, number[]>();
-function limited(ip: string): boolean {
-  const now = Date.now();
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < 60_000);
-  recent.push(now);
-  hits.set(ip, recent);
-  return recent.length > RATE_PER_MIN;
-}
+const limiter = new RateLimiter(RATE_PER_MIN, GLOBAL_PER_MIN);
 
 function send(res: http.ServerResponse, status: number, body: unknown) {
   res.writeHead(status, {
@@ -167,8 +185,10 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (req.method === 'POST' && req.url === '/relay') {
-      const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.socket.remoteAddress ?? '?';
-      if (limited(ip)) return send(res, 429, { ok: false, error: 'rate limited, try again in a minute' });
+      const ip = clientIp(req.headers['x-forwarded-for'], req.socket.remoteAddress, TRUSTED_PROXIES);
+      const allowed = limiter.allow(ip);
+      if (allowed === 'client') return send(res, 429, { ok: false, error: 'rate limited, try again in a minute' });
+      if (allowed === 'global') return send(res, 503, { ok: false, error: 'the relayer is busy, try again shortly' });
       const body = validate(JSON.parse(await readBody(req)));
       const started = Date.now();
       const out = await relay(body);
@@ -179,6 +199,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 404, { ok: false, error: 'not found' });
   } catch (err) {
     if (err instanceof BadRequest || err instanceof SyntaxError) return send(res, 400, { ok: false, error: err.message });
+    if (err instanceof Busy) return send(res, 503, { ok: false, error: err.message });
     console.error('[relay] error', err);
     return send(res, 502, { ok: false, error: err instanceof Error ? err.message : String(err) });
   }
