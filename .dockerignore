@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+.git
+**/.env
+**/.env.local
+backend/turbo-audit.jsonl
+backend/turbo-prune.json
+backend/.seed-lp-notes.json
+near/circuits/build
+near/contract/target
