@@ -6,9 +6,12 @@
     "scripts": {
         "relayer": "tsx src/near-relayer.ts",
         "turbo-oracle": "tsx src/near-turbo-oracle.ts",
-        "test": "tsx --test src/relay-guards.test.ts scripts/lp-notes.test.ts"
+        "test": "tsx --test src/relay-guards.test.ts src/ai-resolver-core.test.ts scripts/lp-notes.test.ts",
+        "ai-resolver": "tsx --env-file-if-exists=.env src/near-ai-resolver.ts"
     },
     "dependencies": {
+        "@noble/curves": "2.2.0",
+        "@noble/hashes": "2.2.0",
         "eventsource": "^3.0.7",
         "near-api-js": "7.3.1",
         "node-fetch": "^3.3.2",

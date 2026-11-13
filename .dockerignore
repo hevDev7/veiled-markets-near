@@ -8,3 +8,4 @@ backend/turbo-prune.json
 backend/.seed-lp-notes.json
 near/circuits/build
 near/contract/target
+backend/ai-receipts

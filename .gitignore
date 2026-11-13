@@ -84,6 +84,9 @@ backend/turbo-prune.json
 # NEAR demo seeding: LP note secrets of the seeded markets
 backend/.seed-lp-notes.json
 
+# NEAR AI resolver receipts (served by the running service, kept on its volume)
+backend/ai-receipts/
+
 # node_modules symlinked to the external build cache (the node_modules/ rule above does not match a symlink)
 node_modules
 
