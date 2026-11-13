@@ -1003,7 +1003,9 @@ function savePendingBetsToStorage(bets: Bet[]) {
  * positions bought in another browser are listed too. `sync` first brings the notes up to date with the contract
  * (with the cached note keys only: never a signature prompt); without it the notes cached in this browser are used.
  */
-async function withChainPositions(bets: Bet[], sync: boolean): Promise<Bet[]> {
+// `pending` takes part only in matching notes to records: a note bought here is not listed again while its bet is
+// still pending.
+async function withChainPositions(bets: Bet[], pending: Bet[], sync: boolean): Promise<Bet[]> {
   try {
     const { currentAccountId } = await import('./near/near-wallet')
     const { refreshNotes } = await import('./near/private')
@@ -1019,7 +1021,7 @@ async function withChainPositions(bets: Bet[], sync: boolean): Promise<Bet[]> {
       const market = await getNearMarket(asset).catch(() => null)
       if (market) tokens.set(asset, tokenKey(market.token_type))
     }))
-    const recovered = chainPositions(notes, bets, (asset) => tokens.get(asset))
+    const recovered = chainPositions(notes, [...bets, ...pending.filter(p => !bets.some(b => b.id === p.id))], (asset) => tokens.get(asset))
     return [...bets.filter(b => !b.recovered), ...recovered]
   } catch (err) {
     devWarn('[Bets] Could not read positions from the chain:', err)
@@ -1722,7 +1724,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         saveBetsToStorage(mergedBets)
       }
 
-      const withChain = await withChainPositions(mergedBets, true)
+      const withChain = await withChainPositions(mergedBets, get().pendingBets, true)
       if (useWalletStore.getState().wallet.address === address && get().userBets === mergedBets) {
         set({ userBets: withChain })
       }
@@ -1769,7 +1771,7 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
   refreshChainPositions: async () => {
     const address = useWalletStore.getState().wallet.address
     const before = get().userBets
-    const next = await withChainPositions(before, false)
+    const next = await withChainPositions(before, get().pendingBets, false)
     if (useWalletStore.getState().wallet.address !== address || get().userBets !== before) return 0
     const known = new Set(before.filter(b => b.recovered).map(b => b.id))
     set({ userBets: next })

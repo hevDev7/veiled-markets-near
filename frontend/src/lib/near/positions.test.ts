@@ -33,10 +33,41 @@ describe('chainPositions', () => {
     expect(bet).toMatchObject({ sharesReceived: 30n, amount: 0n, costUnknown: true });
   });
 
-  it('skips a market and outcome this browser already has a bet record for', () => {
-    const local = { id: 'tx1', marketId: '933field', outcome: 'yes', amount: 100_000n, placedAt: 1, status: 'active' } as Bet;
+  it('skips the note of a bet this browser has a record for (same market, outcome and cost)', () => {
+    const local = { id: 'tx1', marketId: '933field', outcome: 'yes', amount: 5n, placedAt: 1, status: 'active' } as Bet;
     const bets = chainPositions([note({ amount: 10n, cost: 5n }), note({ sub: 2, amount: 7n, cost: 3n })], [local], NEAR);
     expect(bets.map((b) => b.outcome)).toEqual(['no']);
+  });
+
+  it('lists the notes of a market and outcome that no bet record here accounts for', () => {
+    // Bought here (the record), and earlier somewhere else (only the note).
+    const local = { id: 'tx1', marketId: '933field', outcome: 'yes', amount: 100_000n, sharesReceived: 180_020n, placedAt: 1, status: 'active' } as Bet;
+    const bets = chainPositions(
+      [note({ amount: 181_838n, cost: 100_000n }), note({ amount: 751_800n })],
+      [local],
+      NEAR,
+    );
+    expect(bets).toHaveLength(1);
+    expect(bets[0]).toMatchObject({ outcome: 'yes', sharesReceived: 751_800n, costUnknown: true });
+  });
+
+  it('matches a record from before costs were stored to a note with at least the shares it recorded', () => {
+    const legacy = { id: 'tx0', marketId: '933field', outcome: 'yes', amount: 50_000n, sharesReceived: 90_000n, placedAt: 1, status: 'active' } as Bet;
+    const bets = chainPositions([note({ amount: 91_000n }), note({ amount: 40_000n, cost: 20_000n })], [legacy], NEAR);
+    expect(bets).toHaveLength(1);
+    expect(bets[0]).toMatchObject({ sharesReceived: 40_000n, amount: 20_000n });
+  });
+
+  it('counts a pending record of this browser, so a just-bought note is not listed twice', () => {
+    const pending = { id: 'p1', marketId: '933field', outcome: 'yes', amount: 100_000n, placedAt: 1, status: 'pending' } as Bet;
+    expect(chainPositions([note({ amount: 181_838n, cost: 100_000n })], [pending], NEAR)).toEqual([]);
+  });
+
+  it('lists nothing more for a market and outcome this browser has sold from, since its records already show them', () => {
+    const buy = { id: 'b', marketId: '933field', outcome: 'yes', amount: 100_000n, sharesReceived: 180_000n, placedAt: 1, status: 'active' } as Bet;
+    const sell = { id: 's', marketId: '933field', outcome: 'yes', amount: 40_000n, placedAt: 2, status: 'active', type: 'sell' } as Bet;
+    // The sell spent the bought note and left change, which carries no cost.
+    expect(chainPositions([note({ amount: 100_000n })], [buy, sell], NEAR)).toEqual([]);
   });
 
   it('ignores spent notes, other kinds, and records of sold or claimed bets', () => {
