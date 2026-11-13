@@ -91,6 +91,8 @@ interface EscalationPanelProps {
   onOpenProposal?: (proposalId: string) => void;
   onReviewLane?: (marketId: string) => void;
   onOpenContextLane?: (lane: GovernanceProposalLane) => void;
+  /** Inside a section that already has a heading (the NEAR governance page): no title of its own, plain captions. */
+  embedded?: boolean;
 }
 
 // Admin (deployer) address that holds slash_resolver authority on-chain.
@@ -98,7 +100,7 @@ const ADMIN_ADDRESS = 'aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpq
 
 type EscalationFilterMode = 'active' | 'history' | 'all';
 
-export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLane }: EscalationPanelProps) {
+export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLane, embedded = false }: EscalationPanelProps) {
   const navigate = useNavigate();
   const { escalations, currentBlockHeight, actorFocusAddress, actorFocusRole, clearProposalContext, committeeMembers } = useGovernanceStore();
   const { executeTransaction } = useAleoTransaction();
@@ -266,10 +268,20 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <Scale className="w-5 h-5 text-brand-400" />
-          Market Escalations
-        </h2>
+        {embedded ? (
+          <p className="text-sm text-surface-400">
+            {filterMode === 'history'
+              ? 'Markets that were disputed and have since been settled.'
+              : filterMode === 'all'
+                ? 'Every market that has entered resolution.'
+                : 'Markets being voted on, open to dispute, or with the committee.'}
+          </p>
+        ) : (
+          <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <Scale className="w-5 h-5 text-brand-400" />
+            Market Escalations
+          </h2>
+        )}
 
         {/* v6: filter toggle so users can switch between active escalations
             and the history of markets that already passed through governance.
@@ -305,7 +317,7 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
         </div>
       </div>
 
-      <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
+      {!embedded && <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-4">
         <p className="text-xs text-surface-400">
           {filterMode === 'history'
             ? 'Markets that already passed through governance escalation. Read-only audit trail — no further actions available.'
@@ -313,7 +325,7 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
               ? 'All escalation candidates including active disputes and resolved-via-governance history.'
               : 'Live on-chain escalation state for markets moving through voter quorum, dispute bonds, committee review, or governance override.'}
         </p>
-      </div>
+      </div>}
 
       {actorFocusAddress && actorFocusRole && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-500/20 bg-purple-500/8 px-4 py-3 text-sm text-purple-100">
@@ -334,8 +346,16 @@ export function EscalationPanel({ onOpenProposal, onReviewLane, onOpenContextLan
       )}
 
       {filteredEscalations.length === 0 ? (
-        <div className="bg-surface-900/60 border border-white/[0.06] rounded-xl p-5 text-sm text-surface-500">
-          {actorFocusAddress
+        <div className={embedded
+          ? 'rounded-xl border border-dashed border-white/[0.08] px-5 py-10 text-center text-sm text-surface-500'
+          : 'bg-surface-900/60 border border-white/[0.06] rounded-xl p-5 text-sm text-surface-500'}>
+          {embedded
+            ? filterMode === 'history'
+              ? 'No disputed market has been settled yet.'
+              : filterMode === 'all'
+                ? 'No market has entered resolution yet.'
+                : 'No market is being resolved right now. Markets appear here when trading closes and a vote opens.'
+            : actorFocusAddress
             ? 'No market escalations match the current actor focus.'
             : filterMode === 'history'
               ? 'No governance-resolved markets in history yet. Once a disputed market completes the committee/community resolve flow, it will appear here.'

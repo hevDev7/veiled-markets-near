@@ -58,6 +58,7 @@ import {
 } from '../lib/governance-persistence';
 
 import { FEATURES } from '@/lib/near/config';
+import { NearGovernance } from '../components/governance/NearGovernance';
 
 type Tab = 'proposals' | 'disputes' | 'resolver';
 type ProposalStatusFilter = 'all' | 'active' | 'passed' | 'executed' | 'rejected';
@@ -677,6 +678,29 @@ export function Governance() {
     governance.setSelectedProposal(null);
     setView('list');
   }, [governance]);
+
+  // On NEAR the page is about resolution: proposals, resolver staking and rewards are not deployed, so their
+  // panels (below, kept for the builds that have them) would only show zeros.
+  if (!FEATURES.proposals) {
+    return (
+      <div className="min-h-screen bg-surface-950 flex flex-col">
+        <DashboardHeader />
+        <main className="flex-1 pt-20 pb-20 md:pb-0">
+          <NearGovernance
+            disputes={
+              <EscalationPanel
+                embedded
+                onOpenProposal={handleSelectProposal}
+                onReviewLane={handleReviewDisputeLane}
+                onOpenContextLane={handleOpenContextLane}
+              />
+            }
+          />
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-surface-950 flex flex-col">
