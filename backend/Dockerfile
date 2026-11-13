@@ -3,7 +3,9 @@
 #   relayer:     SERVICE_SCRIPT=near-relayer.ts
 #   oracle:      SERVICE_SCRIPT=near-turbo-oracle.ts  SERVICE_ARGS="--serve --auto-create"
 #   ai-resolver: SERVICE_SCRIPT=near-ai-resolver.ts   with a volume mounted at AI_RECEIPTS_DIR (its receipts must
-#                outlive a redeploy: votes on chain link them) and AI_RESOLVER_PUBLIC_URL set to its public address
+#                outlive a redeploy: votes on chain link them) and AI_RESOLVER_PUBLIC_URL set to its public address.
+#                AI_RETRY_ABSTAINED_MINUTES=10 suits quick-market's price questions: CoinGecko publishes the sample at
+#                the question's moment a few minutes after it, so a first look right after trading closes may abstain.
 FROM node:22-slim
 WORKDIR /app
 COPY backend/package.json backend/package-lock.json ./

@@ -148,7 +148,8 @@ disputes within the hour. That is a demo setting; [Known limits](#known-limits) 
 ### AI resolver (NEAR AI Cloud)
 
 `backend/src/near-ai-resolver.ts` is an optional first voter. When a market's trading closes, it fetches the
-resolution source the market names, then asks a model that runs inside NEAR AI Cloud's TEE (default
+resolution source the market names (it can only read a source given as a URL; with any other source the model has
+nothing to read and abstains), then asks a model that runs inside NEAR AI Cloud's TEE (default
 `z-ai/glm-5.3-flash`) which outcome the source supports under the market's rules. It votes only when:
 
 - the model answers with confidence of at least 0.8, and
@@ -233,8 +234,9 @@ comma-separated list for the relayer, the oracle and the scripts. The relayer su
 (`cd near/circuits && npm run build`, which needs `circom`) makes new proving keys, so it goes with a new contract.
 
 **A whole market lifecycle in about an hour and a half** (operator keys needed): `cd backend && npx tsx
-scripts/quick-market.ts create 6` opens a NEAR price question that closes in six minutes; `npx tsx
-scripts/quick-market.ts resolve <id> <1=Yes|2=No>` then casts the bonded vote. The result is final 1 h 15 min later
+scripts/quick-market.ts create 6` opens a NEAR price question for the first five-minute mark at least six minutes
+away, with CoinGecko's price series around that moment as its source, so the AI resolver can decide it. To vote
+yourself, `npx tsx scripts/quick-market.ts resolve <id> <1=Yes|2=No>` casts the bonded vote. The result is final 1 h 15 min later
 with no further call, and the first winner to redeem privately in the app settles the market and pays the voter. The
 other scripts are listed in [backend/README.md](backend/README.md).
 
@@ -250,8 +252,8 @@ its `/receipts` are served), `npm run ai-resolver` votes and serves the receipts
 | Circuit: valid spends prove, invalid ones do not | `cd near/circuits && npm install && node --test test/spend.test.mjs` | 6 pass |
 | Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 73 pass |
 | Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
-| Relayer request checks, AI resolver decisions and TEE signature checks, LP note bookkeeping | `cd backend && npm install && npm test` | 29 pass |
-| App: note keys, wallet signature, market data, positions, math | `cd frontend && npm install && npm test` | 66 pass |
+| Relayer request checks, AI resolver decisions and TEE signature checks, LP note bookkeeping, demo price questions | `cd backend && npm install && npm test` | 33 pass |
+| App: note keys, wallet signature, market data, positions, math, resolution stages | `cd frontend && npm install && npm test` | 70 pass |
 | Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
 
 The sandbox tests download a NEAR sandbox binary on first run, and the in-place upgrade test among them is skipped

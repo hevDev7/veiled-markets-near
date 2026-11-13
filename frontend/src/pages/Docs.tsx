@@ -1370,10 +1370,12 @@ npm run dev`}</CodeBlock>
               <li>Any NEAR account can run a relayer: set <C>RELAYER_ACCOUNT</C> and <C>RELAYER_PRIVATE_KEY</C>, and point <C>VITE_RELAYER_URL</C> at it.</li>
               <li>The contract accepts turbo rounds only from <C>veiled-oracle.testnet</C>, so a second oracle needs its own contract deployment.</li>
               <li>
-                A demo market: <C>cd backend && npx tsx scripts/quick-market.ts create 6</C> opens a question that closes in
-                6 minutes; after it closes, <C>npx tsx scripts/quick-market.ts resolve &lt;id&gt; &lt;1=Yes|2=No&gt;</C> casts
-                the bonded vote. Unless someone disputes, the result is final 1 h 15 min later, and the first redeem settles
-                the market (<C>--settle</C> waits and sends <C>settle_market</C> instead).
+                A demo market: <C>cd backend && npx tsx scripts/quick-market.ts create 6</C> opens a NEAR price question for
+                the first five-minute mark at least 6 minutes away. Its source is CoinGecko&apos;s price series around that
+                moment, which has a sample exactly at the mark, so the AI resolver can decide it. To vote yourself after it
+                closes, <C>npx tsx scripts/quick-market.ts resolve &lt;id&gt; &lt;1=Yes|2=No&gt;</C> casts the bonded vote.
+                Unless someone disputes, the result is final 1 h 15 min later, and the first redeem settles the market
+                (<C>--settle</C> waits and sends <C>settle_market</C> instead).
               </li>
               <li><C>NEAR_RPC_URL</C> takes a comma-separated list for the relayer, the oracle and the scripts; a call moves to the next endpoint on a timeout or rate limit.</li>
             </Bullets>

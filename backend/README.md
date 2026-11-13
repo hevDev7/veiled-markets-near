@@ -10,7 +10,8 @@ comma-separated list; each call moves to the next endpoint when one fails).
 | Turbo oracle | `npm run turbo-oracle -- --serve --auto-create` (port 4090) | Opens and settles the five-minute BTC, ETH and SOL rounds and serves live prices and an audit log of every price it used. Prices come from Pyth Hermes when `PYTH_API_KEY` is set, otherwise from CoinGecko. Key: `ORACLE_PRIVATE_KEY`. |
 | AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
 
-`npm test` runs the relayer's request checks, the AI resolver's checks and the LP note bookkeeping (29 tests).
+`npm test` runs the relayer's request checks, the AI resolver's checks, the LP note bookkeeping and the demo price
+question (33 tests).
 `DRY_RUN=1 npm run ai-resolver -- --once` asks the model about every market waiting for a vote and writes receipts to
 `ai-receipts/` without voting.
 
@@ -20,7 +21,7 @@ Run from this directory with `npx tsx scripts/<name>`.
 
 | Script | Use |
 |---|---|
-| `quick-market.ts create [minutes]` | Opens a NEAR price question that closes in a few minutes, for a demo of the whole lifecycle. |
+| `quick-market.ts create [minutes]` | Opens a NEAR price question for the first five-minute mark at least `minutes` away, for a demo of the whole lifecycle. Its source is CoinGecko's price series around that moment, which the AI resolver can read. |
 | `quick-market.ts open <spec.json> [--near=<n> \| --usdc=<n>]` | Opens a market from a file in `scripts/markets/` (question, rule, source of the result, closing time). |
 | `quick-market.ts resolve <id> <outcome> [--evidence=<url>] [--settle]` | Casts the bonded vote after the market closes. The first redeem after the dispute window settles it; `--settle` waits and settles it instead. |
 | `withdraw-lp.ts <id>` | Withdraws the liquidity the operator added to a resolved market. |

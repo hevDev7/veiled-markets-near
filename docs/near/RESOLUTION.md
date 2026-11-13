@@ -74,7 +74,9 @@ back, the dispute bond included.
 
 `backend/src/near-ai-resolver.ts` applies these rules with a model that runs in NEAR AI Cloud's TEE. Its request
 holds the question, the rules, the numbered outcomes, the current date and the text of the named source, and tells the
-model to treat the source text as data and to answer null when the source does not settle the question. It votes only
+model to treat the source text as data and to answer null when the source does not settle the question. It can only
+read a source given as a URL: on a market whose source is a name or a description, the model has nothing to read and
+abstains. It votes only
 when the model's confidence is at least 0.8 and the model TEE's signature over the exact request and response checks
 out against an attestation fetched with a fresh nonce. Each vote links a receipt with the reasoning, the signature and
 the attestation. It votes as `ai.veiled-markets.testnet` and stands like any other voter: its vote can be voted

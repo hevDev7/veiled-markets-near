@@ -77,7 +77,7 @@ import { LiquidityPanel } from '@/components/LiquidityPanel'
 // DisputePanel removed in v33 — challenge integrated in ResolvePanel
 import { CreatorFeesPanel } from '@/components/CreatorFeesPanel'
 import { ResolvePanel } from '@/components/ResolvePanel'
-import { cn, formatCredits, formatPercentage, getTokenSymbol } from '@/lib/utils'
+import { cn, formatCredits, formatPercentage, getTokenSymbol, sanitizeUrl } from '@/lib/utils'
 import { getLeadingOutcome, getOutcomeSummaryForBet } from '@/lib/market-outcomes'
 import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
@@ -181,6 +181,18 @@ function HeroDescription({ text }: { text: string }) {
         </button>
       )}
     </div>
+  )
+}
+
+// ── Oracle source: a link when it is an http(s) URL (a long API query wraps), plain text otherwise ──
+function OracleSource({ source }: { source?: string }) {
+  const href = sanitizeUrl(source)
+  if (!href) return <span className="text-sm text-white min-w-0 break-words">{source || 'On-chain verification'}</span>
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer nofollow" className="flex items-center gap-2 min-w-0 flex-1 text-sm text-white hover:text-brand-300 transition-colors">
+      <span className="min-w-0 break-all">{source}</span>
+      <ExternalLink className="w-3.5 h-3.5 text-surface-500 ml-auto flex-shrink-0" />
+    </a>
   )
 }
 
@@ -1435,11 +1447,8 @@ export function MarketDetail() {
                       <div>
                         <h3 className="text-sm font-semibold text-white mb-2">Oracle Source</h3>
                         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                          <Info className="w-4 h-4 text-brand-400" />
-                          <span className="text-sm text-white">{market.resolutionSource || 'On-chain verification'}</span>
-                          {market.resolutionSource && (
-                            <ExternalLink className="w-3.5 h-3.5 text-surface-500 ml-auto" />
-                          )}
+                          <Info className="w-4 h-4 text-brand-400 flex-shrink-0" />
+                          <OracleSource source={market.resolutionSource} />
                         </div>
                       </div>
                       <div>

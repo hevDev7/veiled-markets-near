@@ -1,5 +1,7 @@
 // A market that resolves within minutes, for demos and end-to-end tests of the whole lifecycle.
-//   create   opens "Will NEAR trade above $<current price> at <HH:MM> UTC?", closing in a few minutes.
+//   create   opens "Will NEAR trade above $<current price> at <HH:MM> UTC?", closing at the first five-minute mark
+//            at least [minutes] away. Its resolution source is CoinGecko's price series around that moment, which
+//            has a sample exactly at the mark, so the AI resolver (src/near-ai-resolver.ts) can decide it.
 //   resolve  after the deadline: casts the bonded vote (with --evidence=<url> attached, if given). Nothing else is
 //            needed: unless someone disputes, the result is final when the dispute window ends (vote window plus
 //            dispute window, 1 h 15 min on testnet), and the first call that touches the market then, such as a
@@ -24,6 +26,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
 import { metadataOf, questionHash } from './market-meta';
+import { priceQuestion, questionMoment } from './price-question';
 import { confirmLpNote, recordPendingLpNote } from './lp-notes';
 // @ts-ignore -- plain ESM helper shared with the circuit tests
 import { initPoseidon, ownerBlind } from '../../near/circuits/lib/notes.mjs';
@@ -123,23 +126,17 @@ async function create(minutes: number) {
   const coin = await coinQuote(COIN);
   // Two significant decimals at least, so a sub-dollar coin still gets a meaningful threshold.
   const threshold = coin.price >= 1 ? coin.price.toFixed(2) : coin.price.toPrecision(3);
-  const closes = new Date(Date.now() + minutes * 60_000);
-  const hhmm = closes.toISOString().slice(11, 16);
-  const day = closes.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-  // "NEAR" for NEAR Protocol, "Bittensor (TAO)" when the name does not carry the ticker.
-  const label = coin.name.toUpperCase().startsWith(coin.symbol) ? coin.symbol : `${coin.name} (${coin.symbol})`;
-  const text = {
-    question: `Will ${label} trade above $${threshold} at ${hhmm} UTC on ${day}?`,
-    description: `Resolves YES if CoinGecko's ${coin.symbol}/USD price is above $${threshold} at ${hhmm} UTC on ${day}. A short demo market on NEAR testnet.`,
-    resolutionSource: `CoinGecko ${coin.symbol}/USD spot price at ${hhmm} UTC`,
-    outcomes: ['Yes', 'No'],
-  };
-  const deadline = (await height()) + BigInt(Math.ceil((minutes * 60_000) / MS_PER_TICK));
+  // The question's moment is a five-minute mark, where CoinGecko's series has a sample: the source shows that price.
+  const at = questionMoment(Date.now(), minutes);
+  const text = priceQuestion(coin, COIN, threshold, at);
+  // Trading closes at that moment. The contract's clock is one tick per 4 s of block time, so the mark is a whole tick.
+  const deadline = BigInt(Math.floor(at.getTime() / MS_PER_TICK));
   // create_market wants room for two vote windows and a dispute window between the deadlines (ERR_RESOLUTION_DEADLINE).
   const cfg = await view<{ vote_window: number | string; dispute_window: number | string }>('get_config');
   const room = 2n * BigInt(cfg.vote_window) + BigInt(cfg.dispute_window);
   const marketId = await openMarket(text, CATEGORY, deadline, deadline + (room > RESOLUTION_TICKS ? room : RESOLUTION_TICKS));
-  console.log(`trading closes at tick ${deadline} (about ${minutes} min); then run: npx tsx scripts/quick-market.ts resolve ${marketId} <1|2>`);
+  const minutesLeft = Math.round((at.getTime() - Date.now()) / 60_000);
+  console.log(`trading closes at ${at.toISOString().slice(11, 16)} UTC (tick ${deadline}, in about ${minutesLeft} min); then the AI resolver can vote, or run: npx tsx scripts/quick-market.ts resolve ${marketId} <1|2>`);
 }
 
 /** A market described by a JSON file: { question, description, resolutionSource, outcomes?, category, closes, resolveDays? }. */
