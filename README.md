@@ -198,7 +198,7 @@ are listed in [backend/README.md](backend/README.md).
 | Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 48 pass |
 | Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
 | Relayer request checks and LP note bookkeeping | `cd backend && npm install && npm test` | 10 pass |
-| App: note keys, wallet signature, market data, math | `cd frontend && npm install && npm test` | 45 pass |
+| App: note keys, wallet signature, market data, positions, math | `cd frontend && npm install && npm test` | 66 pass |
 | Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
 
 The sandbox tests download a NEAR sandbox binary on first run, and the in-place upgrade test among them is skipped
@@ -256,6 +256,12 @@ those reads.
 
 The team's own pre-hackathon code is the baseline listed above. Parts of the code were written with the help of AI
 coding assistants.
+
+### The submitter's other project
+
+The same person also submits [**YieldForge**](https://github.com/mdlog/yieldforge) (live at
+<https://yieldforge.mdloglabs.org>), which splits Meta Pool stNEAR into principal and yield tokens. The two projects
+are independent: they share no code, contracts or accounts (rule Q-015).
 
 ## Known limits
 
