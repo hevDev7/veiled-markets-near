@@ -95,8 +95,7 @@ it the same way.
 
 Its place in the privacy track is private finance: hiding who holds a position while keeping the market itself
 auditable. An optional AI resolver ([below](#ai-resolver-near-ai-cloud)) asks a model running in NEAR AI Cloud's TEE for
-a market's result and casts an ordinary bonded vote with a signed, checkable receipt; it is built and tested but not
-running on the hosted demo yet.
+a market's result and casts an ordinary bonded vote with a signed, checkable receipt; it runs on the hosted demo.
 
 ## How a bet stays private
 
@@ -160,8 +159,10 @@ The vote's evidence is a link to a receipt (question, source excerpt, request, r
 attestation) plus the receipt's SHA-256, so anyone can check the receipt has not changed and re-verify the signature in
 NEAR AI's Verification Center. The resolver has no special power: its vote is an ordinary bonded vote, and a wrong one
 is disputed and decided by the committee like any other. It votes as `ai.veiled-markets.testnet` (created and funded
-from the testnet faucet), so its votes are easy to tell from the team's own accounts. Its NEAR AI Cloud path
-(attestation, signed answer, signature check) has run with a live key, but it is not running on the hosted demo yet.
+from the testnet faucet), so its votes are easy to tell from the team's own accounts. It runs on the hosted demo and
+looks for closed markets every two minutes; its receipt index,
+[ai-resolver-production.up.railway.app/receipts](https://ai-resolver-production.up.railway.app/receipts), lists every
+market it has looked at and what it did.
 
 ## Architecture
 

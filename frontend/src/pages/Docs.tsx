@@ -842,8 +842,9 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               reasoning, signature, attestation) and the receipt&apos;s SHA-256, so anyone can check it, including in NEAR
               AI&apos;s Verification Center. It casts an ordinary bonded vote with no special power: a wrong AI vote is
               disputed and decided by the committee like any other. It votes as <C>ai.veiled-markets.testnet</C>, an
-              account of its own. Its NEAR AI Cloud path has run with a live key, but it is not running on the hosted
-              demo yet.
+              account of its own. It runs on the hosted demo and looks for closed markets every two minutes; its{' '}
+              <A href="https://ai-resolver-production.up.railway.app/receipts">receipt index</A> lists every market it
+              has looked at and what it did.
             </P>
             <H3>Bonds, fees and cancellation</H3>
             <Bullets>
