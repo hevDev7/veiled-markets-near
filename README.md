@@ -257,12 +257,6 @@ those reads.
 The team's own pre-hackathon code is the baseline listed above. Parts of the code were written with the help of AI
 coding assistants.
 
-### Other submission by the same team
-
-**Verdict** is our other NEAR HACKATHON project: a prediction market that resolves itself by reading NEAR state with
-a view call, so no person or vote decides who won. The two are independent and answer different questions. Veiled
-Markets keeps private who holds a position. Verdict lets the chain decide who won.
-
 ## Known limits
 
 What the testnet deployment trusts, and what a production deployment still needs:
