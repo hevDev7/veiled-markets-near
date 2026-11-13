@@ -89,7 +89,7 @@ import { TurboDetail } from './TurboDetail'
 import type { TurboSymbol } from '@/components/TurboMarketPanel'
 import { FEATURES, isChainTxId, isNearTxHash, txUrl as nearTxUrl, VEILED_CONTRACT as NEAR_CONTRACT_ID } from '@/lib/near/config'
 import { marketPath, useMarketPath, useMarketTx } from '@/lib/near/market-tx'
-import { nearId } from '@/lib/near/ids'
+import { nearId, routeMarketId } from '@/lib/near/ids'
 
 const nearIdOrSelf = (id: string) => {
   try { return nearId(id) } catch { return id }
@@ -259,17 +259,18 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
 
 export function MarketDetail() {
   const navigate = useNavigate()
-  // The route param is the market's creating transaction hash (/market/<hash>) or, for older links, its id.
+  // The route param is the market's creating transaction hash (/market/<hash>) or, for older links, its id ("933" or
+  // "933field"); an id is looked up in the UI spelling, so it opens without the NearBlocks hash index.
   const { marketId: routeParam } = useParams<{ marketId: string }>()
   const routeIsTx = isNearTxHash(routeParam)
-  const [marketId, setMarketId] = useState<string | undefined>(() => (routeParam && !isNearTxHash(routeParam) ? routeParam : undefined))
+  const [marketId, setMarketId] = useState<string | undefined>(() => (routeParam && !isNearTxHash(routeParam) ? routeMarketId(routeParam) : undefined))
   const [routeNotFound, setRouteNotFound] = useState(false)
   const marketTxById = useMarketTx((s) => s.byId)
   useEffect(() => {
     setRouteNotFound(false)
     if (!routeParam) return
     if (!isNearTxHash(routeParam)) {
-      setMarketId(routeParam)
+      setMarketId(routeMarketId(routeParam))
       return
     }
     let cancelled = false

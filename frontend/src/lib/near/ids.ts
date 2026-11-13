@@ -12,6 +12,15 @@ export function aleoId(id: string | number | bigint): string {
   return `${nearId(id)}field`;
 }
 
+/** A /market/<id> route param as the UI id: "933" | "933field" → "933field"; anything else is returned unchanged. */
+export function routeMarketId(param: string): string {
+  try {
+    return aleoId(param);
+  } catch {
+    return param;
+  }
+}
+
 /** Strips a Leo literal suffix and visibility: "5u128.private" → "5". */
 export function leoValue(v: string): string {
   return String(v)
