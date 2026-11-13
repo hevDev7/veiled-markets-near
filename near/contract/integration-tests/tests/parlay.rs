@@ -59,15 +59,12 @@ async fn pool(env: &Env) -> anyhow::Result<(u128, u128)> {
     Ok((u(&p["pool"][1]), u(&p["exposure"][1])))
 }
 
-/// One bonded vote for `outcome`, then finalize and confirm (min_voters = 1).
+/// One bonded vote for `outcome` (min_voters = 1), then the vote and dispute windows pass. Nobody finalizes or
+/// confirms: the parlay calls settle the leg markets themselves.
 async fn resolve(env: &Env, id: u64, outcome: u8) -> anyhow::Result<()> {
     let r = call(env, &env.bob, "vote_outcome", json!({ "market_id": s(id), "outcome": outcome }), NEAR).await?;
     assert!(r.is_success(), "{:?}", r.failures());
-    advance(env, 4).await?;
-    assert!(call(env, &env.carol, "finalize_votes", json!({ "market_id": s(id) }), 0).await?.is_success());
-    advance(env, 4).await?;
-    let r = call(env, &env.carol, "confirm_resolution", json!({ "market_id": s(id) }), 0).await?;
-    assert!(r.is_success(), "{:?}", r.failures());
+    advance(env, 7).await?;
     Ok(())
 }
 

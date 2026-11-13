@@ -1,10 +1,12 @@
 // A market that resolves within minutes, for demos and end-to-end tests of the whole lifecycle.
 //   create   opens "Will NEAR trade above $<current price> at <HH:MM> UTC?", closing in a few minutes.
-//   resolve  after the deadline: bonded vote, vote window, finalize, dispute window, confirm, then reclaims
-//            the vote bond. Takes about ten minutes on the testnet config (75-tick windows, 4 s per tick).
+//   resolve  after the deadline: casts the bonded vote (with --evidence=<url> attached, if given). Nothing else is
+//            needed: unless someone disputes, the result is final when the dispute window ends (vote window plus
+//            dispute window, 1 h 15 min on testnet), and the first call that touches the market then, such as a
+//            winner's private redeem, settles it and pays the first voter of the winning outcome their bond plus
+//            the resolver reward. --settle waits for that moment and sends settle_market itself.
 // Both sign with the account's key in ~/.near-credentials. Creating attaches 0.05 NEAR of liquidity unless --near
-// or --usdc says otherwise (its LP note goes to backend/.seed-lp-notes.json); the 0.1 NEAR vote bond comes back
-// at the end of `resolve`.
+// or --usdc says otherwise (its LP note goes to backend/.seed-lp-notes.json).
 //
 // Usage (from backend/):
 //   npx tsx scripts/quick-market.ts create [minutes=6] [--account=veiled-markets.testnet]
@@ -12,7 +14,8 @@
 //   npx tsx scripts/quick-market.ts open <spec.json> [--near=<NEAR of liquidity> | --usdc=<USDC of liquidity>]
 //       a market of any length, e.g. scripts/markets/nvda-close-2026-11-16.json
 //       ({ question, description, resolutionSource, outcomes?, category, closes, resolveDays? })
-//   npx tsx scripts/quick-market.ts resolve <marketId> <outcome: 1=Yes, 2=No> [--account=veiled-markets.testnet]
+//   npx tsx scripts/quick-market.ts resolve <marketId> <outcome: 1=Yes, 2=No> [--evidence=<url>] [--settle]
+//       [--account=veiled-markets.testnet]
 // --usdc funds the market with Circle testnet USDC (ft_transfer_call) instead of NEAR; the account must hold it.
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -30,7 +33,7 @@ const CONTRACT = process.env.VEILED_CONTRACT ?? 'v1.veiled-markets.testnet';
 const RPCS = (process.env.NEAR_RPC_URL ?? 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org').split(',');
 const DEFAULT_LIQUIDITY_MICRO = 50_000n; // 0.05 NEAR
 const MS_PER_TICK = 4000;
-const RESOLUTION_TICKS = 1800n; // two hours after the deadline to finish resolving
+const RESOLUTION_TICKS = 1800n; // two hours after the deadline to finish resolving, or the contract's minimum if longer
 const GAS = 100_000_000_000_000n;
 const NOTES_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.seed-lp-notes.json');
 const YOCTO_PER_MICRO = 10n ** 18n;
@@ -132,7 +135,10 @@ async function create(minutes: number) {
     outcomes: ['Yes', 'No'],
   };
   const deadline = (await height()) + BigInt(Math.ceil((minutes * 60_000) / MS_PER_TICK));
-  const marketId = await openMarket(text, CATEGORY, deadline, deadline + RESOLUTION_TICKS);
+  // create_market wants room for two vote windows and a dispute window between the deadlines (ERR_RESOLUTION_DEADLINE).
+  const cfg = await view<{ vote_window: number | string; dispute_window: number | string }>('get_config');
+  const room = 2n * BigInt(cfg.vote_window) + BigInt(cfg.dispute_window);
+  const marketId = await openMarket(text, CATEGORY, deadline, deadline + (room > RESOLUTION_TICKS ? room : RESOLUTION_TICKS));
   console.log(`trading closes at tick ${deadline} (about ${minutes} min); then run: npx tsx scripts/quick-market.ts resolve ${marketId} <1|2>`);
 }
 
@@ -207,15 +213,20 @@ interface MarketView {
   status: number;
   deadline: string;
   num_outcomes: number;
-  tally: { voting_deadline: string; dispute_deadline: string; total_voters: number } | null;
+  tally: { voting_deadline: string; dispute_deadline: string; total_voters: number; winning_outcome: number } | null;
   dispute: unknown;
+  proposer?: string | null;
 }
 
 const STATUS = { ACTIVE: 1, CLOSED: 2, RESOLVED: 3, CANCELLED: 4, PENDING_RESOLUTION: 5, PENDING_FINALIZATION: 6, DISPUTED: 7 };
 
+/** Casts the bonded vote; with --settle, also waits out the dispute window and settles the market. */
 async function resolve(marketId: string, outcome: number) {
   const account = signer();
+  const settle = argv.includes('--settle');
   const market = async () => {
+    // get_market shows the market's current stage even before any call writes it, so a market whose dispute
+    // window has passed reads RESOLVED here while the settling call (and the resolver's payment) is still to come.
     const m = await view<MarketView | null>('get_market', { market_id: marketId });
     if (!m) throw new Error(`market ${marketId} not found`);
     return m;
@@ -224,24 +235,39 @@ async function resolve(marketId: string, outcome: number) {
   if (outcome < 1 || outcome > m.num_outcomes) throw new Error(`outcome must be 1..${m.num_outcomes}`);
 
   if (m.status === STATUS.ACTIVE || m.status === STATUS.CLOSED || m.status === STATUS.PENDING_RESOLUTION) {
-    await waitPast(BigInt(m.deadline), 'the trading deadline');
-    const { vote_bond } = await view<{ vote_bond: string }>('get_config');
     const voted = await view<unknown>('get_vote', { market_id: marketId, account_id: accountId });
-    if (!voted) await call(account, 'vote_outcome', { market_id: marketId, outcome }, BigInt(vote_bond));
-    m = await market();
-    await waitPast(BigInt(m.tally!.voting_deadline), 'the vote window');
-    await call(account, 'finalize_votes', { market_id: marketId });
-    m = await market();
+    if (!voted) {
+      await waitPast(BigInt(m.deadline), 'the trading deadline');
+      const { vote_bond } = await view<{ vote_bond: string }>('get_config');
+      const evidence = option('evidence');
+      if (evidence && Buffer.byteLength(evidence) > 300) throw new Error('--evidence is longer than 300 bytes');
+      await call(account, 'vote_outcome', { market_id: marketId, outcome, ...(evidence ? { evidence } : {}) }, BigInt(vote_bond));
+      m = await market();
+    }
   }
-  if (m.status === STATUS.PENDING_FINALIZATION) {
-    await waitPast(BigInt(m.tally!.dispute_deadline), 'the dispute window');
-    await call(account, 'confirm_resolution', { market_id: marketId });
-    m = await market();
+  const settled = m.status === STATUS.RESOLVED || m.status === STATUS.CANCELLED;
+  if (m.tally && !settled) {
+    const final = BigInt(m.tally.dispute_deadline);
+    const minutesLeft = Math.max(0, Math.ceil((Number(final - (await height())) * MS_PER_TICK) / 60_000));
+    console.log(`the vote is counted when its window ends (tick ${m.tally.voting_deadline}); unless disputed, the result is final after tick ${final} (about ${minutesLeft} min).`);
   }
-  if (m.status !== STATUS.RESOLVED) throw new Error(`market ${marketId} ended in status ${m.status}, not RESOLVED`);
-  const vote = await view<{ outcome: number; claimed: boolean } | null>('get_vote', { market_id: marketId, account_id: accountId });
-  if (vote && !vote.claimed) await call(account, 'claim_voter_bond', { market_id: marketId });
-  console.log(`market ${marketId} resolved; winners can redeem from the Portfolio.`);
+  if (!settle) {
+    console.log(settled
+      ? `market ${marketId} is ${m.status === STATUS.RESOLVED ? 'resolved' : 'cancelled'}; the first call that touches it writes that on chain (--settle sends one).`
+      : 'nothing else to send: the first redeem, refund or bond claim after that settles the market and pays the resolver (or run again with --settle).');
+    return;
+  }
+
+  if (m.tally && !settled) await waitPast(BigInt(m.tally.dispute_deadline), 'the dispute window');
+  // A no-op on a market already written as settled; otherwise it writes the result and pays the resolver.
+  const status = await call<number>(account, 'settle_market', { market_id: marketId });
+  if (status === STATUS.CANCELLED) {
+    console.log(`market ${marketId} is cancelled: every position, liquidity share and bond can be refunded.`);
+    return;
+  }
+  if (status !== STATUS.RESOLVED) throw new Error(`market ${marketId} is still in status ${status} (disputed, or not final yet)`);
+  m = await market();
+  console.log(`market ${marketId} resolved on outcome ${m.tally?.winning_outcome}; resolver ${m.proposer ?? 'none'} (paid by the call that settled it); winners can redeem from the Portfolio.`);
 }
 
 if (command === 'create') {
@@ -251,6 +277,6 @@ if (command === 'create') {
 } else if (command === 'resolve' && rest.length === 2) {
   await resolve(rest[0], Number(rest[1]));
 } else {
-  console.error('usage: quick-market.ts create [minutes] | open <spec.json> | resolve <marketId> <outcome> [--account=<id>]');
+  console.error('usage: quick-market.ts create [minutes] | open <spec.json> | resolve <marketId> <outcome> [--evidence=<url>] [--settle] [--account=<id>]');
   process.exit(1);
 }

@@ -228,6 +228,7 @@ impl Veiled {
     pub fn settle_parlay(&mut self, parlay_id: U64) -> u8 {
         let mut p = self.load_parlay(parlay_id.0);
         require!(p.status == PARLAY_ACTIVE, "ERR_PARLAY_SETTLED");
+        self.settle_legs(&p);
         let status = self.settle_status(&p);
         require!(status != PARLAY_ACTIVE, "ERR_PARLAY_NOT_READY");
         self.apply_settlement(&mut p, status);
@@ -451,8 +452,9 @@ impl Veiled {
         (out, depth)
     }
 
+    /// The leg as its market stands now (`get_market`), written or not.
     fn leg_state(&self, l: &Leg) -> u8 {
-        let st = self.market_ref(l.market_id);
+        let st = self.settled_copy(l.market_id);
         match st.market.status {
             STATUS_CANCELLED => LEG_CANCELLED,
             STATUS_RESOLVED => match &st.tally {
@@ -461,6 +463,14 @@ impl Veiled {
                 _ => LEG_PENDING,
             },
             _ => LEG_PENDING,
+        }
+    }
+
+    /// Writes the leg markets' settled state before a parlay is settled on it, so no later change to the
+    /// resolution settings can turn a result a parlay was paid on back into an open vote.
+    fn settle_legs(&mut self, p: &Parlay) {
+        for l in &p.legs {
+            self.settle(l.market_id);
         }
     }
 
@@ -558,6 +568,7 @@ impl Veiled {
         require!(s.out_amount == p.payout, "ERR_AMOUNT");
         require!(!p.claimed, "ERR_CLAIMED");
         if p.status == PARLAY_ACTIVE {
+            self.settle_legs(&p);
             let status = self.settle_status(&p);
             require!(status != PARLAY_ACTIVE, "ERR_PARLAY_NOT_READY");
             self.apply_settlement(&mut p, status);

@@ -18,8 +18,39 @@ pub const STATUS_DISPUTED: u8 = 7;
 pub const MAX_METADATA: usize = 2048;
 /// Protocol + creator + LP fee may not exceed 10% of a trade.
 pub const MAX_TOTAL_FEE_BPS: u128 = 1000;
+/// A vote's evidence: a link to the reasoning behind it, with a hash.
+pub const MAX_EVIDENCE: usize = 300;
+/// Share of a market's protocol fees paid to whoever first bonded on the outcome that won, until the owner sets
+/// another (set_resolver_reward_bps).
+pub const DEFAULT_RESOLVER_REWARD_BPS: u16 = 5000;
 
 const KEY_COLLATERAL: &[u8] = b"oc";
+const KEY_FIRST_VOTER: &[u8] = b"fv";
+const KEY_RESOLVER_REWARD: &[u8] = b"rr";
+const KEY_VOTE_EVIDENCE: &[u8] = b"ve";
+
+fn evidence_key(market_id: u64, voter: &AccountId) -> Vec<u8> {
+    [KEY_VOTE_EVIDENCE, &market_id.to_le_bytes(), voter.as_bytes()].concat()
+}
+
+// New data lives under its own storage keys so the market record and the contract state keep their layout.
+
+fn first_voter_key(market_id: u64, outcome: u8) -> Vec<u8> {
+    [KEY_FIRST_VOTER, &market_id.to_le_bytes(), &[outcome]].concat()
+}
+
+/// The first account that voted for `outcome` (votes from before this record existed are not in it).
+fn first_voter(market_id: u64, outcome: u8) -> Option<AccountId> {
+    env::storage_read(&first_voter_key(market_id, outcome))
+        .and_then(|b| String::from_utf8(b).ok())
+        .and_then(|s| s.parse().ok())
+}
+
+pub(crate) fn resolver_reward_bps() -> u16 {
+    env::storage_read(KEY_RESOLVER_REWARD)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+        .unwrap_or(DEFAULT_RESOLVER_REWARD_BPS)
+}
 
 pub(crate) fn collateral_key(market_id: u64) -> Vec<u8> {
     [KEY_COLLATERAL, &market_id.to_le_bytes()].concat()
@@ -38,6 +69,7 @@ fn write_collateral(market_id: u64, oc: &[u128; 4]) {
 }
 
 #[near(serializers = [borsh])]
+#[derive(Clone)]
 pub struct Market {
     pub id: u64,
     pub creator: AccountId,
@@ -54,6 +86,7 @@ pub struct Market {
 }
 
 #[near(serializers = [borsh])]
+#[derive(Clone)]
 pub struct Pool {
     pub reserves: [u128; 4],
     pub total_liquidity: u128,
@@ -62,7 +95,7 @@ pub struct Pool {
 }
 
 #[near(serializers = [borsh])]
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Tally {
     pub bonds: [u128; 4],
     pub total_voters: u8,
@@ -74,6 +107,7 @@ pub struct Tally {
 }
 
 #[near(serializers = [borsh])]
+#[derive(Clone)]
 pub struct Dispute {
     pub disputer: AccountId,
     pub original_outcome: u8,
@@ -87,6 +121,7 @@ pub struct Dispute {
 }
 
 #[near(serializers = [borsh])]
+#[derive(Clone)]
 pub struct MarketState {
     pub market: Market,
     pub pool: Pool,
@@ -147,6 +182,8 @@ pub struct DisputeView {
     pub escalated_tier: u8,
     pub final_outcome: u8,
     pub resolved_by: AccountId,
+    /// The disputer's bond was paid back (by a claim, or by the call that settled the market in their favour).
+    pub bond_claimed: bool,
 }
 
 /// Everything the frontend reads for one market (the Aleo `markets`, `amm_pools`, `market_fees`,
@@ -187,6 +224,11 @@ pub struct MarketView {
     pub committee_votes: u8,
     pub committee_outcome: u8,
     pub committee_finalized: bool,
+    /// The first voter of the outcome that leads (or won) the vote.
+    pub proposer: Option<AccountId>,
+    /// What the first bond on the winning outcome earns on top of the bond, in the market's token: a share of
+    /// the protocol fees this market has paid so far.
+    pub resolver_reward: U128,
 }
 
 #[near(serializers = [json])]
@@ -210,8 +252,118 @@ fn u4(a: [u128; 4]) -> [U128; 4] {
     a.map(U128)
 }
 
+/// What one settlement pass did. Only the market record changes inside `MarketState::advance`; the rest is
+/// applied by `Veiled::settle`.
+#[derive(Default)]
+pub(crate) struct Settled {
+    /// The status after the pass.
+    pub status: u8,
+    /// Losing bonds (micro NEAR) the pass moved to the treasury.
+    pub slashed: u128,
+    /// The market became RESOLVED in this pass, with this outcome.
+    pub resolved: Option<u8>,
+    /// The committee decided it (otherwise the vote did).
+    pub by_committee: bool,
+    /// The market became CANCELLED in this pass.
+    pub cancelled: bool,
+    /// The resolver paid in this pass and the NEAR they got (bond, plus the reward on a NEAR market).
+    pub paid: Option<(AccountId, u128)>,
+}
+
+impl Tally {
+    /// Counts the vote once its window has closed: the outcome with the most bond wins. The dispute deadline was
+    /// fixed when the window opened; a tally from before that rule gets it now, from the end of the vote window.
+    fn close_vote(&mut self, num_outcomes: u8, dispute_window: u64) {
+        self.winning_outcome = math::vote_winner(self.bonds, num_outcomes);
+        if self.dispute_deadline <= self.voting_deadline {
+            self.dispute_deadline = self.voting_deadline + dispute_window;
+        }
+    }
+
+    /// The outcome with the most bond so far (the winner once the vote is counted).
+    fn leading(&self, num_outcomes: u8) -> u8 {
+        if self.winning_outcome >= 1 {
+            self.winning_outcome
+        } else {
+            math::vote_winner(self.bonds, num_outcomes)
+        }
+    }
+}
+
 impl MarketState {
-    fn view(&self) -> MarketView {
+    /// Moves the market through every stage the clock has reached at height `h`: count a vote whose window
+    /// closed with a quorum, confirm a result nobody disputed in time, apply a committee decision, and cancel a
+    /// market that can no longer be resolved. It never depends on who calls or when, only on `h`, so the views
+    /// can show the same state before anyone writes it.
+    pub(crate) fn advance(&mut self, h: u64, cfg: &Config, me: &AccountId) -> Settled {
+        let mut out = Settled::default();
+        let n = self.market.num_outcomes;
+        if self.market.status == STATUS_PENDING_RESOLUTION
+            && let Some(t) = self.tally.as_mut()
+            && !t.finalized
+            && t.total_voters >= cfg.min_voters
+            && h > t.voting_deadline
+        {
+            t.close_vote(n, cfg.dispute_window);
+            self.market.status = STATUS_PENDING_FINALIZATION;
+        }
+        if self.market.status == STATUS_PENDING_FINALIZATION
+            && self.dispute.is_none()
+            && let Some(t) = self.tally.as_mut()
+            && t.winning_outcome >= 1
+            && h > t.dispute_deadline
+        {
+            out.slashed += t.total_bonded - t.bonds[(t.winning_outcome - 1) as usize];
+            t.finalized = true;
+            self.market.status = STATUS_RESOLVED;
+            out.resolved = Some(t.winning_outcome);
+        }
+        if self.market.status == STATUS_DISPUTED {
+            if self.committee_finalized {
+                out.slashed += self.apply_committee(me);
+                out.resolved = Some(self.committee_outcome);
+                out.by_committee = true;
+            } else if self.dispute.as_ref().is_some_and(|d| h > d.disputed_at + cfg.disputed_timeout) {
+                self.market.status = STATUS_CANCELLED;
+                out.cancelled = true;
+            }
+        }
+        // Past the resolution deadline nobody can open a vote, so a market without a counted vote can only be
+        // cancelled. A vote window still open then is left to close first.
+        let s = self.market.status;
+        if h > self.market.resolution_deadline
+            && matches!(s, STATUS_ACTIVE | STATUS_CLOSED | STATUS_PENDING_RESOLUTION)
+            && !self.tally.as_ref().is_some_and(|t| t.total_voters > 0 && h <= t.voting_deadline)
+        {
+            self.market.status = STATUS_CANCELLED;
+            out.cancelled = true;
+        }
+        out.status = self.market.status;
+        out
+    }
+
+    /// The committee's outcome becomes the result. Returns the bonds slashed: voters of other outcomes, and the
+    /// disputer if the committee did not side with them.
+    fn apply_committee(&mut self, me: &AccountId) -> u128 {
+        let outcome = self.committee_outcome;
+        let tally = self.tally.as_mut().unwrap();
+        let mut slashed = tally.total_bonded - tally.bonds[(outcome - 1) as usize];
+        tally.winning_outcome = outcome;
+        tally.finalized = true;
+        let d = self.dispute.as_mut().unwrap();
+        if d.proposed_outcome != outcome {
+            slashed += d.dispute_bond;
+            d.bond_claimed = true;
+        }
+        d.final_outcome = outcome;
+        d.escalated_tier = 2;
+        d.resolved_by = me.clone();
+        self.market.resolver = me.clone();
+        self.market.status = STATUS_RESOLVED;
+        slashed
+    }
+
+    fn view(&self, proposer: Option<AccountId>, reward_bps: u16) -> MarketView {
         let m = &self.market;
         MarketView {
             id: U64(m.id),
@@ -250,6 +402,7 @@ impl MarketState {
                 escalated_tier: d.escalated_tier,
                 final_outcome: d.final_outcome,
                 resolved_by: d.resolved_by.clone(),
+                bond_claimed: d.bond_claimed,
             }),
             market_credits: U128(self.market_credits),
             outstanding_shares: U128(self.outstanding_shares),
@@ -263,6 +416,8 @@ impl MarketState {
             committee_votes: self.committee_votes.len() as u8,
             committee_outcome: self.committee_outcome,
             committee_finalized: self.committee_finalized,
+            proposer,
+            resolver_reward: U128(self.protocol_fees * reward_bps as u128 / 10_000),
         }
     }
 }
@@ -296,16 +451,19 @@ impl Veiled {
         st.market.status = STATUS_CLOSED;
     }
 
-    /// Bonded vote on the outcome. The bond (config.vote_bond micro NEAR) is attached.
+    /// Bonded vote on the outcome. The bond (config.vote_bond micro NEAR) is attached. `evidence` is an optional
+    /// link to the reasoning behind the vote (the AI resolver links its signed TEE receipt); it is only logged.
     #[payable]
-    pub fn vote_outcome(&mut self, market_id: U64, outcome: u8) {
+    pub fn vote_outcome(&mut self, market_id: U64, outcome: u8, evidence: Option<String>) {
         let bond = attached_micro();
         require!(bond == self.config.vote_bond.0, "ERR_VOTE_BOND");
+        require!(evidence.as_ref().is_none_or(|e| e.len() <= MAX_EVIDENCE), "ERR_EVIDENCE_LEN");
         let h = self.height();
         let voter = env::predecessor_account_id();
         let key = vote_key(market_id.0, &voter);
         require!(!self.votes.contains_key(&key), "ERR_ALREADY_VOTED");
-        let (vote_window, min_voters) = (self.config.vote_window, self.config.min_voters);
+        let (vote_window, dispute_window, min_voters) =
+            (self.config.vote_window, self.config.dispute_window, self.config.min_voters);
         let st = self.market_mut(market_id.0);
         let m = &st.market;
         require!(outcome >= 1 && outcome <= m.num_outcomes, "ERR_OUTCOME");
@@ -316,10 +474,12 @@ impl Veiled {
         );
         require!(h <= m.resolution_deadline, "ERR_RESOLUTION_EXPIRED");
         let tally = st.tally.get_or_insert_with(Tally::default);
-        // The first vote opens the window. A window that closed short of the quorum reopens with the next vote,
-        // so one early vote cannot leave the market with cancellation as its only way out.
+        // The first vote opens the window, and fixes when disputes close: the dispute window follows the vote
+        // window. A window that closed short of the quorum reopens with the next vote, so one early vote cannot
+        // leave the market with cancellation as its only way out.
         if tally.total_voters == 0 || (h > tally.voting_deadline && tally.total_voters < min_voters) {
             tally.voting_deadline = h + vote_window;
+            tally.dispute_deadline = tally.voting_deadline + dispute_window;
         } else {
             require!(h <= tally.voting_deadline, "ERR_VOTING_CLOSED");
         }
@@ -329,8 +489,21 @@ impl Veiled {
         st.market.status = STATUS_PENDING_RESOLUTION;
         self.program_credits[TOKEN_NEAR as usize] += bond;
         self.votes.insert(key, Vote { outcome, bond, claimed: false });
+        let first = first_voter_key(market_id.0, outcome);
+        if !env::storage_has_key(&first) {
+            env::storage_write(&first, voter.as_bytes());
+        }
+        if let Some(e) = evidence {
+            env::storage_write(&evidence_key(market_id.0, &voter), e.as_bytes());
+            let data = serde_json::json!({ "market_id": market_id, "voter": voter, "outcome": outcome, "evidence": e });
+            env::log_str(&format!(
+                "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"vote_evidence\",\"data\":[{data}]}}"
+            ));
+        }
     }
 
+    /// Counts the vote once its window has closed with a quorum. Optional: the next call that touches the
+    /// market does it anyway.
     pub fn finalize_votes(&mut self, market_id: U64) {
         let h = self.height();
         let (min_voters, dispute_window) = (self.config.min_voters, self.config.dispute_window);
@@ -341,32 +514,36 @@ impl Veiled {
         require!(!tally.finalized, "ERR_FINALIZED");
         require!(h > tally.voting_deadline, "ERR_VOTING_OPEN");
         require!(tally.total_voters >= min_voters, "ERR_QUORUM");
-        tally.winning_outcome = math::vote_winner(tally.bonds, n);
-        tally.dispute_deadline = h + dispute_window;
+        tally.close_vote(n, dispute_window);
         st.market.status = STATUS_PENDING_FINALIZATION;
     }
 
+    /// Makes the voted outcome final once the dispute window has passed without a dispute (counting the vote
+    /// first if nobody has). Optional: the next call that touches the market does it anyway.
     pub fn confirm_resolution(&mut self, market_id: U64) {
-        let h = self.height();
-        let st = self.market_mut(market_id.0);
-        require!(st.market.status == STATUS_PENDING_FINALIZATION, "ERR_STATUS");
-        require!(st.dispute.is_none(), "ERR_DISPUTED");
-        let tally = st.tally.as_mut().unwrap();
-        require!(tally.winning_outcome >= 1, "ERR_NO_WINNER");
-        require!(h > tally.dispute_deadline, "ERR_DISPUTE_WINDOW");
-        let losing = tally.total_bonded - tally.bonds[(tally.winning_outcome - 1) as usize];
-        tally.finalized = true;
-        st.market.status = STATUS_RESOLVED;
-        self.treasury[TOKEN_NEAR as usize] += losing;
+        let s = self.market_ref(market_id.0).market.status;
+        require!(s == STATUS_PENDING_RESOLUTION || s == STATUS_PENDING_FINALIZATION, "ERR_STATUS");
+        let fx = self.settle(market_id.0);
+        if fx.resolved.is_none() {
+            env::panic_str(if fx.status == STATUS_PENDING_FINALIZATION { "ERR_DISPUTE_WINDOW" } else { "ERR_STATUS" });
+        }
     }
 
-    /// Disputes the voted outcome with a bond of at least `dispute_bond_multiplier × total_bonded`.
+    /// Anyone: writes the market's current stage (see `MarketState::advance`) and returns its status. Nothing
+    /// needs this call; it only saves the next caller the work.
+    pub fn settle_market(&mut self, market_id: U64) -> u8 {
+        self.settle(market_id.0).status
+    }
+
+    /// Disputes the voted outcome with a bond of at least `dispute_bond_multiplier × total_bonded`, from the end
+    /// of the vote window until the dispute deadline.
     #[payable]
     pub fn dispute_resolution(&mut self, market_id: U64, proposed_outcome: u8) {
         let bond = attached_micro();
         let h = self.height();
         let multiplier = self.config.dispute_bond_multiplier as u128;
         let disputer = env::predecessor_account_id();
+        self.settle(market_id.0);
         let st = self.market_mut(market_id.0);
         require!(st.market.status == STATUS_PENDING_FINALIZATION, "ERR_STATUS");
         require!(st.dispute.is_none(), "ERR_ALREADY_DISPUTED");
@@ -392,30 +569,35 @@ impl Veiled {
         self.program_credits[TOKEN_NEAR as usize] += bond;
     }
 
+    /// The creator, while the market is untraded and open. Anyone else only gets what the clock already decided:
+    /// a market past its resolution deadline without a counted vote, or a dispute past its time limit, is
+    /// cancelled by any call that touches it (a voted outcome is never cancelled: it is confirmed or disputed).
     pub fn cancel_market(&mut self, market_id: U64) {
-        let h = self.height();
-        let timeout = self.config.disputed_timeout;
         let caller = env::predecessor_account_id();
+        if self.settle(market_id.0).cancelled {
+            return;
+        }
         let st = self.market_mut(market_id.0);
         let m = &st.market;
-        let creator_path = caller == m.creator && m.status == STATUS_ACTIVE && st.pool.total_volume == 0;
-        // PENDING_FINALIZATION already has a voted outcome: it is confirmed (or disputed), never cancelled, so
-        // the side that lost the vote cannot void the market by waiting out the resolution deadline.
-        let emergency_path = h > m.resolution_deadline
-            && !matches!(
-                m.status,
-                STATUS_RESOLVED | STATUS_CANCELLED | STATUS_DISPUTED | STATUS_PENDING_FINALIZATION
-            );
-        let dispute_timeout_path =
-            m.status == STATUS_DISPUTED && st.dispute.as_ref().is_some_and(|d| h > d.disputed_at + timeout);
-        require!(creator_path || emergency_path || dispute_timeout_path, "ERR_CANNOT_CANCEL");
+        require!(
+            caller == m.creator && m.status == STATUS_ACTIVE && st.pool.total_volume == 0,
+            "ERR_CANNOT_CANCEL"
+        );
         st.market.status = STATUS_CANCELLED;
+        log_settled(market_id.0, STATUS_CANCELLED, 0);
     }
 
-    /// Returns the caller's vote bond: winners on RESOLVED (losers were slashed), everyone on CANCELLED.
+    /// Returns the caller's vote bond: winners on RESOLVED (losers were slashed), everyone on CANCELLED. The first
+    /// voter of the winning outcome is paid by whichever call settles the market; if that is this call, it
+    /// returns what they were paid.
     pub fn claim_voter_bond(&mut self, market_id: U64) -> U128 {
         let caller = env::predecessor_account_id();
         let key = vote_key(market_id.0, &caller);
+        if let Some((resolver, paid)) = self.settle(market_id.0).paid
+            && resolver == caller
+        {
+            return U128(paid);
+        }
         let st = self.market_ref(market_id.0);
         let status = st.market.status;
         let winner = st.tally.as_ref().map(|t| t.winning_outcome).unwrap_or(0);
@@ -433,8 +615,14 @@ impl Veiled {
         U128(bond)
     }
 
+    /// Returns the disputer's bond when their outcome won or the market was cancelled.
     pub fn claim_dispute_bond(&mut self, market_id: U64) -> U128 {
         let caller = env::predecessor_account_id();
+        if let Some((resolver, paid)) = self.settle(market_id.0).paid
+            && resolver == caller
+        {
+            return U128(paid);
+        }
         let st = self.market_mut(market_id.0);
         let status = st.market.status;
         let winner = st.tally.as_ref().map(|t| t.winning_outcome).unwrap_or(0);
@@ -458,6 +646,7 @@ impl Veiled {
         let h = self.height();
         let priority = self.config.winner_claim_priority;
         let caller = env::predecessor_account_id();
+        self.settle(market_id.0);
         let st = self.market_mut(market_id.0);
         require!(st.market.status == STATUS_RESOLVED, "ERR_STATUS");
         require!(st.market.creator == caller, "ERR_NOT_CREATOR");
@@ -480,6 +669,7 @@ impl Veiled {
     // ------------------------------------------------------------ committee escalation (governance tier 2)
 
     pub fn initiate_escalation(&mut self, market_id: U64) {
+        self.settle(market_id.0);
         let st = self.market_mut(market_id.0);
         require!(st.market.status == STATUS_DISPUTED, "ERR_STATUS");
         require!(st.escalation_tier == 0, "ERR_TIER");
@@ -489,10 +679,13 @@ impl Veiled {
         }
     }
 
+    /// Committee members, while the dispute is within its time limit.
     pub fn committee_vote_resolve(&mut self, market_id: U64, outcome: u8) {
         let caller = env::predecessor_account_id();
         require!(self.committee.contains(&caller), "ERR_NOT_COMMITTEE");
+        self.settle(market_id.0);
         let st = self.market_mut(market_id.0);
+        require!(st.market.status == STATUS_DISPUTED, "ERR_STATUS");
         require!(st.escalation_tier == 2, "ERR_TIER");
         require!(!st.committee_finalized, "ERR_FINALIZED");
         require!(outcome >= 1 && outcome <= st.market.num_outcomes, "ERR_OUTCOME");
@@ -500,10 +693,13 @@ impl Veiled {
         st.committee_votes.push((caller, outcome));
     }
 
-    /// Finalizes when one outcome has at least `committee_quorum` votes and no tie at the top.
+    /// Finalizes when one outcome has at least `committee_quorum` votes and no tie at the top. The decision
+    /// applies from then on (`governance_resolve` only writes it down early).
     pub fn finalize_committee_vote(&mut self, market_id: U64) {
         let quorum = self.config.committee_quorum as usize;
+        self.settle(market_id.0);
         let st = self.market_mut(market_id.0);
+        require!(st.market.status == STATUS_DISPUTED, "ERR_STATUS");
         require!(st.escalation_tier == 2 && !st.committee_finalized, "ERR_TIER");
         require!(st.committee_votes.len() >= quorum, "ERR_QUORUM");
         let mut counts = [0usize; 4];
@@ -518,27 +714,12 @@ impl Veiled {
     }
 
     /// Applies the committee decision: RESOLVED, losing voter bonds and a wrong disputer's bond slashed.
+    /// Optional: the next call that touches the market does it anyway.
     pub fn governance_resolve(&mut self, market_id: U64) {
-        let me = env::current_account_id();
-        let st = self.market_mut(market_id.0);
+        let st = self.market_ref(market_id.0);
         require!(st.market.status == STATUS_DISPUTED, "ERR_STATUS");
         require!(st.committee_finalized, "ERR_NOT_DECIDED");
-        let outcome = st.committee_outcome;
-        let tally = st.tally.as_mut().unwrap();
-        let mut slashed = tally.total_bonded - tally.bonds[(outcome - 1) as usize];
-        tally.winning_outcome = outcome;
-        tally.finalized = true;
-        let d = st.dispute.as_mut().unwrap();
-        if d.proposed_outcome != outcome {
-            slashed += d.dispute_bond;
-            d.bond_claimed = true;
-        }
-        d.final_outcome = outcome;
-        d.escalated_tier = 2;
-        d.resolved_by = me.clone();
-        st.market.resolver = me;
-        st.market.status = STATUS_RESOLVED;
-        self.treasury[TOKEN_NEAR as usize] += slashed;
+        self.settle(market_id.0);
     }
 
     // ------------------------------------------------------------ owner parameters
@@ -628,6 +809,13 @@ impl Veiled {
         }
     }
 
+    /// Owner only. The resolver's share of a market's protocol fees, in basis points (at most all of them).
+    pub fn set_resolver_reward_bps(&mut self, bps: u16) {
+        require!(env::predecessor_account_id() == self.owner, "ERR_OWNER");
+        require!(bps <= 10_000, "ERR_VALUE");
+        env::storage_write(KEY_RESOLVER_REWARD, &bps.to_le_bytes());
+    }
+
     pub fn withdraw_treasury(&mut self, token: u8, amount: U128, recipient: AccountId) {
         require!(env::predecessor_account_id() == self.owner, "ERR_OWNER");
         require!(self.treasury[token as usize] >= amount.0, "ERR_TREASURY");
@@ -638,16 +826,28 @@ impl Veiled {
 
     // ------------------------------------------------------------ views
 
+    /// The market as it stands now: stages the clock has reached are shown even if no call has written them yet.
     pub fn get_market(&self, market_id: U64) -> Option<MarketView> {
-        self.markets.get(&market_id.0).map(|st| st.view())
+        self.markets.get(&market_id.0).map(|st| self.settled_view(st))
     }
 
-    /// Prediction markets by creation order: indexes [from, from + limit) of the market list.
+    /// Prediction markets by creation order: indexes [from, from + limit) of the market list, as `get_market`.
     pub fn get_markets(&self, from: U64, limit: u32) -> Vec<MarketView> {
         let end = from.0.saturating_add(limit.min(100) as u64).min(self.market_ids.len() as u64);
         (from.0..end)
-            .filter_map(|i| self.market_ids.get(i as u32).and_then(|id| self.markets.get(id)).map(|st| st.view()))
+            .filter_map(|i| {
+                self.market_ids.get(i as u32).and_then(|id| self.markets.get(id)).map(|st| self.settled_view(st))
+            })
             .collect()
+    }
+
+    pub fn get_resolver_reward_bps(&self) -> u16 {
+        resolver_reward_bps()
+    }
+
+    /// The evidence link a voter gave with their vote, if any.
+    pub fn get_vote_evidence(&self, market_id: U64, account_id: AccountId) -> Option<String> {
+        env::storage_read(&evidence_key(market_id.0, &account_id)).and_then(|b| String::from_utf8(b).ok())
     }
 
     pub fn get_market_count(&self) -> U64 {
@@ -681,9 +881,103 @@ impl Veiled {
     }
 }
 
+fn log_settled(market_id: u64, status: u8, outcome: u8) {
+    env::log_str(&format!(
+        "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"market_settled\",\"data\":[{{\"market_id\":\"{market_id}\",\"status\":{status},\"outcome\":{outcome}}}]}}"
+    ));
+}
+
 impl Veiled {
     pub(crate) fn market_mut(&mut self, id: u64) -> &mut MarketState {
         self.markets.get_mut(&id).unwrap_or_else(|| env::panic_str("ERR_NO_MARKET"))
+    }
+
+    /// Writes every stage the clock has reached (`MarketState::advance`): slashed bonds go to the treasury and,
+    /// when the market resolves, its resolver is paid.
+    pub(crate) fn settle(&mut self, id: u64) -> Settled {
+        let h = self.height();
+        let me = env::current_account_id();
+        let st = self.markets.get_mut(&id).unwrap_or_else(|| env::panic_str("ERR_NO_MARKET"));
+        let mut fx = st.advance(h, &self.config, &me);
+        self.treasury[TOKEN_NEAR as usize] += fx.slashed;
+        if let Some(outcome) = fx.resolved {
+            fx.paid = self.pay_resolver(id, outcome, fx.by_committee);
+            log_settled(id, STATUS_RESOLVED, outcome);
+        } else if fx.cancelled {
+            log_settled(id, STATUS_CANCELLED, 0);
+        }
+        fx
+    }
+
+    /// The market as `settle` would leave it now, without writing anything.
+    pub(crate) fn settled_copy(&self, id: u64) -> MarketState {
+        self.settled_clone(self.market_ref(id))
+    }
+
+    fn settled_clone(&self, st: &MarketState) -> MarketState {
+        let mut copy = st.clone();
+        let fx = copy.advance(self.height(), &self.config, &env::current_account_id());
+        if let (Some(outcome), false) = (fx.resolved, fx.by_committee)
+            && let Some(resolver) = first_voter(copy.market.id, outcome)
+        {
+            copy.market.resolver = resolver;
+        }
+        copy
+    }
+
+    fn settled_view(&self, st: &MarketState) -> MarketView {
+        let s = self.settled_clone(st);
+        let proposer = s
+            .tally
+            .as_ref()
+            .filter(|t| t.total_voters > 0)
+            .and_then(|t| first_voter(s.market.id, t.leading(s.market.num_outcomes)));
+        s.view(proposer, resolver_reward_bps())
+    }
+
+    /// Pays the resolver of a market that just resolved on `outcome`: the first voter of that outcome or, if
+    /// nobody voted for it, a disputer who proposed it. They get their bond back and a share of the market's
+    /// protocol fees (in the market's token), in the call that settled the market; nobody has to claim.
+    /// Returns who was paid and the NEAR sent.
+    fn pay_resolver(&mut self, id: u64, outcome: u8, by_committee: bool) -> Option<(AccountId, u128)> {
+        let voter = first_voter(id, outcome).and_then(|v| {
+            let vote = self.votes.get_mut(&vote_key(id, &v))?;
+            if vote.claimed || vote.outcome != outcome {
+                return None;
+            }
+            vote.claimed = true;
+            Some((v, vote.bond))
+        });
+        let (resolver, bond) = match voter {
+            Some(found) => found,
+            None => {
+                let d = self.market_mut(id).dispute.as_mut()?;
+                if d.proposed_outcome != outcome || d.bond_claimed {
+                    return None;
+                }
+                d.bond_claimed = true;
+                (d.disputer.clone(), d.dispute_bond)
+            }
+        };
+        let st = self.market_mut(id);
+        if !by_committee {
+            st.market.resolver = resolver.clone();
+        }
+        let (token, fees) = (st.market.token_type, st.protocol_fees);
+        let t = token as usize;
+        let reward = (fees * resolver_reward_bps() as u128 / 10_000).min(self.treasury[t]);
+        self.treasury[t] -= reward;
+        self.program_credits[TOKEN_NEAR as usize] -= bond;
+        self.program_credits[t] -= reward;
+        let near = if token == TOKEN_NEAR { bond + reward } else { bond };
+        self.pay_booked(TOKEN_NEAR, &resolver, near);
+        if token != TOKEN_NEAR && reward > 0 {
+            self.pay_booked(token, &resolver, reward);
+        }
+        env::log_str(&format!(
+            "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"resolver_paid\",\"data\":[{{\"market_id\":\"{id}\",\"resolver\":\"{resolver}\",\"bond\":\"{bond}\",\"reward\":\"{reward}\",\"token\":{token}}}]}}"
+        ));
+        Some((resolver, near))
     }
 
     pub(crate) fn market_ref(&self, id: u64) -> &MarketState {
@@ -913,9 +1207,10 @@ impl Veiled {
         Mint { kind: KIND_LP, asset: market_id, sub: 0, amount: lp }
     }
 
-    /// Winning shares pay 1:1 into a private balance note.
+    /// Winning shares pay 1:1 into a private balance note. The first redeem settles the market.
     fn act_redeem(&mut self, s: &Spent) -> Mint {
         require!(s.kind == KIND_SHARE, "ERR_NOTE_KIND");
+        self.settle(s.asset);
         let q = s.out_amount;
         let st = self.market_mut(s.asset);
         require!(st.market.status == STATUS_RESOLVED, "ERR_STATUS");
@@ -934,6 +1229,7 @@ impl Veiled {
     /// from before the per-outcome ledger refund pro rata to all trader collateral, as before.
     fn act_refund(&mut self, s: &Spent) -> Mint {
         require!(s.kind == KIND_SHARE, "ERR_NOTE_KIND");
+        self.settle(s.asset);
         let q = s.out_amount;
         let st = self.market_mut(s.asset);
         require!(st.market.status == STATUS_CANCELLED, "ERR_STATUS");
@@ -966,6 +1262,7 @@ impl Veiled {
     /// winners and to unclaimed creator fees. CANCELLED: what is left after trader collateral.
     fn act_withdraw_lp(&mut self, s: &Spent, min_tokens_out: u128) -> Mint {
         require!(s.kind == KIND_LP && s.sub == 0, "ERR_NOTE_KIND");
+        self.settle(s.asset);
         let h = self.height();
         let priority = self.config.winner_claim_priority;
         let lp = s.out_amount;

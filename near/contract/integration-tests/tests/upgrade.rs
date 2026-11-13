@@ -54,6 +54,12 @@ async fn state_written_by_the_previous_build_survives_the_upgrade() -> anyhow::R
     unsafe { std::env::remove_var("VEILED_WASM") };
     let mut w = Wallet::new(SK);
 
+    // ---- a market voted on by the previous build: its tally has no dispute deadline and no first-voter record.
+    let voted = create(&env, &mut w, 2).await?;
+    advance(&env, 3).await?;
+    let r = call(&env, &env.bob, "vote_outcome", json!({ "market_id": s(voted), "outcome": 1 }), NEAR).await?;
+    assert!(r.is_success(), "{:?}", r.failures());
+
     // ---- state from the previous build: two markets, a position, a parlay ticket, a turbo round with a bet.
     let a = create(&env, &mut w, 60).await?;
     let b = create(&env, &mut w, 60).await?;
@@ -65,6 +71,13 @@ async fn state_written_by_the_previous_build_survives_the_upgrade() -> anyhow::R
     let shares = buy.minted.unwrap();
     let bal = buy.change.unwrap();
     assert!(call(&env, &env.root, "fund_parlay_pool", json!({ "token": 1 }), 20 * NEAR).await?.is_success());
+    for id in [a, b] {
+        let r = call(&env, &env.root, "set_parlay_leg", json!({ "market_id": s(id), "eligible": true }), 0).await?;
+        assert!(r.is_success(), "{:?}", r.failures());
+    }
+    // A ticket may pay up to the whole leg depth, so a test-sized stake fits.
+    let r = call(&env, &env.root, "set_parlay_leg_cap", json!({ "bps": "10000" }), 0).await?;
+    assert!(r.is_success(), "{:?}", r.failures());
     let legs = json!([{ "market_id": s(a), "outcome": 1 }, { "market_id": s(b), "outcome": 1 }]);
     let ticket = w.spend(&env, &[&bal], NEAR / 2, json!({ "type": "parlay_buy", "legs": legs, "min_payout": "0" })).await?;
     assert!(ticket.result.is_success(), "{:?}", ticket.result.failures());
@@ -95,27 +108,34 @@ async fn state_written_by_the_previous_build_survives_the_upgrade() -> anyhow::R
 
     // ---- everything the previous build wrote reads back unchanged.
     let after = market(&env, a).await?;
-    for field in ["reserves", "market_credits", "trader_collateral", "outcome_shares", "total_lp_shares", "status"] {
+    for field in [
+        "reserves", "market_credits", "trader_collateral", "outcome_shares", "outcome_collateral", "total_lp_shares",
+        "protocol_fees", "status", "parlay_leg",
+    ] {
         assert_eq!(after[field], before[field], "{field}");
     }
     assert_eq!(view(&env, "get_program_credits", json!({})).await?, credits_before);
     assert_eq!(view(&env, "get_tree_info", json!({})).await?, tree_before);
     let pool_after = view(&env, "get_parlay_pool", json!({})).await?;
-    assert_eq!((&pool_after["pool"], &pool_after["exposure"]), (&pool_before["pool"], &pool_before["exposure"]));
+    for field in ["pool", "exposure", "leg_payout_bps"] {
+        assert_eq!(pool_after[field], pool_before[field], "{field}");
+    }
     assert_eq!(view(&env, "get_parlay", json!({ "parlay_id": "1" })).await?["status"], 1);
     assert_eq!(view(&env, "get_turbo_market", json!({ "market_id": s(turbo_id) })).await?["up_bets"], 1);
-    // New fields take their defaults: no per-outcome ledger for the old market, not a parlay leg, 1% leg cap.
-    assert_eq!(after["outcome_collateral"], Value::Null);
-    assert_eq!(after["parlay_leg"], false);
-    assert_eq!(pool_after["leg_payout_bps"], "100");
+    // What this build adds reads from the old state: nobody voted on A, and its resolver would get half its
+    // protocol fees (the default share).
+    assert_eq!(after["proposer"], Value::Null);
+    assert_eq!(u(&after["resolver_reward"]), u(&after["protocol_fees"]) / 2);
+    assert_eq!(view(&env, "get_resolver_reward_bps", json!({})).await?, 5000);
 
     // ---- the old notes still spend under the new code: a buy, a sell and a withdrawal.
     let buy2 = w
         .spend(&env, &[&bal], NEAR, json!({ "type": "buy", "market_id": s(a), "outcome": 2, "min_shares_out": "0" }))
         .await?;
     assert!(buy2.result.is_success(), "{:?}", buy2.result.failures());
-    // The old market had shares outstanding, so it keeps the old refund rule (no ledger appears).
-    assert_eq!(market(&env, a).await?["outcome_collateral"], Value::Null);
+    // The per-outcome ledger the old build kept goes on counting.
+    let ledger = &market(&env, a).await?["outcome_collateral"];
+    assert!(u(&ledger[1]) > u(&before["outcome_collateral"][1]), "{ledger}");
     let sell = w.spend(&env, &[&shares], shares.amount / 2, json!({ "type": "sell", "tokens_desired": "100000" })).await?;
     assert!(sell.result.is_success(), "{:?}", sell.result.failures());
     let shares = sell.change.unwrap();
@@ -147,5 +167,14 @@ async fn state_written_by_the_previous_build_survives_the_upgrade() -> anyhow::R
     assert_eq!(redeem.minted.unwrap().amount, shares.amount);
     let claim = w.spend(&env, &[&ticket_note], ticket_note.amount, json!({ "type": "parlay_claim" })).await?;
     assert!(claim.result.is_success(), "{:?}", claim.result.failures());
+
+    // ---- the market voted before the upgrade settles by the clock; with no first-voter record its voter is not
+    // paid automatically and claims the bond as before.
+    let r = call(&env, &env.carol, "settle_market", json!({ "market_id": s(voted) }), 0).await?;
+    assert!(r.is_success(), "{:?}", r.failures());
+    assert_eq!(r.json::<u8>()?, 3);
+    let r = call(&env, &env.bob, "claim_voter_bond", json!({ "market_id": s(voted) }), 0).await?;
+    assert!(r.is_success(), "{:?}", r.failures());
+    assert_eq!(r.json::<String>()?, s(NEAR));
     Ok(())
 }

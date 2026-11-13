@@ -197,10 +197,11 @@ fn a_market_with_exactly_the_minimum_resolution_gap_is_accepted() {
     assert_eq!(c.get_market(U64(id)).unwrap().status, markets::STATUS_ACTIVE);
 }
 
-/// Votes outcome 1 with one bonded voter and finalizes; the dispute window then ends at H0 + 34.
+/// Votes outcome 1 with one bonded voter and finalizes. The vote window closes at H0 + 24 and the dispute window
+/// at H0 + 27: both are fixed when the vote opens, whenever the finalize call comes.
 fn vote_and_finalize(c: &mut Veiled, id: u64) {
     at("bob.test", NEAR, H0 + 21);
-    c.vote_outcome(U64(id), 1);
+    c.vote_outcome(U64(id), 1, None);
     at("carol.test", 0, H0 + 30); // the vote window (3 ticks) closed at H0 + 24
     c.finalize_votes(U64(id));
 }
@@ -230,12 +231,12 @@ fn voting_reopens_when_the_first_window_ended_without_a_quorum() {
     let mut c = contract(3);
     let id = open_market(&mut c, 10 * NEAR, 2, 20, 200);
     at("v1.test", NEAR, H0 + 21);
-    c.vote_outcome(U64(id), 1); // window ends at H0 + 24 with one voter of the three required
+    c.vote_outcome(U64(id), 1, None); // window ends at H0 + 24 with one voter of the three required
     at("v2.test", NEAR, H0 + 30);
-    c.vote_outcome(U64(id), 1); // a late vote opens a new window: H0 + 30 + 3
+    c.vote_outcome(U64(id), 1, None); // a late vote opens a new window: H0 + 30 + 3
     assert_eq!(c.get_market(U64(id)).unwrap().tally.unwrap().voting_deadline.0, H0 + 33);
     at("v3.test", NEAR, H0 + 31);
-    c.vote_outcome(U64(id), 1);
+    c.vote_outcome(U64(id), 1, None);
     at("carol.test", 0, H0 + 34);
     c.finalize_votes(U64(id));
     assert_eq!(c.get_market(U64(id)).unwrap().status, markets::STATUS_PENDING_FINALIZATION);
@@ -447,7 +448,7 @@ fn a_raised_quorum_applies_to_the_next_finalization() {
     let mut c = contract(1);
     let id = open_market(&mut c, 10 * NEAR, 2, 20, 100);
     at("bob.test", NEAR, H0 + 21);
-    c.vote_outcome(U64(id), 1);
+    c.vote_outcome(U64(id), 1, None);
     at("owner.test", 0, H0 + 22);
     c.set_resolution_config(None, None, None, None, None, Some(2), None, None);
     at("carol.test", 0, H0 + 30);
@@ -470,4 +471,356 @@ fn changed_windows_show_in_the_config() {
     let cfg = c.get_config();
     assert_eq!((cfg.vote_window, cfg.dispute_window, cfg.vote_bond.0, cfg.min_voters), (2880, 2880, 10 * NEAR, 3));
     assert_eq!(cfg.winner_claim_priority, 5); // left as it was
+}
+
+// ---------------------------------------------------------------------------------------- settlement without a keeper
+//
+// Every stage after the vote follows from the clock: nobody has to call finalize, confirm or cancel. Whoever
+// touches the market next (a redeem, a refund, a bond claim, a dispute) settles it first, and the views show the
+// settled state before anyone does.
+
+fn vote(c: &mut Veiled, who: &str, id: u64, outcome: u8, height: u64) {
+    at(who, NEAR, height);
+    c.vote_outcome(U64(id), outcome, None);
+}
+
+fn redeem(c: &mut Veiled, market: u64, outcome: u8, shares: u128, height: u64) -> u128 {
+    at("relayer.test", 0, height);
+    c.act_market(&spend(KIND_SHARE, market, outcome, shares, Action::Redeem)).unwrap().amount
+}
+
+/// The market as the views show it at `height`.
+fn market_at(c: &Veiled, id: u64, height: u64) -> markets::MarketView {
+    at("viewer.test", 0, height);
+    c.get_market(U64(id)).unwrap()
+}
+
+/// NEAR (micro units) the calls since the last `at` sent to `who`.
+fn sent_to(who: &str) -> u128 {
+    near_sdk::test_utils::get_created_receipts()
+        .iter()
+        .filter(|r| r.receiver_id.as_str() == who)
+        .flat_map(|r| r.actions.iter())
+        .map(|a| match a {
+            near_sdk::mock::MockAction::Transfer { deposit, .. } => deposit.as_yoctonear() / YOCTO_PER_MICRO,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Alice's 10 NEAR market (trading ends at H0 + 20, resolution deadline H0 + 120) with 20 NEAR bought on outcome 1
+/// at H0 + 1. Returns (market, outcome-1 shares).
+fn traded_market(c: &mut Veiled) -> (u64, u128) {
+    let id = open_market(c, 10 * NEAR, 2, 20, 100);
+    let shares = buy(c, id, 1, 20 * NEAR, H0 + 1);
+    (id, shares)
+}
+
+#[test]
+fn the_dispute_deadline_is_fixed_when_the_vote_opens() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    let t = market_at(&c, id, H0 + 22).tally.unwrap();
+    // vote window 3 ticks, dispute window 3 ticks after it
+    assert_eq!((t.voting_deadline.0, t.dispute_deadline.0), (H0 + 24, H0 + 27));
+    // A late finalize call does not move it.
+    at("carol.test", 0, H0 + 26);
+    c.finalize_votes(U64(id));
+    assert_eq!(market_at(&c, id, H0 + 26).tally.unwrap().dispute_deadline.0, H0 + 27);
+}
+
+#[test]
+fn the_views_show_each_stage_before_anyone_calls_finalize_or_confirm() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    assert_eq!(market_at(&c, id, H0 + 24).status, markets::STATUS_PENDING_RESOLUTION); // voting open
+    let m = market_at(&c, id, H0 + 25);
+    assert_eq!((m.status, m.tally.unwrap().winning_outcome), (markets::STATUS_PENDING_FINALIZATION, 1));
+    let m = market_at(&c, id, H0 + 28);
+    let t = m.tally.unwrap();
+    assert_eq!((m.status, t.winning_outcome, t.finalized), (markets::STATUS_RESOLVED, 1, true));
+}
+
+#[test]
+fn the_first_redeem_settles_a_market_nobody_finalized() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    assert_eq!(redeem(&mut c, id, 1, shares, H0 + 28), shares);
+    at("carol.test", 0, H0 + 28);
+    assert_eq!(c.settle_market(U64(id)), markets::STATUS_RESOLVED);
+}
+
+#[test]
+#[should_panic(expected = "ERR_STATUS")]
+fn a_redeem_inside_the_dispute_window_is_refused() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    redeem(&mut c, id, 1, shares, H0 + 27);
+}
+
+#[test]
+fn a_dispute_is_taken_once_voting_closes_without_a_finalize_call() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    at("carol.test", 3 * NEAR, H0 + 26); // 3 × the 1 NEAR bonded
+    c.dispute_resolution(U64(id), 2);
+    assert_eq!(market_at(&c, id, H0 + 26).status, markets::STATUS_DISPUTED);
+}
+
+#[test]
+#[should_panic(expected = "ERR_STATUS")]
+fn a_dispute_after_the_dispute_window_is_refused() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    at("carol.test", 3 * NEAR, H0 + 28);
+    c.dispute_resolution(U64(id), 2);
+}
+
+/// Bob votes outcome 1 first, dave agrees, erin votes outcome 2.
+fn three_voters(c: &mut Veiled, id: u64) {
+    vote(c, "bob.test", id, 1, H0 + 21);
+    vote(c, "dave.test", id, 1, H0 + 22);
+    vote(c, "erin.test", id, 2, H0 + 23);
+}
+
+#[test]
+fn the_first_correct_voter_is_paid_bond_and_reward_by_the_settling_call() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    three_voters(&mut c, id);
+    // The market earned 100_000 in protocol fees (0.5% of 20 NEAR); half of that is the resolver's reward.
+    assert_eq!(market_at(&c, id, H0 + 22).resolver_reward.0, 50_000);
+    redeem(&mut c, id, 1, shares, H0 + 28);
+    assert_eq!(sent_to("bob.test"), NEAR + 50_000);
+    assert_eq!(sent_to("dave.test"), 0); // the second voter claims their bond back as before
+    let m = market_at(&c, id, H0 + 28);
+    assert_eq!(m.resolver.as_str(), "bob.test");
+    assert!(c.get_vote(U64(id), acct("bob.test")).unwrap().claimed);
+    // fees 100_000 + erin's slashed bond − bob's reward
+    assert_eq!(c.get_treasury()[1].0, 100_000 + NEAR - 50_000);
+}
+
+#[test]
+fn the_resolver_is_paid_only_once() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    three_voters(&mut c, id);
+    redeem(&mut c, id, 1, shares / 2, H0 + 28);
+    redeem(&mut c, id, 1, shares - shares / 2, H0 + 29);
+    assert_eq!(sent_to("bob.test"), 0);
+    assert_eq!(c.get_treasury()[1].0, 100_000 + NEAR - 50_000);
+}
+
+#[test]
+fn a_resolver_claiming_their_bond_settles_the_market_and_gets_the_reward() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    three_voters(&mut c, id);
+    at("bob.test", 0, H0 + 28);
+    assert_eq!(c.claim_voter_bond(U64(id)).0, NEAR + 50_000);
+    assert_eq!(sent_to("bob.test"), NEAR + 50_000);
+    at("dave.test", 0, H0 + 28);
+    assert_eq!(c.claim_voter_bond(U64(id)).0, NEAR);
+}
+
+#[test]
+#[should_panic(expected = "ERR_CLAIMED")]
+fn a_paid_resolver_cannot_claim_the_bond_again() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    three_voters(&mut c, id);
+    redeem(&mut c, id, 1, shares, H0 + 28);
+    at("bob.test", 0, H0 + 29);
+    c.claim_voter_bond(U64(id));
+}
+
+#[test]
+fn the_owner_sets_the_resolver_share_of_protocol_fees() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    at("owner.test", 0, H0 + 2);
+    c.set_resolver_reward_bps(2000);
+    assert_eq!(c.get_resolver_reward_bps(), 2000);
+    three_voters(&mut c, id);
+    redeem(&mut c, id, 1, shares, H0 + 28);
+    assert_eq!(sent_to("bob.test"), NEAR + 20_000);
+}
+
+#[test]
+#[should_panic(expected = "ERR_OWNER")]
+fn only_the_owner_sets_the_resolver_reward() {
+    let mut c = contract(1);
+    at("mallory.test", 0, H0);
+    c.set_resolver_reward_bps(10_000);
+}
+
+#[test]
+#[should_panic(expected = "ERR_VALUE")]
+fn the_resolver_reward_cannot_exceed_the_protocol_fees() {
+    let mut c = contract(1);
+    at("owner.test", 0, H0);
+    c.set_resolver_reward_bps(10_001);
+}
+
+#[test]
+fn a_market_nobody_voted_on_refunds_once_its_resolution_deadline_passes() {
+    let mut c = contract(1);
+    let (id, shares) = traded_market(&mut c);
+    assert_eq!(market_at(&c, id, H0 + 120).status, markets::STATUS_ACTIVE);
+    assert_eq!(market_at(&c, id, H0 + 121).status, markets::STATUS_CANCELLED);
+    // 20 NEAR less 0.5% protocol and 0.5% creator fee went into the pool for these shares
+    assert_eq!(refund(&mut c, id, 1, shares, H0 + 121), 19_800_000);
+}
+
+#[test]
+fn a_vote_still_open_at_the_resolution_deadline_is_counted_not_cancelled() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 9); // resolution deadline H0 + 29
+    vote(&mut c, "bob.test", id, 1, H0 + 29); // the window runs to H0 + 32
+    assert_eq!(market_at(&c, id, H0 + 31).status, markets::STATUS_PENDING_RESOLUTION);
+    assert_eq!(market_at(&c, id, H0 + 33).status, markets::STATUS_PENDING_FINALIZATION);
+}
+
+#[test]
+#[should_panic(expected = "ERR_CANNOT_CANCEL")]
+fn an_open_vote_cannot_be_cancelled_after_the_resolution_deadline() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 9);
+    vote(&mut c, "bob.test", id, 1, H0 + 29);
+    at("mallory.test", 0, H0 + 31);
+    c.cancel_market(U64(id));
+}
+
+#[test]
+fn a_vote_short_of_its_quorum_at_the_resolution_deadline_ends_in_a_refund() {
+    let mut c = contract(2);
+    let (id, shares) = traded_market(&mut c);
+    vote(&mut c, "bob.test", id, 1, H0 + 21);
+    assert_eq!(market_at(&c, id, H0 + 120).status, markets::STATUS_PENDING_RESOLUTION);
+    assert_eq!(refund(&mut c, id, 1, shares, H0 + 121), 19_800_000);
+    at("bob.test", 0, H0 + 121);
+    assert_eq!(c.claim_voter_bond(U64(id)).0, NEAR);
+}
+
+/// 5 NEAR buys outcome 2 at H0 + 2; after trading closes bob votes outcome 1 and carol disputes it for outcome 2
+/// at H0 + 26. Returns (market, the outcome-2 shares).
+fn disputed(c: &mut Veiled) -> (u64, u128) {
+    let id = open_market(c, 10 * NEAR, 2, 20, 100);
+    let shares_2 = buy(c, id, 2, 5 * NEAR, H0 + 2);
+    vote(c, "bob.test", id, 1, H0 + 21);
+    at("carol.test", 3 * NEAR, H0 + 26);
+    c.dispute_resolution(U64(id), 2);
+    (id, shares_2)
+}
+
+#[test]
+fn a_dispute_nobody_decides_is_cancelled_by_its_time_limit() {
+    let mut c = contract(1);
+    let (id, _) = disputed(&mut c);
+    // disputed_timeout is 40 ticks: H0 + 26 + 40
+    assert_eq!(market_at(&c, id, H0 + 66).status, markets::STATUS_DISPUTED);
+    assert_eq!(market_at(&c, id, H0 + 67).status, markets::STATUS_CANCELLED);
+    at("carol.test", 0, H0 + 67);
+    assert_eq!(c.claim_dispute_bond(U64(id)).0, 3 * NEAR);
+    at("bob.test", 0, H0 + 67);
+    assert_eq!(c.claim_voter_bond(U64(id)).0, NEAR);
+}
+
+fn committee_decides(c: &mut Veiled, id: u64, outcome: u8, height: u64) {
+    at("carol.test", 0, height);
+    c.initiate_escalation(U64(id));
+    for i in 1..=3 {
+        at(&format!("c{i}.test"), 0, height);
+        c.committee_vote_resolve(U64(id), outcome);
+    }
+    at("carol.test", 0, height);
+    c.finalize_committee_vote(U64(id));
+}
+
+#[test]
+fn a_committee_decision_applies_without_a_governance_resolve_call() {
+    let mut c = contract(1);
+    let (id, shares_2) = disputed(&mut c);
+    committee_decides(&mut c, id, 2, H0 + 30);
+    let m = market_at(&c, id, H0 + 30);
+    assert_eq!((m.status, m.tally.unwrap().winning_outcome), (markets::STATUS_RESOLVED, 2));
+    assert_eq!(redeem(&mut c, id, 2, shares_2, H0 + 31), shares_2);
+    // Nobody voted outcome 2, so the disputer who proposed it is the resolver: the settling call paid back their
+    // 3 NEAR bond plus half of the 25_000 protocol fee the 5 NEAR buy paid.
+    assert_eq!(sent_to("carol.test"), 3 * NEAR + 12_500);
+    // The view shows the dispute bond as paid, so the app does not offer a claim that would fail.
+    assert!(market_at(&c, id, H0 + 32).dispute.unwrap().bond_claimed);
+}
+
+#[test]
+#[should_panic(expected = "ERR_CLAIMED")]
+fn a_paid_disputer_cannot_claim_the_bond_again() {
+    let mut c = contract(1);
+    let (id, shares_2) = disputed(&mut c);
+    committee_decides(&mut c, id, 2, H0 + 30);
+    redeem(&mut c, id, 2, shares_2, H0 + 31);
+    at("carol.test", 0, H0 + 32);
+    c.claim_dispute_bond(U64(id));
+}
+
+#[test]
+#[should_panic(expected = "ERR_STATUS")]
+fn the_committee_cannot_vote_after_the_dispute_time_limit() {
+    let mut c = contract(1);
+    let (id, _) = disputed(&mut c);
+    at("carol.test", 0, H0 + 30);
+    c.initiate_escalation(U64(id));
+    at("c1.test", 0, H0 + 67);
+    c.committee_vote_resolve(U64(id), 2);
+}
+
+#[test]
+fn a_parlay_settles_on_legs_nobody_finalized() {
+    let mut c = contract(1);
+    let (a, b) = two_markets_and_a_pool(&mut c);
+    approve_leg(&mut c, a);
+    approve_leg(&mut c, b);
+    parlay(&mut c, &[a, b], NEAR / 5, H0 + 1);
+    vote(&mut c, "bob.test", a, 1, H0 + 21);
+    vote(&mut c, "bob.test", b, 1, H0 + 21);
+    at("carol.test", 0, H0 + 28);
+    assert_eq!(c.settle_parlay(U64(1)), parlay::PARLAY_WON);
+    // Settling the parlay settled its legs: bob, who resolved both, got his bonds back in that call.
+    assert_eq!(sent_to("bob.test"), 2 * NEAR);
+}
+
+#[test]
+fn a_vote_can_carry_a_link_to_its_evidence() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    at("ai.test", NEAR, H0 + 21);
+    c.vote_outcome(U64(id), 1, Some("https://veiledmarkets.xyz/r/1#sha256=ab12".into()));
+    let logs = near_sdk::test_utils::get_logs();
+    assert!(logs.iter().any(|l| l.contains("\"vote_evidence\"") && l.contains("sha256=ab12")), "{logs:?}");
+    let stored = c.get_vote_evidence(U64(id), acct("ai.test"));
+    assert_eq!(stored.as_deref(), Some("https://veiledmarkets.xyz/r/1#sha256=ab12"));
+    assert_eq!(c.get_vote_evidence(U64(id), acct("bob.test")), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_EVIDENCE_LEN")]
+fn vote_evidence_is_kept_short() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    at("ai.test", NEAR, H0 + 21);
+    c.vote_outcome(U64(id), 1, Some("x".repeat(301)));
+}
+
+#[test]
+fn the_view_names_the_first_voter_of_the_leading_outcome() {
+    let mut c = contract(1);
+    let (id, _) = traded_market(&mut c);
+    three_voters(&mut c, id);
+    assert_eq!(market_at(&c, id, H0 + 23).proposer.unwrap().as_str(), "bob.test");
 }

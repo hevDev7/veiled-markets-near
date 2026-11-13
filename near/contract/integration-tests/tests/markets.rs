@@ -6,9 +6,10 @@ use serde_json::{json, Value};
 
 const SK: &str = "1234567";
 
+/// A dispute window long enough (2 minutes of block time) that the checks inside it never race the clock.
 fn fast_config() -> Value {
     json!({
-        "vote_window": 3, "dispute_window": 3, "winner_claim_priority": 40, "disputed_timeout": 40,
+        "vote_window": 3, "dispute_window": 30, "winner_claim_priority": 40, "disputed_timeout": 40,
         "vote_bond": "1000000", "min_voters": 3, "dispute_bond_multiplier": 3,
         "min_trade": "1000", "min_liquidity": "10000",
         "protocol_fee_bps": "50", "creator_fee_bps": "50", "lp_fee_bps": "100", "committee_quorum": 3
@@ -139,29 +140,35 @@ async fn market_lifecycle_with_private_trades() -> anyhow::Result<()> {
     let m = market(&env, id).await?;
     assert_eq!((m["status"].as_u64(), m["tally"]["winning_outcome"].as_u64()), (Some(6), Some(1)));
 
-    // Redeeming before the resolution is final fails.
+    // Redeeming inside the dispute window fails.
     let r = w.spend(&env, &[&shares], shares.amount, json!({ "type": "redeem" })).await?;
     assert_fails_with(&r.result, "ERR_STATUS");
-    advance(&env, 4).await?;
-    assert!(call(&env, &env.carol, "confirm_resolution", json!({ "market_id": s(id) }), 0).await?.is_success());
-    let m = market(&env, id).await?;
-    assert_eq!(m["status"], 3);
-    let treasury: Value = view(&env, "get_treasury", json!({})).await?;
-    // protocol fees of the two buys and the sell, plus carol's slashed bond.
-    assert_eq!(u(&treasury[1]), 10_000 + 5_000 + 2_500 + 1_000_000);
 
-    // Winning shares redeem 1:1; losing ones cannot.
+    // Once the dispute window has passed the market is resolved, and nobody has to say so: the view shows it and
+    // the first redeem writes it. Losing shares still cannot redeem (that call settles nothing: it fails whole).
+    advance(&env, 31).await?;
+    assert_eq!(market(&env, id).await?["status"], 3);
     let losing = w.spend(&env, &[&shares2], shares2.amount, json!({ "type": "redeem" })).await?;
     assert_fails_with(&losing.result, "ERR_NOT_WINNER");
+    let alice_before = env.alice.view_account().await?.balance.as_yoctonear();
     let red = w.spend(&env, &[&shares], shares.amount, json!({ "type": "redeem" })).await?;
     assert!(red.result.is_success(), "{:?}", red.result.failures());
+    println!("transact (redeem that settles and pays the resolver) gas: {:.1} TGas", tgas(&red.result));
     let payout = red.minted.unwrap();
     assert_eq!((payout.kind, payout.amount), (1, shares.amount));
 
-    // Voter bonds: winners get theirs back, the loser was slashed.
-    let alice_before = env.alice.view_account().await?.balance.as_yoctonear();
-    assert!(call(&env, &env.alice, "claim_voter_bond", json!({ "market_id": s(id) }), 0).await?.is_success());
-    assert!(env.alice.view_account().await?.balance.as_yoctonear() > alice_before + 990_000 * YOCTO_PER_MICRO);
+    // Alice voted outcome 1 first: that redeem paid back her bond plus half of the market's 17_500 protocol fees
+    // (two buys and the sell), without a transaction of hers.
+    let paid = env.alice.view_account().await?.balance.as_yoctonear() - alice_before;
+    assert_eq!(paid, (1_000_000 + 8_750) * YOCTO_PER_MICRO);
+    let treasury: Value = view(&env, "get_treasury", json!({})).await?;
+    // the protocol fees and carol's slashed bond, less alice's reward
+    assert_eq!(u(&treasury[1]), 17_500 + 1_000_000 - 8_750);
+
+    // Other voters on the winning side claim their bond; the loser was slashed; alice has nothing left to claim.
+    let bob_before = env.bob.view_account().await?.balance.as_yoctonear();
+    assert!(call(&env, &env.bob, "claim_voter_bond", json!({ "market_id": s(id) }), 0).await?.is_success());
+    assert!(env.bob.view_account().await?.balance.as_yoctonear() > bob_before + 990_000 * YOCTO_PER_MICRO);
     assert_fails_with(&call(&env, &env.carol, "claim_voter_bond", json!({ "market_id": s(id) }), 0).await?, "ERR_LOSING_VOTE");
     assert_fails_with(&call(&env, &env.alice, "claim_voter_bond", json!({ "market_id": s(id) }), 0).await?, "ERR_CLAIMED");
 
@@ -236,19 +243,22 @@ async fn disputed_market_is_settled_by_the_committee() -> anyhow::Result<()> {
         assert!(r.is_success(), "{:?}", r.failures());
     }
     assert!(call(&env, &env.carol, "finalize_committee_vote", json!({ "market_id": s(id) }), 0).await?.is_success());
+    // The decision shows at once; governance_resolve (anyone) writes it.
+    assert_eq!(market(&env, id).await?["status"], 3);
+    let bob_before = env.bob.view_account().await?.balance.as_yoctonear();
     assert!(call(&env, &env.carol, "governance_resolve", json!({ "market_id": s(id) }), 0).await?.is_success());
     let m = market(&env, id).await?;
     assert_eq!((m["status"].as_u64(), m["tally"]["winning_outcome"].as_u64()), (Some(3), Some(2)));
     assert_eq!(m["dispute"]["final_outcome"], 2);
 
-    // The disputer was right: bond back. All three voters were wrong: slashed.
-    let bob_before = env.bob.view_account().await?.balance.as_yoctonear();
-    let c = call(&env, &env.bob, "claim_dispute_bond", json!({ "market_id": s(id) }), 0).await?;
-    assert!(c.is_success(), "{:?}", c.failures());
-    assert!(env.bob.view_account().await?.balance.as_yoctonear() > bob_before + 8_990_000 * YOCTO_PER_MICRO);
+    // Nobody voted outcome 2, so the disputer who proposed it resolved the market: the settling call paid bob his
+    // 9 NEAR bond and half of the 5_000 protocol fee. All three voters were wrong: slashed.
+    let paid = env.bob.view_account().await?.balance.as_yoctonear() - bob_before;
+    assert_eq!(paid, (9_000_000 + 2_500) * YOCTO_PER_MICRO);
+    assert_fails_with(&call(&env, &env.bob, "claim_dispute_bond", json!({ "market_id": s(id) }), 0).await?, "ERR_CLAIMED");
     assert_fails_with(&call(&env, &env.alice, "claim_voter_bond", json!({ "market_id": s(id) }), 0).await?, "ERR_LOSING_VOTE");
     let treasury: Value = view(&env, "get_treasury", json!({})).await?;
-    assert_eq!(u(&treasury[1]), 5_000 + 3_000_000);
+    assert_eq!(u(&treasury[1]), 5_000 + 3_000_000 - 2_500);
 
     // Outcome-2 shares redeem.
     let red = w.spend(&env, &[&shares], shares.amount, json!({ "type": "redeem" })).await?;
