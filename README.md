@@ -6,7 +6,7 @@
 
 A prediction market on NEAR where prices are public and positions are private.
 
-[**Live demo**](https://veiledmarkets.xyz) · [Demo video](https://x.com/MDLOG_labs/status/2121134799658328102) · [Contract](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) · [Design](docs/near/DESIGN.md) · [Try it](#try-it) · [Run it locally](#run-it-locally)
+[**Live demo**](https://veiledmarkets.xyz) · [Demo video](https://x.com/MDLOG_labs/status/2121134799658328102) · [Contract](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) · [Design](docs/near/DESIGN.md) · [Resolution rules](docs/near/RESOLUTION.md) · [Try it](#try-it) · [Run it locally](#run-it-locally)
 
 ![NEAR testnet](https://img.shields.io/badge/NEAR-testnet-0b0d12?style=flat-square&logo=near&logoColor=white)
 ![Track](https://img.shields.io/badge/NEAR%20HACKATHON-Privacy%20%26%20Private%20AI-c9a84c?style=flat-square)
@@ -52,7 +52,8 @@ It has:
   price it used.
 - **Parlays** of two to four outcomes across markets, priced by the contract from the live pools.
 - **Liquidity provision**, with a fee on every sell going to the pool.
-- **Resolution** by bonded vote, a dispute window, and a committee when a result is disputed.
+- **Resolution** by bonded vote, a dispute window, and a committee when a result is disputed, with no keeper: the
+  first redeem settles the market and pays its first correct voter. See [How a market settles](#how-a-market-settles).
 
 | Landing page | Dashboard | A market |
 |---|---|---|
@@ -92,8 +93,10 @@ it the same way.
 - **Named accounts separate the roles**: the contract, the relayer that submits private actions and the oracle that
   runs turbo rounds are three accounts with three keys.
 
-The project does not use TEEs or NEAR AI. Its place in the privacy track is private finance: hiding who holds a
-position while keeping the market itself auditable.
+Its place in the privacy track is private finance: hiding who holds a position while keeping the market itself
+auditable. An optional AI resolver ([below](#ai-resolver-near-ai-cloud)) asks a model running in NEAR AI Cloud's TEE for
+a market's result and casts an ordinary bonded vote with a signed, checkable receipt; it is built and tested but not
+running on the hosted demo yet.
 
 ## How a bet stays private
 
@@ -119,6 +122,46 @@ The note key is derived from the wallet's signature, so a new browser recovers t
 sign messages gets a key kept only in that browser, which the app asks the user to back up; a declined signature is an
 error, never a silent fallback.
 
+## How a market settles
+
+Nobody has to run a keeper, and no transaction is needed just to move a market along. Each stage takes effect when
+its window ends:
+
+1. **Vote.** After trading closes, anyone votes for an outcome with a 0.1 NEAR bond, optionally with a link to their
+   evidence. The first vote opens a 15-minute vote window and fixes the dispute deadline one hour after it.
+2. **Counted.** When the vote window ends with enough voters, the outcome with the most bonded NEAR is the result.
+3. **Dispute window.** For an hour anyone can dispute with 3× the bonds posted; the committee then decides. Without a
+   dispute the result is final when the hour ends.
+4. **Settled.** The contract's views already show the market as resolved. The next call that touches it (in practice
+   the first winner's redeem, or anyone's `settle_market`) writes the result on chain, slashes the losing bonds, and
+   pays the market's **resolver** in the same transaction: the first voter of the winning outcome gets their bond back
+   plus half the market's protocol fees, with nothing to claim.
+
+A market with no vote counted by its resolution deadline, or a dispute the committee leaves undecided for 24 hours, is
+cancelled the same way, and every position and bond is refunded. The written standard that voters, disputers and the
+committee apply is in [docs/near/RESOLUTION.md](docs/near/RESOLUTION.md).
+
+**Who resolves today, honestly.** Anyone can vote, but on testnet most votes so far come from the team's own
+accounts, and the five committee accounts are all run by the operator. One 0.1 NEAR vote decides a market that nobody
+disputes within the hour. That is a demo setting; [Known limits](#known-limits) says what production needs.
+
+### AI resolver (NEAR AI Cloud)
+
+`backend/src/near-ai-resolver.ts` is an optional first voter. When a market's trading closes, it fetches the
+resolution source the market names, then asks a model that runs inside NEAR AI Cloud's TEE (default
+`z-ai/glm-5.3-flash`) which outcome the source supports under the market's rules. It votes only when:
+
+- the model answers with confidence of at least 0.8, and
+- NEAR AI's model TEE signed `model:sha256(request):sha256(response)` over the exact bytes, with a key listed in the
+  hardware attestation the resolver fetched, with a fresh nonce, just before asking.
+
+The vote's evidence is a link to a receipt (question, source excerpt, request, response, reasoning, signature and
+attestation) plus the receipt's SHA-256, so anyone can check the receipt has not changed and re-verify the signature in
+NEAR AI's Verification Center. The resolver has no special power: its vote is an ordinary bonded vote, and a wrong one
+is disputed and decided by the committee like any other. It votes as `ai.veiled-markets.testnet` (created and funded
+from the testnet faucet), so its votes are easy to tell from the team's own accounts. Its NEAR AI Cloud path
+(attestation, signed answer, signature check) has run with a live key, but it is not running on the hosted demo yet.
+
 ## Architecture
 
 ```
@@ -133,8 +176,11 @@ Browser (React)
 Relayer (backend/src/near-relayer.ts) ── transact ──▶ Contract v1.veiled-markets.testnet
                                                         ├─ note pool: depth-20 Poseidon tree, nullifiers
 Turbo oracle (backend/src/near-turbo-oracle.ts)          ├─ markets: FPMM market maker, liquidity, fees
-  opens and settles five-minute rounds           ──▶    ├─ resolution: votes, disputes, committee
-                                                        └─ parlays, turbo rounds and their vault
+  opens and settles five-minute rounds           ──▶    ├─ resolution: votes, disputes, committee,
+                                                        │    settled by the first call that touches a market
+AI resolver (backend/src/near-ai-resolver.ts)    ──▶    └─ parlays, turbo rounds and their vault
+  optional: NEAR AI Cloud (TEE) reads the source,
+  casts a bonded vote with a signed receipt
 ```
 
 The relayer checks each proof locally before it spends gas on it, and it cannot change a trade: the proof binds the
@@ -149,9 +195,9 @@ action, the recipient and the fee. The full design is in [docs/near/DESIGN.md](d
 | Turbo oracle account and service | [`veiled-oracle.testnet`](https://testnet.nearblocks.io/address/veiled-oracle.testnet), <https://oracle.veiledmarkets.xyz> ([audit log](https://oracle.veiledmarkets.xyz/audit)) |
 | USDC | Circle's testnet token, `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` |
 
-Testnet settings: the vote and dispute windows are five minutes each and the vote bond is 0.1 NEAR, so a demo market
-resolves in minutes. A buy pays 1% (half to the market's creator, half to the protocol); a sell pays that plus 1% to
-liquidity providers.
+Testnet settings: the vote window is 15 minutes, the dispute window an hour, the committee's time limit 24 hours and
+the vote bond 0.1 NEAR, so a market nobody disputes resolves 1 h 15 min after its first vote. A buy pays 1% (half to
+the market's creator, half to the protocol); a sell pays that plus 1% to liquidity providers.
 
 ## Run it locally
 
@@ -186,19 +232,25 @@ comma-separated list for the relayer, the oracle and the scripts. The relayer su
 **Your own contract:** build the wasm and run `near/scripts/deploy-testnet.sh v2`. Rebuilding the circuit
 (`cd near/circuits && npm run build`, which needs `circom`) makes new proving keys, so it goes with a new contract.
 
-**A whole market lifecycle in fifteen minutes** (operator keys needed): `cd backend && npx tsx scripts/quick-market.ts
-create 6` opens a NEAR price question that closes in six minutes; `npx tsx scripts/quick-market.ts resolve <id>
-<1=Yes|2=No>` then votes, finalizes and confirms the result. Winners redeem privately in the app. The other scripts
-are listed in [backend/README.md](backend/README.md).
+**A whole market lifecycle in about an hour and a half** (operator keys needed): `cd backend && npx tsx
+scripts/quick-market.ts create 6` opens a NEAR price question that closes in six minutes; `npx tsx
+scripts/quick-market.ts resolve <id> <1=Yes|2=No>` then casts the bonded vote. The result is final 1 h 15 min later
+with no further call, and the first winner to redeem privately in the app settles the market and pays the voter. The
+other scripts are listed in [backend/README.md](backend/README.md).
+
+**The AI resolver** (a NEAR AI Cloud key in `backend/.env` as `NEARAI_API_KEY`, and a funded account):
+`cd backend && DRY_RUN=1 npm run ai-resolver -- --once` decides every market waiting for a vote and writes the receipts
+to `backend/ai-receipts/` without voting. With `AI_RESOLVER_ACCOUNT` and `AI_RESOLVER_PUBLIC_URL` set (the address where
+its `/receipts` are served), `npm run ai-resolver` votes and serves the receipts.
 
 ## Tests
 
 | What | Command | Expect |
 |---|---|---|
 | Circuit: valid spends prove, invalid ones do not | `cd near/circuits && npm install && node --test test/spend.test.mjs` | 6 pass |
-| Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 48 pass |
+| Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 73 pass |
 | Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
-| Relayer request checks and LP note bookkeeping | `cd backend && npm install && npm test` | 10 pass |
+| Relayer request checks, AI resolver decisions and TEE signature checks, LP note bookkeeping | `cd backend && npm install && npm test` | 29 pass |
 | App: note keys, wallet signature, market data, positions, math | `cd frontend && npm install && npm test` | 66 pass |
 | Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
 
@@ -230,7 +282,7 @@ same, and NEAR now supplies the data, the wallet and the private trading that Al
 |---|---|
 | **New:** zero-knowledge circuit (Groth16 note pool) | `near/circuits/` |
 | **New:** NEAR contract (note pool, markets, market maker, resolution, parlays, turbo) | `near/contract/` |
-| **New:** relayer, turbo oracle and operator scripts | `backend/src/near-relayer.ts`, `backend/src/near-turbo-oracle.ts`, `backend/scripts/` |
+| **New:** relayer, turbo oracle, AI resolver and operator scripts | `backend/src/near-relayer.ts`, `backend/src/near-turbo-oracle.ts`, `backend/src/near-ai-resolver.ts`, `backend/scripts/` |
 | **New:** the app's NEAR layer (wallet, chain reads, prover, notes) | `frontend/src/lib/near/` |
 | **New:** private balance panel, landing page, account pictures and NEAR wording in the app | `frontend/src/components/` |
 | **Baseline:** React pages and components, market maker math, the SDK | the rest of `frontend/` and `sdk/` |
@@ -252,7 +304,7 @@ those reads.
 | Contract | `near-sdk` 5.30.1, `ark-bn254` and `ark-ff` 0.5 (field arithmetic); tests with `near-workspaces` 0.24 |
 | Circuit | Circom 2.1.6, `circomlib` 2.0.5, `circomlibjs` 0.1.7, `snarkjs` 0.7.5, and the public Perpetual Powers of Tau |
 | App | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, Framer Motion 11, React Router 6, Zustand 4, Recharts 3, `lucide-react`, NEAR Wallet Selector 10.1.4 with its Meteor Wallet module, `@near-js/transactions`, `snarkjs`, `poseidon-lite` |
-| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx`; turbo prices from Pyth Hermes, or CoinGecko without a Pyth key |
+| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx`, `@noble/curves` and `@noble/hashes` 2.2.0 (TEE signature checks); turbo prices from Pyth Hermes, or CoinGecko without a Pyth key; the AI resolver calls NEAR AI Cloud's OpenAI-compatible API |
 | Hosting | Docker images on Railway; the app is served by Caddy |
 
 The team's own pre-hackathon code is the baseline listed above. Parts of the code were written with the help of AI
@@ -269,11 +321,12 @@ are independent: they share no code, contracts or accounts (rule Q-015).
 What the testnet deployment trusts, and what a production deployment still needs:
 
 - **Resolution.** A market resolves by bonded vote, then a dispute window, then (if disputed) a committee of five
-  accounts the operator runs. The testnet uses demo settings so a market resolves in minutes: one voter is enough, the
-  bond is 0.1 NEAR and each window is five minutes. With those settings one account can decide a market unless someone
-  disputes within five minutes. The owner can set production values with `set_resolution_config` (more voters,
-  hour-long windows, a real bond); correct voters and disputers are not yet paid from forfeited bonds, so honest
-  resolution still depends on bettors and the committee watching.
+  accounts the operator runs, so the team decides every dispute. On testnet one voter is enough and the bond is
+  0.1 NEAR, so one account can decide a market unless someone disputes within the hour. The first correct voter is
+  paid half the market's protocol fees, which is small on testnet markets; forfeited bonds go to the treasury, not to
+  correct voters. Production needs a larger bond, more voters (`set_resolution_config`), and a committee the operator
+  does not control. The AI resolver's model and signature are checked, but the source page it reads is fetched by the
+  resolver itself, outside the TEE.
 - **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in, pro rata within that
   outcome, so a refund cannot draw on another outcome's collateral. Markets created before that rule keep the older
   pro-rata refund.
@@ -298,8 +351,8 @@ What the testnet deployment trusts, and what a production deployment still needs
 
 ### Not on NEAR yet
 
-Governance proposals, resolver staking and rewards exist only in the Aleo product. The app hides their controls on
-NEAR.
+Governance proposals and resolver staking exist only in the Aleo product. The app hides their controls on NEAR.
+(Resolver rewards are on NEAR now, paid per market from its protocol fees.)
 
 ## License
 

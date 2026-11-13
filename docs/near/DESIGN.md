@@ -97,12 +97,26 @@ Markets (port of `veiled_markets_v37.aleo` with the working-tree fixes; one cont
   note (private), as the Aleo program minted an LPToken record. `resolution_deadline` must leave two vote windows
   and one dispute window after `deadline`.
 - Public resolution calls from NEAR accounts (voters and disputers are public on Aleo too), bonds in NEAR:
-  `close_market, vote_outcome (payable bond), finalize_votes, confirm_resolution, dispute_resolution (payable bond),
+  `close_market, vote_outcome(market_id, outcome, evidence?) (payable bond), dispute_resolution (payable bond),
   cancel_market, claim_voter_bond, claim_dispute_bond, withdraw_creator_fees`. A vote window that ends short of the
   quorum reopens with the next vote, and a market with a voted outcome is confirmed or disputed, never cancelled.
   The owner sets the windows, bond and quorums with `set_resolution_config`; total fees are capped at 10%.
+- Settlement on use (no keeper). `MarketState::advance(height)` moves a market through every stage its clock has
+  reached: count a vote whose window closed with the quorum, confirm a result whose dispute window passed, apply a
+  finalized committee decision, cancel a dispute past `disputed_timeout` or a market past its resolution deadline
+  with no vote counted. Views (`get_market`, `get_markets`) return the advanced copy; every call that touches a market
+  (redeem, refund, LP exit, parlay settlement and claims, bond and fee claims, disputes, committee calls,
+  `settle_market`) persists it first. The dispute deadline is fixed when the vote window opens (one dispute window
+  after it), so a late call cannot stretch it. `finalize_votes`, `confirm_resolution` and `governance_resolve` remain
+  as optional single steps.
+- Resolver reward. The first voter of each outcome is recorded (raw key `fv`). The call that resolves a market pays
+  the first voter of the winning outcome (or, if nobody voted for it, the disputer who proposed it) their bond plus
+  `resolver_reward_bps` of the market's protocol fees from the treasury (default 5000; owner:
+  `set_resolver_reward_bps`), and logs `resolver_paid`. `vote_outcome` stores an optional evidence link of at most
+  300 bytes (`get_vote_evidence`, event `vote_evidence`). The new state lives under raw storage keys, so the upgrade
+  needs no migration.
 - Committee escalation (governance tier 2): `initiate_escalation, committee_vote_resolve, finalize_committee_vote,
-  governance_resolve`.
+  governance_resolve`. A finalized committee decision applies without `governance_resolve`.
 - Views mirror the Aleo mappings: `get_market, get_pool, get_fees, get_tally, get_dispute, get_market_credits,
   get_markets(from, limit), get_governance_values, has_voted(market_id, account), get_height`.
 
@@ -121,11 +135,18 @@ Market ids and turbo ids share one counter, so a `/market/:id` route is unambigu
 - Turbo oracle (`backend/src/near-turbo-oracle.ts`): the Aleo oracle's logic and HTTP endpoints (`/health, /quote,
   /stream, /chain, /chain/symbol`) with NEAR calls. Same trust model as Aleo: the operator account submits Pyth
   Hermes prices (CoinGecko when no `PYTH_API_KEY` is set); the contract checks bounds and the operator identity.
+- AI resolver (`backend/src/near-ai-resolver.ts`, optional): for each market whose trading closed and that has no
+  vote, it fetches the named resolution source (public http(s) only, every hop's address checked), asks a model in
+  NEAR AI Cloud's TEE for the outcome, checks the model TEE's ECDSA signature over `model:sha256(request):
+  sha256(response)` against the signers in an attestation fetched with a fresh nonce, and votes when the model's
+  confidence is at least 0.8. The vote's evidence is the receipt's URL and SHA-256; the receipts are served at
+  `/receipts/<market>.json`. It casts an ordinary bonded vote.
 - Supabase is optional on NEAR: market list and metadata come from the contract.
 
 ## 6. Out of scope for the hackathon build
 
-Community governance proposals, resolver registry, reward epochs and the multisig treasury stay Aleo-only.
+Community governance proposals, resolver registry and staking, reward epochs and the multisig treasury stay
+Aleo-only (the per-market resolver reward above is NEAR's own).
 Parlays were ported later (`near/contract/contracts/veiled/src/parlay.rs`, note kind 5 = parlay ticket; see the
 Parlays section of the in-app Docs page). Legs are markets the owner approved (`set_parlay_leg`), and a ticket pays
 at most a set share of its thinnest leg's pool depth (`set_parlay_leg_cap`, 1% by default), because leg odds are
