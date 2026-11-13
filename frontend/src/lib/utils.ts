@@ -30,14 +30,18 @@ export function formatCredits(microcredits: bigint, decimals: number = 2): strin
   // "0.99" not "1.00" — matches actual spendable amount after 0.5% fee.
   // Testnet amounts are often below 0.01: a non-zero amount that would truncate to 0.00 gets two significant
   // digits instead (9950 micro shows as 0.0099, not 0.00).
-  const value = Number(microcredits) / 1_000_000
+  // Truncation is done on the integer amount: on a float, 2_300_000 micro became 2.3 * 100 = 229.99999999999997
+  // and showed as 2.29.
+  const abs = microcredits < 0n ? -microcredits : microcredits
+  const unitFor = (digits: number) => 10n ** BigInt(6 - Math.min(digits, 6))
   let shown = decimals
-  if (value !== 0 && Math.trunc(value * Math.pow(10, decimals)) === 0) {
-    while (shown < 6 && Math.trunc(value * Math.pow(10, shown)) === 0) shown++
+  if (abs !== 0n && abs / unitFor(decimals) === 0n) {
+    while (shown < 6 && abs / unitFor(shown) === 0n) shown++
     shown = Math.min(shown + 1, 6)
   }
-  const factor = Math.pow(10, shown)
-  const credits = Math.trunc(value * factor) / factor
+  const unit = unitFor(shown)
+  const truncated = (abs / unit) * unit
+  const credits = (Number(truncated) / 1_000_000) * (microcredits < 0n ? -1 : 1)
   return credits.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: shown,
