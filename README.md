@@ -6,7 +6,7 @@
 
 A prediction market on NEAR where prices are public and positions are private.
 
-[**Live demo**](https://veiledmarkets.xyz) · [Contract](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) · [Design](docs/near/DESIGN.md) · [Try it](#try-it) · [Run it locally](#run-it-locally)
+[**Live demo**](https://veiledmarkets.xyz) · [Demo video](https://x.com/MDLOG_labs/status/2121134799658328102) · [Contract](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) · [Design](docs/near/DESIGN.md) · [Try it](#try-it) · [Run it locally](#run-it-locally)
 
 ![NEAR testnet](https://img.shields.io/badge/NEAR-testnet-0b0d12?style=flat-square&logo=near&logoColor=white)
 ![Track](https://img.shields.io/badge/NEAR%20HACKATHON-Privacy%20%26%20Private%20AI-c9a84c?style=flat-square)
@@ -30,6 +30,7 @@ A prediction market on NEAR where prices are public and positions are private.
 | **Event** | NEAR HACKATHON, 1 to 14 November 2026 |
 | **Track** | Privacy & Private AI (private finance) |
 | **Live demo** | <https://veiledmarkets.xyz>, on NEAR testnet with test tokens only |
+| **Demo video** | [Post on X](https://x.com/MDLOG_labs/status/2121134799658328102): a 2.5-minute walkthrough of a deposit and a private bet, filmed live on testnet |
 | **Contract** | [`v1.veiled-markets.testnet`](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) |
 | **Built in the hackathon** | The NEAR contract, the zero-knowledge circuit, the relayer, the turbo oracle and the app's NEAR layer. The product existed on Aleo before: see [Hackathon disclosure](#hackathon-disclosure). |
 
