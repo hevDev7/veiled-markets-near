@@ -50,6 +50,7 @@ import {
 } from '@/lib/parlay-helpers'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { FEATURES, isChainTxId } from '@/lib/near/config'
+import { onNotesChanged } from '@/lib/near/notes/store'
 
 type BetFilter = 'all' | 'accepted' | 'unredeemed' | 'settled' | 'history' | 'watchlist'
 
@@ -232,18 +233,19 @@ function renderPortfolioTokenLines(
 function getOpenPositionMetrics(bet: Bet, market: Market | undefined) {
   const shares = bet.sharesReceived || bet.amount
   const sharesRaw = Number(shares) / 1_000_000
-  const amountRaw = Number(bet.amount) / 1_000_000
-  const avgPrice = sharesRaw > 0 ? amountRaw / sharesRaw : 0
+  // A position recovered from share notes older than the cost-in-memo has no known cost: no average, no P&L.
+  const amountRaw = bet.costUnknown ? null : Number(bet.amount) / 1_000_000
+  const avgPrice = amountRaw !== null && sharesRaw > 0 ? amountRaw / sharesRaw : amountRaw !== null ? 0 : null
   const outcomeIdx = outcomeToIndex(bet.outcome)
-  const currentPrice = getOutcomeCurrentPrice(market, outcomeIdx) ?? avgPrice
+  const currentPrice = getOutcomeCurrentPrice(market, outcomeIdx) ?? avgPrice ?? 0
   const reserves = getMarketReserves(market)
   const quotedValueMicro = reserves ? calculateSellTokensOut(reserves, outcomeIdx, shares) : 0n
   const currentValue = quotedValueMicro > 0n
     ? Number(quotedValueMicro) / 1_000_000
     : sharesRaw * currentPrice
   const exitPrice = sharesRaw > 0 ? currentValue / sharesRaw : currentPrice
-  const pnlAmount = currentValue - amountRaw
-  const pnlPct = amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
+  const pnlAmount = amountRaw !== null ? currentValue - amountRaw : null
+  const pnlPct = amountRaw === null || pnlAmount === null ? null : amountRaw > 0 ? (pnlAmount / amountRaw) * 100 : 0
 
   return {
     shares,
@@ -271,6 +273,7 @@ export function MyBets() {
     markBetUnclaimed,
     addPendingBet,
     removePendingBet,
+    refreshChainPositions,
   } = useBetsStore()
   const { markets, fetchMarkets } = useRealMarketsStore()
   const [isLoading, setIsLoading] = useState(true)
@@ -428,7 +431,7 @@ export function MyBets() {
     // Build cumulative portfolio value over time from chronological bets
     const sorted = [...allBets].sort((a, b) => a.placedAt - b.placedAt)
     let cumValue = 0
-    return sorted.map((bet) => {
+    return sorted.filter((bet) => !bet.costUnknown).map((bet) => {
       const amount = Number(bet.amount) / 1_000_000
       if (bet.status === 'won') {
         cumValue += Number(bet.sharesReceived || bet.amount) / 1_000_000 - amount
@@ -445,6 +448,24 @@ export function MyBets() {
   }, [allBets])
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
+
+  // NEAR: positions held on chain show up as soon as this page's notes change (unlocking the private balance here
+  // scans them), not only after a reload. A status sync follows only when that adds a position.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const off = onNotesChanged(() => {
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        refreshChainPositions()
+          .then((added) => (added > 0 ? syncBetStatuses() : undefined))
+          .catch(() => undefined)
+      }, 1000)
+    })
+    return () => {
+      clearTimeout(timer)
+      off()
+    }
+  }, [refreshChainPositions, syncBetStatuses])
 
   // Load bets and sync statuses on mount
   useEffect(() => {
@@ -693,7 +714,7 @@ export function MyBets() {
               const wonParlays = settledParlays.filter((parlay) => parlay.status === 'won')
               const lostParlays = settledParlays.filter((parlay) => parlay.status === 'lost')
               userBets.forEach((bet) => {
-                if (bet.type === 'sell') return
+                if (bet.type === 'sell' || bet.costUnknown) return
                 const market = getMarketInfo(bet.marketId)
                 const token = normalizePortfolioToken(market?.tokenType || bet.tokenType)
 
@@ -970,10 +991,14 @@ export function MyBets() {
                                     {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
                                   </p>
                                   <p className="text-[10px] text-surface-400 mt-1">
-                                    {formatPurchaseTime(bet.placedAt)}
+                                    {bet.recovered ? 'Found on chain' : formatPurchaseTime(bet.placedAt)}
                                   </p>
                                   <p className="text-[10px] text-surface-500 mt-0.5 tabular-nums">
-                                    Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; Exit {exitPrice.toFixed(3)} {tokenSymbol}
+                                    {avgPrice !== null ? (
+                                      <>Avg. {avgPrice.toFixed(3)} {tokenSymbol} &rarr; Exit {exitPrice.toFixed(3)} {tokenSymbol}</>
+                                    ) : (
+                                      <>Exit {exitPrice.toFixed(3)} {tokenSymbol} · cost not recorded</>
+                                    )}
                                   </p>
                                 </td>
                                 <td className="px-4 py-4 text-center">
@@ -1003,6 +1028,9 @@ export function MyBets() {
                                   </span>
                                 </td>
                                 <td className="px-4 py-4 text-right">
+                                  {pnlAmount === null || pnlPct === null ? (
+                                    <span className="text-sm text-surface-500" title="This position was found on chain; its cost was not recorded">—</span>
+                                  ) : (
                                   <div className="flex items-center justify-end gap-1">
                                     {pnlAmount >= 0 ? (
                                       <ArrowUpRight className="w-3.5 h-3.5 text-yes-400" />
@@ -1022,6 +1050,7 @@ export function MyBets() {
                                       ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
                                     </span>
                                   </div>
+                                  )}
                                 </td>
                                 <td className="px-3 py-4">
                                   <ChevronRight className="w-4 h-4 text-surface-600 group-hover:text-surface-400 transition-colors" />
@@ -1069,7 +1098,7 @@ export function MyBets() {
                                   {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
                                 </p>
                                 <p className="text-[10px] text-surface-400 mt-1">
-                                  {formatPurchaseTime(bet.placedAt)}
+                                  {bet.recovered ? 'Found on chain' : formatPurchaseTime(bet.placedAt)}
                                 </p>
                               </div>
                               <ChevronRight className="w-4 h-4 text-surface-600 flex-shrink-0 mt-1" />
@@ -1090,6 +1119,9 @@ export function MyBets() {
                               </div>
                               <div className="text-right">
                                 <p className="text-[10px] text-surface-500 uppercase font-heading mb-0.5">Unrealized P&L</p>
+                                {pnlAmount === null || pnlPct === null ? (
+                                  <p className="text-sm text-surface-500" title="This position was found on chain; its cost was not recorded">—</p>
+                                ) : (
                                 <div className="flex items-center justify-end gap-0.5">
                                   {pnlAmount >= 0 ? (
                                     <ArrowUpRight className="w-3 h-3 text-yes-400" />
@@ -1100,6 +1132,7 @@ export function MyBets() {
                                     {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%
                                   </span>
                                 </div>
+                                )}
                               </div>
                             </div>
                           </motion.div>
@@ -1482,7 +1515,7 @@ function BetCard({
             {market?.question || bet.marketQuestion || `Market ${bet.marketId.slice(0, 12)}...`}
           </h3>
           <p className="text-[11px] text-surface-500 mt-0.5 tabular-nums">
-            {formatPurchaseTime(bet.placedAt)}
+            {bet.recovered ? 'Found on chain' : formatPurchaseTime(bet.placedAt)}
           </p>
         </div>
 
@@ -1507,7 +1540,9 @@ function BetCard({
             <>
               <div className="text-right">
                 <p className="text-xs font-heading text-surface-500">Stake</p>
-                <p className="text-sm font-heading font-bold text-white tabular-nums">{formatCredits(bet.amount)} {tokenSymbol}</p>
+                <p className="text-sm font-heading font-bold text-white tabular-nums">
+                  {bet.costUnknown ? '\u2014' : <>{formatCredits(bet.amount)} {tokenSymbol}</>}
+                </p>
               </div>
 
               {(isWon || isLost || isRefunded) && (
@@ -1530,11 +1565,13 @@ function BetCard({
                             ?? (bet.amount - bet.amount / 200n)
                           return `+${formatCredits(shown)} ${tokenSymbol}`
                         })()
-                      : isRefunded
-                        ? `${formatCredits(bet.amount)} ${tokenSymbol}`
-                        : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
+                      : bet.costUnknown
+                        ? (isRefunded ? 'Refundable' : 'Lost')
+                        : isRefunded
+                          ? `${formatCredits(bet.amount)} ${tokenSymbol}`
+                          : `-${formatCredits(bet.amount)} ${tokenSymbol}`}
                   </p>
-                  {isWon && (() => {
+                  {isWon && !bet.costUnknown && (() => {
                     const payout = bet.payoutAmount
                       ?? bet.sharesReceived
                       ?? (bet.amount - bet.amount / 200n)

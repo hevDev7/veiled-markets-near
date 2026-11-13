@@ -114,6 +114,8 @@ export interface Bet {
   winningOutcome?: string      // From resolution data
   claimed?: boolean            // Whether user has claimed winnings/refund
   tokenType?: 'NEAR' | 'USDCX' | 'USAD' // v12: token denomination
+  recovered?: boolean          // NEAR: built from the account's share notes on chain, not from a record kept here
+  costUnknown?: boolean        // recovered from notes that predate the cost in the memo: `amount` is not the cost
 }
 
 /** Convert 1-indexed outcome number to string key */
@@ -863,6 +865,7 @@ interface BetsStore {
   importCommitments: (json: string) => number
   fetchUserBets: () => Promise<void>
   loadBetsForAddress: (address: string) => void
+  refreshChainPositions: () => Promise<number>  // NEAR: recovered positions from the notes cached here (no note sync); returns how many are new
   syncBetStatuses: () => Promise<void>
   markBetClaimed: (betId: string) => void
   markBetUnclaimed: (betId: string) => void
@@ -995,11 +998,41 @@ function savePendingBetsToStorage(bets: Bet[]) {
 }
 
 // Helper to save bets to localStorage (per-address)
+/**
+ * NEAR: `bets` plus the positions the account holds on chain (unspent share notes) that no record here covers, so
+ * positions bought in another browser are listed too. `sync` first brings the notes up to date with the contract
+ * (with the cached note keys only: never a signature prompt); without it the notes cached in this browser are used.
+ */
+async function withChainPositions(bets: Bet[], sync: boolean): Promise<Bet[]> {
+  try {
+    const { currentAccountId } = await import('./near/near-wallet')
+    const { refreshNotes } = await import('./near/private')
+    const { notesOf } = await import('./near/notes/store')
+    const { getNearMarket } = await import('./near/chain')
+    const { chainPositions, tokenKey } = await import('./near/positions')
+    const accountId = await currentAccountId()
+    if (!accountId) return bets
+    const notes = sync ? await refreshNotes(false) : notesOf(accountId)
+    const assets = [...new Set(notes.filter(n => n.status === 'unspent').map(n => n.asset))]
+    const tokens = new Map<bigint, Bet['tokenType']>()
+    await Promise.all(assets.map(async (asset) => {
+      const market = await getNearMarket(asset).catch(() => null)
+      if (market) tokens.set(asset, tokenKey(market.token_type))
+    }))
+    const recovered = chainPositions(notes, bets, (asset) => tokens.get(asset))
+    return [...bets.filter(b => !b.recovered), ...recovered]
+  } catch (err) {
+    devWarn('[Bets] Could not read positions from the chain:', err)
+    return bets
+  }
+}
+
 function saveBetsToStorage(bets: Bet[]) {
   const { address, encryptionKey } = useWalletStore.getState().wallet
   if (typeof window === 'undefined' || !address) return
   try {
-    const serializable = bets.map(serializeBetForStorage)
+    // Positions recovered from on-chain notes are rebuilt on every load, never stored as records.
+    const serializable = bets.filter(b => !b.recovered).map(serializeBetForStorage)
     localStorage.setItem(getBetsKey(address), JSON.stringify(serializable))
     // Sync to Supabase (encrypted if key available, plaintext otherwise)
     if (isSupabaseAvailable()) {
@@ -1689,6 +1722,11 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
         saveBetsToStorage(mergedBets)
       }
 
+      const withChain = await withChainPositions(mergedBets, true)
+      if (useWalletStore.getState().wallet.address === address && get().userBets === mergedBets) {
+        set({ userBets: withChain })
+      }
+
       // Background: merge from Supabase if available
       if (isSupabaseAvailable()) {
         syncFromSupabase(address, set, get)
@@ -1726,6 +1764,16 @@ export const useBetsStore = create<BetsStore>((set, get) => ({
     if (isSupabaseAvailable()) {
       syncFromSupabase(address, set, get)
     }
+  },
+
+  refreshChainPositions: async () => {
+    const address = useWalletStore.getState().wallet.address
+    const before = get().userBets
+    const next = await withChainPositions(before, false)
+    if (useWalletStore.getState().wallet.address !== address || get().userBets !== before) return 0
+    const known = new Set(before.filter(b => b.recovered).map(b => b.id))
+    set({ userBets: next })
+    return next.filter(b => b.recovered && !known.has(b.id)).length
   },
 
   syncBetStatuses: async () => {

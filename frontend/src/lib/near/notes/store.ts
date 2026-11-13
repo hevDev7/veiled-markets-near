@@ -19,6 +19,8 @@ export interface Note {
   nullifier: bigint;
   status: NoteStatus;
   createdAt: number;
+  /** What a buy spent for this share note (micro units), from the buyer's memo; absent on older notes. */
+  cost?: bigint;
 }
 
 interface LeafView {
@@ -55,6 +57,7 @@ function serialize(l: Ledger) {
       blinding: n.blinding.toString(),
       commitment: n.commitment.toString(),
       nullifier: n.nullifier.toString(),
+      cost: n.cost?.toString(),
     })),
   });
 }
@@ -75,6 +78,7 @@ function load(accountId: string): Ledger {
         blinding: BigInt(n.blinding),
         commitment: BigInt(n.commitment),
         nullifier: BigInt(n.nullifier),
+        cost: n.cost === undefined ? undefined : BigInt(n.cost),
       }));
     }
   } catch {
@@ -145,6 +149,7 @@ async function ownLeaf(keys: NoteKeys, leaf: LeafView): Promise<Note | null> {
     nullifier: nullifierOf(keys.sk, commitment),
     status: 'unspent',
     createdAt: Date.now(),
+    ...(payload.c !== undefined ? { cost: BigInt(payload.c) } : {}),
   };
 }
 

@@ -90,10 +90,13 @@ async function spendOnce(keys: NoteKeys, req: PrivateActionRequest, inputs: Note
   const changeAmount = sum - req.amount;
   const changeBlinding = randomField();
   const newBlinding = randomField();
+  // A buy's share note keeps what it cost in its memo (only this key opens it; out_amount is public anyway), so the
+  // position's cost can be shown from the chain alone, in another browser too.
+  const cost = req.action.type === 'buy' ? req.amount : null;
   const ext = JSON.stringify({
     action: req.action,
     new_owner_blind: ownerBlindOf(keys.sk, newBlinding).toString(),
-    new_memo: await sealMemo(keys.memoKey, { b: newBlinding.toString() }),
+    new_memo: await sealMemo(keys.memoKey, { b: newBlinding.toString(), ...(cost !== null ? { c: cost.toString() } : {}) }),
     change_memo:
       changeAmount > 0n
         ? await sealMemo(keys.memoKey, {
@@ -185,6 +188,7 @@ async function spendOnce(keys: NoteKeys, req: PrivateActionRequest, inputs: Note
     minted = {
       kind: r.new_kind, asset: BigInt(r.new_asset), sub: r.new_sub, amount: BigInt(r.new_amount), blinding: newBlinding,
       index: Number(r.new_index), commitment: c, nullifier: nullifierOf(keys.sk, c), status: 'unspent', createdAt: now,
+      ...(cost !== null ? { cost } : {}),
     };
     upsertNote(keys.accountId, minted);
   }
