@@ -686,16 +686,7 @@ export function Governance() {
       <div className="min-h-screen bg-surface-950 flex flex-col">
         <DashboardHeader />
         <main className="flex-1 pt-20 pb-20 md:pb-0">
-          <NearGovernance
-            disputes={
-              <EscalationPanel
-                embedded
-                onOpenProposal={handleSelectProposal}
-                onReviewLane={handleReviewDisputeLane}
-                onOpenContextLane={handleOpenContextLane}
-              />
-            }
-          />
+          <NearGovernance />
         </main>
         <Footer />
       </div>

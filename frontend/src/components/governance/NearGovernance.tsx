@@ -2,38 +2,60 @@
 // settings the contract runs with. Everything shown is read from the contract. Proposals, resolver staking and
 // rewards belong to the Aleo product and have no panel here.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowUpRight, Coins, Scale, ShieldAlert, Vote, type LucideIcon } from 'lucide-react'
-import { getGovernanceValues, getNearConfig, type NearConfig } from '@/lib/near/chain'
-import { accountUrl, VEILED_CONTRACT } from '@/lib/near/config'
-import { formatWindow, percentOfBps, resolutionCounts } from '@/lib/near/governance'
-import { useRealMarketsStore } from '@/lib/market-store'
+import { Link } from 'react-router-dom'
+import { ArrowRight, ArrowUpRight, Coins, Scale, ShieldAlert, Vote, type LucideIcon } from 'lucide-react'
+import {
+  decodeMetadata,
+  getGovernanceValues,
+  getNearConfig,
+  getNearHeight,
+  listNearMarkets,
+  type NearConfig,
+  type NearMarket,
+} from '@/lib/near/chain'
+import { accountUrl, TOKEN_SYMBOL, VEILED_CONTRACT } from '@/lib/near/config'
+import {
+  formatWindow,
+  microToUnits,
+  percentOfBps,
+  resolutionCounts,
+  resolutionStage,
+  stageSummary,
+  type ResolutionStage,
+} from '@/lib/near/governance'
+import { useMarketPath } from '@/lib/near/market-tx'
 import { cn } from '@/lib/utils'
 
 const card = 'rounded-2xl border border-white/[0.06] bg-surface-900/40'
 const sectionTitle = 'font-display text-[1.375rem] leading-tight tracking-tight text-white'
 
-/** Micro units (6 decimals) as a plain number: "0.1", "0.001". */
-const tokens = (micro: string) => String(Number(micro) / 1_000_000)
+const tokens = microToUnits
 
-export function NearGovernance({ disputes }: { disputes: ReactNode }) {
+/** How often the markets and the contract's clock are read again, so stages move without a reload. */
+const REFRESH_MS = 20_000
+
+export function NearGovernance() {
   const [config, setConfig] = useState<NearConfig | null>(null)
   const [paused, setPaused] = useState<boolean | null>(null)
-  const { markets, fetchMarkets } = useRealMarketsStore()
+  const [chain, setChain] = useState<{ markets: NearMarket[]; height: bigint } | null>(null)
 
   useEffect(() => {
     let alive = true
     getNearConfig().then((c) => alive && setConfig(c)).catch(() => {})
     getGovernanceValues().then((g) => alive && setPaused(g.paused)).catch(() => {})
+    const load = () =>
+      Promise.all([listNearMarkets(), getNearHeight()])
+        .then(([markets, height]) => alive && setChain({ markets, height }))
+        .catch(() => {})
+    void load()
+    const timer = window.setInterval(() => !document.hidden && void load(), REFRESH_MS)
     return () => {
       alive = false
+      window.clearInterval(timer)
     }
   }, [])
 
-  useEffect(() => {
-    if (markets.length === 0) void fetchMarkets()
-  }, [markets.length, fetchMarkets])
-
-  const counts = useMemo(() => resolutionCounts(markets), [markets])
+  const counts = useMemo(() => resolutionCounts(chain?.markets ?? [], chain?.height ?? 0n), [chain])
 
   return (
     <div className="mx-auto max-w-[1200px] space-y-12 px-4 py-8 sm:px-6 lg:px-8">
@@ -119,7 +141,7 @@ export function NearGovernance({ disputes }: { disputes: ReactNode }) {
         <h2 id="gov-disputes" className={sectionTitle}>
           Markets in resolution
         </h2>
-        <div className={cn(card, 'mt-5 p-4 sm:p-6')}>{disputes}</div>
+        <ResolutionList chain={chain} config={config} />
       </section>
 
       <section aria-labelledby="gov-settings">
@@ -165,6 +187,119 @@ export function NearGovernance({ disputes }: { disputes: ReactNode }) {
         Governance proposals, resolver staking and rewards are part of the Aleo product and are not deployed on NEAR.
         The settings above are the testnet's: the windows are short so that a demo market resolves in minutes.
       </p>
+    </div>
+  )
+}
+
+const STAGE: Record<ResolutionStage, { label: string; tone: string; order: number }> = {
+  committee: { label: 'With the committee', tone: 'border-purple-400/30 bg-purple-400/10 text-purple-200', order: 0 },
+  disputed: { label: 'In dispute', tone: 'border-no-500/30 bg-no-500/10 text-no-300', order: 1 },
+  dispute_window: { label: 'Open to dispute', tone: 'border-amber-400/30 bg-amber-400/10 text-amber-200', order: 2 },
+  voting: { label: 'Vote open', tone: 'border-brand-400/30 bg-brand-400/10 text-brand-200', order: 3 },
+  awaiting_vote: { label: 'Awaiting a vote', tone: 'border-white/10 bg-white/[0.04] text-surface-200', order: 4 },
+  resolved: { label: 'Resolved', tone: 'border-yes-500/25 bg-yes-500/10 text-yes-300', order: 5 },
+  cancelled: { label: 'Cancelled', tone: 'border-white/10 bg-white/[0.04] text-surface-400', order: 6 },
+}
+const SETTLED: ResolutionStage[] = ['resolved', 'cancelled']
+
+type ListFilter = 'active' | 'settled' | 'all'
+
+/** Every market that has left trading, with its stage and what can happen to it next. Actions are on its page. */
+function ResolutionList({ chain, config }: { chain: { markets: NearMarket[]; height: bigint } | null; config: NearConfig | null }) {
+  const [filter, setFilter] = useState<ListFilter>('active')
+  const marketHref = useMarketPath()
+
+  const rows = useMemo(() => {
+    if (!chain) return []
+    return chain.markets
+      .map((market) => ({ market, stage: resolutionStage(market, chain.height) }))
+      .filter((row): row is { market: NearMarket; stage: ResolutionStage } => row.stage !== null)
+      .sort((a, b) => STAGE[a.stage].order - STAGE[b.stage].order || Number(b.market.id) - Number(a.market.id))
+  }, [chain])
+
+  const active = rows.filter((r) => !SETTLED.includes(r.stage))
+  const settled = rows.filter((r) => SETTLED.includes(r.stage))
+  const shown = filter === 'active' ? active : filter === 'settled' ? settled : rows
+  const filters: Array<{ key: ListFilter; label: string; count: number }> = [
+    { key: 'active', label: 'In progress', count: active.length },
+    { key: 'settled', label: 'Settled', count: settled.length },
+    { key: 'all', label: 'All', count: rows.length },
+  ]
+
+  return (
+    <div className={cn(card, 'mt-5')}>
+      <div className="flex flex-col gap-3 border-b border-white/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <p className="text-sm text-surface-400">
+          Markets that have closed, with what can happen to each next. Voting and disputing are done on the market's
+          own page.
+        </p>
+        <div role="group" aria-label="Which markets to list" className="inline-flex shrink-0 gap-1 rounded-xl border border-white/[0.06] bg-white/[0.02] p-1">
+          {filters.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={filter === f.key}
+              onClick={() => setFilter(f.key)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
+                filter === f.key ? 'bg-brand-500/15 text-brand-200' : 'text-surface-400 hover:bg-white/[0.04] hover:text-white',
+              )}
+            >
+              {f.label}
+              <span className="tabular-nums text-surface-500">{f.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!chain ? (
+        <div className="space-y-3 p-4 sm:p-6" aria-busy="true" aria-label="Loading markets">
+          {[0, 1].map((i) => (
+            <div key={i} className="h-16 animate-pulse rounded-xl bg-white/[0.03]" />
+          ))}
+        </div>
+      ) : shown.length === 0 ? (
+        <p className="px-6 py-12 text-center text-sm text-surface-500">
+          {filter === 'settled'
+            ? 'No market has been resolved or cancelled yet.'
+            : filter === 'all'
+              ? 'No market has closed yet.'
+              : 'No market is being resolved right now. A market appears here as soon as its trading closes.'}
+        </p>
+      ) : (
+        <ul className="divide-y divide-white/[0.05]">
+          {shown.map(({ market, stage }) => {
+            const meta = decodeMetadata(market.metadata)
+            const label = (outcome: number) =>
+              meta.outcomeLabels?.[outcome - 1] ?? (market.num_outcomes === 2 ? ['Yes', 'No'][outcome - 1] : undefined) ?? `Outcome ${outcome}`
+            return (
+              <li key={market.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6 sm:px-6 sm:py-5">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', STAGE[stage].tone)}>
+                      {STAGE[stage].label}
+                    </span>
+                    <span className="font-mono text-xs text-surface-500">
+                      #{market.id} · {TOKEN_SYMBOL[market.token_type] ?? 'NEAR'}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[15px] font-medium leading-snug text-white">{meta.question ?? `Market #${market.id}`}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-surface-400">
+                    {stageSummary(market, chain.height, { quorum: config?.committee_quorum ?? 0, timeout: config?.disputed_timeout, label })}
+                  </p>
+                </div>
+                <Link
+                  to={marketHref(market.id)}
+                  className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-lg border border-white/[0.08] px-3 py-2 text-xs font-medium text-surface-200 transition-colors hover:border-white/20 hover:text-white"
+                >
+                  Open market
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }
