@@ -21,6 +21,8 @@ export interface NearDispute {
   escalated_tier: number;
   final_outcome: number;
   resolved_by: string;
+  /** The disputer's bond was paid back (absent on contract builds before settlement on use). */
+  bond_claimed?: boolean;
 }
 
 export interface NearMarket {
@@ -58,6 +60,10 @@ export interface NearMarket {
   committee_votes: number;
   committee_outcome: number;
   committee_finalized: boolean;
+  /** First voter of the leading outcome: the resolver, who is paid bond and reward when the market settles. */
+  proposer?: string | null;
+  /** What that resolver is paid on top of the bond: a share of the market's protocol fees (micro units). */
+  resolver_reward?: string;
 }
 
 export interface NearTurbo {
@@ -177,6 +183,11 @@ export const getGovernanceValues = () =>
   );
 export const getNearVote = (marketId: string, accountId: string) =>
   view<{ outcome: number; bond: string; claimed: boolean } | null>('get_vote', { market_id: nearId(marketId), account_id: accountId });
+/** The evidence link a voter attached to their vote (vote_outcome `evidence`), or null. */
+export const getVoteEvidence = (marketId: string, accountId: string) =>
+  cachedView<string | null>('get_vote_evidence', { market_id: nearId(marketId), account_id: accountId }, 30_000).catch(() => null);
+/** The resolver's share of a market's protocol fees, in basis points. */
+export const getResolverRewardBps = () => cachedView<number>('get_resolver_reward_bps', {}, 60_000);
 export const getNearTurbo = (id: string | number | bigint) =>
   cachedView<NearTurbo | null>('get_turbo_market', { market_id: nearId(id) }, 2000);
 

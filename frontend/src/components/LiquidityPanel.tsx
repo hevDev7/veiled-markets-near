@@ -14,8 +14,8 @@ import {
   getCurrentBlockHeight,
   MARKET_STATUS,
   getProgramIdForToken,
-  WINNER_CLAIM_PRIORITY_BLOCKS,
 } from '@/lib/aleo-client'
+import { useWinnerClaimPriority } from '@/hooks/useWinnerClaimPriority'
 import { calculateAddLiquidityQuote, type AMMReserves } from '@/lib/amm'
 import { fetchLPTokenRecords, type ParsedLPToken } from '@/lib/credits-record'
 import { getNearMarket, type NearMarket } from '@/lib/near/chain'
@@ -182,10 +182,11 @@ export function LiquidityPanel({ market }: LiquidityPanelProps) {
     : walletTokenBalance
   const addLiquidityBalance = privateTokenBalance + walletSpendable
 
+  const winnerPriority = useWinnerClaimPriority()
   const winnerClaimUnlockBlock = useMemo(() => {
     if (!isResolved || market.challengeDeadline === undefined) return null
-    return market.challengeDeadline + WINNER_CLAIM_PRIORITY_BLOCKS
-  }, [isResolved, market.challengeDeadline])
+    return market.challengeDeadline + winnerPriority
+  }, [isResolved, market.challengeDeadline, winnerPriority])
 
   const winnerClaimWindowActive = isResolved
     && !isCancelled

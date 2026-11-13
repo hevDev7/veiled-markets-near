@@ -1,6 +1,6 @@
 // The governance page on NEAR: how a market's result is decided, which markets are being resolved now, and the
-// settings the contract runs with. Everything shown is read from the contract. Proposals, resolver staking and
-// rewards belong to the Aleo product and have no panel here.
+// settings the contract runs with. Everything shown is read from the contract. Proposals and resolver staking
+// belong to the Aleo product and have no panel here.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, ArrowUpRight, Coins, Scale, ShieldAlert, Vote, type LucideIcon } from 'lucide-react'
@@ -9,6 +9,7 @@ import {
   getGovernanceValues,
   getNearConfig,
   getNearHeight,
+  getResolverRewardBps,
   listNearMarkets,
   type NearConfig,
   type NearMarket,
@@ -37,12 +38,14 @@ const REFRESH_MS = 20_000
 export function NearGovernance() {
   const [config, setConfig] = useState<NearConfig | null>(null)
   const [paused, setPaused] = useState<boolean | null>(null)
+  const [rewardBps, setRewardBps] = useState<number | null>(null)
   const [chain, setChain] = useState<{ markets: NearMarket[]; height: bigint } | null>(null)
 
   useEffect(() => {
     let alive = true
     getNearConfig().then((c) => alive && setConfig(c)).catch(() => {})
     getGovernanceValues().then((g) => alive && setPaused(g.paused)).catch(() => {})
+    getResolverRewardBps().then((b) => alive && setRewardBps(b)).catch(() => {})
     const load = () =>
       Promise.all([listNearMarkets(), getNearHeight()])
         .then(([markets, height]) => alive && setChain({ markets, height }))
@@ -115,23 +118,25 @@ export function NearGovernance() {
             <V>{config ? `${tokens(config.vote_bond)} NEAR` : null}</V>. Voting stays open for{' '}
             <V>{config ? formatWindow(config.vote_window) : null}</V> and needs at least{' '}
             <V>{config ? `${config.min_voters} ${config.min_voters === 1 ? 'voter' : 'voters'}` : null}</V>. The outcome
-            with the most bonded NEAR leads.
+            with the most bonded NEAR leads. Its first voter is the market's resolver, paid their bond back plus{' '}
+            <V>{rewardBps !== null ? percentOfBps(rewardBps) : null}</V> of the market's protocol fees when it settles.
           </Step>
           <Step n={2} icon={ShieldAlert} title="Dispute window">
             For <V>{config ? formatWindow(config.dispute_window) : null}</V> the leading outcome can be challenged in
             favour of another, with a bond of at least{' '}
             <V>{config ? `${config.dispute_bond_multiplier}×` : null}</V> everything bonded in the vote. With no
-            challenge, the result becomes final.
+            challenge, the result is final when the window ends: nobody has to confirm it.
           </Step>
           <Step n={3} icon={Scale} title="Committee">
             A disputed market goes to the committee. An outcome with{' '}
-            <V>{config ? `${config.committee_quorum} votes` : null}</V> and no tie settles it. Without a decision after{' '}
-            <V>{config ? formatWindow(config.disputed_timeout) : null}</V>, anyone can cancel the market and every
-            position is refunded.
+            <V>{config ? `${config.committee_quorum} votes` : null}</V> and no tie settles it, with no further call. Without
+            a decision after <V>{config ? formatWindow(config.disputed_timeout) : null}</V>, the market is cancelled and
+            every position and bond is refunded.
           </Step>
           <Step n={4} icon={Coins} title="Payout">
-            Winners redeem their shares privately. Voters on the winning outcome take their bond back, and bonds on
-            a losing outcome go to the treasury. Liquidity and creator fees can be withdrawn{' '}
+            Winners redeem their shares privately; the first redeem also records the result on chain and pays the
+            resolver. Other voters on the winning outcome take their bond back, and bonds on a losing outcome go to
+            the treasury. Liquidity and creator fees can be withdrawn{' '}
             <V>{config ? formatWindow(config.winner_claim_priority) : null}</V> after the result is final.
           </Step>
         </ol>
@@ -178,14 +183,16 @@ export function NearGovernance() {
               ['Committee votes needed', config && String(config.committee_quorum)],
               ['Dispute time limit', config && formatWindow(config.disputed_timeout)],
               ['Winners-first window', config && formatWindow(config.winner_claim_priority)],
+              ['Resolver reward', rewardBps !== null ? `${percentOfBps(rewardBps)} of protocol fees` : null],
             ]}
           />
         </div>
       </section>
 
       <p className="border-t border-white/[0.06] pt-6 text-xs leading-relaxed text-surface-500">
-        Governance proposals, resolver staking and rewards are part of the Aleo product and are not deployed on NEAR.
-        The settings above are the testnet's: the windows are short so that a demo market resolves in minutes.
+        Governance proposals and resolver staking are part of the Aleo product and are not deployed on NEAR. The
+        settings above are the testnet's: the windows are short, so a market nobody disputes resolves{' '}
+        {config ? formatWindow(config.vote_window + config.dispute_window) : 'soon'} after its first vote.
       </p>
     </div>
   )

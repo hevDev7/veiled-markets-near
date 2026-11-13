@@ -598,7 +598,7 @@ USDC (Circle, NEP-141) ─ ft_transfer_call ─────▶
                 ['deposit_near, USDC ft_transfer_call', 'your account', 'account, token, amount'],
                 ['transact: trade, bet, parlay, redeem, claim, withdraw', 'the relayer', 'the action and its amounts, not your account'],
                 ['create_market, vote_outcome, dispute_resolution, bond and fee claims', 'your account', 'everything'],
-                ['close_market, finalize_votes, confirm_resolution, settle_parlay', 'anyone', 'everything'],
+                ['close_market, settle_market, settle_parlay (optional: the next call that touches a market does it)', 'anyone', 'everything'],
                 ['create_turbo_market, resolve_turbo_market', 'the oracle operator', 'everything'],
               ]}
             />
@@ -764,7 +764,7 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
                 ['1', 'Active', 'trading open until the deadline'],
                 ['2', 'Closed', 'close_market was called after the deadline'],
                 ['5', 'Pending resolution', 'at least one vote; the voting window is running'],
-                ['6', 'Pending finalization', 'votes finalized; the dispute window is running'],
+                ['6', 'Pending finalization', 'the vote is counted; the dispute window is running'],
                 ['7', 'Disputed', 'waiting for the committee or the timeout'],
                 ['3', 'Resolved', 'the winning outcome is final; redeem is open'],
                 ['4', 'Cancelled', 'refunds are open'],
@@ -776,47 +776,85 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
             <SectionHeader id="resolution" icon={Gavel} title="Resolution" />
             <P>
               Markets resolve by bonded voting from ordinary NEAR accounts, with a dispute window and a 5-member committee
-              as the last step. Bonds are paid in NEAR for every market, whatever its collateral. The testnet windows are
-              short, so a demo market resolves in about ten minutes.
+              as the last step. Bonds are paid in NEAR for every market, whatever its collateral. Nobody has to run a
+              keeper: each stage takes effect when its window ends. The contract&apos;s views show every market at its
+              effective stage, and the next call that touches the market (the first redeem, a refund, a bond claim, or{' '}
+              <C>settle_market</C>) writes that stage on chain and pays the resolver in the same transaction. With the
+              testnet windows below, a market nobody disputes resolves 1 h 15 min after its first vote.
             </P>
             <Steps
               steps={[
                 {
                   title: 'Close',
-                  body: <>After the deadline anyone calls <C>close_market</C>. Voting also accepts an Active market whose deadline has passed.</>,
+                  body: <>After the deadline anyone may call <C>close_market</C>; it is optional, since voting also accepts an Active market whose deadline has passed.</>,
                 },
                 {
                   title: 'Vote',
-                  body: <><C>vote_outcome(market_id, outcome)</C> with exactly 0.1 NEAR attached, one vote per account, until the resolution deadline. The first vote starts the voting window (75 ticks, 5 minutes). A window that ends without the quorum reopens with the next vote.</>,
+                  body: <><C>vote_outcome(market_id, outcome, evidence)</C> with exactly 0.1 NEAR attached, one vote per account, until the resolution deadline. <C>evidence</C> is optional: a link of up to 300 bytes, stored with the vote (<C>get_vote_evidence</C>). The first vote opens the voting window (225 ticks, 15 minutes) and fixes the dispute deadline, one dispute window after it. A window that ends without the quorum reopens with the next vote.</>,
                 },
                 {
-                  title: 'Finalize',
-                  body: <>After the window, <C>finalize_votes</C> needs at least min_voters votes (1 on testnet). The outcome with the largest total bond wins; a tie goes to the lower outcome number. This starts the dispute window (75 ticks).</>,
+                  title: 'Counted',
+                  body: <>When the window ends with at least min_voters votes (1 on testnet), the outcome with the largest total bond is the result; a tie goes to the lower outcome number. No call is needed (<C>finalize_votes</C> still exists and does only this step).</>,
                 },
                 {
-                  title: 'Confirm or dispute',
-                  body: <>Without a dispute, <C>confirm_resolution</C> after the window resolves the market, and bonds on losing outcomes go to the treasury. To dispute, call <C>dispute_resolution(market_id, proposed_outcome)</C> inside the window, naming a different outcome and attaching at least 3 × the total voter bonds.</>,
+                  title: 'Dispute window',
+                  body: <>For 900 ticks (1 hour) anyone can call <C>dispute_resolution(market_id, proposed_outcome)</C>, naming a different outcome and attaching 3 × the total voter bonds. Without a dispute the result is final when the window ends, and bonds on losing outcomes go to the treasury (<C>confirm_resolution</C> is optional).</>,
+                },
+                {
+                  title: 'Resolver paid',
+                  body: <>The first voter of the winning outcome is the market&apos;s resolver. The call that settles the market pays them their bond back plus a share of the market&apos;s protocol fees (<C>get_resolver_reward_bps</C>, 5000 = half), so a correct resolver earns something and claims nothing. If nobody voted for the outcome the committee chose, the disputer who proposed it is the resolver.</>,
                 },
                 {
                   title: 'Committee',
-                  body: <>On a disputed market anyone calls <C>initiate_escalation</C>. The 5 committee members vote with <C>committee_vote_resolve</C>, one vote each. <C>finalize_committee_vote</C> succeeds when one outcome has at least 3 votes and no tie at the top, and <C>governance_resolve</C> then resolves the market. Bonds on other outcomes are forfeited, and so is the dispute bond if the committee chose an outcome other than the disputer&apos;s.</>,
+                  body: <>On a disputed market anyone calls <C>initiate_escalation</C>. The 5 committee members vote with <C>committee_vote_resolve</C>, one vote each. Once <C>finalize_committee_vote</C> finds one outcome with at least 3 votes and no tie at the top, the decision applies by itself (<C>governance_resolve</C> only writes it down early). Bonds on other outcomes are forfeited, and so is the dispute bond if the committee chose another outcome than the disputer&apos;s.</>,
                 },
                 {
-                  title: 'Timeout',
-                  body: <>A market Disputed for longer than disputed_timeout (900 ticks, 1 hour) can be cancelled by anyone.</>,
+                  title: 'Cancellation',
+                  body: <>A dispute the committee has not decided within disputed_timeout (21600 ticks, 24 hours) cancels the market, and so does a resolution deadline reached with no vote counted. Every position, liquidity share and bond is then refunded.</>,
                 },
               ]}
             />
+            <H3>How a result is decided</H3>
+            <P>
+              Voters, disputers and the committee all apply the same standard, written out in{' '}
+              <A href="https://github.com/hevDev7/veiled-markets-near/blob/main/docs/near/RESOLUTION.md">RESOLUTION.md</A>. In short:
+            </P>
+            <Bullets>
+              <li>A market resolves on its own question, rules and named resolution source, as they stood when it was created, for what was true at its trading deadline (UTC).</li>
+              <li>The named source decides. If it is unavailable, a clear consensus of reliable public reporting decides. A &quot;Will X happen by D?&quot; market whose X has not happened by D resolves No.</li>
+              <li>A market that cannot be decided this way (an ambiguous question, an event called off, a source that never publishes) is not forced onto an outcome: its vote is disputed, the committee declines to pick one, and the time limit cancels the market with every bond returned.</li>
+              <li>A vote should carry a link to the evidence it relies on. The committee reads the votes&apos; evidence and the market&apos;s source, and decides by the same rules.</li>
+            </Bullets>
+            <Callout tone="warn">
+              Who resolves today: anyone can vote, but on testnet most votes so far come from the team&apos;s own accounts,
+              and the five committee accounts are all run by the operator, so a disputed market is decided by the team.
+              One voter is enough and the bond is 0.1 NEAR, so a single account can decide a market that nobody disputes
+              within the hour. A production deployment needs a larger bond, more voters, and a committee the operator does
+              not control.
+            </Callout>
+            <H3>AI resolver (NEAR AI Cloud)</H3>
+            <P>
+              <C>backend/src/near-ai-resolver.ts</C> is an optional first voter. When a market&apos;s trading closes, it
+              fetches the market&apos;s resolution source and asks a model that runs inside NEAR AI Cloud&apos;s TEE which
+              outcome the source supports under the market&apos;s rules. It votes only when the model is confident and NEAR
+              AI&apos;s model TEE signed the exact request and response with a key from the hardware attestation fetched just
+              before the request. The vote carries a link to a receipt (question, source excerpt, request, response,
+              reasoning, signature, attestation) and the receipt&apos;s SHA-256, so anyone can check it, including in NEAR
+              AI&apos;s Verification Center. It casts an ordinary bonded vote with no special power: a wrong AI vote is
+              disputed and decided by the committee like any other. It votes as <C>ai.veiled-markets.testnet</C>, an
+              account of its own. Its NEAR AI Cloud path has run with a live key, but it is not running on the hosted
+              demo yet.
+            </P>
             <H3>Bonds, fees and cancellation</H3>
             <Bullets>
-              <li><B>claim_voter_bond(market_id)</B>: voters on the winning outcome once the market is Resolved; every voter once it is Cancelled.</li>
-              <li><B>claim_dispute_bond(market_id)</B>: the disputer, if the proposed outcome won or the market was cancelled.</li>
+              <li><B>settle_market(market_id)</B>: anyone; applies every stage that is due and returns the status. Optional: redeems, refunds and claims do the same.</li>
+              <li><B>claim_voter_bond(market_id)</B>: voters on the winning outcome once the market is Resolved (the resolver was already paid); every voter once it is Cancelled.</li>
+              <li><B>claim_dispute_bond(market_id)</B>: the disputer, if the proposed outcome won or the market was cancelled, unless the settling call already paid them as resolver.</li>
               <li><B>withdraw_creator_fees(market_id)</B>: the creator, once, after the dispute deadline plus the winner-claim priority window.</li>
               <li>
-                <B>cancel_market(market_id)</B>: the creator while the market is Active with no volume; anyone after the
-                resolution deadline unless the market is Resolved, Cancelled, Disputed, or already has a voted outcome
-                waiting to be confirmed (a voted outcome is confirmed or disputed, never cancelled); anyone when it has
-                been Disputed for longer than disputed_timeout.
+                <B>cancel_market(market_id)</B>: the creator while the market is Active with no volume. For anyone else it
+                only writes down a cancellation that is already due: no vote counted by the resolution deadline, or a
+                dispute left undecided past disputed_timeout. A voted outcome is confirmed or disputed, never cancelled.
               </li>
             </Bullets>
             <Callout tone="warn">
@@ -828,10 +866,10 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
             <Table
               head={['Parameter', 'Value']}
               rows={[
-                ['vote_window', '75 ticks (5 min)'],
-                ['dispute_window', '75 ticks (5 min)'],
-                ['winner_claim_priority', '75 ticks (5 min)'],
-                ['disputed_timeout', '900 ticks (1 h)'],
+                ['vote_window', '225 ticks (15 min)'],
+                ['dispute_window', '900 ticks (1 h)'],
+                ['winner_claim_priority', '900 ticks (1 h)'],
+                ['disputed_timeout', '21600 ticks (24 h)'],
                 ['vote_bond', '100000 (0.1 NEAR)'],
                 ['min_voters', '1'],
                 ['dispute_bond_multiplier', '3'],
@@ -839,6 +877,7 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
                 ['min_liquidity', '10000 (0.01)'],
                 ['protocol_fee_bps / creator_fee_bps / lp_fee_bps', '50 / 50 / 100'],
                 ['committee_quorum', '3'],
+                ['resolver reward (get_resolver_reward_bps)', '5000 (half the protocol fees)'],
               ]}
             />
             <CodeBlock title="vote from the command line (near-cli-rs)">{`near contract call-function as-transaction v1.veiled-markets.testnet vote_outcome \\
@@ -1107,18 +1146,21 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
               methods={[
                 { name: 'create_market(args)', tag: 'payable', desc: 'Creates a NEAR market with the attached deposit as liquidity; returns the market id. USDC markets use ft_transfer_call.' },
                 { name: 'close_market(market_id)', tag: 'anyone', desc: 'Active → Closed after the deadline.' },
-                { name: 'vote_outcome(market_id, outcome)', tag: 'payable, 0.1 NEAR', desc: 'One bonded vote per account, until the resolution deadline.' },
-                { name: 'finalize_votes(market_id)', tag: 'anyone', desc: 'After the voting window; picks the winner and opens the dispute window.' },
-                { name: 'confirm_resolution(market_id)', tag: 'anyone', desc: 'After the dispute window, without a dispute: Resolved.' },
+                { name: 'vote_outcome(market_id, outcome, evidence?)', tag: 'payable, 0.1 NEAR', desc: 'One bonded vote per account, until the resolution deadline; evidence is an optional link of up to 300 bytes.' },
+                { name: 'settle_market(market_id)', tag: 'anyone', desc: 'Applies every resolution stage that is due and returns the status. Optional: the next call that touches the market does it.' },
+                { name: 'finalize_votes(market_id)', tag: 'anyone', desc: 'Optional. After the voting window; counts the vote (the dispute window is already fixed).' },
+                { name: 'confirm_resolution(market_id)', tag: 'anyone', desc: 'Optional. After the dispute window, without a dispute: Resolved, and the resolver is paid.' },
                 { name: 'dispute_resolution(market_id, proposed_outcome)', tag: 'payable', desc: 'Inside the dispute window, with at least 3 × the total voter bonds.' },
                 { name: 'initiate_escalation(market_id)', tag: 'anyone', desc: 'Sends a disputed market to the committee.' },
                 { name: 'committee_vote_resolve(market_id, outcome)', tag: 'committee', desc: 'One vote per committee member.' },
                 { name: 'finalize_committee_vote(market_id)', tag: 'anyone', desc: 'Needs one outcome with at least 3 votes and no tie at the top.' },
-                { name: 'governance_resolve(market_id)', tag: 'anyone', desc: 'Applies the committee decision: Resolved.' },
+                { name: 'governance_resolve(market_id)', tag: 'anyone', desc: 'Optional. Writes down the committee decision, which applies anyway once finalized.' },
                 { name: 'cancel_market(market_id)', tag: 'creator or anyone', desc: 'See Resolution for the three cases.' },
-                { name: 'claim_voter_bond(market_id)', tag: 'voter', desc: 'Pays the bond back to the voter; returns the amount.' },
+                { name: 'claim_voter_bond(market_id)', tag: 'voter', desc: 'Pays the bond back to the voter; returns the amount (for the resolver, what the settling call paid).' },
                 { name: 'claim_dispute_bond(market_id)', tag: 'disputer', desc: 'Pays the dispute bond back if the proposed outcome won or the market was cancelled; returns the amount.' },
                 { name: 'withdraw_creator_fees(market_id)', tag: 'creator', desc: 'Once, after the winner-claim priority window.' },
+                { name: 'get_vote_evidence(market_id, account_id)', tag: 'view', desc: 'The evidence link stored with that account’s vote, or null.' },
+                { name: 'get_resolver_reward_bps()', tag: 'view', desc: 'The resolver’s share of a market’s protocol fees; the owner sets it with set_resolver_reward_bps.' },
               ]}
             />
             <CodeBlock title="create_market arguments">{`{
@@ -1329,8 +1371,9 @@ npm run dev`}</CodeBlock>
               <li>The contract accepts turbo rounds only from <C>veiled-oracle.testnet</C>, so a second oracle needs its own contract deployment.</li>
               <li>
                 A demo market: <C>cd backend && npx tsx scripts/quick-market.ts create 6</C> opens a question that closes in
-                6 minutes; after it closes, <C>npx tsx scripts/quick-market.ts resolve &lt;id&gt; &lt;1=Yes|2=No&gt;</C> votes,
-                finalizes and confirms it.
+                6 minutes; after it closes, <C>npx tsx scripts/quick-market.ts resolve &lt;id&gt; &lt;1=Yes|2=No&gt;</C> casts
+                the bonded vote. Unless someone disputes, the result is final 1 h 15 min later, and the first redeem settles
+                the market (<C>--settle</C> waits and sends <C>settle_market</C> instead).
               </li>
               <li><C>NEAR_RPC_URL</C> takes a comma-separated list for the relayer, the oracle and the scripts; a call moves to the next endpoint on a timeout or rate limit.</li>
             </Bullets>
@@ -1387,11 +1430,13 @@ npm run dev`}</CodeBlock>
             <P muted>
               These parts of the Aleo version are not ported: community governance proposals, resolver staking and the
               resolver registry, reward epochs, and the multisig treasury. On NEAR the owner account holds the
-              treasury and the parameters, and disputed markets go to the 5-member committee, which does work.
+              treasury and the parameters, disputed markets go to the 5-member committee, and a market&apos;s resolver is
+              paid per market from its protocol fees.
             </P>
             <H3>Known limits</H3>
             <Bullets>
               <li><B>Testnet only.</B> Tokens have no value, and the contract may be redeployed.</li>
+              <li><B>Resolution trust.</B> The team runs the five committee accounts and casts most votes on testnet, and one 0.1 NEAR vote can decide a market nobody disputes. See <A href="#resolution">Resolution</A>.</li>
               <li><B>Trusted setup.</B> The circuit key comes from a single phase-2 contribution.</li>
               <li><B>Turbo operator trust.</B> The operator submits prices. The contract checks its identity, the price range, the confidence and the maximum move, and the audit trail is public, but it cannot prove the price itself.</li>
               <li><B>One relayer.</B> If it is down, private actions wait. It pays the gas and cannot alter a trade.</li>

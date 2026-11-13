@@ -221,9 +221,13 @@ async function dispatch(call: AleoCall): Promise<ExecResult> {
   if (fn === 'cancel_market') return publicCall('cancel_market', { market_id: nearId(inputs[0]) });
   if (fn === 'finalize_votes') return publicCall('finalize_votes', { market_id: nearId(inputs[0]) });
   if (fn === 'confirm_resolution') return publicCall('confirm_resolution', { market_id: nearId(inputs[0]) });
+  // Applies every resolution step that is due (count the vote, confirm, apply the committee, cancel on a deadline).
+  if (fn === 'settle_market') return publicCall('settle_market', { market_id: nearId(inputs[0]) });
   if (fn === 'vote_outcome') {
+    // Inputs: market, outcome, bond nonce (Aleo), then an optional evidence link stored with the vote.
     const bond = BigInt((await getNearConfig()).vote_bond);
-    return publicCall('vote_outcome', { market_id: nearId(inputs[0]), outcome: leoNum(inputs[1]) }, bond);
+    const evidence = inputs[3]?.trim();
+    return publicCall('vote_outcome', { market_id: nearId(inputs[0]), outcome: leoNum(inputs[1]), ...(evidence ? { evidence } : {}) }, bond);
   }
   if (fn === 'dispute_resolution') {
     // The pages pass (market_id, outcome, nonce, record, bond); the bond attached is exactly what the contract

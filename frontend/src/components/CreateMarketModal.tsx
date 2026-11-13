@@ -36,7 +36,13 @@ import { uploadMarketMetadata, isPinataAvailable, type MarketMetadataIPFS } from
 import { saveIPFSCid, getMarket } from '@/lib/aleo-client'
 import { devLog, devWarn } from '../lib/logger'
 import { PUBLIC_CALL_GAS_MICRO, tokenLabel } from '@/lib/near/config'
-import { isChainTxId } from '@/lib/near/config'
+import { isChainTxId, SECONDS_PER_TICK } from '@/lib/near/config'
+import { getNearConfig } from '@/lib/near/chain'
+import { formatWindow } from '@/lib/near/governance'
+
+/** The form asks for at least this much time between the deadlines, more than the contract needs (below), so a
+ * first vote has time to arrive after the vote and dispute windows are accounted for. */
+const MIN_RESOLUTION_GAP_MS = 6 * 60 * 60 * 1000
 
 interface CreateMarketModalProps {
   isOpen: boolean
@@ -208,6 +214,17 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
   const [step, setStep] = useState<CreateStep>('details')
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
+  // What create_market itself requires between the deadlines: two vote windows and a dispute window
+  // (ERR_RESOLUTION_DEADLINE), in ticks. The form's minimum is the larger of this and MIN_RESOLUTION_GAP_MS.
+  const [resolutionRoomTicks, setResolutionRoomTicks] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    getNearConfig()
+      .then((c) => { if (!cancelled) setResolutionRoomTicks(2 * c.vote_window + c.dispute_window) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  const minResolutionGapMs = Math.max(MIN_RESOLUTION_GAP_MS, resolutionRoomTicks * SECONDS_PER_TICK * 1000)
   const [marketId, setMarketId] = useState<string | null>(null)
   const [isSlowTransaction, setIsSlowTransaction] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -296,13 +313,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
       setError('Resolution deadline must be after betting deadline')
       return false
     }
-    // v35: Resolution deadline must allow enough time for voting + dispute windows
-    // Voting window: ~3h (2880 blocks × 4s) + Dispute window: ~3h (2880 blocks × 4s) = ~6h minimum
-    const minResolutionMs = 6 * 60 * 60 * 1000 // 6 hours
+    // The resolution deadline must leave room for the vote and dispute windows, and time for a first vote.
     const timeBetweenDeadlines = resolutionDeadline.getTime() - deadline.getTime()
-    if (timeBetweenDeadlines < minResolutionMs) {
-      const hoursNeeded = Math.ceil(minResolutionMs / (60 * 60 * 1000))
-      setError(`Resolution deadline must be at least ${hoursNeeded} hours after betting deadline to allow for voting (~3h) and dispute (~3h) windows`)
+    if (timeBetweenDeadlines < minResolutionGapMs) {
+      const needed = formatWindow(Math.ceil(minResolutionGapMs / 1000 / SECONDS_PER_TICK))
+      const windows = resolutionRoomTicks > 0 ? ` Voting and disputes take up to ${formatWindow(resolutionRoomTicks)}; the rest gives a first vote time to arrive.` : ''
+      setError(`The resolution deadline must be at least ${needed} after the betting deadline.${windows} A market with no vote counted by then is cancelled and refunded.`)
       return false
     }
     // Validate initial liquidity bounds
@@ -1213,12 +1229,12 @@ export function CreateMarketModal({ isOpen, onClose, onSuccess }: CreateMarketMo
                             const dl = new Date(`${formData.deadlineDate}T${formData.deadlineTime}`)
                             const rd = new Date(`${formData.resolutionDeadlineDate}T${formData.resolutionDeadlineTime}`)
                             const diffMs = rd.getTime() - dl.getTime()
-                            const minMs = 6 * 60 * 60 * 1000
+                            const minMs = minResolutionGapMs
                             if (diffMs > 0 && diffMs < minMs) {
                               const minTime = new Date(dl.getTime() + minMs)
                               const minTimeStr = minTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                               const minDateStr = minTime.toLocaleDateString([], { month: 'short', day: 'numeric' })
-                              return <p className="text-xs text-no-400 mt-2">Too close — resolution must be after {minDateStr} {minTimeStr} (6h after betting deadline)</p>
+                              return <p className="text-xs text-no-400 mt-2">Too close: resolution must be after {minDateStr} {minTimeStr} ({formatWindow(Math.ceil(minMs / 1000 / SECONDS_PER_TICK))} after the betting deadline)</p>
                             }
                             if (diffMs > 0 && diffMs >= minMs) {
                               const hours = Math.floor(diffMs / (60 * 60 * 1000))

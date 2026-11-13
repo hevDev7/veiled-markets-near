@@ -11,8 +11,9 @@ import {
   type MarketFeesData,
   MARKET_STATUS,
   getProgramIdForToken,
-  WINNER_CLAIM_PRIORITY_BLOCKS,
 } from '@/lib/aleo-client'
+import { useWinnerClaimPriority } from '@/hooks/useWinnerClaimPriority'
+import { getNearMarket } from '@/lib/near/chain'
 import { TransactionLink } from './TransactionLink'
 
 interface CreatorFeesPanelProps {
@@ -32,8 +33,9 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
   const tokenSymbol = getTokenSymbol(market.tokenType)
   const isCreator = wallet.address === market.creator
   const isResolved = market.status === MARKET_STATUS.RESOLVED
+  const winnerPriority = useWinnerClaimPriority()
   const winnerClaimUnlockBlock = isResolved && market.challengeDeadline !== undefined
-    ? market.challengeDeadline + WINNER_CLAIM_PRIORITY_BLOCKS
+    ? market.challengeDeadline + winnerPriority
     : null
   const winnerClaimWindowActive = isResolved
     && (winnerClaimUnlockBlock === null || currentBlock === null || currentBlock <= winnerClaimUnlockBlock)
@@ -41,8 +43,18 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
     ? formatTimeRemaining(winnerClaimUnlockBlock, currentBlock)
     : null
 
+  // The contract pays the creator fees once (creator_fees_claimed); the amount itself stays on the market.
+  const [alreadyWithdrawn, setAlreadyWithdrawn] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    getNearMarket(market.id)
+      .then((m) => { if (!cancelled) setAlreadyWithdrawn(!!m?.creator_fees_claimed) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [market.id, transactionId])
+
   // Creator can withdraw fees only after market is resolved and finalized
-  const canWithdraw = isCreator && isResolved && fees.creator_fees > 0n && !winnerClaimWindowActive
+  const canWithdraw = isCreator && isResolved && fees.creator_fees > 0n && !winnerClaimWindowActive && !alreadyWithdrawn
 
   useEffect(() => {
     if (!isResolved) {
@@ -230,7 +242,13 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
               </div>
             )}
 
-            {isCreator && isResolved && fees.creator_fees > 0n && winnerClaimWindowActive && (
+            {isCreator && isResolved && alreadyWithdrawn && (
+              <div className="p-4 rounded-xl bg-white/[0.02] text-center">
+                <p className="text-surface-400 text-sm">You have already withdrawn this market's creator fees.</p>
+              </div>
+            )}
+
+            {isCreator && isResolved && fees.creator_fees > 0n && winnerClaimWindowActive && !alreadyWithdrawn && (
               <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-500/5 border border-yellow-500/20">
                 <AlertCircle className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
                 <div>
@@ -279,7 +297,9 @@ export function CreatorFeesPanel({ market, fees }: CreatorFeesPanelProps) {
                 <>
                   <Coins className="w-5 h-5" />
                   <span>
-                    {winnerClaimWindowActive
+                    {alreadyWithdrawn
+                      ? 'Already withdrawn'
+                      : winnerClaimWindowActive
                       ? 'Winner Claim Window Active'
                       : `Withdraw ${fees.creator_fees > 0n
                         ? `${formatCredits(fees.creator_fees)} ${tokenSymbol}`

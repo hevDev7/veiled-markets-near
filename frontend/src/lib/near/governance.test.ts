@@ -100,7 +100,7 @@ describe('stageSummary', () => {
       'Yes leads with 0.1 NEAR bonded by 1 voter. Voting closes in 5 min.',
     );
     expect(stageSummary({ ...base, status: 5, tally: tally({ voting_deadline: '990' }) }, HEIGHT, options)).toBe(
-      'Yes leads with 0.1 NEAR bonded by 1 voter. Voting has closed: the vote can be finalized.',
+      'Yes leads with 0.1 NEAR bonded by 1 voter. Voting closed short of its quorum: the next vote reopens it.',
     );
   });
 
@@ -108,7 +108,7 @@ describe('stageSummary', () => {
     const voted = tally({ winning_outcome: 2, dispute_deadline: '1030' });
     expect(stageSummary({ ...base, status: 6, tally: voted }, HEIGHT, options)).toBe('Voted No. It can be disputed for another 2 min.');
     expect(stageSummary({ ...base, status: 6, tally: { ...voted, dispute_deadline: '999' } }, HEIGHT, options)).toBe(
-      'Voted No. The dispute window has passed: the result can be confirmed.',
+      'Voted No. The dispute window has passed, so the result stands.',
     );
   });
 
@@ -126,10 +126,10 @@ describe('stageSummary', () => {
         HEIGHT,
         options,
       ),
-    ).toBe('The committee chose No. Its decision can now be applied.');
+    ).toBe('The committee chose No, which settles the market.');
   });
 
-  it('says when a dispute has outlived its time limit and the market can be cancelled', () => {
+  it('says when a dispute has outlived its time limit and the market is cancelled', () => {
     const voted = tally({ winning_outcome: 1 });
     const withCommittee = { ...base, status: 7, escalation_tier: 2, committee_votes: 0, tally: voted, dispute };
     // Disputed at tick 950 with a limit of 900 ticks: over once the height passes 1850.
@@ -138,11 +138,11 @@ describe('stageSummary', () => {
     );
     expect(stageSummary(withCommittee, 1851n, { ...options, timeout: 900 })).toBe(
       'Voted Yes, disputed in favour of No. The committee has cast 0 of the 3 votes needed. ' +
-        'The time limit for a decision has passed: anyone can cancel the market, which refunds every position and bond.',
+        'The time limit for a decision has passed: the market is cancelled, and every position and bond can be refunded.',
     );
     expect(stageSummary({ ...withCommittee, escalation_tier: 0 }, 1851n, { ...options, timeout: 900 })).toBe(
       'Voted Yes, disputed in favour of No with a bond of 0.3 NEAR. Not yet sent to the committee. ' +
-        'The time limit for a decision has passed: anyone can cancel the market, which refunds every position and bond.',
+        'The time limit for a decision has passed: the market is cancelled, and every position and bond can be refunded.',
     );
   });
 

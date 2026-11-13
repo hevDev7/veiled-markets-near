@@ -1052,13 +1052,13 @@ export function MarketDetail() {
   const quickAmounts = [0.01, 0.05, 0.1, 0.5, 1, 5]
 
   // Determine which panels to show based on market status
-  const showResolve = market.status !== MARKET_STATUS.CANCELLED && (
-    isExpired
+  // A cancelled market keeps the tab: its voters and disputer take their bonds back there.
+  const showResolve = isExpired
     || market.status === MARKET_STATUS.CLOSED
     || market.status === MARKET_STATUS.PENDING_RESOLUTION
     || market.status === MARKET_STATUS.PENDING_FINALIZATION
     || market.status === MARKET_STATUS.RESOLVED
-  )
+    || market.status === MARKET_STATUS.CANCELLED
   // v33: showDispute removed — challenge is in ResolvePanel
   const showCreatorFees = market.status === MARKET_STATUS.RESOLVED && fees && wallet.address === market.creator
   const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired

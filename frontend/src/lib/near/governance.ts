@@ -122,6 +122,10 @@ function leadingOutcome(bonds: string[]): number {
 /**
  * One or two sentences on where a market stands and what can happen next. `label` names an outcome, `quorum` is
  * the number of committee votes the contract asks for, and `timeout` is its time limit for a dispute, in ticks.
+ *
+ * The contract's views already show a market at its effective stage (a closed vote counted, a passed dispute window
+ * confirmed, a committee decision applied, an overdue dispute cancelled), and the next call that touches the market
+ * records it. So nobody has to finalize, confirm, apply or cancel; the later sentences only cover a stale read.
  */
 export function stageSummary(
   m: ResolvingMarket,
@@ -131,10 +135,10 @@ export function stageSummary(
   const stage = resolutionStage(m, height);
   const tally = m.tally;
   const ticksUntil = (tick: string) => Number(BigInt(tick) - height);
-  // A dispute nobody has settled within the limit can be cancelled by anyone (contract: cancel_market).
+  // A dispute the committee has not decided within the limit cancels the market.
   const overdue =
     timeout !== undefined && m.dispute && height > BigInt(m.dispute.disputed_at) + BigInt(timeout)
-      ? ' The time limit for a decision has passed: anyone can cancel the market, which refunds every position and bond.'
+      ? ' The time limit for a decision has passed: the market is cancelled, and every position and bond can be refunded.'
       : '';
   switch (stage) {
     case 'awaiting_vote':
@@ -143,21 +147,24 @@ export function stageSummary(
       if (!tally) return 'A vote has opened.';
       const lead = `${label(leadingOutcome(tally.outcome_bonds))} leads with ${microToUnits(tally.total_bonded)} NEAR bonded by ${plural(tally.total_voters, 'voter')}.`;
       const left = ticksUntil(tally.voting_deadline);
-      return left >= 0 ? `${lead} Voting closes in ${formatWindow(left)}.` : `${lead} Voting has closed: the vote can be finalized.`;
+      // A vote that met its quorum is counted when the window closes (the view shows the dispute window then).
+      return left >= 0
+        ? `${lead} Voting closes in ${formatWindow(left)}.`
+        : `${lead} Voting closed short of its quorum: the next vote reopens it.`;
     }
     case 'dispute_window': {
       if (!tally) return 'A result has been voted.';
       const left = ticksUntil(tally.dispute_deadline);
       return left >= 0
         ? `Voted ${label(tally.winning_outcome)}. It can be disputed for another ${formatWindow(left)}.`
-        : `Voted ${label(tally.winning_outcome)}. The dispute window has passed: the result can be confirmed.`;
+        : `Voted ${label(tally.winning_outcome)}. The dispute window has passed, so the result stands.`;
     }
     case 'disputed':
       return tally && m.dispute
         ? `Voted ${label(tally.winning_outcome)}, disputed in favour of ${label(m.dispute.proposed_outcome)} with a bond of ${microToUnits(m.dispute.dispute_bond)} NEAR. Not yet sent to the committee.${overdue}`
         : `The voted result has been disputed.${overdue}`;
     case 'committee':
-      if (m.committee_finalized) return `The committee chose ${label(m.committee_outcome)}. Its decision can now be applied.`;
+      if (m.committee_finalized) return `The committee chose ${label(m.committee_outcome)}, which settles the market.`;
       return tally && m.dispute
         ? `Voted ${label(tally.winning_outcome)}, disputed in favour of ${label(m.dispute.proposed_outcome)}. The committee has cast ${m.committee_votes} of the ${quorum} votes needed.${overdue}`
         : `The committee has cast ${m.committee_votes} of the ${quorum} votes needed.${overdue}`;
