@@ -352,11 +352,8 @@ export function MarketDetail() {
 
   const [createdTimestamp, setCreatedTimestamp] = useState<string | null>(null)
 
-  // Active tab for extra panels
-  const [activeTab, setActiveTab] = useState<'trade' | 'liquidity' | 'dispute' | 'fees' | 'resolve'>('trade')
-
-  // Content tab for chart/activity/discussion/rules
-  const [contentTab, setContentTab] = useState<'chart' | 'activity' | 'discussion' | 'rules'>('chart')
+  // The tabs card: chart/activity/discussion/rules, then the liquidity, resolve and creator-fee panels
+  const [contentTab, setContentTab] = useState<'chart' | 'activity' | 'discussion' | 'rules' | 'liquidity' | 'resolve' | 'fees'>('chart')
 
   // Sell shares state
   const [tradeMode, setTradeMode] = useState<'buy' | 'sell'>('buy')
@@ -387,19 +384,7 @@ export function MarketDetail() {
 
   // Ref for mobile scroll-to-trading
   const tradingPanelRef = useRef<HTMLDivElement>(null)
-  const tabPanelRef = useRef<HTMLDivElement>(null)
   const isWalletConnected = wallet.connected && Boolean(wallet.address)
-
-  // Close tab panels when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (activeTab !== 'trade' && tabPanelRef.current && !tabPanelRef.current.contains(e.target as Node)) {
-        setActiveTab('trade')
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [activeTab])
 
   // Redirect handled by ProtectedRoute wrapper in App.tsx
 
@@ -1076,6 +1061,17 @@ export function MarketDetail() {
   const canTrade = market.status === MARKET_STATUS.ACTIVE && !isExpired
   // v33: Show liquidity tab for ALL statuses — LP needs to see positions and withdraw
   const showLiquidity = true
+  const contentTabs = [
+    { id: 'chart' as const, label: 'Price Chart', icon: Activity },
+    { id: 'activity' as const, label: 'Activity', icon: Zap },
+    { id: 'discussion' as const, label: 'Discussion', icon: MessageSquare },
+    { id: 'rules' as const, label: 'Rules', icon: FileText },
+    ...(showLiquidity ? [{ id: 'liquidity' as const, label: canTrade ? 'Liquidity' : 'Withdraw LP', icon: Droplets }] : []),
+    ...(showResolve ? [{ id: 'resolve' as const, label: 'Resolve', icon: CheckCircle2 }] : []),
+    ...(showCreatorFees ? [{ id: 'fees' as const, label: 'Creator Fees', icon: Coins }] : []),
+  ]
+  // A tab that is no longer offered (the wallet that owns the creator fees disconnected) falls back to the chart.
+  const shownTab = contentTabs.some((tab) => tab.id === contentTab) ? contentTab : 'chart'
 
   // Re-fetch market + resolution data after a resolution action
   const refreshExtras = async () => {
@@ -1254,7 +1250,7 @@ export function MarketDetail() {
                 </div>
               </motion.div>
 
-              {/* ═══ CONTENT TABS: Price Chart | Activity | Discussion | Rules ═══ */}
+              {/* ═══ CONTENT TABS: Price Chart | Activity | Discussion | Rules | Liquidity | Resolve | Creator Fees ═══ */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1262,19 +1258,14 @@ export function MarketDetail() {
                 className="glass-card overflow-hidden"
               >
                 {/* Tab bar */}
-                <div className="flex items-center gap-1 p-1.5 mx-4 mt-4 rounded-xl bg-white/[0.02] border border-white/[0.04]">
-                  {[
-                    { id: 'chart' as const, label: 'Price Chart', icon: Activity },
-                    { id: 'activity' as const, label: 'Activity', icon: Zap },
-                    { id: 'discussion' as const, label: 'Discussion', icon: MessageSquare },
-                    { id: 'rules' as const, label: 'Rules', icon: FileText },
-                  ].map((tab) => (
+                <div className="flex items-center gap-1 p-1.5 mx-4 mt-4 rounded-xl bg-white/[0.02] border border-white/[0.04] overflow-x-auto">
+                  {contentTabs.map((tab) => (
                     <button
                       key={tab.id}
                       onClick={() => setContentTab(tab.id)}
                       className={cn(
-                        'flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200',
-                        contentTab === tab.id
+                        'flex flex-shrink-0 items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-200',
+                        shownTab === tab.id
                           ? 'bg-white/[0.06] text-white'
                           : 'text-surface-500 hover:text-surface-300'
                       )}
@@ -1287,7 +1278,7 @@ export function MarketDetail() {
 
                 <div className="p-4 lg:p-6">
                   {/* Price Chart tab */}
-                  {contentTab === 'chart' && (
+                  {shownTab === 'chart' && (
                     <div className="space-y-6">
                 <h2 className="text-lg font-semibold text-white mb-4">Market Sentiment</h2>
 
@@ -1323,7 +1314,7 @@ export function MarketDetail() {
                   )}
 
                   {/* Activity tab */}
-                  {contentTab === 'activity' && (
+                  {shownTab === 'activity' && (
                     <div className="space-y-4">
                       {(() => {
                         const { userBets, pendingBets } = useBetsStore.getState()
@@ -1427,7 +1418,7 @@ export function MarketDetail() {
                   )}
 
                   {/* Discussion tab */}
-                  {contentTab === 'discussion' && (
+                  {shownTab === 'discussion' && (
                     <div className="text-center py-12">
                       <MessageSquare className="w-8 h-8 text-surface-500 mx-auto mb-3" />
                       <p className="text-sm text-surface-300 mb-1">Discussion coming soon</p>
@@ -1436,7 +1427,7 @@ export function MarketDetail() {
                   )}
 
                   {/* Rules tab */}
-                  {contentTab === 'rules' && (
+                  {shownTab === 'rules' && (
                     <div className="space-y-6">
                       <div>
                         <h3 className="text-sm font-semibold text-white mb-2">Resolution Criteria</h3>
@@ -1489,78 +1480,18 @@ export function MarketDetail() {
                       )}
                     </div>
                   )}
-                </div>
-              </motion.div>
 
-              {/* Tab panels: Liquidity, Dispute, Creator Fees */}
-              <motion.div
-                ref={tabPanelRef}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                {/* Tab buttons */}
-                <div className="flex gap-2 mb-4">
-                  {showLiquidity && (
-                    <button
-                      onClick={() => setActiveTab(activeTab === 'liquidity' ? 'trade' : 'liquidity')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                        activeTab === 'liquidity'
-                          ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]'
-                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
-                      )}
-                    >
-                      <Droplets className="w-4 h-4" />
-                      {canTrade ? 'Liquidity' : 'Withdraw LP'}
-                    </button>
+                  {/* Liquidity, Resolve and Creator Fees tabs (challenges are part of ResolvePanel since v33) */}
+                  {shownTab === 'liquidity' && <LiquidityPanel market={market} />}
+                  {shownTab === 'resolve' && (
+                    <ResolvePanel
+                      market={market}
+                      resolution={resolution}
+                      onResolutionChange={refreshExtras}
+                    />
                   )}
-                  {/* v33: Dispute tab removed — challenge is now part of ResolvePanel */}
-                  {showCreatorFees && (
-                    <button
-                      onClick={() => setActiveTab(activeTab === 'fees' ? 'trade' : 'fees')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                        activeTab === 'fees'
-                          ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
-                      )}
-                    >
-                      <Coins className="w-4 h-4" />
-                      Creator Fees
-                    </button>
-                  )}
-                  {showResolve && (
-                    <button
-                      onClick={() => setActiveTab(activeTab === 'resolve' ? 'trade' : 'resolve')}
-                      className={cn(
-                        'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-                        activeTab === 'resolve'
-                          ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]'
-                          : 'bg-white/[0.03] text-surface-400 hover:text-white'
-                      )}
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Resolve
-                    </button>
-                  )}
+                  {shownTab === 'fees' && fees && <CreatorFeesPanel market={market} fees={fees} />}
                 </div>
-
-                {/* Tab content */}
-                {activeTab === 'liquidity' && showLiquidity && (
-                  <LiquidityPanel market={market} />
-                )}
-                {/* v33: DisputePanel removed — challenge integrated in ResolvePanel */}
-                {activeTab === 'fees' && showCreatorFees && fees && (
-                  <CreatorFeesPanel market={market} fees={fees} />
-                )}
-                {activeTab === 'resolve' && showResolve && (
-                  <ResolvePanel
-                    market={market}
-                    resolution={resolution}
-                    onResolutionChange={refreshExtras}
-                  />
-                )}
               </motion.div>
 
             </div>
@@ -2382,7 +2313,7 @@ export function MarketDetail() {
                 {/* Verify On-Chain */}
                 {isChainTxId(market.transactionId) && (
                   <a
-                    href={`${config.explorerUrl}/transaction/${market.transactionId}`}
+                    href={nearTxUrl(market.transactionId)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mt-4 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-brand-500/8 border border-brand-500/15 text-brand-400 hover:bg-brand-500/15 hover:border-brand-500/30 transition-all text-xs font-semibold"

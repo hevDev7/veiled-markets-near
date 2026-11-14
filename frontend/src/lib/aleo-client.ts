@@ -5,7 +5,7 @@
 // (v6 post-audit hardening — Bug A/B/C/D fixes).
 // ============================================================================
 
-import { config } from './config';
+import { config, getTransactionUrl as explorerTxUrl } from './config';
 import { clearAllSupabaseData } from './supabase';
 import { devLog, devWarn } from './logger'
 // NEAR: the contract is the market registry; its views replace the Aleo indexer, block scans and tx lookups.
@@ -1486,10 +1486,10 @@ export function formatTimeRemaining(deadlineBlock: bigint, currentBlock: bigint)
 }
 
 /**
- * Get transaction URL on explorer
+ * Get transaction URL on explorer: NearBlocks' /txns/<hash> page, the same link config.ts builds.
  */
 export function getTransactionUrl(transactionId: string): string {
-  return `${config.explorerUrl}/transaction/${transactionId}`;
+  return explorerTxUrl(transactionId);
 }
 
 /**
