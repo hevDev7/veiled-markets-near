@@ -10,6 +10,8 @@ use crate::*;
 use serde_json::json;
 
 const KEY_PENDING_OWNER: &[u8] = b"go";
+/// The account (the AI resolver) that may end a market's trading early besides the owner and the committee.
+const KEY_TRADING_CLOSER: &[u8] = b"tc";
 /// `committee.contains` is a linear scan on every committee call; fifteen keeps it cheap.
 pub const MAX_COMMITTEE: usize = 15;
 const GAS_MIGRATE: Gas = Gas::from_tgas(30);
@@ -21,6 +23,8 @@ pub struct GovernanceView {
     pub oracle_operator: AccountId,
     pub committee: Vec<AccountId>,
     pub committee_quorum: u8,
+    /// Besides the owner and each committee member, the account that may end a market's trading early.
+    pub trading_closer: Option<AccountId>,
 }
 
 /// 1..=15 distinct members and a quorum of more than half of them, so two outcomes can never both reach it.
@@ -41,6 +45,10 @@ pub(crate) fn log_event(event: &str, data: serde_json::Value) {
 
 fn pending_owner() -> Option<AccountId> {
     env::storage_read(KEY_PENDING_OWNER).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
+}
+
+pub(crate) fn trading_closer() -> Option<AccountId> {
+    env::storage_read(KEY_TRADING_CLOSER).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
 }
 
 #[near]
@@ -73,6 +81,21 @@ impl Veiled {
         self.assert_owner();
         self.oracle = oracle_operator;
         log_event("oracle_operator_set", json!({ "oracle_operator": self.oracle }));
+    }
+
+    /// Owner only. Names the account (the AI resolver) that may end a market's trading early with `close_trading`,
+    /// as the owner and each committee member may; `None` removes it.
+    pub fn set_trading_closer(&mut self, trading_closer: Option<AccountId>) {
+        self.assert_owner();
+        match &trading_closer {
+            Some(a) => {
+                env::storage_write(KEY_TRADING_CLOSER, a.as_bytes());
+            }
+            None => {
+                env::storage_remove(KEY_TRADING_CLOSER);
+            }
+        }
+        log_event("trading_closer_set", json!({ "trading_closer": trading_closer }));
     }
 
     /// Owner only. Replaces the committee and its quorum. Votes already cast count only while their member is
@@ -116,6 +139,7 @@ impl Veiled {
             oracle_operator: self.oracle.clone(),
             committee: self.committee.clone(),
             committee_quorum: self.config.committee_quorum,
+            trading_closer: trading_closer(),
         }
     }
 }

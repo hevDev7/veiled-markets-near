@@ -2,6 +2,7 @@
 //! Sputnik DAO can hold the owner or the committee role) and code upgrades through `upgrade`.
 
 use crate::behaviour_tests::*;
+use crate::markets::{MAX_EVIDENCE, STATUS_CLOSED};
 use crate::*;
 use near_sdk::mock::MockAction;
 use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
@@ -357,4 +358,195 @@ fn migrate_keeps_the_stored_state() {
 fn migrate_without_state_fails() {
     at("veiled.test", 0, H0);
     Veiled::migrate();
+}
+
+// ------------------------------------------------------------------------------- trading closed early
+// A market asking whether something happens before a date can be decided long before its trading deadline (the
+// event happens early). `close_trading` ends its trading then, so nobody bets on a known result. Alice's markets
+// below trade until H0 + 20 with the resolution deadline at H0 + 60.
+
+#[test]
+fn the_trading_closer_ends_trading_now_and_resolution_can_start() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_trading_closer(Some(acct("ai.test")));
+    assert!(logged("trading_closer_set"));
+    assert_eq!(c.get_governance().trading_closer.as_ref().map(|a| a.as_str()), Some("ai.test"));
+    // The owner opens this market to an early close after checking it and its source.
+    assert!(!c.get_market(U64(id)).unwrap().early_close);
+    c.set_early_close(U64(id), true);
+    assert!(logged("early_close_set"));
+    assert!(c.get_market(U64(id)).unwrap().early_close);
+
+    at("ai.test", 0, H0 + 5);
+    c.close_trading(U64(id), Some("https://ai.test/receipts/1.json".into()));
+    assert!(logged("trading_closed"));
+    // Closed, with the deadline moved to the tick before: the market stands where a passed deadline puts it.
+    let m = c.get_market(U64(id)).unwrap();
+    assert_eq!((m.status, m.deadline.0), (STATUS_CLOSED, H0 + 4));
+
+    // Resolution can start at once: a bonded vote is taken at the next tick.
+    at("bob.test", NEAR, H0 + 6);
+    c.vote_outcome(U64(id), 1, None);
+    assert_eq!(c.get_market(U64(id)).unwrap().tally.unwrap().total_voters, 1);
+}
+
+#[test]
+#[should_panic(expected = "ERR_STATUS")]
+fn nobody_can_buy_once_trading_was_closed_early() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 5);
+    c.close_trading(U64(id), None);
+    buy(&mut c, id, 1, NEAR, H0 + 5);
+}
+
+#[test]
+#[should_panic(expected = "ERR_LEG_CLOSED")]
+fn a_market_closed_early_cannot_join_a_new_parlay() {
+    let mut c = contract(1);
+    let a = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    let b = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_parlay_leg(U64(a), true);
+    c.set_parlay_leg(U64(b), true);
+    c.close_trading(U64(b), None);
+    let legs = vec![
+        crate::parlay::LegArg { market_id: U64(a), outcome: 1 },
+        crate::parlay::LegArg { market_id: U64(b), outcome: 1 },
+    ];
+    c.quote_parlay(TOKEN_NEAR, U128(NEAR), legs);
+}
+
+#[test]
+fn the_owner_may_close_trading_on_any_open_market() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 3);
+    c.close_trading(U64(id), None);
+    assert_eq!(c.get_market(U64(id)).unwrap().status, STATUS_CLOSED);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_ALLOWED")]
+fn the_trading_closer_cannot_close_a_market_the_owner_did_not_open_to_it() {
+    // Anyone can create a market naming a page they control: the AI closes only markets the owner vetted.
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_trading_closer(Some(acct("ai.test")));
+    at("ai.test", 0, H0 + 2);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_ALLOWED")]
+fn the_trading_closer_cannot_close_a_market_once_the_owner_withdrew_it() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_trading_closer(Some(acct("ai.test")));
+    c.set_early_close(U64(id), true);
+    c.set_early_close(U64(id), false);
+    assert!(!c.get_market(U64(id)).unwrap().early_close);
+    at("ai.test", 0, H0 + 2);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_ALLOWED")]
+fn a_committee_member_alone_cannot_close_trading() {
+    // Every other committee power needs a quorum; one member must not end a market's trading for good.
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_early_close(U64(id), true);
+    at("c3.test", 0, H0 + 2);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_ALLOWED")]
+fn anyone_else_cannot_close_trading_not_even_the_creator() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_early_close(U64(id), true);
+    at("alice.test", 0, H0 + 2);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_OWNER")]
+fn only_the_owner_opens_a_market_to_an_early_close() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("c1.test", 0, H0 + 1);
+    c.set_early_close(U64(id), true);
+}
+
+#[test]
+fn trading_closes_early_even_while_the_contract_is_paused() {
+    // Deliberate: ending trading on a known result protects traders, so a pause must not hold it up.
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_trading_closer(Some(acct("ai.test")));
+    c.set_early_close(U64(id), true);
+    c.set_governance_value(6, U128(1));
+    at("ai.test", 0, H0 + 2);
+    c.close_trading(U64(id), None);
+    assert_eq!(c.get_market(U64(id)).unwrap().status, STATUS_CLOSED);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_ALLOWED")]
+fn a_removed_trading_closer_cannot_close_trading() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 1);
+    c.set_trading_closer(Some(acct("ai.test")));
+    c.set_early_close(U64(id), true);
+    c.set_trading_closer(None);
+    assert_eq!(c.get_governance().trading_closer, None);
+    at("ai.test", 0, H0 + 2);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_OPEN")]
+fn trading_that_already_ended_is_neither_closed_again_nor_moved_later() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 21);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_NOT_OPEN")]
+fn a_market_closed_early_cannot_be_closed_twice() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 5);
+    c.close_trading(U64(id), None);
+    at("owner.test", 0, H0 + 6);
+    c.close_trading(U64(id), None);
+}
+
+#[test]
+#[should_panic(expected = "ERR_OWNER")]
+fn only_the_owner_names_the_trading_closer() {
+    let mut c = contract(1);
+    at("c1.test", 0, H0);
+    c.set_trading_closer(Some(acct("ai.test")));
+}
+
+#[test]
+#[should_panic(expected = "ERR_EVIDENCE_LEN")]
+fn the_evidence_of_an_early_close_is_bounded() {
+    let mut c = contract(1);
+    let id = open_market(&mut c, 10 * NEAR, 2, 20, 40);
+    at("owner.test", 0, H0 + 5);
+    c.close_trading(U64(id), Some("x".repeat(MAX_EVIDENCE + 1)));
 }

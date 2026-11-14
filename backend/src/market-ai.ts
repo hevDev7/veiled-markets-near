@@ -155,7 +155,7 @@ Write these fields:
   Keep the rules under 1,400 characters.
 - source: one URL, from the catalog below whenever the idea fits it. It must serve the deciding value as plain HTML or JSON, without JavaScript, from a public address, with no login. It must show the value for the moment that counts and keep showing it afterwards: a page that only shows the latest value is wrong, because the value will have changed by the time the resolver reads it.
 - category: the id of one category below.
-- closes_at: when trading stops, as an ISO 8601 time in UTC such as 2026-11-20T16:00:00Z. At least 15 minutes after the current time, and no later than the moment that decides the market, so nobody can trade on a known result.
+- closes_at: when trading stops, as an ISO 8601 time in UTC such as 2026-11-20T16:00:00Z. At least 15 minutes after the current time, and no later than the moment that decides the market, so nobody can trade on a known result. Never write a question whose answer can become known while trading is still open: whether something happens before or by a date (a launch, a storm, an announcement, a record) is decided the day it happens, which can be long before that date, and a championship can be clinched before its last race. Ask instead about a window that opens when trading closes (the first match kicking off after closes_at, a launch between closes_at and a later date), or about a value at one fixed moment, with trading closing at that moment.
 - resolution_deadline_at: 7 days after closes_at, or later when the source publishes the value later. Never less than 6 hours after closes_at.
 - assumptions: each choice you made that the idea did not settle (a date, a time, a threshold, a source, a change to the idea), one short sentence each, at most 5. Empty when the idea settled everything.
 
@@ -201,7 +201,7 @@ time_bounds: do the times work for trading and for resolution?
 - 10: ideal timing for trading and for reporting the result.
 - 7 to 9: a sensible order with safe buffers.
 - 4 to 6: feasible, but without the buffers resolution needs, such as a resolution deadline that leaves the source little time to publish.
-- 1 to 3: impossible, or the dates have already passed. Trading that stays open after the deciding moment, so people can bet on a known result, also scores 1 to 3.
+- 1 to 3: impossible, or the dates have already passed. Trading that stays open after the deciding moment, so people can bet on a known result, also scores 1 to 3. So does a question that can be decided while trading is still open, such as whether something happens before a date with trading open until that date: it can happen early and be known while people still bet. A window that opens when trading closes, or a value at the moment trading closes, avoids this.
 
 source_quality: will the resolver find the deciding value in this source?
 - 10: an official API with a direct, unchangeable history.

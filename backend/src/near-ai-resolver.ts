@@ -15,6 +15,13 @@
 // idea into a Yes/No market and POST /review scores one before it is published, with Claude (market-ai.ts,
 // anthropic-model.ts); without it they answer 503.
 //
+// While a market trades, it also reads the market's source every AI_EARLY_CLOSE_MINUTES and asks the model, the same
+// way, whether the outcome is already settled (a market asking whether something happens before a date, and it
+// happened). If it is, with enough confidence and a checked signature, it ends the market's trading with close_trading
+// and the early-close receipt (/receipts/<market>.early.json) as evidence, so nobody bets on a known result. It does
+// this only once the contract names this account its trading closer (set_trading_closer), and only on markets the
+// owner opened to an early close (set_early_close) after checking the market and its source.
+//
 // It also keeps the app's market → creating-transaction index (market-index.ts), built from FastNEAR's Transactions
 // API and saved next to the receipts: GET /market-tx answers {contract, byId}, so market pages link to
 // /market/<tx hash> without every browser paging an explorer API.
@@ -37,7 +44,9 @@
 //      AI_RESOLVER_PUBLIC_URL (the public base URL of this service: votes link their receipts there; without it
 //      the service never votes),
 //      NEAR_RPC_URL (comma-separated), AI_MIN_CONFIDENCE (0.8), AI_POLL_SECONDS (120),
-//      AI_RETRY_ABSTAINED_MINUTES (60), AI_RESOLVER_PORT (4091), AI_RECEIPTS_DIR (backend/ai-receipts),
+//      AI_RETRY_ABSTAINED_MINUTES (60), AI_EARLY_CLOSE_MINUTES (60; 0 turns early closes off),
+//      AI_EARLY_CLOSE_CONFIDENCE (0.9), AI_EARLY_CLOSE_PER_PASS (3),
+//      AI_RESOLVER_PORT (4091), AI_RECEIPTS_DIR (backend/ai-receipts),
 //      MARKET_AI_ORIGINS (the create page's origins, comma-separated;
 //      https://veiledmarkets.xyz,http://localhost:3100), MARKET_AI_CLIENT_PER_HOUR (10), MARKET_AI_DAILY_CAP (150),
 //      MARKET_AI_API_KEY (an Anthropic key; turns on /draft and /review), MARKET_AI_MODEL (claude-opus-5-5),
@@ -64,6 +73,14 @@ import {
   sha256Hex,
   shouldVote,
   verifyLink,
+  buildEarlyCloseRequest,
+  closesEarly,
+  earlyEvidenceFor,
+  mayCloseTrading,
+  parseEarlyClose,
+  receiptFile,
+  shouldCheckEarly,
+  type GovernanceRoles,
   type ChainMarket,
   type Decision,
   type TeeSignature,
@@ -108,6 +125,13 @@ const PUBLIC_URL = (process.env.AI_RESOLVER_PUBLIC_URL || '').replace(/\/+$/, ''
 const MIN_CONFIDENCE = Number(process.env.AI_MIN_CONFIDENCE || 0.8);
 const POLL_SECONDS = Number(process.env.AI_POLL_SECONDS || 120);
 const RETRY_ABSTAINED_MS = Number(process.env.AI_RETRY_ABSTAINED_MINUTES || 60) * 60_000;
+// How often each open market is checked for an outcome settled before its trading deadline (0 = never), the
+// confidence that ends its trading, and how many checks one pass makes (each is a source read and a model call).
+const EARLY_CLOSE_MS = Number(process.env.AI_EARLY_CLOSE_MINUTES ?? '60') * 60_000;
+const EARLY_CLOSE_CONFIDENCE = Number(process.env.AI_EARLY_CLOSE_CONFIDENCE || 0.9);
+const EARLY_CLOSE_PER_PASS = Number(process.env.AI_EARLY_CLOSE_PER_PASS || 3);
+/** Trading that closes within five minutes is left to its deadline. */
+const EARLY_CLOSE_MIN_TICKS_LEFT = 75n;
 const PORT = Number(process.env.AI_RESOLVER_PORT || process.env.PORT || 4091);
 const RECEIPTS = process.env.AI_RECEIPTS_DIR || nodePath.join(nodePath.dirname(new URL(import.meta.url).pathname), '..', 'ai-receipts');
 const DRY_RUN = process.env.DRY_RUN === '1' || !PUBLIC_URL;
@@ -162,6 +186,20 @@ mkdirSync(RECEIPTS, { recursive: true });
 const INDEX = nodePath.join(RECEIPTS, 'index.json');
 const index: Record<string, Entry> = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
 const saveIndex = () => writeFileSync(INDEX, JSON.stringify(index, null, 2));
+
+/** The last early-close check of each open market. */
+interface EarlyEntry {
+  state: 'open' | 'closed' | 'unverified' | 'error';
+  at: string;
+  outcome?: number;
+  tx?: string;
+  receipt_sha256?: string;
+  note?: string;
+}
+
+const EARLY = nodePath.join(RECEIPTS, 'early-close.json');
+const early: Record<string, EarlyEntry> = existsSync(EARLY) ? JSON.parse(readFileSync(EARLY, 'utf8')) : {};
+const saveEarly = () => writeFileSync(EARLY, JSON.stringify(early, null, 2));
 
 // The resolution source is read by source-reader.ts: the same reader /check-source uses, with DNS pinned to the
 // addresses it vetted. With OutLayer set up, it is read inside OutLayer's TEE instead (outlayer.ts), and the model is
@@ -314,9 +352,126 @@ async function resolve(m: ChainMarket): Promise<void> {
   console.log(`[ai] market ${id}: voted ${decision.outcome} (${text.outcomes[decision.outcome - 1]}) tx=${tx}`);
 }
 
+// ------------------------------------------------------------------ one open market: settled already?
+
+/** Whether the contract lets this account end trading early, read again every ten minutes. */
+let closer: { at: number; may: boolean } | null = null;
+
+async function mayClose(): Promise<boolean> {
+  if (closer && Date.now() - closer.at < 600_000) return closer.may;
+  let may = false;
+  try {
+    may = mayCloseTrading(await view<GovernanceRoles>('get_governance', {}), ACCOUNT);
+  } catch {
+    may = false; // a contract from before close_trading has no get_governance
+  }
+  if (closer?.may !== may) {
+    console.log(`[ai] early close ${may ? `on: each open market every ${EARLY_CLOSE_MS / 60_000} min` : `off: the contract does not let ${ACCOUNT} close trading`}`);
+  }
+  closer = { at: Date.now(), may };
+  return may;
+}
+
+async function checkEarly(m: ChainMarket): Promise<void> {
+  const id = m.id;
+  const text = readMarket(m);
+  const { source, sourceText } = await readMarketSource(text.source);
+  if (!sourceText) {
+    // Settled means the source shows the result: with nothing read there is nothing to ask the model.
+    early[id] = { state: 'open', at: new Date().toISOString(), note: 'source not readable' };
+    return;
+  }
+  const attestation = await attest();
+  const attestationFile = `${id}.early.attestation.json`;
+  writeFileSync(nodePath.join(RECEIPTS, attestationFile), attestation.raw);
+  const tradingClosesAt = new Date(Number(m.deadline) * TICK_SECONDS * 1000);
+  const request = buildEarlyCloseRequest(MODEL, text, sourceText, new Date(), tradingClosesAt);
+  const reply = await complete(request);
+  const decision = parseEarlyClose(reply.content, m.num_outcomes);
+  const signature = await signatureOf(reply.id);
+  const check = checkSignature(signature, MODEL, request, reply.raw, attestation.signers);
+  const verifiedAt = new Date().toISOString();
+  const receipt = {
+    version: 1,
+    kind: 'early_close',
+    contract: CONTRACT,
+    market_id: id,
+    question: text.question,
+    rules: text.rules,
+    outcomes: text.outcomes,
+    trading_closes_at: tradingClosesAt.toISOString(),
+    resolution_source: text.source,
+    source: source ? { ...source, excerpt: sourceText?.slice(0, 2000) ?? null } : null,
+    model: MODEL,
+    decision,
+    resolver: ACCOUNT,
+    tee: {
+      attestation: {
+        nonce: attestation.nonce,
+        fetched_at: attestation.fetched_at,
+        report_sha256: sha256Hex(attestation.raw),
+        report: PUBLIC_URL ? `${PUBLIC_URL}/receipts/${attestationFile}` : attestationFile,
+        model_signers: attestation.signers,
+      },
+      signature,
+      check,
+      verify: verifyLink({
+        completionId: reply.id,
+        model: MODEL,
+        signatureKind: signature.signature_kind ?? '',
+        signingAlgo: signature.signing_algo,
+        signingAddress: signature.signing_address,
+        signedText: signature.text,
+        signature: signature.signature,
+        verifiedAt,
+      }),
+    },
+    request_body: request,
+    response_body: reply.raw.toString('utf8'),
+    created_at: verifiedAt,
+  };
+  const receiptJson = JSON.stringify(receipt, null, 2);
+  writeFileSync(nodePath.join(RECEIPTS, `${id}.early.json`), receiptJson);
+  const receipt_sha256 = sha256Hex(receiptJson);
+  const at = new Date().toISOString();
+
+  if (!check.ok) {
+    early[id] = { state: 'unverified', at, receipt_sha256, note: check.reason };
+    console.warn(`[ai] market ${id}: early-close check not used, ${check.reason}`);
+    return;
+  }
+  if (!decision || !closesEarly(decision, EARLY_CLOSE_CONFIDENCE)) {
+    early[id] = { state: 'open', at, receipt_sha256, note: decision ? `settled ${decision.settled}, confidence ${decision.confidence}` : 'no readable answer' };
+    return;
+  }
+  const outcome = decision.outcome as number;
+  if (DRY_RUN) {
+    early[id] = { state: 'open', at, outcome, receipt_sha256, note: 'dry run' };
+    console.log(`[ai] market ${id}: DRY_RUN would close trading, the source settles ${outcome} (${text.outcomes[outcome - 1]})`);
+    return;
+  }
+  const evidence = earlyEvidenceFor(PUBLIC_URL, id, receiptJson);
+  const result: any = await signer().signAndSendTransaction({
+    receiverId: CONTRACT,
+    actions: [actions.functionCall('close_trading', { market_id: id, evidence }, 30_000_000_000_000n, 0n)],
+    waitUntil: 'EXECUTED_OPTIMISTIC',
+    throwOnFailure: false,
+  });
+  const tx: string = result?.transaction_outcome?.id ?? result?.transaction?.hash ?? 'unknown';
+  const failure = result?.status?.Failure;
+  if (failure) {
+    const code = JSON.stringify(failure).match(/ERR_[A-Z_0-9]+/)?.[0] ?? 'failed';
+    early[id] = { state: 'error', at, tx, receipt_sha256, note: `close_trading failed: ${code}` };
+    console.warn(`[ai] market ${id}: close_trading failed ${code} tx=${tx}`);
+    return;
+  }
+  early[id] = { state: 'closed', at, outcome, tx, receipt_sha256 };
+  console.log(`[ai] market ${id}: trading closed early, the source settles ${outcome} (${text.outcomes[outcome - 1]}) tx=${tx}`);
+}
+
 // ------------------------------------------------------------------ the loop
 
-let lastPass: { at: string; candidates: number; error?: string } | null = null;
+let lastPass: { at: string; candidates: number; early_checks?: number; error?: string } | null = null;
 
 async function pass(): Promise<void> {
   const height = BigInt(await view<string>('get_height', {}));
@@ -341,7 +496,25 @@ async function pass(): Promise<void> {
     }
     saveIndex();
   }
-  lastPass = { at: new Date().toISOString(), candidates };
+  // Then a few open markets, each at most every EARLY_CLOSE_MS: is the outcome already settled?
+  let earlyChecks = 0;
+  if (EARLY_CLOSE_MS > 0 && (await mayClose())) {
+    for (const m of markets) {
+      if (earlyChecks >= EARLY_CLOSE_PER_PASS) break;
+      if (!shouldCheckEarly(m, height, EARLY_CLOSE_MIN_TICKS_LEFT)) continue;
+      const prior = early[m.id];
+      if (prior && Date.now() - Date.parse(prior.at) < EARLY_CLOSE_MS) continue;
+      earlyChecks++;
+      try {
+        await checkEarly(m);
+      } catch (e) {
+        early[m.id] = { state: 'error', at: new Date().toISOString(), note: (e as Error).message.slice(0, 300) };
+        console.warn(`[ai] market ${m.id}: early-close check failed, ${(e as Error).message}`);
+      }
+      saveEarly();
+    }
+  }
+  lastPass = { at: new Date().toISOString(), candidates, early_checks: earlyChecks };
 }
 
 // Market id → creating transaction hash (market-index.ts). Updated in place by each poll, so /market-tx serves the
@@ -401,7 +574,13 @@ function serve(): void {
           const url = new URL(req.url ?? '/', 'http://x');
           if (url.pathname === '/health') {
             const marketIndex = { height: markets.height, markets: Object.keys(markets.byId).length, last_poll: marketsPoll };
-            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, source_reader: SOURCE_READER, drafting: model ? MARKET_AI_MODEL : 'off', last_pass: lastPass, market_index: marketIndex }));
+            const earlyClose = {
+              every_minutes: EARLY_CLOSE_MS / 60_000,
+              confidence: EARLY_CLOSE_CONFIDENCE,
+              permitted: closer?.may ?? null,
+              closed: Object.values(early).filter(e => e.state === 'closed').length,
+            };
+            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, source_reader: SOURCE_READER, drafting: model ? MARKET_AI_MODEL : 'off', last_pass: lastPass, early_close: earlyClose, market_index: marketIndex }));
           }
           if (url.pathname === '/market-tx') {
             const r = marketTx(markets, { acceptEncoding: req.headers['accept-encoding'], ifNoneMatch: req.headers['if-none-match'] });
@@ -410,7 +589,8 @@ function serve(): void {
             return void res.end(r.body);
           }
           if (url.pathname === '/receipts' || url.pathname === '/receipts/') return send(res, 200, JSON.stringify(index));
-          const file = url.pathname.match(/^\/receipts\/(\d+(?:\.attestation)?\.json)$/)?.[1];
+          if (url.pathname === '/receipts/early') return send(res, 200, JSON.stringify(early));
+          const file = receiptFile(url.pathname);
           if (file && existsSync(nodePath.join(RECEIPTS, file))) return send(res, 200, readFileSync(nodePath.join(RECEIPTS, file), 'utf8'));
           return send(res, 404, JSON.stringify({ error: 'not found' }));
         })

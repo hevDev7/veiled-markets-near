@@ -331,6 +331,19 @@ test('the prompts carry the categories, the rules style, the catalog and the sca
   }
 });
 
+test('the prompts keep trading from staying open on a result that can already be known', () => {
+  // A market asking whether something happens before a date can be decided the day it happens, while people still
+  // bet (live market #933: a Starship launch before February 1, trading until then).
+  const draft = draftSystemPrompt();
+  // The draft rule is as wide as the review's, so a draft never fails the review on this (a title clinched early too).
+  assert.ok(draft.includes('Never write a question whose answer can become known while trading is still open'));
+  assert.ok(draft.includes('clinched'));
+  assert.ok(draft.includes('a window that opens when trading closes'));
+  const review = reviewSystemPrompt();
+  assert.ok(review.includes('can be decided while trading is still open'));
+  assert.ok(review.includes('scores 1 to 3'));
+});
+
 test('parseDraftRequest and parseReviewRequest accept what the page sends and refuse the rest', () => {
   assert.deepEqual(parseDraftRequest({ idea: '  ETH above 4000 next Friday?  ' }), { idea: 'ETH above 4000 next Friday?' });
   assert.deepEqual(parseDraftRequest({ idea: 'ETH above 4000 next Friday?', category: 6 }), { idea: 'ETH above 4000 next Friday?', category: 6 });

@@ -28,9 +28,19 @@ const KEY_COLLATERAL: &[u8] = b"oc";
 const KEY_FIRST_VOTER: &[u8] = b"fv";
 const KEY_RESOLVER_REWARD: &[u8] = b"rr";
 const KEY_VOTE_EVIDENCE: &[u8] = b"ve";
+const KEY_EARLY_CLOSE: &[u8] = b"ec";
 
 fn evidence_key(market_id: u64, voter: &AccountId) -> Vec<u8> {
     [KEY_VOTE_EVIDENCE, &market_id.to_le_bytes(), voter.as_bytes()].concat()
+}
+
+fn early_close_key(market_id: u64) -> Vec<u8> {
+    [KEY_EARLY_CLOSE, &market_id.to_le_bytes()].concat()
+}
+
+/// The owner opened this market to an early close by the trading closer (`set_early_close`).
+pub(crate) fn early_close_allowed(market_id: u64) -> bool {
+    env::storage_has_key(&early_close_key(market_id))
 }
 
 // New data lives under its own storage keys so the market record and the contract state keep their layout.
@@ -218,6 +228,8 @@ pub struct MarketView {
     pub outcome_collateral: Option<[U128; 4]>,
     /// The owner approved this market as a parlay leg.
     pub parlay_leg: bool,
+    /// The owner opened this market to an early close by the trading closer (the AI resolver).
+    pub early_close: bool,
     pub creator_fees_claimed: bool,
     pub trades: U64,
     pub escalation_tier: u8,
@@ -410,6 +422,7 @@ impl MarketState {
             outcome_shares: u4(self.outcome_shares),
             outcome_collateral: read_collateral(m.id).map(u4),
             parlay_leg: crate::parlay::is_leg(m.id),
+            early_close: early_close_allowed(m.id),
             creator_fees_claimed: self.creator_fees_claimed,
             trades: U64(self.trades),
             escalation_tier: self.escalation_tier,
@@ -449,6 +462,51 @@ impl Veiled {
         require!(st.market.status == STATUS_ACTIVE, "ERR_STATUS");
         require!(h > st.market.deadline, "ERR_NOT_EXPIRED");
         st.market.status = STATUS_CLOSED;
+    }
+
+    /// Ends trading on an open market now, for a market decided before its trading deadline (it asks whether
+    /// something happens before a date, and it already happened), so nobody bets on a known result. The deadline
+    /// only moves earlier: to the tick before this one, closing the market as a passed deadline would, so
+    /// resolution can start. Nothing reopens trading. The owner may close any open market; the trading closer
+    /// (`set_trading_closer`, the AI resolver) only one the owner opened to it with `set_early_close`. A single
+    /// committee member may not: every other committee power needs a quorum. It works paused or not; `evidence`
+    /// links the reasoning and is only logged.
+    pub fn close_trading(&mut self, market_id: U64, evidence: Option<String>) {
+        let caller = env::predecessor_account_id();
+        require!(
+            caller == self.owner
+                || (crate::governance::trading_closer().as_ref() == Some(&caller) && early_close_allowed(market_id.0)),
+            "ERR_NOT_ALLOWED"
+        );
+        require!(evidence.as_ref().is_none_or(|e| e.len() <= MAX_EVIDENCE), "ERR_EVIDENCE_LEN");
+        let h = self.height();
+        let st = self.market_mut(market_id.0);
+        require!(st.market.status == STATUS_ACTIVE && h <= st.market.deadline, "ERR_NOT_OPEN");
+        let previous = st.market.deadline;
+        st.market.deadline = h.saturating_sub(1);
+        st.market.status = STATUS_CLOSED;
+        let data = serde_json::json!({
+            "market_id": market_id,
+            "by": caller,
+            "previous_deadline": U64(previous),
+            "deadline": U64(st.market.deadline),
+            "evidence": evidence,
+        });
+        crate::governance::log_event("trading_closed", data);
+    }
+
+    /// Owner only. Opens a market to `close_trading` by the trading closer, or withdraws that. Anyone can create a
+    /// market that names a page they control, so the owner first checks the market and its source; the AI
+    /// resolver watches only these markets. The owner may close any open market without this.
+    pub fn set_early_close(&mut self, market_id: U64, allowed: bool) {
+        self.assert_owner();
+        self.market_ref(market_id.0);
+        if allowed {
+            env::storage_write(&early_close_key(market_id.0), &[1]);
+        } else {
+            env::storage_remove(&early_close_key(market_id.0));
+        }
+        crate::governance::log_event("early_close_set", serde_json::json!({ "market_id": market_id, "allowed": allowed }));
     }
 
     /// Bonded vote on the outcome. The bond (config.vote_bond micro NEAR) is attached. `evidence` is an optional
