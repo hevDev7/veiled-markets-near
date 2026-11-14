@@ -15,9 +15,24 @@
 //      (veiled-oracle.testnet), ORACLE_PRIVATE_KEY (default: the legacy
 //      keychain file), NEAR_RPC_URL (comma-separated, tried in order), TURBO_SYMBOLS (BTC,ETH,SOL),
 //      TURBO_DURATION_BLOCKS (75 = 5 min), TURBO_OPERATOR_PORT (4090).
+//
+// TURBO_PRICES=contract: rounds open with open_turbo_round and settle with settle_turbo_round, so the contract
+// takes both prices from the oracle contract it names (set_turbo_oracle / set_turbo_feed by the owner); this
+// service's own quotes then only drive the charts. The symbols must have a feed on the contract. With Pyth as that
+// oracle, set TURBO_PYTH_PUSH_HERMES (testnet: https://hermes-beta.pyth.network, with PYTH_API_KEY) so the
+// latest update is stored on the Pyth contract before each open and settle; OutLayer's oracle needs no push.
 // ============================================================================
 
 import { EventSource } from 'eventsource'
+import {
+  CloseWindowMissed,
+  openRound,
+  pythPush,
+  settleRound,
+  turboPriceMode,
+  type ContractPriceDeps,
+  type ContractPriceOptions,
+} from './turbo-contract-prices'
 // node-fetch is already a dep; native fetch is fine on Node 18+ but we
 // import to keep parity with the rest of backend/.
 // import fetch from 'node-fetch'
@@ -843,7 +858,7 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
     try {
       const currentBlock = await getAleoBlockHeight()
       const deadline = currentBlock + DURATION_BLOCKS
-      const baselinePrice = baselineOverride ?? quote.price
+      let baselinePrice = baselineOverride ?? quote.price
       const baselineMicro = BigInt(Math.round(baselinePrice * 1_000_000))
       const confMicro = BigInt(Math.round(quote.conf * 1_000_000))
       if (baselineOverride != null) {
@@ -866,6 +881,8 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
       const inputs = snapshotToCreateInputs(snap, deadline, nonce, operatorAddress)
       const result = await broadcastCreateTurboMarket(inputs)
       const marketId = result.firstFieldOutput || `pending_${symbol}_${nonce}`
+      // Contract prices: the round's baseline is the oracle price the contract stored, not this service's quote.
+      if (result.baselineMicro != null) baselinePrice = Number(result.baselineMicro) / 1_000_000
 
       // Verify create tx was actually accepted on-chain (not rejected).
       // If we got a txId but the tx was rejected, don't set chainState —
@@ -944,8 +961,11 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
     // create). Falls back to the fresh quote's publishTime when we
     // don't have the previous source (e.g. non-chained first-ever
     // create, or lastClosingPrice fallback without a saved timestamp).
+    // Contract prices: the contract keeps only the tick the oracle price was published in; its start is the time.
     const baselinePublishTime =
-      baselineOverride != null && baselineSourcePublishTime != null
+      result.baselineBlock != null
+        ? Number(result.baselineBlock) * SECS_PER_BLOCK * 1000
+        : baselineOverride != null && baselineSourcePublishTime != null
         ? baselineSourcePublishTime
         : quote.publishTime
     await logTurboAudit({
@@ -961,10 +981,10 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
       metadata: {
         deadline: deadline.toString(),
         nonce: nonce.toString(),
-        chained_from: baselineOverride ? 'previous_closing' : 'pyth_live',
+        chained_from: result.baselineMicro != null ? 'oracle_contract' : baselineOverride ? 'previous_closing' : 'pyth_live',
       },
     })
-    console.log(`[chain] ${symbol} created ${marketId.slice(0, 20)}... baseline=$${baselinePrice.toFixed(6)} (micro=${baselineMicro}) chained=${!!baselineOverride} deadline=${deadline}`)
+    console.log(`[chain] ${symbol} created ${marketId.slice(0, 20)}... baseline=$${baselinePrice.toFixed(6)} (micro=${result.baselineMicro ?? baselineMicro}) chained=${!!baselineOverride} deadline=${deadline}`)
     } finally {
       creating.delete(symbol)
     }
@@ -1060,7 +1080,20 @@ export async function rollingChainLoop(stream: PythStream): Promise<void> {
     try {
       const snap = buildSnapshot(m.symbol, ATTESTATION_KIND.CLOSING, quote, closingBlock, m.market_id)
       const inputs = snapshotToResolveInputs(m.market_id, snap)
-      const result = await broadcastResolveTurboMarket(inputs)
+      let result: SnarkosExecResult
+      try {
+        result = await broadcastResolveTurboMarket(inputs)
+      } catch (err) {
+        if (!(err instanceof CloseWindowMissed)) throw err
+        // Contract prices: no oracle price landed inside the round's close window, so it can no longer be
+        // settled by price. The stale sweep cancels it after its resolution deadline (bets are refunded); the
+        // next round opens on the next tick instead of retrying this one.
+        console.warn(`[chain] ${m.symbol} ${m.market_id.slice(0, 16)}... missed its close window: ${err.message}`)
+        const fallbackQuote = stream.latest(m.symbol)
+        if (fallbackQuote) lastClosingPrice.set(m.symbol, fallbackQuote.price)
+        chainState.delete(m.symbol)
+        return null
+      }
       ;(globalThis as any)._lastResolveTxId = result.txId
 
       // Wait briefly then read on-chain closing_price as authoritative.
@@ -1366,15 +1399,25 @@ function serial<T>(job: () => Promise<T>): Promise<T> {
   return run
 }
 
-async function nearCall(method: string, args: Record<string, unknown>): Promise<SnarkosExecResult> {
+function nearCall(method: string, args: Record<string, unknown>): Promise<SnarkosExecResult> {
+  return nearCallTo(VEILED_CONTRACT, method, args, 50_000_000_000_000n, 0n)
+}
+
+async function nearCallTo(
+  receiverId: string,
+  method: string,
+  args: Record<string, unknown>,
+  gas: bigint,
+  deposit: bigint,
+): Promise<SnarkosExecResult> {
   if (process.env.DRY_RUN === '1') {
-    console.log(`[near] DRY_RUN ${method}`, JSON.stringify(args))
+    console.log(`[near] DRY_RUN ${receiverId} ${method}`, JSON.stringify(args))
     return { txId: `dryrun_${Date.now()}`, raw: '' }
   }
   const outcome: any = await serial(() =>
     getOracleAccount().signAndSendTransaction({
-      receiverId: VEILED_CONTRACT,
-      actions: [actions.functionCall(method, args, 50_000_000_000_000n, 0n)],
+      receiverId,
+      actions: [actions.functionCall(method, args, gas, deposit)],
       waitUntil: 'EXECUTED_OPTIMISTIC',
       throwOnFailure: false,
     }),
@@ -1396,9 +1439,39 @@ const lit = (x: string) => x.replace(/(u8|u16|u32|u64|u128|field)$/, '')
 
 const TURBO_PROGRAM_ID_LIVE = VEILED_CONTRACT
 
-async function broadcastCreateTurboMarket(inputs: string[]): Promise<SnarkosExecResult> {
+const TURBO_PRICES = turboPriceMode(process.env)
+const contractPriceDeps: ContractPriceDeps = {
+  view: (contractId, method, args) => nearProvider.callFunction({ contractId, method, args }),
+  call: async (receiverId, method, args, gas, deposit) => {
+    const r = await nearCallTo(receiverId, method, args, gas, deposit)
+    return { txId: r.txId, value: r.raw ? JSON.parse(r.raw) : null }
+  },
+  get: (url, headers) => fetch(url, { headers, signal: AbortSignal.timeout(10_000) }),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now: () => Date.now(),
+}
+const contractPriceOptions: ContractPriceOptions = {
+  veiled: VEILED_CONTRACT,
+  operator: ORACLE_ACCOUNT,
+  push: process.env.TURBO_PYTH_PUSH_HERMES
+    ? pythPush(process.env.TURBO_PYTH_PUSH_HERMES, PYTH_API_KEY || undefined)
+    : undefined,
+}
+
+interface CreateResult extends SnarkosExecResult {
+  /** Contract prices only: the baseline the contract took from the oracle (micro-USD) and its tick. */
+  baselineMicro?: bigint
+  baselineBlock?: bigint
+}
+
+async function broadcastCreateTurboMarket(inputs: string[]): Promise<CreateResult> {
   // inputs: [symbol_id, deadline, nonce, price, conf, at_block, creator] (snapshotToCreateInputs)
   const [symbolId, deadline, , price, conf, atBlock] = inputs.map(lit)
+  if (TURBO_PRICES === 'contract') {
+    if (process.env.DRY_RUN === '1') return nearCall('open_turbo_round', { symbol_id: Number(symbolId), deadline })
+    const o = await openRound(contractPriceDeps, contractPriceOptions, Number(symbolId), BigInt(deadline))
+    return { txId: o.txId, firstFieldOutput: `${o.marketId}field`, raw: o.marketId, baselineMicro: o.baselineMicro, baselineBlock: o.baselineBlock }
+  }
   const r = await nearCall('create_turbo_market', {
     symbol_id: Number(symbolId),
     deadline,
@@ -1413,6 +1486,13 @@ async function broadcastCreateTurboMarket(inputs: string[]): Promise<SnarkosExec
 async function broadcastResolveTurboMarket(inputs: string[]): Promise<SnarkosExecResult> {
   // inputs: [market_id, price, conf, at_block] (snapshotToResolveInputs)
   const [marketId, price, conf, atBlock] = inputs.map(lit)
+  if (TURBO_PRICES === 'contract') {
+    // The closing price is the oracle's; the caller reads it back from the round.
+    if (process.env.DRY_RUN === '1') return nearCall('settle_turbo_round', { market_id: marketId })
+    const s = await settleRound(contractPriceDeps, contractPriceOptions, marketId)
+    if (s.alreadySettled) console.log(`[near] turbo round ${marketId} was already settled`)
+    return { txId: s.txId || 'already_settled', raw: '' }
+  }
   return nearCall('resolve_turbo_market', {
     market_id: marketId,
     closing_price: price,

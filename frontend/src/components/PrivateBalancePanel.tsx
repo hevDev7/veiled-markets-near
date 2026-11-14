@@ -9,7 +9,9 @@ import { cachedNoteKeys, exportNoteSeed, importNoteSeed, switchToWalletKey, type
 import { forgetNotes, unspent } from '@/lib/near/notes/store'
 import { signMessage } from '@/lib/near/near-wallet'
 import { deposit, noteKeys, refreshNotes, withdraw, type PrivateStep } from '@/lib/near/private'
+import { ONECLICK_UI } from '@/lib/near/oneclick'
 import { GAS_RESERVE_MICRO } from '@/lib/near/wallet-records'
+import { CrossChainUsdc } from './CrossChainUsdc'
 
 // NEAR and Circle USDC (internal key 'USDCX').
 const TOKENS = ENABLED_TOKEN_KEYS.map((key) => ({ id: TOKEN[key], symbol: tokenLabel(key) }))
@@ -404,6 +406,10 @@ export function PrivateBalancePanel({ className }: { className?: string } = {}) 
           <span>View on NearBlocks</span>
           <ExternalLink className="w-3.5 h-3.5" />
         </a>
+      )}
+
+      {ONECLICK_UI && unlocked && wallet.address && token === TOKEN.USDCX && (
+        <CrossChainUsdc account={wallet.address} privateMicro={priv} onChange={refreshBalance} />
       )}
 
       <p className="mt-4 text-xs text-surface-500">

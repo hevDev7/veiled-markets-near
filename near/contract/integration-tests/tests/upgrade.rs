@@ -54,7 +54,7 @@ async fn state_written_by_the_previous_build_survives_the_upgrade() -> anyhow::R
     unsafe { std::env::remove_var("VEILED_WASM") };
     let mut w = Wallet::new(SK);
 
-    // ---- a market voted on by the previous build: its tally has no dispute deadline and no first-voter record.
+    // ---- a market voted on by the previous build and settled after the upgrade.
     let voted = create(&env, &mut w, 2).await?;
     advance(&env, 3).await?;
     let r = call(&env, &env.bob, "vote_outcome", json!({ "market_id": s(voted), "outcome": 1 }), NEAR).await?;
@@ -168,13 +168,14 @@ async fn state_written_by_the_previous_build_survives_the_upgrade() -> anyhow::R
     let claim = w.spend(&env, &[&ticket_note], ticket_note.amount, json!({ "type": "parlay_claim" })).await?;
     assert!(claim.result.is_success(), "{:?}", claim.result.failures());
 
-    // ---- the market voted before the upgrade settles by the clock; with no first-voter record its voter is not
-    // paid automatically and claims the bond as before.
+    // ---- the market voted before the upgrade settles by the clock. The previous build recorded its first voter,
+    // so the settling call returns that voter's bond and there is nothing left to claim.
     let r = call(&env, &env.carol, "settle_market", json!({ "market_id": s(voted) }), 0).await?;
     assert!(r.is_success(), "{:?}", r.failures());
+    let paid = format!("\"resolver\":\"{}\",\"bond\":\"{NEAR}\"", env.bob.id());
+    assert!(r.logs().iter().any(|l| l.contains("\"resolver_paid\"") && l.contains(&paid)), "{:?}", r.logs());
     assert_eq!(r.json::<u8>()?, 3);
     let r = call(&env, &env.bob, "claim_voter_bond", json!({ "market_id": s(voted) }), 0).await?;
-    assert!(r.is_success(), "{:?}", r.failures());
-    assert_eq!(r.json::<String>()?, s(NEAR));
+    assert_fails_with(&r, "ERR_CLAIMED");
     Ok(())
 }

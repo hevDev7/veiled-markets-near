@@ -39,6 +39,10 @@ pub fn mock_ft_wasm() -> Result<Vec<u8>> {
     wasm("mock_ft", "MOCK_FT_WASM")
 }
 
+pub fn mock_pyth_wasm() -> Result<Vec<u8>> {
+    wasm("mock_pyth", "MOCK_PYTH_WASM")
+}
+
 pub async fn account(root: &Account, name: &str, near: u128) -> Result<Account> {
     Ok(root.create_subaccount(name).initial_balance(NearToken::from_near(near)).transact().await?.into_result()?)
 }

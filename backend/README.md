@@ -6,13 +6,15 @@ comma-separated list; each call moves to the next endpoint when one fails).
 
 | Service | Start | What it does |
 |---|---|---|
-| Relayer | `npm run relayer` (port 4100) | Receives a proof and an action from the browser, checks the proof locally, and submits `transact` to the contract. It pays the gas, so the user's account never signs a private action. Key: `RELAYER_PRIVATE_KEY`. |
-| Turbo oracle | `npm run turbo-oracle -- --serve --auto-create` (port 4090) | Opens and settles the five-minute BTC, ETH and SOL rounds and serves live prices and an audit log of every price it used. Prices come from Pyth Hermes when `PYTH_API_KEY` is set, otherwise from CoinGecko. Key: `ORACLE_PRIVATE_KEY`. |
-| AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. It also answers the create page's source check and, with an Anthropic key, AI drafting and review (below). Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`, and `MARKET_AI_API_KEY` for drafting. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
+| Relayer | `npm run relayer` (port 4100) | Receives a proof and an action from the browser, checks the proof locally, and submits `transact` to the contract. It pays the gas, so the user's account never signs a private action. With `RELAYER_META=1` it also submits stablecoin deposits the user signed as NEP-366 delegate actions (`POST /meta`), paying their gas, so an account holding USDC but no NEAR can still deposit. On mainnet, `ONECLICK_ENABLED=1` adds `/oneclick/*`: quotes and status for moving USDC between another chain and Veiled through 1Click. Details: [`docs/near/DESIGN.md`](../docs/near/DESIGN.md) §5. Key: `RELAYER_PRIVATE_KEY`. |
+| Turbo oracle | `npm run turbo-oracle -- --serve --auto-create` (port 4090) | Opens and settles the five-minute BTC, ETH and SOL rounds and serves live prices and an audit log of every price it used. Prices come from Pyth Hermes when `PYTH_API_KEY` is set, otherwise from CoinGecko. With `TURBO_PRICES=contract` the contract takes both prices of a round from the oracle contract its owner named (`set_turbo_oracle`, `set_turbo_feed`), and with a Pyth oracle `TURBO_PYTH_PUSH_HERMES` stores a Hermes update on it whenever the stored price is too old to open or settle a round, then reads it back (details in [`docs/near/DESIGN.md`](../docs/near/DESIGN.md)). Key: `ORACLE_PRIVATE_KEY`. |
+| AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. It also answers the create page's source check and, with an Anthropic key, AI drafting and review, keeps the app's market → transaction index (`GET /market-tx`), and with an OutLayer project of the operator's can read sources inside OutLayer's TEE (all below). Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`, and `MARKET_AI_API_KEY` for drafting. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
 
 `npm test` runs the relayer's request checks, the AI resolver's checks, the source reader, catalog and check, the
-create page's endpoints and rate limits, AI drafting and review and their Claude client (stubbed, no key needed), the LP
-note bookkeeping, the spec files and the demo price question (98 tests).
+create page's endpoints and rate limits, AI drafting and review and their Claude client (stubbed, no key needed), the
+turbo keeper's on-chain price pushes, the gasless deposit checks, the 1Click client (stubbed), the market index
+(FastNEAR stubbed), the OutLayer client and source reader (OutLayer stubbed), the LP note bookkeeping, the spec files
+and the demo price question (204 tests).
 `DRY_RUN=1 npm run ai-resolver -- --once` asks the model about every market waiting for a vote and writes receipts to
 `ai-receipts/` without voting.
 
@@ -57,8 +59,9 @@ request Claude declines is retried on the model Anthropic recommends; a refusal 
 failure of the model 502. A body the endpoint cannot use answers 400 before it counts against the limits below. Each
 model call logs its token use.
 
-`npm run ai-resolver -- --serve-only` serves `/health`, `/receipts`, the check and the AI endpoints without voting, and
-needs no `NEARAI_API_KEY`. `/health` shows `drafting`: the model in use, or `off`.
+`npm run ai-resolver -- --serve-only` serves `/health`, `/receipts`, `/market-tx`, the check and the AI endpoints
+without voting, and needs no `NEARAI_API_KEY`. `/health` shows `drafting` (the model in use, or `off`),
+`source_reader` (`this server`, the OutLayer project, or what is wrong with its settings) and `market_index`.
 
 | Variable | Default | Use |
 |---|---|---|
@@ -67,6 +70,122 @@ needs no `NEARAI_API_KEY`. `/health` shows `drafting`: the model in use, or `off
 | `MARKET_AI_MODEL` | `claude-opus-5-5` | The Claude model for drafting and review |
 | `MARKET_AI_CLIENT_PER_HOUR` | `10` | AI drafting and review requests per client per hour |
 | `MARKET_AI_DAILY_CAP` | `150` | AI drafting and review requests per UTC day, across all clients |
+
+### Market links (`GET /market-tx`)
+
+Market pages are addressed by the hash of the transaction that created the market (`/market/<hash>`). The contract
+cannot know that hash, so the service builds the market → hash index (`src/market-index.ts`) from FastNEAR's
+Transactions API:
+
+- `POST /v0/account` lists the contract's successful transactions (200 a page);
+- `POST /v0/transactions` returns their receipts (20 at a time), and each `market_created` event the contract logged
+  names a market.
+
+Each poll lists again from 1,000 blocks below the last height, so a transaction that succeeds late is still found. The
+index is saved to `MARKET_INDEX_FILE` as it grows. Building it from nothing takes about 280 requests on testnet (5 a
+second); after that a poll runs every 15 s.
+
+`GET /market-tx` answers `{contract, byId}`, gzipped when the browser accepts it, with an ETag so an unchanged index
+costs a 304. Pages read it at most every 15 s and take its links as suggestions only: a `/market/<hash>` page shows
+the market the chain says that transaction created, and a `/market/<id>` page moves to its hash only once the chain
+confirms it, so a wrong index entry cannot make one URL show different markets in different browsers. The links a
+browser checked on chain (a market it created, a hash it opened) are kept and win over the index; the index's own
+are read again on each page load. A page links to `/market/<id>` until a market's hash is known.
+
+| Variable | Default | Use |
+|---|---|---|
+| `MARKET_INDEX_FILE` | `<AI_RECEIPTS_DIR>/market-index.json` | Where the index is kept: on the service's volume, so a restart does not rebuild it |
+| `MARKET_INDEX_API` | `https://tx.test.fastnear.com` for a `.testnet` contract, else `https://tx.main.fastnear.com` | FastNEAR's Transactions API |
+| `MARKET_INDEX_SECONDS` | `15` (at least 5) | Seconds between polls; a minute after FastNEAR answers 429 |
+| `FASTNEAR_API_KEY` | (none) | Optional key from <https://dashboard.fastnear.com>: FastNEAR rate-limits keyless clients harder |
+
+### Reading sources in OutLayer
+
+On the hosted demo the resolver fetches a market's source on its own server, so a receipt's source rests on the
+operator's word. With `OUTLAYER_PROJECT` and `OUTLAYER_PAYMENT_KEY` set, it asks a build published on
+[OutLayer](https://outlayer.ai) to read the source inside OutLayer's Intel TDX TEE, and gives the model the text that
+build returned (`src/outlayer.ts`). The model call itself stays in NEAR AI Cloud's TEE, with its signature check.
+
+The receipt's `source.outlayer` names the call (`api`, `project`, `version_key` when one is pinned, `call_id`,
+`attestation_url`, `compute_cost`, `time_ms`) and keeps its `input` and `output` as OutLayer returned them. A call
+that comes back without an https attestation link is refused, and the market is tried again later. OutLayer's
+attestation for a call names the build that ran and two SHA-256 hashes: `input_hash`, over the input as OutLayer's
+coordinator serialised it (keys in the order sent), and `output_hash`, over the bytes the build wrote. To check a
+receipt:
+
+1. Read the market from the contract. Check that `input.url` is its resolution source as `sourceUrl` in
+   `src/ai-resolver-core.ts` reads it, and that the other input fields are the limits below.
+2. Fetch the call's attestation from OutLayer's own API, not from the receipt's link:
+   `https://api.outlayer.ai/attestations/by-call/<call_id>` (`https://testnet-api.outlayer.ai/…` on testnet).
+3. Check that `input_hash` and `output_hash` are the SHA-256 of `JSON.stringify(input)` and `JSON.stringify(output)`
+   from the receipt: compact JSON, keys in the order the receipt stores them, non-ASCII characters unescaped. The
+   build writes its answer in exactly that form (**Output** below).
+4. Check that the build it names is the published source-reader build, and the version the receipt names, if any.
+5. Check that `output.text` is the source text in `request_body`, the request NEAR AI's TEE signed.
+
+What these checks leave open:
+
+- The resolver does not run them itself. OutLayer's API reference does not give the attestation's document format,
+  nor how a reader ties one to the TDX-attested worker keys registered on chain (OutLayer's `WORKER_ATTESTATION.md`
+  covers how workers are admitted). Until OutLayer documents that, step 2 rests on OutLayer's API.
+- The operator still decides when a source is read and which call a receipt names: an operator who made several
+  calls for one market could publish the one it liked. `fetched_at` is this server's clock, and a page can change
+  between reads.
+
+The build is the operator's to write, from this contract:
+
+- **Input** (JSON on stdin): `{url, max_bytes, max_chars, max_redirects, timeout_ms, total_ms, user_agent}`. The
+  resolver sends 1,000,000, 20,000, 3, 10,000, 15,000 and `VeiledMarkets-AIResolver/1.0`.
+- **Fetching**: fetch `url` with that user agent and follow at most `max_redirects` redirects. Every address it
+  fetches must pass `sourceUrl`'s rule in `src/ai-resolver-core.ts`: http or https on the default port, no user
+  info, no localhost, `.local` or `.internal` name, no private IP literal. Stop a request after `timeout_ms` and the
+  whole read after `total_ms`, and keep at most `max_bytes` of the body.
+- **Output** (JSON on stdout: compact, keys in this order, non-ASCII characters unescaped, no trailing newline, so
+  that `JSON.stringify` of the answer gives back the bytes written): `{"bytes":…,"final_url":…,"sha256":…,"status":…,"text":…}`.
+  - `bytes`: the body's size.
+  - `final_url`: the address after redirects.
+  - `sha256`: the body's SHA-256 in lowercase hex.
+  - `status`: the HTTP status.
+  - `text`: the body's text by `htmlToText`'s rules in `src/ai-resolver-core.ts` (drop script, style, noscript, svg
+    and template elements and comments; replace other tags with spaces; decode `&nbsp; &amp; &lt; &gt; &quot; &#39;
+    &apos;`; collapse whitespace; trim), cut to `max_chars` UTF-16 code units.
+
+  `{"error":"…"}` when the source cannot be read.
+- **Target**: `wasm32-wasip2`. HTTP needs WASI preview 2; OutLayer's `ai-example` repository shows an HTTP client.
+
+The resolver refuses an answer outside the contract and tries the market again on a later pass. That covers text over
+20,000 characters, a hash that is not SHA-256 hex, a size over 1 MB, a status outside 100–599, or a final address
+that may not be read.
+
+The operator's steps (OutLayer CLI: `cargo install --git https://github.com/out-layer/outlayer-cli`):
+
+1. `outlayer login testnet` (or `outlayer login` for mainnet) with the account that will own the project.
+2. `outlayer create veiled-source-reader`, then write the build above in it.
+3. Push it to a public git repository and run `outlayer deploy veiled-source-reader`. OutLayer builds it from the
+   repository, so anyone can read the source of the build an attestation names.
+4. `outlayer keys create` prints the payment key (`<owner>:<nonce>:<secret>`, shown once). Fund it: on mainnet,
+   `outlayer keys topup <nonce> <NEAR>`.
+5. Try it: `outlayer run <owner>/veiled-source-reader '{"url":"https://example.com/","max_bytes":1000000,…}'`.
+6. Set `OUTLAYER_PROJECT` and `OUTLAYER_PAYMENT_KEY` in the service's environment, then restart it. To pin the
+   build, also set `OUTLAYER_VERSION` (`outlayer versions` lists the keys). Check that `/health` shows
+   `source_reader: "OutLayer <owner>/veiled-source-reader"`.
+
+Every call is async, and the client polls it every 2 s for up to 2 minutes. A 503 is sent again after its
+`Retry-After` (at most 60 s, at most 3 times). Any other refusal, or a request that got no answer, ends the call:
+`/call` takes no idempotency key, so a resend could run and charge it twice. The market is tried again on a later
+pass (`AI_RETRY_ABSTAINED_MINUTES`).
+
+Once either variable is set, a problem with them stops the resolver from reading sources: each market records the
+problem and `/health` names it. It never falls back to reading sources itself. The create page's `/check-source` and
+`/review` always read on this server.
+
+| Variable | Default | Use |
+|---|---|---|
+| `OUTLAYER_PROJECT` | (none) | `<owner account>/<project name>` of the source-reader build |
+| `OUTLAYER_PAYMENT_KEY` | (none) | `<owner>:<nonce>:<secret>`, a funded OutLayer payment key |
+| `OUTLAYER_API` | `https://testnet-api.outlayer.ai` for a `.testnet` contract, else `https://api.outlayer.ai` | OutLayer's API, on the payment key's network |
+| `OUTLAYER_VERSION` | the project's active version | A published version to run |
+| `OUTLAYER_COMPUTE_LIMIT` | (none) | The most one call may spend on compute, in USD micro-units |
 
 ## Scripts
 

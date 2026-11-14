@@ -697,14 +697,18 @@ impl Veiled {
     /// applies from then on (`governance_resolve` only writes it down early).
     pub fn finalize_committee_vote(&mut self, market_id: U64) {
         let quorum = self.config.committee_quorum as usize;
+        // Only members still on the committee count (`set_committee` may have replaced some since they voted).
+        let committee = self.committee.clone();
         self.settle(market_id.0);
         let st = self.market_mut(market_id.0);
         require!(st.market.status == STATUS_DISPUTED, "ERR_STATUS");
         require!(st.escalation_tier == 2 && !st.committee_finalized, "ERR_TIER");
-        require!(st.committee_votes.len() >= quorum, "ERR_QUORUM");
+        let counted: Vec<u8> =
+            st.committee_votes.iter().filter(|(a, _)| committee.contains(a)).map(|(_, o)| *o).collect();
+        require!(counted.len() >= quorum, "ERR_QUORUM");
         let mut counts = [0usize; 4];
-        for (_, o) in &st.committee_votes {
-            counts[(*o - 1) as usize] += 1;
+        for o in counted {
+            counts[(o - 1) as usize] += 1;
         }
         let max = *counts.iter().max().unwrap();
         let leaders: Vec<_> = (0..4).filter(|&k| counts[k] == max).collect();

@@ -2,14 +2,16 @@
 // → prove in a worker → submit through the relayer → update the local notes. Also the public deposits that fund
 // the private balance (shielding), which are the only wallet-signed steps of private trading.
 import { KIND, TOKEN, VEILED_CONTRACT, YOCTO_PER_MICRO, tokenAccount } from './config';
-import { callContract, currentAccountId, signMessage } from './near-wallet';
+import { callContract, canSignDelegate, currentAccountId, signDelegate, signMessage } from './near-wallet';
 import { commitmentOf, extDataHash, nullifierOf, ownerBlindOf, randomField } from './notes/crypto';
 import { cachedNoteKeys, unlockNoteKeys, type NoteKeys } from './notes/keys';
 import { sealMemo } from './notes/memo';
 import { prove } from './notes/prove';
 import { balanceOf, setStatus, syncNotes, treeOf, unspent, upsertNote, type Note } from './notes/store';
 import { EMPTY_PATH } from './notes/tree';
-import { relay, type TransactResult } from './relayer';
+import { RelayError, relay, relayMeta, relayerHealth, type TransactResult } from './relayer';
+
+type ContractCall = Parameters<typeof signDelegate>[0] & Parameters<typeof callContract>[0];
 
 export type PrivateStep = 'unlocking' | 'syncing' | 'merging' | 'proving' | 'relaying' | 'done';
 
@@ -241,6 +243,36 @@ async function depositMemo(keys: NoteKeys) {
   };
 }
 
+// Set after a gasless deposit failed: this page then signs its deposits with the account, so a wallet or relayer
+// that keeps failing never blocks deposits.
+let gaslessFailed = false;
+
+/** Gasless stablecoin deposits need a wallet that signs delegate actions and a relayer that submits them. */
+async function gaslessDeposits(): Promise<boolean> {
+  if (gaslessFailed || !(await canSignDelegate())) return false;
+  return (await relayerHealth()).meta === true;
+}
+
+/** The relayer answered that it refused the deposit before sending anything (its 4xx refusals, and 503 busy). */
+const refusedUnsent = (e: unknown) =>
+  e instanceof RelayError && !e.txHash && [400, 404, 429, 503].includes(e.status ?? 0);
+
+/**
+ * A stablecoin deposit signed as a delegate action and submitted by the relayer, which pays the gas and the 1 yocto.
+ * When the relayer refused it before sending anything, the account signs and sends the same deposit instead. Any
+ * other failure is reported and not retried, since the delegate action may still land and the deposit would be made
+ * twice; the next deposit on this page is signed by the account.
+ */
+async function gaslessDeposit(call: ContractCall): Promise<string> {
+  try {
+    return (await relayMeta(await signDelegate(call))).txHash;
+  } catch (e) {
+    gaslessFailed = true;
+    if (!refusedUnsent(e)) throw e;
+    return (await callContract(call)).txHash;
+  }
+}
+
 /** Moves `micro` units of a token from the wallet into the private balance. The deposit itself is public. */
 export async function deposit(token: number, micro: bigint): Promise<{ txHash: string }> {
   const keys = await noteKeys();
@@ -256,7 +288,7 @@ export async function deposit(token: number, micro: bigint): Promise<{ txHash: s
   } else {
     const ft = tokenAccount(token);
     if (!ft) throw new Error(`unknown token ${token}`);
-    const r = await callContract({
+    const call = {
       contractId: ft,
       method: 'ft_transfer_call',
       args: {
@@ -266,8 +298,8 @@ export async function deposit(token: number, micro: bigint): Promise<{ txHash: s
       },
       deposit: 1n,
       gas: 200_000_000_000_000n,
-    });
-    txHash = r.txHash;
+    };
+    txHash = (await gaslessDeposits()) ? await gaslessDeposit(call) : (await callContract(call)).txHash;
   }
   await syncNotes(keys);
   return { txHash };

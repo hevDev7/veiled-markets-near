@@ -87,6 +87,9 @@ backend/.seed-lp-notes.json
 # NEAR AI resolver receipts (served by the running service, kept on its volume)
 backend/ai-receipts/
 
+# NEAR relayer: signed 1Click quotes (evidence for disputes; keep ONECLICK_QUOTE_LOG on a volume in production)
+backend/oneclick-quotes.jsonl
+
 # node_modules symlinked to the external build cache (the node_modules/ rule above does not match a symlink)
 node_modules
 

@@ -33,6 +33,10 @@
 
   <title>Veiled Markets | Private prediction markets on NEAR</title>
 
+  <!-- Caddy renders a fresh CSP nonce here for every response (see Caddyfile). NEAR Connect puts it on the inline
+       scripts of each wallet's sandboxed iframe, which inherits this page's CSP. -->
+  <meta property="csp-nonce" nonce="{{placeholder `csp_nonce`}}" />
+
   <!-- Applies the saved theme before first paint. A file, not inline: the CSP allows no inline scripts. -->
   <script src="/theme-init.js"></script>
   <style>

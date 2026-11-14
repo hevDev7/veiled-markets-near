@@ -12,7 +12,8 @@ export interface TransactResult {
 }
 
 export class RelayError extends Error {
-  constructor(message: string, readonly code: string, readonly txHash?: string) {
+  /** `status`: the relayer's HTTP status; none when it could not be reached. */
+  constructor(message: string, readonly code: string, readonly txHash?: string, readonly status?: number) {
     super(message);
     this.name = 'RelayError';
   }
@@ -53,6 +54,7 @@ export const ERROR_TEXT: Record<string, string> = {
   ERR_PARLAY_SETTLED: 'This parlay is already settled.',
   ERR_CLAIMED: 'This parlay was already claimed.',
   ERR_NO_PARLAY: 'This parlay does not exist.',
+  ERR_MIN_DEPOSIT: 'The amount is below the minimum deposit. Nothing was taken.',
 };
 
 export const explain = (code: string) => ERROR_TEXT[code] ?? code;
@@ -76,7 +78,31 @@ export async function relay(body: { proof: unknown; public: unknown; ext_data: s
   return { txHash: out.txHash, result: out.result };
 }
 
-export async function relayerHealth(): Promise<{ ok: boolean; relayer?: string; balanceNear?: number }> {
+/**
+ * Sends a stablecoin deposit the user signed as a NEP-366 delegate action (near-wallet.ts `signDelegate`). The relayer
+ * checks it, submits it and pays its gas and its 1 yocto.
+ */
+export async function relayMeta(signedDelegate: string): Promise<{ txHash: string }> {
+  let res: Response;
+  try {
+    res = await fetch(`${RELAYER_URL}/meta`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ signed_delegate: signedDelegate }),
+    });
+  } catch {
+    throw new RelayError(`The relayer at ${RELAYER_URL} is not reachable.`, 'RELAYER_DOWN');
+  }
+  const out = await res.json().catch(() => ({ ok: false, error: `relayer answered ${res.status}` }));
+  if (!out.ok) {
+    const code = String(out.error ?? 'RELAY_FAILED');
+    throw new RelayError(explain(code), code, out.txHash, res.status);
+  }
+  return { txHash: out.txHash };
+}
+
+/** `meta`: the relayer submits gasless stablecoin deposits (`relayMeta`). */
+export async function relayerHealth(): Promise<{ ok: boolean; relayer?: string; balanceNear?: number; meta?: boolean }> {
   try {
     const r = await fetch(`${RELAYER_URL}/health`);
     return await r.json();

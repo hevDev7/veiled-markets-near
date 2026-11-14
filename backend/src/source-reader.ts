@@ -14,9 +14,9 @@ import { htmlToText, isPrivateAddress, sha256Hex, sourceUrl } from './ai-resolve
 export const SOURCE_CHARS = 20_000;
 export const SOURCE_BYTES = 1_000_000;
 export const SOURCE_UA = 'VeiledMarkets-AIResolver/1.0';
-const TIMEOUT_MS = 10_000;
+export const TIMEOUT_MS = 10_000;
 export const TOTAL_MS = 15_000;
-const MAX_REDIRECTS = 3;
+export const MAX_REDIRECTS = 3;
 
 export type ResolveHost = (host: string) => Promise<string[]>;
 
@@ -158,6 +158,22 @@ export async function fetchSource(
   }
 }
 
+/**
+ * The OutLayer call that read the source inside OutLayer's TEE (outlayer.ts), when it was not read on this server. Its
+ * input and output are kept as they were sent: the call's attestation holds the SHA-256 of both.
+ */
+export interface OutLayerRead {
+  api: string;
+  project: string;
+  version_key?: string;
+  call_id: string;
+  attestation_url: string | null;
+  compute_cost: string | null;
+  time_ms: number | null;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+}
+
 export interface Source {
   url: string;
   final_url?: string;
@@ -166,6 +182,7 @@ export interface Source {
   bytes?: number;
   fetched_at: string;
   error?: string;
+  outlayer?: OutLayerRead;
 }
 
 /** The text the model is given: the body without markup, first 20,000 characters. */

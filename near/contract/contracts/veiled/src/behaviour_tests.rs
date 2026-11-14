@@ -10,15 +10,15 @@ use near_sdk::testing_env;
 
 const TICK_MS_T: u64 = 4000;
 /// Virtual height the tests start at.
-const H0: u64 = 1000;
-const NEAR: u128 = 1_000_000; // one token in micro units
+pub(crate) const H0: u64 = 1000;
+pub(crate) const NEAR: u128 = 1_000_000; // one token in micro units
 
-fn acct(name: &str) -> AccountId {
+pub(crate) fn acct(name: &str) -> AccountId {
     name.parse().unwrap()
 }
 
 /// Sets who is calling, what they attach (micro units) and the virtual height.
-fn at(who: &str, attached_micro: u128, height: u64) {
+pub(crate) fn at(who: &str, attached_micro: u128, height: u64) {
     let mut b = VMContextBuilder::new();
     b.current_account_id(acct("veiled.test"))
         .predecessor_account_id(acct(who))
@@ -29,7 +29,7 @@ fn at(who: &str, attached_micro: u128, height: u64) {
     testing_env!(b.build());
 }
 
-fn config(min_voters: u8) -> Config {
+pub(crate) fn config(min_voters: u8) -> Config {
     Config {
         vote_window: 3,
         dispute_window: 3,
@@ -47,7 +47,7 @@ fn config(min_voters: u8) -> Config {
     }
 }
 
-fn contract(min_voters: u8) -> Veiled {
+pub(crate) fn contract(min_voters: u8) -> Veiled {
     at("owner.test", 0, H0);
     Veiled::new(
         acct("owner.test"),
@@ -60,7 +60,7 @@ fn contract(min_voters: u8) -> Veiled {
 }
 
 /// Alice opens a NEAR market with `liquidity`; trading ends `ticks` after H0.
-fn open_market(c: &mut Veiled, liquidity: u128, outcomes: u8, ticks: u64, resolution_gap: u64) -> u64 {
+pub(crate) fn open_market(c: &mut Veiled, liquidity: u128, outcomes: u8, ticks: u64, resolution_gap: u64) -> u64 {
     at("alice.test", liquidity, H0);
     c.create_market(CreateMarketArgs {
         question_hash: "q".into(),
@@ -76,7 +76,7 @@ fn open_market(c: &mut Veiled, liquidity: u128, outcomes: u8, ticks: u64, resolu
 }
 
 /// The spend a verified proof hands to the action: `out_amount` leaves notes of (kind, asset, sub).
-fn spend(kind: u8, asset: u64, sub: u8, out_amount: u128, action: Action) -> Spent {
+pub(crate) fn spend(kind: u8, asset: u64, sub: u8, out_amount: u128, action: Action) -> Spent {
     Spent {
         kind,
         asset,
@@ -94,7 +94,7 @@ fn spend(kind: u8, asset: u64, sub: u8, out_amount: u128, action: Action) -> Spe
     }
 }
 
-fn buy(c: &mut Veiled, market: u64, outcome: u8, amount: u128, height: u64) -> u128 {
+pub(crate) fn buy(c: &mut Veiled, market: u64, outcome: u8, amount: u128, height: u64) -> u128 {
     at("relayer.test", 0, height);
     let action = Action::Buy { market_id: U64(market), outcome, min_shares_out: U128(0) };
     c.act_market(&spend(KIND_BALANCE, TOKEN_NEAR as u64, 0, amount, action)).unwrap().amount
@@ -315,12 +315,12 @@ fn a_400_byte_deposit_memo_is_accepted() {
 
 // ---------------------------------------------------------------------------------------- turbo
 
-fn open_turbo(c: &mut Veiled, duration: u64) -> u64 {
+pub(crate) fn open_turbo(c: &mut Veiled, duration: u64) -> u64 {
     at("oracle.test", 0, H0);
     c.create_turbo_market(1, U64(H0 + duration), U128(70_000_000_000), U128(0), U64(H0)).0
 }
 
-fn turbo_bet(c: &mut Veiled, id: u64, height: u64) -> u128 {
+pub(crate) fn turbo_bet(c: &mut Veiled, id: u64, height: u64) -> u128 {
     at("relayer.test", 0, height);
     let action = Action::TurboBuy { market_id: U64(id), side: turbo::UP };
     c.act_market(&spend(KIND_BALANCE, TOKEN_NEAR as u64, 0, NEAR, action)).unwrap().amount
@@ -479,7 +479,7 @@ fn changed_windows_show_in_the_config() {
 // touches the market next (a redeem, a refund, a bond claim, a dispute) settles it first, and the views show the
 // settled state before anyone does.
 
-fn vote(c: &mut Veiled, who: &str, id: u64, outcome: u8, height: u64) {
+pub(crate) fn vote(c: &mut Veiled, who: &str, id: u64, outcome: u8, height: u64) {
     at(who, NEAR, height);
     c.vote_outcome(U64(id), outcome, None);
 }
@@ -490,13 +490,13 @@ fn redeem(c: &mut Veiled, market: u64, outcome: u8, shares: u128, height: u64) -
 }
 
 /// The market as the views show it at `height`.
-fn market_at(c: &Veiled, id: u64, height: u64) -> markets::MarketView {
+pub(crate) fn market_at(c: &Veiled, id: u64, height: u64) -> markets::MarketView {
     at("viewer.test", 0, height);
     c.get_market(U64(id)).unwrap()
 }
 
 /// NEAR (micro units) the calls since the last `at` sent to `who`.
-fn sent_to(who: &str) -> u128 {
+pub(crate) fn sent_to(who: &str) -> u128 {
     near_sdk::test_utils::get_created_receipts()
         .iter()
         .filter(|r| r.receiver_id.as_str() == who)
@@ -510,7 +510,7 @@ fn sent_to(who: &str) -> u128 {
 
 /// Alice's 10 NEAR market (trading ends at H0 + 20, resolution deadline H0 + 120) with 20 NEAR bought on outcome 1
 /// at H0 + 1. Returns (market, outcome-1 shares).
-fn traded_market(c: &mut Veiled) -> (u64, u128) {
+pub(crate) fn traded_market(c: &mut Veiled) -> (u64, u128) {
     let id = open_market(c, 10 * NEAR, 2, 20, 100);
     let shares = buy(c, id, 1, 20 * NEAR, H0 + 1);
     (id, shares)

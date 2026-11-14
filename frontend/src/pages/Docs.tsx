@@ -570,7 +570,7 @@ export function Docs() {
           <section className="mb-16">
             <SectionHeader id="architecture" icon={Network} title="Architecture" />
             <CodeBlock title="components">{`Browser (React + Vite), frontend/src/lib/near/
-  wallet   NEAR Wallet Selector: Meteor Wallet
+  wallet   NEAR Connect: Meteor Wallet (list built into the app)
   reads    contract view calls over NEAR RPC
   notes    scans leaves, decrypts memos, builds Merkle paths
   prover   snarkjs Groth16 in a web worker (/zk/spend.wasm, /zk/spend_final.zkey)

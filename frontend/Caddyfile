@@ -11,14 +11,28 @@
 	root * /srv
 	encode zstd gzip
 
+	# A fresh script nonce for every response: the request's random UUID without its dashes (NEAR Connect drops
+	# every character outside base64 from the nonce it is handed, so the header must not have them either).
+	map {http.request.uuid} {csp_nonce} {
+		~^([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$ "${1}${2}${3}${4}${5}"
+	}
+	# index.html hands the nonce to the app (<meta property="csp-nonce">). Templating also drops the page's ETag
+	# and Last-Modified, so a browser never revalidates a cached page whose nonce no longer matches the header.
+	@page path / /index.html
+	templates @page {
+		mime text/html
+	}
+
 	# No COOP/COEP: wallet popups (Meteor) need window.opener, and the prover does not need
 	# SharedArrayBuffer (same as the dev server in vite.config.ts).
 	header {
-		# Scripts only from this origin (plus WebAssembly for the prover): an injected <script>, inline handler or
-		# remote script cannot run, which matters because the private-balance key is kept in this origin's storage.
-		# 'unsafe-eval' stays until the prover is confirmed to run without it. Images, RPC, relayer, oracle and
-		# wallet connections are open to any https host: market thumbnails and wallets come from many.
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		# Scripts only from this origin (plus WebAssembly for the prover), and inline scripts only with this
+		# response's nonce: an injected <script>, inline handler or remote script cannot run, which matters because
+		# the private-balance key is kept in this origin's storage. The nonce is for NEAR Connect: each wallet runs
+		# in a sandboxed srcdoc iframe whose inline scripts fall under this policy. 'unsafe-eval' stays until the
+		# prover is confirmed to run without it. Images, RPC, relayer, oracle and wallet connections are open to
+		# any https host: market thumbnails and wallets come from many.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'nonce-{csp_nonce}' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-src https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY

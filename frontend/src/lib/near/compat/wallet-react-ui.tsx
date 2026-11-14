@@ -1,4 +1,4 @@
-// Stands in for @provablehq/aleo-wallet-adaptor-react-ui: "show the wallet modal" opens the NEAR Wallet Selector.
+// Stands in for @provablehq/aleo-wallet-adaptor-react-ui: "show the wallet modal" opens NEAR Connect's wallet list.
 import { useCallback, useState, type ReactNode } from 'react';
 import { openWalletModal } from '../near-wallet';
 

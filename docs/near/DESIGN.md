@@ -65,10 +65,26 @@ storage instead; its notes are then spendable only from that browser.
 
 ## 4. Contract API (account `veiled` on testnet; JSON args, numbers > 2^53 as strings)
 
-Init: `new(owner, oracle_operator, committee: [AccountId; 5], usdcx_token, usad_token, config: ConfigArgs)`.
+Init: `new(owner, oracle_operator, committee, usdcx_token, usad_token, config: ConfigArgs)`. The committee has 1 to 15
+members with no duplicates, and `committee_quorum` must be more than half of them and at most all.
 `ConfigArgs` holds the Aleo constants in ticks and micro units (defaults = Aleo values; the testnet deploy shortens
 the windows so a demo resolves in minutes): `vote_window, dispute_window, winner_claim_priority, disputed_timeout,
 vote_bond, min_voters, min_trade, min_liquidity, protocol_fee_bps, creator_fee_bps, lp_fee_bps`.
+
+Governance (`src/governance.rs`; a Sputnik DAO account can hold the owner role or sit on the committee):
+- `propose_owner(new_owner: Option<AccountId>)` by the owner (`None` withdraws the proposal), then `accept_owner()` by
+  the proposed account. Two steps, so a typo or an account that cannot act never gets the contract.
+- `set_oracle_operator(oracle_operator)` and `set_committee(members, quorum)` by the owner, with the init rules
+  above. A committee decision counts only the votes of accounts on the committee at the time it is finalized.
+- `upgrade()` by the owner takes the new wasm as the raw call input, not JSON (Sputnik's `UpgradeRemote` proposal
+  sends a stored blob that way). One receipt deploys it and calls the new code's `migrate`, so code that has no
+  `migrate`, or whose `migrate` fails, is rolled back with the deploy. Every later build keeps a `migrate`
+  (`#[private] #[init(ignore_state)]`; this one only reads the state back).
+- View `get_governance() -> {owner, pending_owner, oracle_operator, committee, committee_quorum}`. Events (NEP-297,
+  standard `veiled`): `owner_proposed, owner_changed, oracle_operator_set, committee_set, contract_migrated`.
+- The new state lives under raw storage keys, so builds that predate it upgrade by a plain deploy. Their first move
+  to this build has to be one, since the code on chain has no `upgrade` yet. A DAO owner only governs the code once
+  the contract account no longer has a full-access key.
 
 Note pool:
 - `deposit_near(owner_blind, memo)` payable; attached deposit must be a positive multiple of 10^18 yocto.
@@ -125,6 +141,39 @@ operator calls `create_turbo_market, resolve_turbo_market, emergency_cancel_turb
 private via `transact`. Bets are taken for the first four fifths of a round (`betting_deadline` in the view). Views
 `get_turbo_market, get_latest_turbo, get_turbo_markets(from, limit), get_turbo_count, get_turbo_exposure`.
 
+Turbo prices from an oracle contract (`src/turbo_oracle.rs`), instead of the operator:
+- The owner names a Pyth-compatible contract and a close window: `set_turbo_oracle(oracle, close_window_secs)`
+  (10 to 300 s; 20 s advised, see Limits). It then sets a feed per symbol: `set_turbo_feed(symbol_id, feed_id)`
+  (64 hex digits). Pyth's NEAR receiver (`pyth-oracle.near`, `pyth-oracle.testnet`) and OutLayer's
+  `price-oracle.near` serve the same views. Testnet Pyth knows only the beta feed ids: BTC/USD is `f9c0172b…` there,
+  not mainnet's `e62df6c8…`. A feed can be replaced but not removed. From then on `create_turbo_market` and
+  `resolve_turbo_market` refuse that symbol (`ERR_ORACLE_FEED`).
+- `open_turbo_round(symbol_id, deadline)` by the operator: the contract asks the oracle for
+  `get_price_no_older_than(feed, 60)`, and the price becomes the baseline through the same checks as before. The
+  transaction returns the round id.
+- `settle_turbo_round(market_id)` by anyone from the deadline height until the close window ends in block time
+  (`ERR_RESOLUTION_WINDOW` after that). The contract reads `get_price_unsafe(feed)` and settles only with a price
+  published from the start of the deadline tick (unix second `deadline × 4`) to the end of the close window. A
+  price from earlier fails with `ERR_PRICE_TOO_EARLY` and the call can be repeated inside the window; a later one
+  fails with `ERR_PRICE_TOO_LATE`. The confidence,
+  maximum move, tie (DOWN wins) and empty-side (CANCELLED) rules stay the same. A round that nobody settles inside
+  its window is refunded through `emergency_cancel_turbo` after its resolution deadline.
+- Prices convert as `price × 10^(expo + 6)` to micro-USD; only positive prices are accepted. View
+  `get_turbo_oracle() -> {oracle, close_window_secs, feeds: [{symbol_id, feed_id}]}`.
+- Limits. Pyth on NEAR keeps only the latest price, and anyone can store any verified update newer than it,
+  however old. Nobody else pushes BTC there: on 2026-11-14 the stored price was 80 days old on mainnet and months
+  old on testnet. So the window bounds two things. It must outlast the keeper's push and read; shorter, a losing
+  bettor stores a price published after the window first and forces a refund. Hence the 10 s floor; 20 s is
+  advised. And since a round settles only while its window is open in block time, nobody can come back later and
+  push the window's most convenient price. Whoever settles first may still choose among the prices published so
+  far, which a prompt keeper keeps to a few seconds.
+  OutLayer's `price-oracle.near` signs its prices in its TEE, but anyone can trigger a push (at most every 20 s per
+  asset), so a settler can pick the timing, though not the price; its window must hold one update. It is not
+  usable as configured. On 2026-11-14 its Pyth-compatible views knew neither the Pyth BTC nor the NEAR feed id. Its
+  docs show `price` as a JSON number where Pyth sends a string, and the callback accepts only strings. Its views
+  must also fit the 10 TGas the contract gives the oracle call. Check all three before pointing `set_turbo_oracle`
+  at it.
+
 Market ids and turbo ids share one counter, so a `/market/:id` route is unambiguous.
 
 ## 5. Off-chain services
@@ -132,15 +181,70 @@ Market ids and turbo ids share one counter, so a `/market/:id` route is unambigu
 - Relayer (`backend/src/near-relayer.ts`): `POST /relay {proof, public, ext_data}` submits `transact` from the
   relayer account (300 TGas) and returns `{tx_hash, status, result | error}`. The user's account never signs a
   private action. Testnet fee 0.
+  - Gasless stablecoin deposits (`POST /meta {signed_delegate}`; off unless `RELAYER_META=1`): the wallet signs the
+    deposit's `ft_transfer_call` as a NEP-366 delegate action (NEAR Connect `signDelegateActions`), and the relayer
+    submits it, paying the gas and the 1 yocto (about 0.0095 NEAR per deposit on the sandbox). It accepts exactly
+    that action (`backend/src/meta-tx.ts`):
+    - a token the contract lists, called with the Veiled contract as receiver;
+    - a `{"deposit":{owner_blind, memo}}` message, where owner_blind is a non-zero field element;
+    - 1 yocto and 100 to 300 TGas;
+    - a valid ed25519 signature by a full-access key of the sender, with an unused nonce, on an action that has not
+      expired;
+    - a sender that holds the amount.
+
+    It relays at most `RELAYER_META_PER_SENDER` (3) deposits per sender per minute. The app uses it only when the
+    wallet offers it and `/health` reports `meta: true`; otherwise the user signs and pays as before. A refused
+    delegate action is reported, never re-sent as a signed call. NEAR deposits attach NEAR, so the user always
+    signs them.
+  - Cross-chain USDC through 1Click (`/oneclick/*`; mainnet only, off unless `ONECLICK_ENABLED=1`; source
+    `backend/src/oneclick.ts`).
+    - Bring-in: 1Click delivers USDC from another chain to the user's own NEAR account, and a deposit then moves it
+      into the pool. It does not use `customRecipientMsg`: a deposit the contract refuses would go back to NEAR
+      Intents, not to the user.
+    - Take-out: the quote names a 1Click deposit address on NEAR, and a private withdraw pays it. A refund comes back
+      to the user's NEAR account as public USDC.
+    - Terms: USDC only, EXACT_INPUT, 0.5% slippage. The partner key (`ONECLICK_API_KEY`) stays on the server.
+    - Every signed quote is appended to `ONECLICK_QUOTE_LOG` before it is handed out.
+    - The app uses a quote only when 1Click's ed25519 signature over it verifies (`VITE_ONECLICK_SIGNER`, 1Click's
+      published key by default) and its signed fields are what the user asked for: assets, amount, recipient,
+      refund address, exact input, at most 0.5% slippage, no custom message. A real quote must promise at least the
+      previewed minimum less 0.5%. So a relayer cannot swap in another deposit address or recipient.
+    - A real (not dry) quote registers the NEAR accounts it needs on USDC (`storage_deposit`, registration only),
+      within `ONECLICK_REGISTER_PER_HOUR` (30).
+    - The app shows it only on a mainnet build with `VITE_ONECLICK=1`.
 - Turbo oracle (`backend/src/near-turbo-oracle.ts`): the Aleo oracle's logic and HTTP endpoints (`/health, /quote,
   /stream, /chain, /chain/symbol`) with NEAR calls. Same trust model as Aleo: the operator account submits Pyth
   Hermes prices (CoinGecko when no `PYTH_API_KEY` is set); the contract checks bounds and the operator identity.
+  With `TURBO_PRICES=contract` it opens and settles rounds through `open_turbo_round` and `settle_turbo_round`, so
+  the contract takes both prices from its oracle and the service's own quotes only drive the charts. Before an open
+  it checks, with free views, that the contract is not paused and names it the oracle operator. It retries a settle
+  that comes too early until the close window ends; after that it leaves the round to the stale sweep
+  (`emergency_cancel_turbo`) and opens the next one.
+  With Pyth as the oracle, `TURBO_PYTH_PUSH_HERMES` (testnet: `https://hermes-beta.pyth.network`, which needs
+  `PYTH_API_KEY`) makes it store Hermes updates on the Pyth contract (`update_price_feeds`, fee from
+  `get_update_fee_estimate`), but only when the stored price is of no use:
+  - before an open, when that price is more than 10 s old;
+  - before a settle, when it is older than the deadline. It then stores the first update of the deadline second
+    (`/v2/updates/price/{deadline × 4}`), the same one on every attempt.
+
+  `update_price_feeds` returns before Pyth verifies the update, so the keeper reads the stored price back. A push
+  that stored nothing pauses that feed's pushes (10 s, doubling up to 10 min).
 - AI resolver (`backend/src/near-ai-resolver.ts`, optional): for each market whose trading closed and that has no
   vote, it fetches the named resolution source (public http(s) only, every hop's address checked), asks a model in
   NEAR AI Cloud's TEE for the outcome, checks the model TEE's ECDSA signature over `model:sha256(request):
   sha256(response)` against the signers in an attestation fetched with a fresh nonce, and votes when the model's
   confidence is at least 0.8. The vote's evidence is the receipt's URL and SHA-256; the receipts are served at
   `/receipts/<market>.json`. It casts an ordinary bonded vote.
+  - With `OUTLAYER_PROJECT` and `OUTLAYER_PAYMENT_KEY` set, the source is read inside OutLayer's TEE by the operator's
+    published source-reader build instead (`backend/src/outlayer.ts`; off on the hosted demo). The receipt names the
+    call and its attestation and keeps the call's input and output, whose SHA-256 the attestation holds; the model is
+    given the text that build returned, and a call without an attestation is refused. Once either variable is set, a
+    problem with them stops voting instead of falling back to reading on the server.
+  - The same service keeps the market → creating-transaction index (`backend/src/market-index.ts`) from FastNEAR's
+    Transactions API and serves it at `GET /market-tx`, so market pages link to `/market/<tx hash>` without every
+    browser paging an explorer API. The browser takes those links as suggestions: a `/market/<hash>` page shows the
+    market the chain says that transaction created, and a `/market/<id>` page moves to its hash only once the chain
+    confirms it (`frontend/src/lib/near/market-tx.ts`).
 - Supabase is optional on NEAR: market list and metadata come from the contract.
 
 ## 6. Out of scope for the hackathon build

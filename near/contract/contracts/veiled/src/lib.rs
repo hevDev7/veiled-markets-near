@@ -5,6 +5,7 @@
 //! call submitted by a relayer, so the bettor's account never appears in it.
 
 pub mod field;
+pub mod governance;
 pub mod markets;
 pub mod math;
 pub mod parlay;
@@ -12,12 +13,17 @@ pub mod poseidon;
 mod poseidon_constants;
 pub mod tree;
 pub mod turbo;
+pub mod turbo_oracle;
 pub mod types;
 mod vk;
 pub mod zk;
 
 #[cfg(test)]
 mod behaviour_tests;
+#[cfg(test)]
+mod governance_tests;
+#[cfg(test)]
+mod turbo_oracle_tests;
 
 use field::{ext_data_hash, parse_fr, to_dec, to_u128, Felt, ZERO};
 use near_sdk::json_types::{U128, U64};
@@ -144,14 +150,15 @@ impl Veiled {
         usad_token: AccountId,
         config: Option<Config>,
     ) -> Self {
-        require!(committee.len() == 5, "ERR_COMMITTEE_SIZE");
+        let config = config.unwrap_or_default();
+        governance::check_committee(&committee, config.committee_quorum);
         Self {
             owner,
             oracle: oracle_operator,
             committee,
             usdcx: usdcx_token,
             usad: usad_token,
-            config: config.unwrap_or_default(),
+            config,
             tree: Tree::new(),
             leaves: Vector::new(StorageKey::Leaves),
             nullifiers: LookupSet::new(StorageKey::Nullifiers),

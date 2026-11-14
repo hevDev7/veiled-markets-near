@@ -3,7 +3,7 @@ import './lib/near/boot'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-// The Aleo wallet provider/modal names resolve to the NEAR Wallet Selector stand-ins (see vite.config.ts).
+// The Aleo wallet provider/modal names resolve to the NEAR Connect stand-ins (see vite.config.ts).
 import { AleoWalletProvider } from '@provablehq/aleo-wallet-adaptor-react'
 import { WalletModalProvider } from '@provablehq/aleo-wallet-adaptor-react-ui'
 import App from './App'

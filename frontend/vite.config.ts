@@ -3,8 +3,8 @@ import { realpathSync } from 'fs'
 import { resolve } from 'path'
 import react from '@vitejs/plugin-react'
 
-// The pages import the Aleo wallet packages by name; on NEAR those names resolve to small stand-ins backed by the
-// NEAR Wallet Selector (src/lib/near/compat). Keep in sync with "paths" in tsconfig.json.
+// The pages import the Aleo wallet packages by name; on NEAR those names resolve to small stand-ins backed by
+// NEAR Connect (src/lib/near/compat). Keep in sync with "paths" in tsconfig.json.
 const compat = (file: string) => resolve(__dirname, 'src/lib/near/compat', file)
 const ALEO_PACKAGES: Record<string, string> = {
   '@provablehq/aleo-wallet-adaptor-react-ui': compat('wallet-react-ui.tsx'),
@@ -33,7 +33,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: '@', replacement: '/src' },
-      // NEAR wallet SDKs require('buffer'): use the npm polyfill instead of Vite's empty browser stub.
+      // lib/near/boot.ts imports 'buffer': use the npm polyfill instead of Vite's empty browser stub.
       { find: /^buffer$/, replacement: 'buffer/' },
       { find: '@sdk', replacement: resolve(__dirname, '../sdk/src') },
       ...Object.entries(ALEO_PACKAGES).map(([find, replacement]) => ({
@@ -46,17 +46,10 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
-  // Pre-bundle the packages the app only imports lazily (the prover worker, the wallet modules). Otherwise the dev
-  // server discovers them mid-session and reloads the page, which aborts a trade that is being proven.
+  // Pre-bundle the packages the app only imports lazily (the prover worker). Otherwise the dev server discovers
+  // them mid-session and reloads the page, which aborts a trade that is being proven.
   optimizeDeps: {
-    include: [
-      'snarkjs',
-      'poseidon-lite',
-      '@near-js/transactions',
-      '@near-wallet-selector/core',
-      '@near-wallet-selector/modal-ui',
-      '@near-wallet-selector/meteor-wallet',
-    ],
+    include: ['snarkjs', 'poseidon-lite'],
   },
   build: {
     target: 'esnext',

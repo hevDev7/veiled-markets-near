@@ -705,3 +705,8 @@
   .stagger-7 { animation-delay: 350ms; }
   .stagger-8 { animation-delay: 400ms; }
 }
+
+/* NEAR Connect's wallet list: no settings panel for pasting extra wallets (see lib/near/near-wallet.ts). */
+.hot-connector-popup .settings-button {
+  display: none !important;
+}

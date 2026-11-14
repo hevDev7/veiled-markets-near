@@ -1,5 +1,5 @@
 // Stands in for @provablehq/aleo-wallet-adaptor-react (aliased in vite.config.ts and tsconfig.json): the same
-// provider and hook the pages already use, backed by the NEAR Wallet Selector. `address` is the NEAR account id.
+// provider and hook the pages already use, backed by NEAR Connect. `address` is the NEAR account id.
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { currentWalletName, openWalletModal, signOut, watchAccount } from '../near-wallet';
 import { noteKeys } from '../private';
@@ -66,7 +66,7 @@ export function AleoWalletProvider({ children }: { children?: ReactNode } & Reco
         else u();
       })
       .catch((err) => {
-        console.error('[wallet] NEAR Wallet Selector failed to start', err);
+        console.error('[wallet] NEAR Connect failed to start', err);
         if (alive) setReady(true);
       });
     return () => {

@@ -272,7 +272,7 @@ function MarketNewsTicker({ markets, currentMarketId }: { markets: Market[]; cur
 export function MarketDetail() {
   const navigate = useNavigate()
   // The route param is the market's creating transaction hash (/market/<hash>) or, for older links, its id ("933" or
-  // "933field"); an id is looked up in the UI spelling, so it opens without the NearBlocks hash index.
+  // "933field"); an id is looked up in the UI spelling, so it opens without the market → hash index.
   const { marketId: routeParam } = useParams<{ marketId: string }>()
   const routeIsTx = isNearTxHash(routeParam)
   const [marketId, setMarketId] = useState<string | undefined>(() => (routeParam && !isNearTxHash(routeParam) ? routeMarketId(routeParam) : undefined))
@@ -319,11 +319,12 @@ export function MarketDetail() {
     return () => { cancelled = true }
   }, [marketId, routeIsTx, routeNotFound])
 
-  const createTxHash = routeIsTx ? routeParam : (() => {
-    try { return marketId ? marketTxById[nearId(marketId)] : undefined } catch { return undefined }
-  })()
+  // Only the route's hash is shown as the creating transaction: the chain checked it (resolve). An id page's index link
+  // is unchecked until the redirect below confirms it, and then the page is at /market/<hash>.
+  const createTxHash = routeIsTx ? routeParam : undefined
 
-  // An id link (/market/30field) moves to the market's transaction-hash URL once that hash is known.
+  // An id link (/market/30field) moves to the market's transaction-hash URL once the chain confirms that hash; a link
+  // the chain disproves is dropped (this effect then runs again without it), and one it cannot check yet stays put.
   useEffect(() => {
     if (!marketId || routeIsTx || turboSymbol !== null) return
     let hash: string | undefined
@@ -332,8 +333,15 @@ export function MarketDetail() {
     } catch {
       return
     }
-    if (hash) navigate(`/market/${hash}`, { replace: true })
-    else useMarketTx.getState().refresh([marketId])
+    if (!hash) {
+      useMarketTx.getState().refresh([marketId])
+      return
+    }
+    let cancelled = false
+    useMarketTx.getState().confirm(marketId).then((checked) => {
+      if (!cancelled && checked) navigate(`/market/${checked}`, { replace: true })
+    })
+    return () => { cancelled = true }
   }, [marketId, routeIsTx, turboSymbol, marketTxById]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [market, setMarket] = useState<Market | null>(null)
@@ -1221,7 +1229,8 @@ export function MarketDetail() {
                 <div className="flex items-center gap-3 mt-6 pt-6 border-t border-white/[0.04]">
                   <button
                     onClick={async () => {
-                      const url = new URL(marketPath(market.id, marketTxById), window.location.origin).href
+                      // The URL this page was checked at: its confirmed hash, else the id (never an unchecked index link).
+                      const url = new URL(createTxHash ? `/market/${createTxHash}` : marketPath(market.id, {}), window.location.origin).href
                       if (navigator.share) {
                         try { await navigator.share({ title: market.question, url }) } catch {}
                       } else {

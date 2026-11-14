@@ -29,7 +29,7 @@ const MAX_MOVE_FRAC: u128 = 2;
 const MIN_PRICE: u128 = 1;
 const MAX_PRICE: u128 = 100_000_000_000_000;
 /// BTC ETH SOL DOGE XRP BNB ADA AVAX LINK DOT.
-const MAX_SYMBOL: u8 = 10;
+pub(crate) const MAX_SYMBOL: u8 = 10;
 
 #[near(serializers = [borsh])]
 pub struct TurboMarket {
@@ -127,7 +127,8 @@ impl TurboMarket {
 
 #[near]
 impl Veiled {
-    /// Oracle operator only. `baseline_block` is the virtual height the baseline price was observed at.
+    /// Oracle operator only, for symbols without a price feed (turbo_oracle.rs). `baseline_block` is the virtual
+    /// height the baseline price was observed at.
     pub fn create_turbo_market(
         &mut self,
         symbol_id: u8,
@@ -138,56 +139,12 @@ impl Veiled {
     ) -> U64 {
         let caller = env::predecessor_account_id();
         require!(caller == self.oracle, "ERR_NOT_ORACLE");
-        require!(!self.paused, "ERR_PAUSED");
-        let h = self.height();
-        let (deadline, price, conf, base_block) = (deadline.0, baseline_price.0, baseline_conf.0, baseline_block.0);
-        require!(base_block <= h && h - base_block <= BASELINE_LAG_TOLERANCE, "ERR_BASELINE_STALE");
-        require!(deadline > h, "ERR_DEADLINE");
-        let duration = deadline - h;
-        require!((MIN_DURATION..=MAX_DURATION).contains(&duration), "ERR_DURATION");
-        require!((1..=MAX_SYMBOL).contains(&symbol_id), "ERR_SYMBOL");
-        require!((MIN_PRICE..=MAX_PRICE).contains(&price), "ERR_PRICE");
-        require!(conf <= price / CONF_DENOMINATOR_FRAC, "ERR_CONFIDENCE");
-
-        let id = self.take_id();
-        self.turbo.insert(
-            id,
-            TurboMarket {
-                id,
-                creator: caller,
-                symbol_id,
-                baseline_price: price,
-                baseline_conf: conf,
-                baseline_block: base_block,
-                deadline,
-                resolution_deadline: deadline + RESOLUTION_GRACE,
-                closing_price: 0,
-                closing_conf: 0,
-                closing_block: 0,
-                winning_outcome: 0,
-                status: TURBO_ACTIVE,
-                created_at: h,
-                total_up: 0,
-                total_down: 0,
-                total_volume: 0,
-                payout_pool: 0,
-                fees: 0,
-                up_bets: 0,
-                down_bets: 0,
-                paid_out: 0,
-            },
-        );
-        // Rounds enter `turbo_ids` on their first bet (act_turbo_buy): the rolling chain opens one every few
-        // minutes per symbol and most stay empty on testnet, so indexing them all would only grow storage.
-        self.latest_turbo.insert(symbol_id, id);
-        env::log_str(&format!(
-            "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"turbo_created\",\"data\":[{{\"market_id\":\"{id}\",\"symbol_id\":{symbol_id},\"deadline\":\"{deadline}\",\"baseline_price\":\"{price}\"}}]}}"
-        ));
-        U64(id)
+        require!(turbo_oracle::turbo_feed(symbol_id).is_none(), "ERR_ORACLE_FEED");
+        U64(self.insert_turbo_round(caller, symbol_id, deadline.0, baseline_price.0, baseline_conf.0, baseline_block.0))
     }
 
-    /// Oracle operator only. UP wins on a strictly higher close; a tie is DOWN. No winning bets → CANCELLED
-    /// so every bettor can refund.
+    /// Oracle operator only, for rounds whose symbol has no price feed. UP wins on a strictly higher close; a
+    /// tie is DOWN. No winning bets → CANCELLED so every bettor can refund.
     pub fn resolve_turbo_market(
         &mut self,
         market_id: U64,
@@ -197,30 +154,14 @@ impl Veiled {
     ) -> u8 {
         require!(env::predecessor_account_id() == self.oracle, "ERR_NOT_ORACLE");
         let h = self.height();
-        let (price, conf, block) = (closing_price.0, closing_conf.0, closing_block.0);
+        let block = closing_block.0;
         let t = self.turbo_mut(market_id.0);
         require!(t.status == TURBO_ACTIVE, "ERR_STATUS");
-        require!(block >= t.deadline && block <= t.deadline + RESOLUTION_WINDOW, "ERR_CLOSING_BLOCK");
-        require!(h >= block && h <= t.deadline + RESOLUTION_GRACE, "ERR_RESOLUTION_WINDOW");
-        require!((MIN_PRICE..=MAX_PRICE).contains(&price), "ERR_PRICE");
-        require!(conf <= price / CONF_DENOMINATOR_FRAC, "ERR_CONFIDENCE");
-        let base = t.baseline_price;
-        require!(price.abs_diff(base) <= base / MAX_MOVE_FRAC, "ERR_PRICE_MOVE");
-
-        let winner = if price > base { UP } else { DOWN };
-        let winning_stake = if winner == UP { t.total_up } else { t.total_down };
-        t.closing_price = price;
-        t.closing_conf = conf;
-        t.closing_block = block;
-        t.winning_outcome = winner;
-        t.payout_pool = t.total_up + t.total_down;
-        t.status = if winning_stake > 0 { TURBO_RESOLVED } else { TURBO_CANCELLED };
-        let status = t.status;
-        env::log_str(&format!(
-            "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"turbo_resolved\",\"data\":[{{\"market_id\":\"{}\",\"closing_price\":\"{price}\",\"winning_outcome\":{winner},\"status\":{status}}}]}}",
-            market_id.0
-        ));
-        status
+        let (symbol_id, deadline) = (t.symbol_id, t.deadline);
+        require!(turbo_oracle::turbo_feed(symbol_id).is_none(), "ERR_ORACLE_FEED");
+        require!(block >= deadline && block <= deadline + RESOLUTION_WINDOW, "ERR_CLOSING_BLOCK");
+        require!(h >= block && h <= deadline + RESOLUTION_GRACE, "ERR_RESOLUTION_WINDOW");
+        self.close_turbo_round(market_id.0, closing_price.0, closing_conf.0, block)
     }
 
     /// Oracle or owner. Deletes finished rounds nobody bet on (RESOLVED/CANCELLED with zero bets), returning
@@ -290,9 +231,95 @@ impl Veiled {
     }
 }
 
+/// A round runs MIN_DURATION..=MAX_DURATION ticks from now.
+pub(crate) fn check_round_duration(h: u64, deadline: u64) {
+    require!(deadline > h, "ERR_DEADLINE");
+    require!((MIN_DURATION..=MAX_DURATION).contains(&(deadline - h)), "ERR_DURATION");
+}
+
 impl Veiled {
     fn turbo_mut(&mut self, id: u64) -> &mut TurboMarket {
         self.turbo.get_mut(&id).unwrap_or_else(|| env::panic_str("ERR_NO_MARKET"))
+    }
+
+    /// Opens a round with a checked baseline, whoever gave the price (the operator or the price oracle).
+    pub(crate) fn insert_turbo_round(
+        &mut self,
+        creator: AccountId,
+        symbol_id: u8,
+        deadline: u64,
+        price: u128,
+        conf: u128,
+        base_block: u64,
+    ) -> u64 {
+        require!(!self.paused, "ERR_PAUSED");
+        let h = self.height();
+        require!(base_block <= h && h - base_block <= BASELINE_LAG_TOLERANCE, "ERR_BASELINE_STALE");
+        check_round_duration(h, deadline);
+        require!((1..=MAX_SYMBOL).contains(&symbol_id), "ERR_SYMBOL");
+        require!((MIN_PRICE..=MAX_PRICE).contains(&price), "ERR_PRICE");
+        require!(conf <= price / CONF_DENOMINATOR_FRAC, "ERR_CONFIDENCE");
+
+        let id = self.take_id();
+        self.turbo.insert(
+            id,
+            TurboMarket {
+                id,
+                creator,
+                symbol_id,
+                baseline_price: price,
+                baseline_conf: conf,
+                baseline_block: base_block,
+                deadline,
+                resolution_deadline: deadline + RESOLUTION_GRACE,
+                closing_price: 0,
+                closing_conf: 0,
+                closing_block: 0,
+                winning_outcome: 0,
+                status: TURBO_ACTIVE,
+                created_at: h,
+                total_up: 0,
+                total_down: 0,
+                total_volume: 0,
+                payout_pool: 0,
+                fees: 0,
+                up_bets: 0,
+                down_bets: 0,
+                paid_out: 0,
+            },
+        );
+        // Rounds enter `turbo_ids` on their first bet (act_turbo_buy): the rolling chain opens one every few
+        // minutes per symbol and most stay empty on testnet, so indexing them all would only grow storage.
+        self.latest_turbo.insert(symbol_id, id);
+        env::log_str(&format!(
+            "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"turbo_created\",\"data\":[{{\"market_id\":\"{id}\",\"symbol_id\":{symbol_id},\"deadline\":\"{deadline}\",\"baseline_price\":\"{price}\"}}]}}"
+        ));
+        id
+    }
+
+    /// Closes an active round at `price`, whoever gave it. UP wins on a strictly higher close; a tie is DOWN.
+    /// No winning bets → CANCELLED so every bettor can refund.
+    pub(crate) fn close_turbo_round(&mut self, id: u64, price: u128, conf: u128, block: u64) -> u8 {
+        let t = self.turbo_mut(id);
+        require!(t.status == TURBO_ACTIVE, "ERR_STATUS");
+        require!((MIN_PRICE..=MAX_PRICE).contains(&price), "ERR_PRICE");
+        require!(conf <= price / CONF_DENOMINATOR_FRAC, "ERR_CONFIDENCE");
+        let base = t.baseline_price;
+        require!(price.abs_diff(base) <= base / MAX_MOVE_FRAC, "ERR_PRICE_MOVE");
+
+        let winner = if price > base { UP } else { DOWN };
+        let winning_stake = if winner == UP { t.total_up } else { t.total_down };
+        t.closing_price = price;
+        t.closing_conf = conf;
+        t.closing_block = block;
+        t.winning_outcome = winner;
+        t.payout_pool = t.total_up + t.total_down;
+        t.status = if winning_stake > 0 { TURBO_RESOLVED } else { TURBO_CANCELLED };
+        let status = t.status;
+        env::log_str(&format!(
+            "EVENT_JSON:{{\"standard\":\"veiled\",\"version\":\"1.0.0\",\"event\":\"turbo_resolved\",\"data\":[{{\"market_id\":\"{id}\",\"closing_price\":\"{price}\",\"winning_outcome\":{winner},\"status\":{status}}}]}}"
+        ));
+        status
     }
 
     /// Private bet: a NEAR balance note in, a turbo note (asset = market, sub = side, amount = stake) out.

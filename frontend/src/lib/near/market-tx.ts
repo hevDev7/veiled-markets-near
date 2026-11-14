@@ -1,43 +1,77 @@
 // Market pages are addressed by the hash of the transaction that created the market (/market/<tx hash>).
 // The contract cannot know its own transaction hash, so the two directions are found differently:
 //   - hash → market: the transaction's `market_created` event (read over RPC, archival for old transactions);
-//   - market → hash: NearBlocks lists the contract's create_market and ft_on_transfer receipts (USDC markets
-//     arrive through ft_transfer_call), and each new transaction is checked for its `market_created` event.
-// Both directions are immutable, so the result is kept in localStorage. Pages fall back to /market/<id> until a
-// market's hash is known, and /market/<id> links keep working.
+//   - market → hash: the AI resolver service indexes every `market_created` event from FastNEAR's transactions API
+//     (backend/src/market-index.ts) and serves the index at GET /market-tx; the page reads it at most every 15 s.
+// The index only suggests links: a /market/<hash> page shows the market the chain says that transaction created, and a
+// /market/<id> page moves to /market/<hash> only after the chain confirms it, so a wrong index entry never makes one
+// URL show different markets in different browsers. Links this browser checked on chain (a market it created, a hash
+// it resolved or confirmed) are immutable, so they are kept in localStorage and win over the index; the index's links
+// are held in memory, re-read on each page load, and one the chain disproves stays out until the page is reloaded.
+// Pages fall back to /market/<id> until a market's hash is known, and /market/<id> links keep working.
 import { create } from 'zustand';
-import { RPC_URLS, VEILED_CONTRACT, isNearTxHash } from './config';
+import { AI_RESOLVER_URL, RPC_URLS, VEILED_CONTRACT, isNearTxHash } from './config';
 import { aleoId, nearId } from './ids';
 
-const NEARBLOCKS_API = 'https://api-testnet.nearblocks.io/v3';
 const ARCHIVAL_RPC = 'https://archival-rpc.testnet.fastnear.com';
 const CACHE_KEY = `veiled_market_tx_v1:${VEILED_CONTRACT}`;
-const PAGE = 25;
+/** The resolver's index catches up every 15 s: asking more often finds nothing new. */
+const REFRESH_EVERY_MS = 15_000;
+const INDEX_TIMEOUT_MS = 10_000;
 
-interface Cache {
-  /** on-chain market id ("30") → creating transaction hash */
-  byId: Record<string, string>;
-  /** transaction hashes already inspected (market-creating or not) */
-  checked: string[];
-}
+/** On-chain market id ("30") → creating transaction hash. */
+type Links = Record<string, string>;
 
-function readCache(): Cache {
-  try {
-    const c = JSON.parse(localStorage.getItem(CACHE_KEY) ?? '');
-    if (c && typeof c.byId === 'object' && Array.isArray(c.checked)) return c;
-  } catch {
-    /* empty or unavailable storage */
+/** Only market id → transaction hash pairs: a damaged cache or a bad index entry is left out. */
+function links(raw: unknown): Links {
+  const out: Links = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [id, hash] of Object.entries(raw)) {
+    if (typeof hash !== 'string' || !isNearTxHash(hash)) continue;
+    try {
+      out[nearId(id)] = hash;
+    } catch {
+      /* not a market id */
+    }
   }
-  return { byId: {}, checked: [] };
+  return out;
 }
 
-function writeCache(c: Cache) {
+/**
+ * The links this browser checked on chain ({byId}; an older page kept {byId, checked}, whose byId entries were each
+ * checked over RPC too, and only byId is read).
+ */
+function readCache(): Links {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(c));
+    return links(JSON.parse(localStorage.getItem(CACHE_KEY) ?? '')?.byId);
   } catch {
-    /* storage full or blocked: the index is rebuilt next time */
+    return {}; // empty or unavailable storage
   }
 }
+
+function writeCache(byId: Links) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ byId }));
+  } catch {
+    /* storage full or blocked: the links are read from the index again next time */
+  }
+}
+
+/** The resolver service's index, for this contract only. */
+async function indexedLinks(): Promise<Links> {
+  const res = await fetch(`${AI_RESOLVER_URL}/market-tx`, { signal: AbortSignal.timeout(INDEX_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`The market index answered ${res.status}`);
+  const body = await res.json();
+  if (body?.contract !== VEILED_CONTRACT || !body.byId || typeof body.byId !== 'object') {
+    throw new Error('The market index is not for this contract');
+  }
+  return links(body.byId);
+}
+
+const sameLinks = (a: Links, b: Links) => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+};
 
 async function rpcAt<T>(url: string, method: string, params: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -81,89 +115,121 @@ export async function marketsCreatedBy(txHash: string): Promise<string[]> {
   return ids;
 }
 
-/** Successful receipts on the contract for one method, newest first, as transaction hashes. */
-async function receiptTxs(method: string): Promise<string[]> {
-  const out: string[] = [];
-  for (let page = 1; page <= 20; page++) {
-    const res = await fetch(`${NEARBLOCKS_API}/accounts/${VEILED_CONTRACT}/receipts?method=${method}&per_page=${PAGE}&page=${page}`);
-    if (!res.ok) throw new Error(`NearBlocks ${res.status}`);
-    const rows: { transaction_hash?: string; outcome?: { status?: boolean } }[] = (await res.json())?.data ?? [];
-    for (const r of rows) if (r.outcome?.status !== false && r.transaction_hash) out.push(r.transaction_hash);
-    if (rows.length < PAGE) break;
-  }
-  return out;
-}
-
 interface MarketTxState {
-  byId: Record<string, string>;
+  /** Every known link, for building page URLs: the index's, with this browser's checked links over them. */
+  byId: Links;
   loading: boolean;
-  /** Fills in the hashes of markets created since the last refresh. Cheap when nothing is missing. */
+  /** Fills in the hashes of markets created since the last refresh, from the index; at most every 15 s. */
   refresh: (wantedIds?: string[]) => Promise<void>;
-  /** Records a market this browser just created. */
+  /** Records a link checked on chain: a market this browser just created, or a hash the chain confirmed. */
   remember: (marketId: string, txHash: string) => void;
-  /** The market a /market/<hash> URL points at, as the UI id ("30field"), or null. */
+  /** The market a /market/<hash> URL points at, as the UI id ("30field"), or null (unknown, or the chain cannot say). */
   resolve: (txHash: string) => Promise<string | null>;
+  /** The creating transaction of a market once the chain confirms it, or null (no link, disproved, or unchecked). */
+  confirm: (marketId: string) => Promise<string | null>;
 }
 
 let inflight: Promise<void> | null = null;
+let lastAsked = -Infinity;
 
-export const useMarketTx = create<MarketTxState>((set, get) => ({
-  byId: readCache().byId,
-  loading: false,
+export const useMarketTx = create<MarketTxState>((set, get) => {
+  /** Links this browser checked on chain (kept in localStorage). */
+  let own = readCache();
+  /** The index's links as last read, less the ones the chain disproved (memory only). */
+  let indexed: Links = {};
+  /** Index links the chain disproved this page load (id → the hash the index gave). */
+  const disproved: Links = {};
 
-  refresh: async (wantedIds) => {
-    const known = get().byId;
-    if (wantedIds && wantedIds.every((id) => known[nearId(id)])) return;
-    if (inflight) return inflight;
-    inflight = (async () => {
-      set({ loading: true });
-      try {
-        const cache = readCache();
-        const checked = new Set(cache.checked);
-        const [created, received] = await Promise.all([
-          receiptTxs('create_market'),
-          receiptTxs('ft_on_transfer').catch(() => [] as string[]),
-        ]);
-        for (const hash of [...new Set([...created, ...received])]) {
-          if (checked.has(hash)) continue;
-          try {
-            for (const id of await marketsCreatedBy(hash)) cache.byId[id] = hash;
-            checked.add(hash);
-          } catch {
-            /* try this one again on the next refresh */
-          }
+  // A new object only when a link changed: pages that follow the links would otherwise ask again at once.
+  const publish = () => {
+    const byId = { ...indexed, ...own };
+    if (!sameLinks(byId, get().byId)) set({ byId });
+  };
+
+  /** Drops the index links to this hash for markets the chain shows it did not create. */
+  const dropDisproved = (txHash: string, createdIds: string[]) => {
+    const wrong = Object.keys(indexed).filter((id) => indexed[id] === txHash && !createdIds.includes(id));
+    if (!wrong.length) return;
+    indexed = { ...indexed };
+    for (const id of wrong) {
+      disproved[id] = txHash;
+      delete indexed[id];
+    }
+    publish();
+  };
+
+  return {
+    byId: { ...own },
+    loading: false,
+
+    refresh: async (wantedIds) => {
+      const known = get().byId;
+      const isKnown = (id: string) => {
+        try {
+          return !!known[nearId(id)];
+        } catch {
+          return true; // not a market id: nothing to look up
         }
-        cache.checked = [...checked];
-        writeCache(cache);
-        set({ byId: { ...cache.byId } });
+      };
+      if (wantedIds?.every(isKnown)) return;
+      if (inflight) return inflight;
+      if (Date.now() - lastAsked < REFRESH_EVERY_MS) return;
+      lastAsked = Date.now();
+      inflight = (async () => {
+        set({ loading: true });
+        try {
+          const fresh = await indexedLinks();
+          indexed = {};
+          for (const [id, hash] of Object.entries(fresh)) if (disproved[id] !== hash) indexed[id] = hash;
+          own = { ...readCache(), ...own }; // and what another tab of this browser checked meanwhile
+          publish();
+        } catch {
+          /* the index is unreachable: pages keep their /market/<id> links */
+        } finally {
+          set({ loading: false });
+          inflight = null;
+        }
+      })();
+      return inflight;
+    },
+
+    remember: (marketId, txHash) => {
+      if (!isNearTxHash(txHash)) return;
+      own = { ...readCache(), ...own, [nearId(marketId)]: txHash };
+      writeCache(own);
+      publish();
+    },
+
+    resolve: async (txHash) => {
+      const hit = Object.entries(own).find(([, h]) => h === txHash);
+      if (hit) return aleoId(hit[0]);
+      const ids = await marketsCreatedBy(txHash).catch(() => null);
+      if (!ids) return null; // the chain cannot say now: the index's word is not taken instead
+      dropDisproved(txHash, ids);
+      if (!ids.length) return null;
+      get().remember(ids[0], txHash);
+      return aleoId(ids[0]);
+    },
+
+    confirm: async (marketId) => {
+      let id: string;
+      try {
+        id = nearId(marketId);
       } catch {
-        /* NearBlocks unreachable: pages keep their /market/<id> links */
-      } finally {
-        set({ loading: false });
-        inflight = null;
+        return null; // not a market id
       }
-    })();
-    return inflight;
-  },
-
-  remember: (marketId, txHash) => {
-    if (!isNearTxHash(txHash)) return;
-    const cache = readCache();
-    cache.byId[nearId(marketId)] = txHash;
-    if (!cache.checked.includes(txHash)) cache.checked.push(txHash);
-    writeCache(cache);
-    set({ byId: { ...cache.byId } });
-  },
-
-  resolve: async (txHash) => {
-    const hit = Object.entries(get().byId).find(([, h]) => h === txHash);
-    if (hit) return aleoId(hit[0]);
-    const ids = await marketsCreatedBy(txHash).catch(() => [] as string[]);
-    if (!ids.length) return null;
-    get().remember(ids[0], txHash);
-    return aleoId(ids[0]);
-  },
-}));
+      if (own[id]) return own[id];
+      const txHash = indexed[id];
+      if (!txHash) return null;
+      const ids = await marketsCreatedBy(txHash).catch(() => null);
+      if (!ids) return null;
+      dropDisproved(txHash, ids);
+      if (!ids.includes(id)) return null;
+      get().remember(id, txHash);
+      return txHash;
+    },
+  };
+});
 
 /**
  * The market a create transaction just made, as the UI id ("30field"), or null when none shows after the last attempt.

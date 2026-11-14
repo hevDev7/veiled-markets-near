@@ -15,7 +15,17 @@
 // idea into a Yes/No market and POST /review scores one before it is published, with Claude (market-ai.ts,
 // anthropic-model.ts); without it they answer 503.
 //
-//   npm run ai-resolver                        loop forever, serve /health, /receipts and /check-source
+// It also keeps the app's market → creating-transaction index (market-index.ts), built from FastNEAR's Transactions
+// API and saved next to the receipts: GET /market-tx answers {contract, byId}, so market pages link to
+// /market/<tx hash> without every browser paging an explorer API.
+//
+// With OUTLAYER_PROJECT and OUTLAYER_PAYMENT_KEY set, the resolution source is read inside OutLayer's TEE by the
+// owner's published source-reader build (outlayer.ts) instead of on this server, and the receipt's source names the
+// OutLayer call and its attestation. Once either variable is set, a problem with them stops the resolver from reading
+// sources (each market is retried later); it never goes back to reading them itself. The create page's
+// /check-source always reads on this server.
+//
+//   npm run ai-resolver                        loop forever, serve /health, /receipts, /check-source and /market-tx
 //                                              (reads backend/.env if any)
 //   npm run ai-resolver -- --once              one pass, then exit
 //   npm run ai-resolver -- --serve-only        serve only, never vote (NEARAI_API_KEY not needed)
@@ -30,7 +40,13 @@
 //      AI_RETRY_ABSTAINED_MINUTES (60), AI_RESOLVER_PORT (4091), AI_RECEIPTS_DIR (backend/ai-receipts),
 //      MARKET_AI_ORIGINS (the create page's origins, comma-separated;
 //      https://veiledmarkets.xyz,http://localhost:3100), MARKET_AI_CLIENT_PER_HOUR (10), MARKET_AI_DAILY_CAP (150),
-//      MARKET_AI_API_KEY (an Anthropic key; turns on /draft and /review), MARKET_AI_MODEL (claude-opus-5-5).
+//      MARKET_AI_API_KEY (an Anthropic key; turns on /draft and /review), MARKET_AI_MODEL (claude-opus-5-5),
+//      MARKET_INDEX_FILE (<AI_RECEIPTS_DIR>/market-index.json), MARKET_INDEX_API (FastNEAR's Transactions API for
+//      the contract's network), MARKET_INDEX_SECONDS (15; a minute after FastNEAR answers 429), FASTNEAR_API_KEY
+//      (optional, from https://dashboard.fastnear.com: FastNEAR rate-limits keyless clients harder),
+//      OUTLAYER_PROJECT (<owner>/<project>) and OUTLAYER_PAYMENT_KEY (<owner>:<nonce>:<secret>) to read sources in
+//      OutLayer, OUTLAYER_API (OutLayer's API for the contract's network), OUTLAYER_VERSION (a published version to
+//      pin), OUTLAYER_COMPUTE_LIMIT (USD micro-units a call may spend on compute).
 // ============================================================================
 
 import http from 'node:http';
@@ -55,6 +71,17 @@ import {
 import { anthropicModel } from './anthropic-model';
 import { draftMarket, reviewMarket } from './market-ai';
 import { marketAiRoutes } from './market-ai-http';
+import {
+  catchUp,
+  emptyIndex,
+  loadIndex as loadMarketIndex,
+  marketIndexApi,
+  marketTxReplies,
+  pollDelayMs,
+  saveIndex as saveMarketIndex,
+  type MarketIndex,
+} from './market-index';
+import { outlayerFromEnv, readSourceInOutLayer } from './outlayer';
 import { RateLimiter } from './rate-limit';
 import { checkSource } from './source-check';
 import { defaultReaderDeps, fetchSource, limitLookups, readSource, type ReaderDeps } from './source-reader';
@@ -92,6 +119,17 @@ const MARKET_AI_CLIENT_PER_HOUR = Number(process.env.MARKET_AI_CLIENT_PER_HOUR |
 const MARKET_AI_DAILY_CAP = Number(process.env.MARKET_AI_DAILY_CAP || 150);
 const MARKET_AI_API_KEY = process.env.MARKET_AI_API_KEY || '';
 const MARKET_AI_MODEL = process.env.MARKET_AI_MODEL || 'claude-opus-5-5';
+const MARKET_INDEX_FILE = process.env.MARKET_INDEX_FILE || nodePath.join(RECEIPTS, 'market-index.json');
+const MARKET_INDEX_API = marketIndexApi(CONTRACT, process.env.MARKET_INDEX_API);
+// At least 5 s between polls, whatever the variable says: the index polls a public API.
+const MARKET_INDEX_SECONDS = Math.max(5, Number(process.env.MARKET_INDEX_SECONDS) || 15);
+const FASTNEAR_API_KEY = process.env.FASTNEAR_API_KEY || '';
+const OUTLAYER = outlayerFromEnv(process.env, CONTRACT);
+const SOURCE_READER = !OUTLAYER
+  ? 'this server'
+  : 'config' in OUTLAYER
+    ? `OutLayer ${OUTLAYER.config.project}${OUTLAYER.config.versionKey ? ` (${OUTLAYER.config.versionKey})` : ''}`
+    : `none: ${OUTLAYER.problem}`;
 /** Seconds per contract tick (height = block time in ms / 4000). */
 const TICK_SECONDS = 4;
 
@@ -126,7 +164,13 @@ const index: Record<string, Entry> = existsSync(INDEX) ? JSON.parse(readFileSync
 const saveIndex = () => writeFileSync(INDEX, JSON.stringify(index, null, 2));
 
 // The resolution source is read by source-reader.ts: the same reader /check-source uses, with DNS pinned to the
-// addresses it vetted.
+// addresses it vetted. With OutLayer set up, it is read inside OutLayer's TEE instead (outlayer.ts), and the model is
+// given the text made the same way.
+async function readMarketSource(text: string): ReturnType<typeof readSource> {
+  if (!OUTLAYER) return readSource(text);
+  if ('problem' in OUTLAYER) throw new Error(`sources are not read until OutLayer is set up right: ${OUTLAYER.problem}`);
+  return readSourceInOutLayer(text, OUTLAYER.config, { fetch });
+}
 
 // ------------------------------------------------------------------ NEAR AI Cloud
 
@@ -181,7 +225,7 @@ async function signatureOf(chatId: string): Promise<TeeSignature> {
 async function resolve(m: ChainMarket): Promise<void> {
   const id = m.id;
   const text = readMarket(m);
-  const { source, sourceText } = await readSource(text.source);
+  const { source, sourceText } = await readMarketSource(text.source);
   const attestation = await attest();
   const attestationFile = `${id}.attestation.json`;
   writeFileSync(nodePath.join(RECEIPTS, attestationFile), attestation.raw);
@@ -300,7 +344,36 @@ async function pass(): Promise<void> {
   lastPass = { at: new Date().toISOString(), candidates };
 }
 
+// Market id → creating transaction hash (market-index.ts). Updated in place by each poll, so /market-tx serves the
+// progress of a rebuild while it runs.
+let markets: MarketIndex = emptyIndex();
+let marketsPoll: { at: string; error?: string } | null = null;
+
+async function followMarkets(): Promise<void> {
+  try {
+    markets = loadMarketIndex(MARKET_INDEX_FILE);
+  } catch (e) {
+    console.warn(`[index] ${(e as Error).message}; rebuilding it`);
+  }
+  console.log(`[index] ${Object.keys(markets.byId).length} markets up to block ${markets.height}; following ${MARKET_INDEX_API}`);
+  const deps = { fetch, api: MARKET_INDEX_API, contract: CONTRACT, apiKey: FASTNEAR_API_KEY || undefined };
+  for (;;) {
+    let failure: unknown = null;
+    try {
+      await catchUp(markets, deps, i => saveMarketIndex(MARKET_INDEX_FILE, i));
+      marketsPoll = { at: new Date().toISOString() };
+    } catch (e) {
+      failure = e;
+      marketsPoll = { at: new Date().toISOString(), error: (e as Error).message.slice(0, 300) };
+      console.warn('[index] poll failed:', (e as Error).message);
+    }
+    await new Promise(r => setTimeout(r, pollDelayMs(failure, MARKET_INDEX_SECONDS * 1000)));
+  }
+}
+
 function serve(): void {
+  const marketTx = marketTxReplies(CONTRACT);
+  void followMarkets();
   const send = (res: http.ServerResponse, status: number, body: string, type = 'application/json') => {
     if (res.headersSent) return;
     res.writeHead(status, { 'content-type': type, 'access-control-allow-origin': '*', 'cache-control': 'no-cache' });
@@ -327,7 +400,14 @@ function serve(): void {
           if (handled) return;
           const url = new URL(req.url ?? '/', 'http://x');
           if (url.pathname === '/health') {
-            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, drafting: model ? MARKET_AI_MODEL : 'off', last_pass: lastPass }));
+            const marketIndex = { height: markets.height, markets: Object.keys(markets.byId).length, last_poll: marketsPoll };
+            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, source_reader: SOURCE_READER, drafting: model ? MARKET_AI_MODEL : 'off', last_pass: lastPass, market_index: marketIndex }));
+          }
+          if (url.pathname === '/market-tx') {
+            const r = marketTx(markets, { acceptEncoding: req.headers['accept-encoding'], ifNoneMatch: req.headers['if-none-match'] });
+            if (res.headersSent) return;
+            res.writeHead(r.status, { ...r.headers, 'access-control-allow-origin': '*', 'cache-control': 'no-cache' });
+            return void res.end(r.body);
           }
           if (url.pathname === '/receipts' || url.pathname === '/receipts/') return send(res, 200, JSON.stringify(index));
           const file = url.pathname.match(/^\/receipts\/(\d+(?:\.attestation)?\.json)$/)?.[1];
@@ -344,12 +424,13 @@ function serve(): void {
 
 async function main(): Promise<void> {
   if (process.argv.includes('--serve-only')) {
-    console.log(`[ai] serve only (no voting): /health, /receipts, /check-source, /draft, /review; origins ${MARKET_AI_ORIGINS.join(', ')}`);
+    console.log(`[ai] serve only (no voting): /health, /receipts, /check-source, /draft, /review, /market-tx; origins ${MARKET_AI_ORIGINS.join(', ')}`);
     serve();
     return;
   }
   if (!API_KEY) throw new Error('NEARAI_API_KEY is not set (backend/.env or the environment)');
-  console.log(`[ai] ${ACCOUNT} on ${CONTRACT}, model ${MODEL}${DRY_RUN ? ', DRY RUN (no votes)' : ''}`);
+  console.log(`[ai] ${ACCOUNT} on ${CONTRACT}, model ${MODEL}${DRY_RUN ? ', DRY RUN (no votes)' : ''}; sources read by ${SOURCE_READER}`);
+  if (OUTLAYER && 'problem' in OUTLAYER) console.warn(`[ai] OutLayer is not set up right, so no market is resolved: ${OUTLAYER.problem}`);
   if (!PUBLIC_URL) console.warn('[ai] AI_RESOLVER_PUBLIC_URL is not set: running dry, since a vote must link a receipt anyone can fetch');
   if (process.argv.includes('--once')) {
     await pass();

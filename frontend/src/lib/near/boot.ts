@@ -2,8 +2,9 @@
 import { Buffer } from 'buffer';
 import { installAleoRestShim } from './aleo-rest';
 
-// Some NEAR wallet code (near-api-js and randombytes inside the Meteor SDK) expects Node's global, Buffer and
-// process. Without `global` the Meteor module throws while loading and the wallet selector never starts.
+// Node's global, Buffer and process, which the Meteor module of the old NEAR Wallet Selector needed on this page.
+// NEAR Connect runs each wallet's code in its own sandboxed iframe, so these are likely unused now; they stay until
+// the whole app has been checked without them.
 const g = globalThis as unknown as {
   global?: unknown;
   Buffer?: typeof Buffer;

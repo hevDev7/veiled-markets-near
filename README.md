@@ -213,7 +213,7 @@ outcomes other than Yes/No.
 ```
 Browser (React)
   └─ frontend/src/lib/near/
-       ├─ wallet   NEAR Wallet Selector (Meteor Wallet)
+       ├─ wallet   NEAR Connect, Meteor Wallet only (list built into the app)
        ├─ reads    contract views
        ├─ notes    scans and decrypts the user's notes, builds the Merkle path
        └─ prover   snarkjs Groth16 proof in a web worker
@@ -358,7 +358,7 @@ those reads.
 |---|---|
 | Contract | `near-sdk` 5.30.1, `ark-bn254` and `ark-ff` 0.5 (field arithmetic); tests with `near-workspaces` 0.24 |
 | Circuit | Circom 2.1.6, `circomlib` 2.0.5, `circomlibjs` 0.1.7, `snarkjs` 0.7.5, and the public Perpetual Powers of Tau |
-| App | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, Framer Motion 11, React Router 6, Zustand 4, Recharts 3, `lucide-react`, NEAR Wallet Selector 10.1.4 with its Meteor Wallet module, `@near-js/transactions`, `snarkjs`, `poseidon-lite` |
+| App | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, Framer Motion 11, React Router 6, Zustand 4, Recharts 3, `lucide-react`, NEAR Connect (`@hot-labs/near-connect` 0.12.0), `snarkjs`, `poseidon-lite` |
 | Services | `near-api-js` 7.3.1, `snarkjs`, `tsx`, `@noble/curves` and `@noble/hashes` 2.2.0 (TEE signature checks); turbo prices from Pyth Hermes, or CoinGecko without a Pyth key; the AI resolver calls NEAR AI Cloud's OpenAI-compatible API |
 | Hosting | Docker images on Railway; the app is served by Caddy |
 
@@ -380,9 +380,12 @@ What the testnet deployment trusts, and what a production deployment still needs
   0.1 NEAR, so one account can decide a market unless someone disputes within the hour. The first correct voter is
   paid half the market's protocol fees, which is small on testnet markets; forfeited bonds go to the treasury, not to
   correct voters. Production needs a larger bond, more voters (`set_resolution_config`), and a committee the operator
-  does not control. The AI resolver's model and signature are checked, but the source page it reads is fetched by the
-  resolver itself, outside the TEE. The create page's source check shows that the resolver could read a source when
-  the market was published; a site can still change or go down before the market closes.
+  does not control. The AI resolver's model and signature are checked, but on the hosted demo the source page it reads
+  is fetched by the resolver itself, outside the TEE. It can have the page read inside OutLayer's TEE instead, with the
+  call's attestation in the receipt; that needs an OutLayer project of the operator's and a published reader build
+  ([backend/README.md](backend/README.md#reading-sources-in-outlayer)). The create page's source check shows that the
+  resolver could read a source when the market was published; a site can still change or go down before the market
+  closes.
 - **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in, pro rata within that
   outcome, so a refund cannot draw on another outcome's collateral. Markets created before that rule keep the older
   pro-rata refund.

@@ -1,5 +1,5 @@
 // Stands in for the Aleo wallet adapters (Shield, Leo, Fox, Soter). Veiled Markets on NEAR connects NEAR wallets
-// through the Wallet Selector, so these never connect; they only keep the legacy wallet manager compiling.
+// through NEAR Connect, so these never connect; they only keep the legacy wallet manager compiling.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 class AleoOnlyAdapter {
   [key: string]: any;

@@ -1960,6 +1960,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-pyth"
+version = "0.1.0"
+dependencies = [
+ "near-sdk",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
