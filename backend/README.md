@@ -8,10 +8,11 @@ comma-separated list; each call moves to the next endpoint when one fails).
 |---|---|---|
 | Relayer | `npm run relayer` (port 4100) | Receives a proof and an action from the browser, checks the proof locally, and submits `transact` to the contract. It pays the gas, so the user's account never signs a private action. Key: `RELAYER_PRIVATE_KEY`. |
 | Turbo oracle | `npm run turbo-oracle -- --serve --auto-create` (port 4090) | Opens and settles the five-minute BTC, ETH and SOL rounds and serves live prices and an audit log of every price it used. Prices come from Pyth Hermes when `PYTH_API_KEY` is set, otherwise from CoinGecko. Key: `ORACLE_PRIVATE_KEY`. |
-| AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. It also answers the create page's source check (below). Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
+| AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. It also answers the create page's source check and, with an Anthropic key, AI drafting and review (below). Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`, and `MARKET_AI_API_KEY` for drafting. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
 
 `npm test` runs the relayer's request checks, the AI resolver's checks, the source reader, catalog and check, the
-create page's endpoints and rate limits, the LP note bookkeeping, the spec files and the demo price question (75 tests).
+create page's endpoints and rate limits, AI drafting and review and their Claude client (stubbed, no key needed), the LP
+note bookkeeping, the spec files and the demo price question (98 tests).
 `DRY_RUN=1 npm run ai-resolver -- --once` asks the model about every market waiting for a vote and writes receipts to
 `ai-receipts/` without voting.
 
@@ -26,16 +27,46 @@ first 2,000 characters of the text the resolver would get. Any source needs at l
 candles, Nasdaq daily history and Frankfurter rates (`src/source-catalog.ts`) are checked with a past date and the
 shape of the answer instead. Each client gets 30 checks a minute and 2 at a time; a passed answer is reused for 60 s
 and a failed one for 5 s; at most 4 checks run at once, with at most 2 DNS lookups pending, so the voting loop keeps
-its share of Node's thread pool. `POST /draft` and `POST /review` answer 503 until AI drafting is set up.
+its share of Node's thread pool.
 
-`npm run ai-resolver -- --serve-only` serves `/health`, `/receipts` and the check without voting, and needs no
-`NEARAI_API_KEY`.
+### AI drafting and review
+
+With `MARKET_AI_API_KEY` set (an Anthropic key, in `backend/.env` or the service's environment), the same service asks
+Claude (`src/market-ai.ts`, `src/anthropic-model.ts`) for two things; without it both endpoints answer 503 "AI drafting
+is not set up".
+
+- `POST /draft` with `{ idea, category? }` (an idea of 10 to 500 characters) answers `{ draft: { question, rules,
+  source, category, closes_at, resolution_deadline_at }, source_check, warnings }`. The model gets the current time,
+  the categories, the rules style and the source catalog. The server checks the draft (a question ending in "?", rules
+  starting `This market will resolve to "Yes" if`, trading closing at least 15 minutes ahead, a resolution deadline at
+  least 6 hours after it, at most 2,048 bytes of text, and for a Coinbase candles source a `start` equal to the
+  closing minute in Unix seconds with `end` after it) and runs the source check on its source. When either fails, the
+  model is asked once more and told why, so one draft is at most two model calls. A source that fails twice comes back
+  with `source_check.ok: false`, and the page will not publish it. `warnings` lists what the model assumed and the
+  failed check, if any.
+- `POST /review` with `{ question, rules, source, closes_at, resolution_deadline_at }` answers `{ scores: { clarity,
+  verifiability, time_bounds, source_quality }, critiques, ready }`. The model reads the market and the text the
+  resolver would read from the source today (up to 20,000 characters, marked as data, not instructions) and scores
+  each from 1 to 10. For a catalog source, which shows nothing before the moment that counts (Coinbase answers HTTP
+  400 "Start cannot be in the future", Nasdaq an empty table, Frankfurter an earlier date), it reads the same API for
+  a recent past date, as the source check does, and is told so. `ready` is set by the server: every score is at
+  least 7.
+
+Each call asks for JSON in a fixed schema (structured outputs) at medium effort, with server-side fallback on, so a
+request Claude declines is retried on the model Anthropic recommends; a refusal that remains answers 422, and any other
+failure of the model 502. A body the endpoint cannot use answers 400 before it counts against the limits below. Each
+model call logs its token use.
+
+`npm run ai-resolver -- --serve-only` serves `/health`, `/receipts`, the check and the AI endpoints without voting, and
+needs no `NEARAI_API_KEY`. `/health` shows `drafting`: the model in use, or `off`.
 
 | Variable | Default | Use |
 |---|---|---|
 | `MARKET_AI_ORIGINS` | `https://veiledmarkets.xyz,http://localhost:3100` | Browser origins the check answers (CORS) |
-| `MARKET_AI_CLIENT_PER_HOUR` | `10` | AI drafting and review calls per client per hour |
-| `MARKET_AI_DAILY_CAP` | `150` | AI drafting and review calls per UTC day, across all clients |
+| `MARKET_AI_API_KEY` | (none) | Anthropic API key; turns on `/draft` and `/review` |
+| `MARKET_AI_MODEL` | `claude-opus-5-5` | The Claude model for drafting and review |
+| `MARKET_AI_CLIENT_PER_HOUR` | `10` | AI drafting and review requests per client per hour |
+| `MARKET_AI_DAILY_CAP` | `150` | AI drafting and review requests per UTC day, across all clients |
 
 ## Scripts
 

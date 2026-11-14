@@ -188,9 +188,22 @@ The Start step offers three ways in:
   them. The stock and rate rules say the market waits until the day's value is published, so the resolver does not
   vote "No" in the hours between the close and the publication; if the value never appears, the market is cancelled
   at its resolution deadline and every position is refunded.
-- **Write it yourself.** The rules box starts from the pattern the templates use. Before publishing, the creator
-  ticks that the value that decides the market appears in the source text the check showed.
-- **Describe it to AI** comes with AI drafting, which is not switched on yet.
+- **Describe it to AI.** The creator writes the idea in a sentence and may pick a category. Claude, with the
+  operator's Anthropic key on the AI resolver service, drafts the question, rules in the templates' style, a source
+  (from the same catalog when the idea fits it) and the times. The service checks the draft (a Yes/No question,
+  trading closing at least 15 minutes ahead, a resolution deadline at least 6 hours later, at most 2,048 bytes, and
+  for a Coinbase source a `start` that is the closing minute in Unix seconds) and runs the source check on its
+  source; when either fails, it asks Claude once more and says why. The draft opens in
+  the details step with what the AI assumed, and every field can be edited.
+- **Write it yourself.** The rules box starts from the pattern the templates use.
+
+A market that is not an unedited template goes through an AI review before it is published: Claude reads the market
+and the text the resolver gets from its source today (for a catalog API, which shows nothing before the moment that
+counts, the same API for a recent past date), and scores clarity, verifiability, timing and the source from 1 to 10. Create opens only when every score is 7 or more, and only for the text, source and times that were reviewed:
+an edit afterwards locks it again. When AI drafting is not set up on the service, or the review cannot run for that
+version of the market (over a limit, failed or declined), the creator instead ticks that the value that decides the
+market appears in the source text the check showed. A review that already scored the same text stays in force when
+a later run fails.
 
 `backend/scripts/quick-market.ts open` runs the same check before it signs anything, and refuses spec files with
 outcomes other than Yes/No.
@@ -252,7 +265,10 @@ Then follow [Try it](#try-it) with `http://localhost:3100` in place of the demo 
 sources with the hosted AI resolver service, which answers `http://localhost:3100`. To run that check yourself,
 start `npm run ai-resolver -- --serve-only` in `backend/` (port 4091; it serves the check and the receipts, never
 votes, and needs no NEAR AI key) and set `VITE_AI_RESOLVER_URL=http://localhost:4091`. The service answers only the
-origins in `MARKET_AI_ORIGINS` (default `https://veiledmarkets.xyz,http://localhost:3100`).
+origins in `MARKET_AI_ORIGINS` (default `https://veiledmarkets.xyz,http://localhost:3100`). With an Anthropic key in
+`backend/.env` as `MARKET_AI_API_KEY`, it also drafts and reviews markets with Claude (`MARKET_AI_MODEL`, default
+`claude-opus-5-5`), up to `MARKET_AI_CLIENT_PER_HOUR` (10) requests per client an hour and `MARKET_AI_DAILY_CAP` (150)
+a UTC day; without the key the page offers templates and its own form, with the tick.
 
 **Your own relayer and oracle** (optional; each needs the key of a funded testnet account):
 
@@ -289,8 +305,8 @@ its `/receipts` are served), `npm run ai-resolver` votes and serves the receipts
 | Circuit: valid spends prove, invalid ones do not | `cd near/circuits && npm install && node --test test/spend.test.mjs` | 6 pass |
 | Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 73 pass |
 | Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
-| Relayer request checks, AI resolver decisions and TEE signature checks, the source reader, catalog and check, the create page's endpoints and rate limits, LP note bookkeeping, spec files, demo price questions | `cd backend && npm install && npm test` | 75 pass |
-| App: note keys, wallet signature, market data, positions, math, resolution stages, market templates, the create form and its source check | `cd frontend && npm install && npm test` | 99 pass |
+| Relayer request checks, AI resolver decisions and TEE signature checks, the source reader, catalog and check, the create page's endpoints and rate limits, AI drafting and review with a stubbed Claude client, LP note bookkeeping, spec files, demo price questions | `cd backend && npm install && npm test` | 98 pass |
+| App: note keys, wallet signature, market data, positions, math, resolution stages, market templates, the create form, its source check, AI drafting and review requests and the review gate | `cd frontend && npm install && npm test` | 112 pass |
 | Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
 
 The sandbox tests download a NEAR sandbox binary on first run, and the in-place upgrade test among them is skipped

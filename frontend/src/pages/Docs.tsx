@@ -686,8 +686,16 @@ nullifier   = Poseidon(sk, commitment)     published when the note is spent`}</C
               decided by Nasdaq&apos;s daily history; trading closes at 16:00 New York time, or 13:00 on early-close days.
               <B> Currency rate</B>: a pair&apos;s ECB reference rate for a TARGET business day above a value, decided by
               Frankfurter; trading closes at 12:00 UTC, before the ECB publishes. A template&apos;s question, rules and
-              source stay read-only unless the creator edits them; a hand-written market is published only after its
-              creator ticks that the deciding value appears in the checked source text.
+              source stay read-only unless the creator edits them.
+            </P>
+            <P muted>
+              <B>Describe it to AI</B>: the creator writes the idea in a sentence, and Claude drafts the question, the
+              rules, a source and the times, which the service checks and runs through the source check before the
+              draft opens for editing. Any market that is not an unedited template is published only after an AI review
+              scores it 7 or more on clarity, verifiability, timing and the source, for exactly the text, source and
+              times reviewed; an edit afterwards locks Create again. When the AI review is not available for that
+              version of the market, the creator ticks instead that the deciding value appears in the checked source
+              text; a review that already scored the same text stays in force when a later run fails.
             </P>
             <Table
               head={['Rule', 'Value']}
@@ -867,6 +875,16 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               rates are checked with a past date and the shape of the answer instead. The service answers browsers only
               from the origins in <C>MARKET_AI_ORIGINS</C> (default <C>https://veiledmarkets.xyz,http://localhost:3100</C>);{' '}
               <C>npm run ai-resolver -- --serve-only</C> runs the check and the receipts without voting.
+            </P>
+            <P muted>
+              With an Anthropic key in <C>MARKET_AI_API_KEY</C>, the service also drafts and reviews markets with Claude
+              (<C>MARKET_AI_MODEL</C>, default <C>claude-opus-5-5</C>). <C>POST /draft</C> turns an idea into a
+              question, rules, a source and times; the server checks the draft and its source, and asks once more when
+              either fails. <C>POST /review</C> returns four scores from 1 to 10 and critiques; the model reads the
+              market and the source text, marked as data rather than instructions (for a catalog API, which shows
+              nothing before the moment that counts, the same API for a recent past date), and the server calls a
+              market ready when every score is 7 or more. Each client gets <C>MARKET_AI_CLIENT_PER_HOUR</C> (10) such requests an
+              hour and the service <C>MARKET_AI_DAILY_CAP</C> (150) a UTC day; without a key both answer 503.
             </P>
             <H3>Bonds, fees and cancellation</H3>
             <Bullets>

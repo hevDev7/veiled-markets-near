@@ -1,6 +1,7 @@
 // Data APIs the AI resolver is known to read well (checked with its own reader on 2026-11-13), and how to check one
-// before a market uses it. For a future date these APIs answer with nothing yet (Coinbase gives []), so the source
-// check fetches a probe instead: the same API for a recent past date, and it checks the shape of that answer.
+// before a market uses it. For a future date these APIs show nothing yet (Coinbase answers HTTP 400 "Start cannot be in
+// the future", Nasdaq an empty table, Frankfurter an earlier date), so the source check fetches a probe instead: the
+// same API for a recent past date, and it checks the shape of that answer. The AI review reads the same probe.
 export type CatalogId = 'coinbase-candles' | 'nasdaq-historical' | 'frankfurter-rate';
 
 export interface CatalogProbe {

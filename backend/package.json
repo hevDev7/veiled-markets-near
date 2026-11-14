@@ -6,10 +6,11 @@
     "scripts": {
         "relayer": "tsx src/near-relayer.ts",
         "turbo-oracle": "tsx src/near-turbo-oracle.ts",
-        "test": "tsx --test src/relay-guards.test.ts src/ai-resolver-core.test.ts src/source-reader.test.ts src/source-catalog.test.ts src/source-check.test.ts src/rate-limit.test.ts src/market-ai-http.test.ts scripts/lp-notes.test.ts scripts/market-spec.test.ts scripts/price-question.test.ts",
+        "test": "tsx --test src/relay-guards.test.ts src/ai-resolver-core.test.ts src/source-reader.test.ts src/source-catalog.test.ts src/source-check.test.ts src/rate-limit.test.ts src/market-ai-http.test.ts src/market-ai.test.ts src/anthropic-model.test.ts scripts/lp-notes.test.ts scripts/market-spec.test.ts scripts/price-question.test.ts",
         "ai-resolver": "tsx --env-file-if-exists=.env src/near-ai-resolver.ts"
     },
     "dependencies": {
+        "@anthropic-ai/sdk": "^1.8.0",
         "@noble/curves": "2.2.0",
         "@noble/hashes": "2.2.0",
         "eventsource": "^3.0.7",

@@ -1,17 +1,18 @@
 // The create page's endpoints on the AI resolver service:
 //   GET  /check-source?url=…   can the resolver read this source? (source-check.ts)
-//   POST /draft, POST /review  AI drafting and review with the owner's key (stage 2; 503 until set up)
+//   POST /draft, POST /review  AI drafting and review with the owner's Anthropic key (market-ai.ts; 503 until set up)
 // CORS answers the app's origins only. Every response is JSON, and no error escapes: an unhandled rejection would stop
-// the resolver's voting loop.
+// the resolver's voting loop. Errors map by class: a bad body 400, a model refusal 422, a model failure 502, else 500.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { InvalidRequest, ModelFailure, ModelRefusal, parseDraftRequest, parseReviewRequest, type ReviewInput } from './market-ai';
 import type { RateLimiter } from './rate-limit';
 import type { SourceCheck } from './source-check';
 
 export interface RouteDeps {
   checkSource(url: string): Promise<SourceCheck>;
   /** Absent until AI drafting is set up: the endpoint then answers 503. */
-  draft?(body: unknown): Promise<unknown>;
-  review?(body: unknown): Promise<unknown>;
+  draft?(input: { idea: string; category?: number }): Promise<unknown>;
+  review?(input: ReviewInput): Promise<unknown>;
   origins: string[];
   checkLimiter: RateLimiter;
   aiLimiter: RateLimiter;
@@ -123,8 +124,18 @@ export function marketAiRoutes(deps: RouteDeps): (req: IncomingMessage, res: Ser
       } catch {
         return send(400, { error: 'The request body is not JSON.' }), true;
       }
-      const handler = url.pathname === '/draft' ? deps.draft : deps.review;
-      if (!handler) return send(503, { error: 'AI drafting is not set up' }), true;
+      // A body the endpoint cannot use is refused (InvalidRequest → 400) before it costs one of the client's AI calls.
+      let run: (() => Promise<unknown>) | null = null;
+      if (url.pathname === '/draft' && deps.draft) {
+        const draft = deps.draft;
+        const input = parseDraftRequest(body);
+        run = () => draft(input);
+      } else if (url.pathname === '/review' && deps.review) {
+        const review = deps.review;
+        const input = parseReviewRequest(body);
+        run = () => review(input);
+      }
+      if (!run) return send(503, { error: 'AI drafting is not set up' }), true;
       const limit = deps.aiLimiter.take(clientOf(req));
       if (!limit.ok) {
         const error = limit.scope === 'global'
@@ -132,12 +143,18 @@ export function marketAiRoutes(deps: RouteDeps): (req: IncomingMessage, res: Ser
           : 'You have used your AI calls for this hour. Try again later, or use a template.';
         return send(429, { error, scope: limit.scope }, { 'retry-after': String(limit.retryAfterSec) }), true;
       }
-      send(200, await handler(body));
+      send(200, await run());
       return true;
     } catch (e) {
-      const status = typeof (e as { status?: unknown })?.status === 'number' ? (e as { status: number }).status : 500;
-      send(status, { error: status === 500 ? 'Internal error.' : (e as Error).message });
-      if (status === 500) console.warn('[market-ai]', (e as Error)?.message);
+      if (e instanceof InvalidRequest) send(400, { error: e.message });
+      else if (e instanceof ModelRefusal) send(422, { error: 'The model declined this request.' });
+      else if (e instanceof ModelFailure) {
+        send(502, { error: 'The AI service failed; try again.' });
+        console.warn('[market-ai] model failure:', e.message);
+      } else {
+        send(500, { error: 'Internal error.' });
+        console.warn('[market-ai]', (e as Error)?.message);
+      }
       return true;
     }
   };

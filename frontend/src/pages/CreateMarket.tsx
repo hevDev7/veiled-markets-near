@@ -3,7 +3,7 @@ import {
   ArrowRight, ArrowLeft, AlertCircle, CheckCircle2, Lightbulb,
   Shield, Coins, ExternalLink,
   Check, Loader2, AlertTriangle, DollarSign,
-  Upload, Link, Image,
+  Upload, Link, Image, Sparkles,
 } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -28,21 +28,21 @@ import { PUBLIC_CALL_GAS_MICRO, ENABLED_TOKEN_KEYS, tokenLabel } from '@/lib/nea
 import { isChainTxId } from '@/lib/near/config'
 import { MAX_METADATA, metadataBytes } from '@/lib/near/chain'
 import {
-  CATEGORIES, DRAFT_KEY, METADATA_OUTCOMES, RULES_PATTERN, initialFormData, isTemplateUnedited, normalizeDraft,
-  publishBlocker, reviewFingerprint, storedMetadata, toLocalFields, type MarketFormData,
+  CATEGORIES, DRAFT_KEY, METADATA_OUTCOMES, RULES_PATTERN, draftToForm, initialFormData, isTemplateUnedited, normalizeDraft,
+  publishBlocker, reviewBlocker, reviewFellBack, reviewFingerprint, storedMetadata, toLocalFields, type MarketFormData, type ReviewState,
 } from '@/lib/create/form'
-import type { SourceCheck } from '@/lib/create/market-ai-client'
+import { draftingAvailable, type DraftResult, type SourceCheck } from '@/lib/create/market-ai-client'
 import type { TemplateResult } from '@/lib/create/templates'
 import { StartStep, type StartKind } from '@/components/create/StartStep'
 import { TemplateForm } from '@/components/create/TemplateForm'
+import { AiDraftForm } from '@/components/create/AiDraftForm'
+import { AiReviewPanel } from '@/components/create/AiReviewPanel'
 import { SourceCheckPanel } from '@/components/create/SourceCheckPanel'
 import { SizeMeter } from '@/components/create/SizeMeter'
 
 type CreateStep = 'start' | 'details' | 'timing' | 'review' | 'creating' | 'success' | 'error'
 
 const STEP_LABELS = ['Start', 'Market details', 'Timing & liquidity', 'Review & publish']
-/** "Describe it to AI" on the Start step: off until AI drafting is set up on the resolver service. */
-const AI_ENABLED = false
 
 function saveDraft(data: MarketFormData) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)) } catch {} }
 /** A saved draft in today's shape: Yes/No only, USAD turned into NEAR (normalizeDraft). */
@@ -267,7 +267,7 @@ export function CreateMarketPage() {
   const { wallet } = useWalletStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
   const [step, setStep] = useState<CreateStep>('start')
-  const [startMode, setStartMode] = useState<'choose' | 'template'>('choose')
+  const [startMode, setStartMode] = useState<'choose' | 'template' | 'ai'>('choose')
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
   const [marketId, setMarketId] = useState<string | null>(null)
@@ -277,10 +277,20 @@ export function CreateMarketPage() {
   const [sourceCheck, setSourceCheck] = useState<{ result: SourceCheck | null; unavailable: boolean }>({ result: null, unavailable: false })
   // The review step's tick, tied to what it covers: changing the text, the source or a time clears it.
   const [confirmedFor, setConfirmedFor] = useState<string | null>(null)
+  // AI drafting and review run only when the resolver service has them set up (its /health says so).
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiReview, setAiReview] = useState<ReviewState>(null)
+  const [aiWarnings, setAiWarnings] = useState<string[]>([])
 
   useEffect(() => {
     const draft = loadDraft()
     if (draft && hasFormContent(draft)) { setFormData(draft); setStep('details') }
+  }, [])
+
+  useEffect(() => {
+    let live = true
+    draftingAvailable().then((on) => { if (live) setAiEnabled(on) })
+    return () => { live = false }
   }, [])
 
   const updateForm = (updates: Partial<MarketFormData>) => {
@@ -294,17 +304,33 @@ export function CreateMarketPage() {
   const templateLocked = isTemplateUnedited(formData)
   const metaBytes = metadataBytes(storedMetadata(formData))
   const fingerprint = reviewFingerprint(formData)
-  const needsConfirm = !templateLocked
   const confirmed = confirmedFor === fingerprint
+  const aiFellBack = reviewFellBack(aiReview, fingerprint)
+  // Unedited template: nothing to confirm. Otherwise an AI review of exactly this market, or the tick when the AI could
+  // not review this version of it.
+  const showAiReview = !templateLocked && aiEnabled && !aiFellBack
+  const showTick = !templateLocked && !showAiReview
+  const reviewMsg = reviewBlocker({ templateLocked, aiEnabled, state: aiReview, fingerprint, confirmed })
   const checkedSource = sourceCheck.result && sourceCheck.result.url === formData.resolutionSource.trim() ? sourceCheck.result : null
 
   const startWith = (kind: StartKind) => {
     setError(null)
+    if (kind === 'ai') { setStartMode('ai'); return }
     if (kind === 'template') { setStartMode('template'); return }
-    if (kind === 'manual') {
-      updateForm({ origin: 'manual', templateText: null, description: formData.description.trim() ? formData.description : RULES_PATTERN })
-      setStep('details')
-    }
+    setAiWarnings([])
+    setAiReview(null)
+    setStartMode('choose')
+    updateForm({ origin: 'manual', templateText: null, description: formData.description.trim() ? formData.description : RULES_PATTERN })
+    setStep('details')
+  }
+
+  const applyDraft = (r: DraftResult) => {
+    updateForm(draftToForm(r.draft))
+    setAiWarnings(r.warnings)
+    setAiReview(null)
+    setStartMode('choose')
+    setError(null)
+    setStep('details')
   }
 
   const applyTemplate = (r: TemplateResult) => {
@@ -322,6 +348,8 @@ export function CreateMarketPage() {
       origin: 'template',
       templateText: { question: r.question, description: r.rules, resolutionSource: r.source },
     })
+    setAiWarnings([])
+    setAiReview(null)
     setStartMode('choose')
     setError(null)
     setStep('details')
@@ -369,7 +397,7 @@ export function CreateMarketPage() {
 
   const handleBack = () => {
     setError(null)
-    if (step === 'start' && startMode === 'template') setStartMode('choose')
+    if (step === 'start' && startMode !== 'choose') setStartMode('choose')
     else if (step === 'details') { setStartMode('choose'); setStep('start') }
     else if (step === 'timing') setStep('details')
     else if (step === 'review') setStep('timing')
@@ -380,7 +408,7 @@ export function CreateMarketPage() {
   // ═══════════════════════════════════════════
   const handleCreate = async () => {
     if (isSubmitting) return
-    const blocker = publishBlocker({ metaBytes, check: checkedSource, needsConfirm, confirmed })
+    const blocker = publishBlocker({ metaBytes, check: checkedSource, review: reviewMsg })
     if (blocker) { setError(blocker); return }
     if (!validateTiming()) { setStep('timing'); return }
     setIsSubmitting(true); setStep('creating'); setError(null)
@@ -596,7 +624,9 @@ export function CreateMarketPage() {
                   <motion.div key={`s0-${startMode}`} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}>
                     {startMode === 'template'
                       ? <TemplateForm onBuilt={applyTemplate} />
-                      : <StartStep aiEnabled={AI_ENABLED} onPick={startWith} />}
+                      : startMode === 'ai'
+                        ? <AiDraftForm onDrafted={applyDraft} onOther={startWith} />
+                        : <StartStep aiEnabled={aiEnabled} onPick={startWith} />}
                   </motion.div>
                 )}
 
@@ -614,6 +644,19 @@ export function CreateMarketPage() {
                             className="text-xs font-medium text-brand-400 hover:text-brand-300 flex-shrink-0 transition-colors">
                             Edit the text
                           </button>
+                        </div>
+                      )}
+                      {formData.origin === 'ai' && (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-400/[0.05] border border-brand-400/[0.12]">
+                          <Sparkles className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0 text-xs text-surface-300 leading-relaxed">
+                            <p>Drafted by AI. Read the question, rules and source, and edit anything that is not what you meant.</p>
+                            {aiWarnings.length > 0 && (
+                              <ul className="mt-2 space-y-1 list-disc pl-4 text-surface-400">
+                                {aiWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                              </ul>
+                            )}
+                          </div>
                         </div>
                       )}
                       <div>
@@ -772,17 +815,34 @@ export function CreateMarketPage() {
                           </div>
                         ))}
                       </div>
-                      {needsConfirm ? (
-                        <label className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:border-brand-400/[0.2] transition-colors">
-                          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmedFor(e.target.checked ? fingerprint : null)}
-                            className="mt-0.5 h-4 w-4 flex-shrink-0 accent-[#c9a84c]" />
-                          <span className="text-xs text-surface-300 leading-relaxed">
-                            The value that decides this market appears in the source text shown in step 2.
-                            <span className="block text-surface-500 mt-1">
-                              The AI resolver votes only from that page. Changing the question, rules, source or a time clears this tick.
+                      {showAiReview ? (
+                        <AiReviewPanel form={formData} state={aiReview} onState={setAiReview} />
+                      ) : showTick ? (
+                        <div className="space-y-3">
+                          {aiReview !== null && 'fallback' in aiReview && (
+                            <div className="p-3 rounded-xl bg-yellow-400/[0.06] border border-yellow-400/[0.15] flex items-start gap-2.5" role="alert">
+                              <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs text-yellow-200">The AI review is unavailable: {aiReview.message}</p>
+                                <p className="text-2xs text-surface-400 mt-1">Check the source yourself and tick the box below instead.</p>
+                              </div>
+                              <button type="button" onClick={() => setAiReview(null)}
+                                className="text-2xs font-medium text-yellow-200 hover:text-white transition-colors flex-shrink-0">
+                                Try the AI review again
+                              </button>
+                            </div>
+                          )}
+                          <label className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:border-brand-400/[0.2] transition-colors">
+                            <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmedFor(e.target.checked ? fingerprint : null)}
+                              className="mt-0.5 h-4 w-4 flex-shrink-0 accent-[#c9a84c]" />
+                            <span className="text-xs text-surface-300 leading-relaxed">
+                              The value that decides this market appears in the source text shown in step 2.
+                              <span className="block text-surface-500 mt-1">
+                                The AI resolver votes only from that page. Changing the question, rules, source or a time clears this tick.
+                              </span>
                             </span>
-                          </span>
-                        </label>
+                          </label>
+                        </div>
                       ) : (
                         <div className="flex items-start gap-3 p-4 rounded-xl bg-yes-500/[0.04] border border-yes-500/[0.12]">
                           <CheckCircle2 className="w-4 h-4 text-yes-400 flex-shrink-0 mt-0.5" />
@@ -873,7 +933,7 @@ export function CreateMarketPage() {
                   {step === 'start' ? null : step !== 'review' ? (
                     <button onClick={handleNext} className="btn-primary flex items-center gap-2">Continue <ArrowRight className="w-4 h-4" /></button>
                   ) : (
-                    <button onClick={handleCreate} disabled={isSubmitting || (needsConfirm && !confirmed)} className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <button onClick={handleCreate} disabled={isSubmitting || reviewMsg !== null} title={reviewMsg ?? undefined} className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                       <Shield className="w-4 h-4" />Create Market
                     </button>
                   )}

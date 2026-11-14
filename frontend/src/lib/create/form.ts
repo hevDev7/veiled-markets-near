@@ -1,7 +1,7 @@
 // The create page's form state: what a saved draft may hold, how a template's instant becomes the form's local date
 // and time fields, and which fields an AI review covers. Every new market is Yes/No.
 import { MAX_METADATA, type MarketMetadata } from '../near/chain';
-import type { SourceCheck } from './market-ai-client';
+import type { MarketDraft, MarketReview, ReviewRequest, SourceCheck } from './market-ai-client';
 
 export type MarketOrigin = 'manual' | 'template' | 'ai';
 
@@ -115,6 +115,42 @@ export function toLocalFields(d: Date): { date: string; time: string } {
   };
 }
 
+/** An AI draft as form fields: its text, its category, and its UTC instants in the form's local date and time. */
+export function draftToForm(d: MarketDraft): Partial<MarketFormData> {
+  const closes = toLocalFields(new Date(d.closes_at));
+  const resolves = toLocalFields(new Date(d.resolution_deadline_at));
+  return {
+    question: d.question,
+    description: d.rules,
+    resolutionSource: d.source,
+    category: d.category,
+    deadlineDate: closes.date,
+    deadlineTime: closes.time,
+    resolutionDeadlineDate: resolves.date,
+    resolutionDeadlineTime: resolves.time,
+    origin: 'ai',
+    templateText: null,
+  };
+}
+
+/** What POST /review gets for the form: trimmed text and both local times as UTC instants; null until both are set. */
+export function reviewRequestOf(f: MarketFormData): ReviewRequest | null {
+  const instant = (date: string, time: string) => {
+    const d = new Date(`${date}T${time}`);
+    return date && time && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+  };
+  const closes = instant(f.deadlineDate, f.deadlineTime);
+  const resolves = instant(f.resolutionDeadlineDate, f.resolutionDeadlineTime);
+  if (!closes || !resolves) return null;
+  return {
+    question: f.question.trim(),
+    rules: f.description.trim(),
+    source: f.resolutionSource.trim(),
+    closes_at: closes,
+    resolution_deadline_at: resolves,
+  };
+}
+
 /** True while a template's question, rules and source are exactly as the template wrote them. */
 export function isTemplateUnedited(f: MarketFormData): boolean {
   const t = f.templateText;
@@ -124,14 +160,55 @@ export function isTemplateUnedited(f: MarketFormData): boolean {
 
 /**
  * Why the market cannot be published as it stands, or null. Create asks again even after step 2 passed: a thumbnail
- * upload that finishes later can make the stored text longer, and encodeMetadata would then cut the rules.
+ * upload that finishes later can make the stored text longer, and encodeMetadata would then cut the rules. `review` is
+ * reviewBlocker's answer for the review step.
  */
-export function publishBlocker(s: { metaBytes: number; check: SourceCheck | null; needsConfirm: boolean; confirmed: boolean }): string | null {
+export function publishBlocker(s: { metaBytes: number; check: SourceCheck | null; review: string | null }): string | null {
   if (s.metaBytes > MAX_METADATA) {
     return `The question, rules, source and thumbnail now take ${s.metaBytes.toLocaleString('en-US')} bytes; a market stores at most ${MAX_METADATA.toLocaleString('en-US')}. Go back to step 2 and shorten the rules.`;
   }
   if (!s.check?.ok) return 'The resolution source has not passed the check. Go back to step 2.';
-  if (s.needsConfirm && !s.confirmed) return 'Tick the box above once the deciding value shows in the source text.';
+  return s.review;
+}
+
+/**
+ * The review step's AI review: a result for one version of the market (its reviewFingerprint), or a fall back to the
+ * creator's tick for the version the AI could not review (not set up, over a limit, failed or declined).
+ */
+export type ReviewState =
+  | { fingerprint: string; review: MarketReview }
+  | { fallback: true; fingerprint: string; message: string }
+  | null;
+
+/** True when the AI could not review this version of the market, so the creator's tick stands in for its review. */
+export function reviewFellBack(state: ReviewState, fingerprint: string): boolean {
+  return state !== null && 'fallback' in state && state.fingerprint === fingerprint;
+}
+
+/**
+ * What the review step holds after a run of the AI review fails. A review of exactly this market stays: the AI already
+ * judged it, and a later limit, timeout or network error must not stand in for that verdict. Otherwise the creator
+ * falls back to the tick, for this version of the market only.
+ */
+export function afterReviewFailure(state: ReviewState, fingerprint: string, message: string): ReviewState {
+  if (state !== null && 'review' in state && state.fingerprint === fingerprint) return state;
+  return { fallback: true, fingerprint, message };
+}
+
+/**
+ * What the review step still needs before Create, or null. An unedited template needs nothing: its source was checked
+ * with a past date. Any other market needs a ready AI review of exactly its current text, source and times, or the
+ * creator's tick when the AI could not review this version.
+ */
+export function reviewBlocker(s: { templateLocked: boolean; aiEnabled: boolean; state: ReviewState; fingerprint: string; confirmed: boolean }): string | null {
+  if (s.templateLocked) return null;
+  const state = s.state;
+  if (!s.aiEnabled || reviewFellBack(state, s.fingerprint)) {
+    return s.confirmed ? null : 'Tick the box above once the deciding value shows in the source text.';
+  }
+  if (state === null || 'fallback' in state) return 'Run the AI review. Create opens when every score is 7 or more.';
+  if (state.fingerprint !== s.fingerprint) return 'The market changed after the AI review. Run the review again.';
+  if (!state.review.ready) return 'Every AI review score must be 7 or more. Fix what the review says, then run it again.';
   return null;
 }
 

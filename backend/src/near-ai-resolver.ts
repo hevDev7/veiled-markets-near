@@ -11,7 +11,9 @@
 // through NEAR AI's Verification Center.
 //
 // The same server answers the create page: GET /check-source?url=… says whether this resolver can read a source,
-// with the same reader the resolver votes with (market-ai-http.ts).
+// with the same reader the resolver votes with (market-ai-http.ts). With MARKET_AI_API_KEY set, POST /draft turns an
+// idea into a Yes/No market and POST /review scores one before it is published, with Claude (market-ai.ts,
+// anthropic-model.ts); without it they answer 503.
 //
 //   npm run ai-resolver                        loop forever, serve /health, /receipts and /check-source
 //                                              (reads backend/.env if any)
@@ -27,7 +29,8 @@
 //      NEAR_RPC_URL (comma-separated), AI_MIN_CONFIDENCE (0.8), AI_POLL_SECONDS (120),
 //      AI_RETRY_ABSTAINED_MINUTES (60), AI_RESOLVER_PORT (4091), AI_RECEIPTS_DIR (backend/ai-receipts),
 //      MARKET_AI_ORIGINS (the create page's origins, comma-separated;
-//      https://veiledmarkets.xyz,http://localhost:3100), MARKET_AI_CLIENT_PER_HOUR (10), MARKET_AI_DAILY_CAP (150).
+//      https://veiledmarkets.xyz,http://localhost:3100), MARKET_AI_CLIENT_PER_HOUR (10), MARKET_AI_DAILY_CAP (150),
+//      MARKET_AI_API_KEY (an Anthropic key; turns on /draft and /review), MARKET_AI_MODEL (claude-opus-5-5).
 // ============================================================================
 
 import http from 'node:http';
@@ -49,6 +52,8 @@ import {
   type Decision,
   type TeeSignature,
 } from './ai-resolver-core';
+import { anthropicModel } from './anthropic-model';
+import { draftMarket, reviewMarket } from './market-ai';
 import { marketAiRoutes } from './market-ai-http';
 import { RateLimiter } from './rate-limit';
 import { checkSource } from './source-check';
@@ -85,6 +90,8 @@ const MARKET_AI_ORIGINS = (process.env.MARKET_AI_ORIGINS || 'https://veiledmarke
   .split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean);
 const MARKET_AI_CLIENT_PER_HOUR = Number(process.env.MARKET_AI_CLIENT_PER_HOUR || 10);
 const MARKET_AI_DAILY_CAP = Number(process.env.MARKET_AI_DAILY_CAP || 150);
+const MARKET_AI_API_KEY = process.env.MARKET_AI_API_KEY || '';
+const MARKET_AI_MODEL = process.env.MARKET_AI_MODEL || 'claude-opus-5-5';
 /** Seconds per contract tick (height = block time in ms / 4000). */
 const TICK_SECONDS = 4;
 
@@ -299,9 +306,16 @@ function serve(): void {
     res.writeHead(status, { 'content-type': type, 'access-control-allow-origin': '*', 'cache-control': 'no-cache' });
     res.end(body);
   };
-  // The create page's endpoints. /draft and /review answer 503 until AI drafting is set up.
+  // The create page's endpoints. /draft and /review answer 503 until MARKET_AI_API_KEY is set. A draft's source is
+  // checked, and a review reads the source, with the same reader as the public check.
+  const check = (url: string) => checkSource(url, { fetch: target => fetchSource(target, checkReaderDeps) });
+  const model = MARKET_AI_API_KEY ? anthropicModel({ apiKey: MARKET_AI_API_KEY, model: MARKET_AI_MODEL, log: line => console.log(line) }) : null;
+  console.log(`[ai] AI drafting and review: ${model ? MARKET_AI_MODEL : 'off (no MARKET_AI_API_KEY)'}`);
+  const now = () => new Date();
   const routes = marketAiRoutes({
-    checkSource: url => checkSource(url, { fetch: target => fetchSource(target, checkReaderDeps) }),
+    checkSource: check,
+    draft: model ? input => draftMarket(input, { model, check, now }) : undefined,
+    review: model ? input => reviewMarket(input, { model, read: async url => (await readSource(url, checkReaderDeps)).sourceText, now }) : undefined,
     origins: MARKET_AI_ORIGINS,
     checkLimiter: new RateLimiter({ perClient: 30, clientWindowMs: 60_000 }),
     aiLimiter: new RateLimiter({ perClient: MARKET_AI_CLIENT_PER_HOUR, clientWindowMs: 3_600_000, globalPerUtcDay: MARKET_AI_DAILY_CAP }),
@@ -313,7 +327,7 @@ function serve(): void {
           if (handled) return;
           const url = new URL(req.url ?? '/', 'http://x');
           if (url.pathname === '/health') {
-            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, last_pass: lastPass }));
+            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, drafting: model ? MARKET_AI_MODEL : 'off', last_pass: lastPass }));
           }
           if (url.pathname === '/receipts' || url.pathname === '/receipts/') return send(res, 200, JSON.stringify(index));
           const file = url.pathname.match(/^\/receipts\/(\d+(?:\.attestation)?\.json)$/)?.[1];
@@ -330,7 +344,7 @@ function serve(): void {
 
 async function main(): Promise<void> {
   if (process.argv.includes('--serve-only')) {
-    console.log(`[ai] serve only (no voting): /health, /receipts, /check-source; origins ${MARKET_AI_ORIGINS.join(', ')}`);
+    console.log(`[ai] serve only (no voting): /health, /receipts, /check-source, /draft, /review; origins ${MARKET_AI_ORIGINS.join(', ')}`);
     serve();
     return;
   }
