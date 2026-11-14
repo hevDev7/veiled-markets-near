@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
+import { settled } from './settle';
 
 const CONTRACT = process.env.VEILED_CONTRACT ?? 'v1.veiled-markets.testnet';
 const RPCS = (process.env.NEAR_RPC_URL ?? 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org').split(',');
@@ -66,7 +67,13 @@ async function status(ids: string[]) {
 if (command === 'status') {
   await status(rest);
 } else if ((command === 'approve' || command === 'revoke') && rest.length) {
-  for (const id of rest) await call('set_parlay_leg', { market_id: id, eligible: command === 'approve' });
+  const eligible = command === 'approve';
+  for (const id of rest) await call('set_parlay_leg', { market_id: id, eligible });
+  // The RPC's load balancer can answer from a node a block behind the transaction: wait until it shows the change.
+  for (const id of rest) {
+    const m = await settled(() => view<MarketView | null>('get_market', { market_id: id }), (v) => (v?.parlay_leg === true) === eligible);
+    if ((m?.parlay_leg === true) !== eligible) console.log(`  #${id}: the RPC does not show the change yet; the transaction succeeded`);
+  }
   await status(rest);
 } else if (command === 'cap' && /^\d+$/.test(rest[0] ?? '')) {
   await call('set_parlay_leg_cap', { bps: rest[0] });

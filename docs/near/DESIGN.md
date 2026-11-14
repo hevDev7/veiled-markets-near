@@ -80,8 +80,11 @@ Governance (`src/governance.rs`; a Sputnik DAO account can hold the owner role o
   sends a stored blob that way). One receipt deploys it and calls the new code's `migrate`, so code that has no
   `migrate`, or whose `migrate` fails, is rolled back with the deploy. Every later build keeps a `migrate`
   (`#[private] #[init(ignore_state)]`; this one only reads the state back).
-- View `get_governance() -> {owner, pending_owner, oracle_operator, committee, committee_quorum}`. Events (NEP-297,
-  standard `veiled`): `owner_proposed, owner_changed, oracle_operator_set, committee_set, contract_migrated`.
+- `set_trading_closer(trading_closer: Option<AccountId>)` by the owner names the account (the AI resolver) that may
+  call `close_trading` on the markets the owner opened to it (Markets, below); `None` removes it (raw key `tc`).
+- View `get_governance() -> {owner, pending_owner, oracle_operator, committee, committee_quorum, trading_closer}`.
+  Events (NEP-297, standard `veiled`): `owner_proposed, owner_changed, oracle_operator_set, trading_closer_set,
+  committee_set, contract_migrated`.
 - The new state lives under raw storage keys, so builds that predate it upgrade by a plain deploy. Their first move
   to this build has to be one, since the code on chain has no `upgrade` yet. A DAO owner only governs the code once
   the contract account no longer has a full-access key.
@@ -131,6 +134,14 @@ Markets (port of `veiled_markets_v37.aleo` with the working-tree fixes; one cont
   `set_resolver_reward_bps`), and logs `resolver_paid`. `vote_outcome` stores an optional evidence link of at most
   300 bytes (`get_vote_evidence`, event `vote_evidence`). The new state lives under raw storage keys, so the upgrade
   needs no migration.
+- Ending trading early. A market asking whether something happens before a date is decided the day it happens, and
+  until its deadline anyone could buy the known result. `close_trading(market_id, evidence?)` sets the deadline to the
+  tick before the call and the status to CLOSED, as a passed deadline would, so voting starts at once; the resolution
+  deadline is unchanged, a deadline never moves later, and nothing reopens trading. The owner may close any open
+  market; the trading closer only a market the owner opened with `set_early_close(market_id, allowed)` (raw key
+  `ec` followed by the id, view field `early_close`), since anyone can create a market that names a page they
+  control. A committee member alone may not. It works while paused. `evidence` (at most 300 bytes) is only logged, in the event
+  `trading_closed {market_id, by, previous_deadline, deadline, evidence}`; `set_early_close` logs `early_close_set`.
 - Committee escalation (governance tier 2): `initiate_escalation, committee_vote_resolve, finalize_committee_vote,
   governance_resolve`. A finalized committee decision applies without `governance_resolve`.
 - Views mirror the Aleo mappings: `get_market, get_pool, get_fees, get_tally, get_dispute, get_market_credits,
@@ -234,7 +245,15 @@ Market ids and turbo ids share one counter, so a `/market/:id` route is unambigu
   NEAR AI Cloud's TEE for the outcome, checks the model TEE's ECDSA signature over `model:sha256(request):
   sha256(response)` against the signers in an attestation fetched with a fresh nonce, and votes when the model's
   confidence is at least 0.8. The vote's evidence is the receipt's URL and SHA-256; the receipts are served at
-  `/receipts/<market>.json`. It casts an ordinary bonded vote.
+  `/receipts/<market>.json`. It casts an ordinary bonded vote, and asks again every `AI_RETRY_ABSTAINED_MINUTES` (60)
+  about a market it abstained on.
+  - Early closes: once `get_governance` names its account the trading closer, it reads, every
+    `AI_EARLY_CLOSE_MINUTES` (60), the source of each open market with `early_close` set and more than 75 ticks of
+    trading left (at most `AI_EARLY_CLOSE_PER_PASS`, 3, a pass), and asks the model in the same TEE whether the
+    outcome is already settled. With a settled answer naming an outcome, a confidence of at least
+    `AI_EARLY_CLOSE_CONFIDENCE` (0.9) and a checked signature, it calls `close_trading` with the receipt's URL and
+    SHA-256 as the evidence. A source it cannot read is skipped without asking the model. Receipts:
+    `/receipts/<market>.early.json`, listed at `/receipts/early`.
   - With `OUTLAYER_PROJECT` and `OUTLAYER_PAYMENT_KEY` set, the source is read inside OutLayer's TEE by the operator's
     published source-reader build instead (`backend/src/outlayer.ts`; off on the hosted demo). The receipt names the
     call and its attestation and keeps the call's input and output, whose SHA-256 the attestation holds; the model is

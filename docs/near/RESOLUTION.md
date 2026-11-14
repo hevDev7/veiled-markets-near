@@ -13,6 +13,12 @@ the resolution source it names, as written on chain when it was created. That te
 **The moment that counts.** If the question names a date and time, that decides what counts. If it names none, what
 was true at the market's trading deadline counts. All times are UTC.
 
+**Trading ended early.** The owner, or the AI resolver on markets the owner opened to it, can end a market's trading
+before its deadline with `close_trading`, once the source already shows the result. That does not change what decides
+the market: it is decided as if trading had run its full length, by the moment its question names or else its
+original trading deadline (`previous_deadline` in the `trading_closed` event). A vote made before that moment, on a
+result that could still change, should be disputed.
+
 **The source, in this order:**
 
 1. The resolution source the market names.
@@ -81,6 +87,10 @@ when the model's confidence is at least 0.8 and the model TEE's signature over t
 out against an attestation fetched with a fresh nonce. Each vote links a receipt with the reasoning, the signature and
 the attestation. It votes as `ai.veiled-markets.testnet` and stands like any other voter: its vote can be voted
 against, disputed and overruled.
+
+The same account is the contract's trading closer. On the markets the owner opened to it, it reads the source every
+hour while trading is open and ends trading early only when the model, in the same TEE, finds the outcome already
+settled with a confidence of at least 0.9 and the signature checks out. Its receipt is the close's evidence.
 
 ## 6. Timeline on testnet
 

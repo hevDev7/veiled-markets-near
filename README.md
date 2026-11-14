@@ -48,14 +48,17 @@ bettor's account never signs it.
 It has:
 
 - **Yes/No markets**, priced at all times by an on-chain market maker, in NEAR or USDC. Each names a source page the
-  AI resolver can read, checked before the market is published. (The contract also takes three or four outcomes, and
-  older markets with them keep working; the create page makes Yes/No markets only.)
+  AI resolver can read, checked before the market is published, and Claude can draft a market from an idea and
+  review it before it goes live. (The contract also takes three or four outcomes, and older markets with them keep
+  working; the create page makes Yes/No markets only.)
 - **Turbo rounds**: BTC, ETH or SOL up or down over five minutes, opened and settled by an oracle that logs every
   price it used.
-- **Parlays** of two to four outcomes across markets, priced by the contract from the live pools.
+- **Parlays** of two to four outcomes across markets the owner approved, priced by the contract from the live pools.
 - **Liquidity provision**, with a fee on every sell going to the pool.
 - **Resolution** by bonded vote, a dispute window, and a committee when a result is disputed, with no keeper: the
-  first redeem settles the market and pays its first correct voter. See [How a market settles](#how-a-market-settles).
+  first redeem settles the market and pays its first correct voter. An AI resolver running in NEAR AI Cloud's TEE
+  casts first votes with signed receipts and, on markets the owner opened to it, ends trading early once the source
+  shows the answer, so nobody bets on a known result. See [How a market settles](#how-a-market-settles).
 
 | Landing page | Dashboard | A market |
 |---|---|---|
@@ -91,13 +94,23 @@ it the same way.
 - **USDC is Circle's NEP-141 token.** Deposits and USDC markets enter through `ft_transfer_call`, handled by the
   contract's `ft_on_transfer`.
 - **The key to a private balance comes from the wallet**: one NEP-413 `signMessage` signature, so the same wallet
-  finds its notes again in any browser.
-- **Named accounts separate the roles**: the contract, the relayer that submits private actions and the oracle that
-  runs turbo rounds are three accounts with three keys.
+  finds its notes again in any browser. Wallets connect through NEAR Connect.
+- **Named accounts separate the roles**: the contract, the relayer that submits private actions, the oracle that
+  runs turbo rounds and the AI resolver are four accounts with four keys. The owner names the oracle operator and the
+  trading closer (the AI resolver) on chain; anyone may relay.
+- **Governance fits a Sputnik DAO**: ownership changes hands in two steps (`propose_owner`, `accept_owner`), the owner
+  replaces the committee and the oracle operator, and `upgrade` takes the raw wasm that Sputnik's UpgradeRemote
+  proposal sends, with the state migration in the same receipt. On testnet the owner is still one account.
+- **Turbo prices can come from Pyth's oracle contract on NEAR**, read by the contract itself (`set_turbo_oracle`,
+  `set_turbo_feed`), so the operator gives no price. Built and deployed, not switched on for the testnet rounds.
+- **Gasless deposits and 1Click** are built: with `RELAYER_META=1` the relayer pays the gas of a USDC deposit signed
+  as a NEP-366 delegate action, and on mainnet 1Click brings USDC from other chains. Both are off on the testnet demo.
+- **Market links come from FastNEAR's Transactions API**: the AI resolver service keeps a market → creating
+  transaction index (`GET /market-tx`), so pages link to `/market/<tx hash>` without each browser paging an explorer.
 
 Its place in the privacy track is private finance: hiding who holds a position while keeping the market itself
-auditable. An optional AI resolver ([below](#ai-resolver-near-ai-cloud)) asks a model running in NEAR AI Cloud's TEE for
-a market's result and casts an ordinary bonded vote with a signed, checkable receipt; it runs on the hosted demo.
+auditable. An AI resolver ([below](#ai-resolver-near-ai-cloud)) asks a model running in NEAR AI Cloud's TEE for a
+market's result and casts an ordinary bonded vote with a signed, checkable receipt; it runs on the hosted demo.
 
 ## How a bet stays private
 
@@ -142,6 +155,13 @@ A market with no vote counted by its resolution deadline, or a dispute the commi
 cancelled the same way, and every position and bond is refunded. The written standard that voters, disputers and the
 committee apply is in [docs/near/RESOLUTION.md](docs/near/RESOLUTION.md).
 
+**Trading can end early.** A market asking whether something happens before a date is decided the day it happens,
+and until its deadline anyone could still bet on the known result. `close_trading` ends trading at once: the deadline
+moves to the tick before the call, the market closes, and voting can start right away. Nothing reopens trading. The
+owner may close any open market; the trading closer the owner names (on testnet the AI resolver,
+`ai.veiled-markets.testnet`) only markets the owner opened to it with `set_early_close`, after checking the market
+and its source. AI drafting and review also steer away from such questions before a market is created.
+
 **Who resolves today, honestly.** Anyone can vote, but on testnet most votes so far come from the team's own
 accounts, and the five committee accounts are all run by the operator. One 0.1 NEAR vote decides a market that nobody
 disputes within the hour. That is a demo setting; [Known limits](#known-limits) says what production needs.
@@ -161,10 +181,17 @@ The vote's evidence is a link to a receipt (question, source excerpt, request, r
 attestation) plus the receipt's SHA-256, so anyone can check the receipt has not changed and re-verify the signature in
 NEAR AI's Verification Center. The resolver has no special power: its vote is an ordinary bonded vote, and a wrong one
 is disputed and decided by the committee like any other. It votes as `ai.veiled-markets.testnet` (created and funded
-from the testnet faucet), so its votes are easy to tell from the team's own accounts. It runs on the hosted demo and
-looks for closed markets every two minutes; its receipt index,
-[ai-resolver-production.up.railway.app/receipts](https://ai-resolver-production.up.railway.app/receipts), lists every
-market it has looked at and what it did.
+from the testnet faucet), so its votes are easy to tell from the team's own accounts. It runs on the hosted demo,
+looks for closed markets every two minutes and asks again every hour about a market it abstained on; its receipt
+index, [ai-resolver-production.up.railway.app/receipts](https://ai-resolver-production.up.railway.app/receipts),
+lists every market it has looked at and what it did.
+
+It is also the contract's trading closer. Every hour it reads the source of each open market the owner opened to an
+early close (at most three a pass, none with five minutes or less of trading left) and asks the model, the same way,
+whether the outcome is already settled. It ends trading with `close_trading` only when the model says so with a
+confidence of at least 0.9 and the TEE signature checks, with a link to the receipt as the evidence; a source it
+cannot read is skipped without asking the model. These receipts are listed at
+[/receipts/early](https://ai-resolver-production.up.railway.app/receipts/early).
 
 ### Creating a market the AI resolver can resolve
 
@@ -221,13 +248,15 @@ Browser (React)
             ▼
 Relayer (backend/src/near-relayer.ts) ── transact ──▶ Contract v1.veiled-markets.testnet
                                                         ├─ note pool: depth-20 Poseidon tree, nullifiers
-Turbo oracle (backend/src/near-turbo-oracle.ts)          ├─ markets: FPMM market maker, liquidity, fees
+Turbo oracle (backend/src/near-turbo-oracle.ts)         ├─ markets: FPMM market maker, liquidity, fees
   opens and settles five-minute rounds           ──▶    ├─ resolution: votes, disputes, committee,
                                                         │    settled by the first call that touches a market
-AI resolver (backend/src/near-ai-resolver.ts)    ──▶    └─ parlays, turbo rounds and their vault
-  optional: NEAR AI Cloud (TEE) reads the source,
-  casts a bonded vote with a signed receipt;
-  also checks sources for the create page
+AI resolver (backend/src/near-ai-resolver.ts)    ──▶    ├─ early close: close_trading before the deadline
+  NEAR AI Cloud (TEE) reads the source, casts a         ├─ parlays, turbo rounds and their vault
+  bonded vote with a signed receipt, and ends           └─ governance: owner, committee, roles, upgrade
+  trading early once the source shows the answer;
+  also checks, drafts and reviews markets (Claude)
+  for the create page and keeps the market index
 ```
 
 The relayer checks each proof locally before it spends gas on it, and it cannot change a trade: the proof binds the
@@ -240,11 +269,14 @@ action, the recipient and the fee. The full design is in [docs/near/DESIGN.md](d
 | Contract | [`v1.veiled-markets.testnet`](https://testnet.nearblocks.io/address/v1.veiled-markets.testnet) |
 | Relayer account and service | [`veiled-relayer.testnet`](https://testnet.nearblocks.io/address/veiled-relayer.testnet), <https://relayer.veiledmarkets.xyz> |
 | Turbo oracle account and service | [`veiled-oracle.testnet`](https://testnet.nearblocks.io/address/veiled-oracle.testnet), <https://oracle.veiledmarkets.xyz> ([audit log](https://oracle.veiledmarkets.xyz/audit)) |
+| AI resolver account and service | [`ai.veiled-markets.testnet`](https://testnet.nearblocks.io/address/ai.veiled-markets.testnet), the trading closer; <https://ai-resolver-production.up.railway.app> ([receipts](https://ai-resolver-production.up.railway.app/receipts)) |
+| Owner and committee | `veiled-markets.testnet`; `c1` … `c5.veiled-markets.testnet`, quorum 3 |
 | USDC | Circle's testnet token, `3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af` |
 
 Testnet settings: the vote window is 15 minutes, the dispute window an hour, the committee's time limit 24 hours and
 the vote bond 0.1 NEAR, so a market nobody disputes resolves 1 h 15 min after its first vote. A buy pays 1% (half to
-the market's creator, half to the protocol); a sell pays that plus 1% to liquidity providers.
+the market's creator, half to the protocol); a sell pays that plus 1% to liquidity providers. One parlay ticket may
+pay at most half its thinnest leg's pool depth (the default is 1%; testnet pools are small).
 
 ## Run it locally
 
@@ -296,17 +328,27 @@ other scripts are listed in [backend/README.md](backend/README.md).
 **The AI resolver** (a NEAR AI Cloud key in `backend/.env` as `NEARAI_API_KEY`, and a funded account):
 `cd backend && DRY_RUN=1 npm run ai-resolver -- --once` decides every market waiting for a vote and writes the receipts
 to `backend/ai-receipts/` without voting. With `AI_RESOLVER_ACCOUNT` and `AI_RESOLVER_PUBLIC_URL` set (the address where
-its `/receipts` are served), `npm run ai-resolver` votes and serves the receipts.
+its `/receipts` are served), `npm run ai-resolver` votes and serves the receipts. It closes trading early only once
+the contract names its account the trading closer.
+
+**The owner's scripts** (the owner's key in `~/.near-credentials`), from `backend/`:
+
+| Script | Use |
+|---|---|
+| `npx tsx scripts/parlay-legs.ts status \| approve <ids> \| revoke <ids> \| cap <bps>` | Which markets may be parlay legs, and how much of its thinnest leg one ticket may pay |
+| `npx tsx scripts/early-close.ts status \| closer <account\|none> \| open <ids> \| withdraw <ids> \| close <id>` | The trading closer, which markets it may close early, and closing one as the owner (`--evidence=<url>`) |
+
+After a change on chain they wait until the RPC shows it before printing the new state.
 
 ## Tests
 
 | What | Command | Expect |
 |---|---|---|
 | Circuit: valid spends prove, invalid ones do not | `cd near/circuits && npm install && node --test test/spend.test.mjs` | 6 pass |
-| Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 73 pass |
-| Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
-| Relayer request checks, AI resolver decisions and TEE signature checks, the source reader, catalog and check, the create page's endpoints and rate limits, AI drafting and review with a stubbed Claude client, LP note bookkeeping, spec files, demo price questions | `cd backend && npm install && npm test` | 98 pass |
-| App: note keys, wallet signature, market data, positions, math, resolution stages, market templates, the create form, its source check, AI drafting and review requests and the review gate | `cd frontend && npm install && npm test` | 112 pass |
+| Contract rules, with a mocked host: notes, markets, resolution, parlays, turbo, governance, early closes, turbo prices from an oracle contract | `cd near/contract && cargo test -p veiled` | 155 pass |
+| Contract in a NEAR sandbox, with real proofs, a mock Pyth contract and an in-place upgrade | `cd near/contract && cargo test -p integration-tests` | 20 pass |
+| Relayer request checks and gasless deposit checks, AI resolver decisions, early-close checks and TEE signature checks, the source reader, catalog and check, the create page's endpoints and rate limits, AI drafting and review with a stubbed Claude client, the 1Click client, the market index, the OutLayer client, the turbo keeper's on-chain prices, LP note bookkeeping, spec files, demo price questions, the owner scripts' read-back | `cd backend && npm install && npm test` | 219 pass |
+| App: note keys, the NEAR Connect wallet, market data and links, positions, math, resolution stages, gasless and 1Click deposits, the parlay slip, market templates, the create form, its source check, AI drafting and review requests and the review gate | `cd frontend && npm install && npm test` | 284 pass |
 | Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
 
 The sandbox tests download a NEAR sandbox binary on first run, and the in-place upgrade test among them is skipped
@@ -315,13 +357,14 @@ unless `VEILED_WASM_OLD` points at the previously deployed wasm.
 ## Repository layout
 
 ```
-near/contract/        Rust contract (near-sdk): note pool, markets, market maker, resolution, parlays, turbo
+near/contract/        Rust contract (near-sdk): note pool, markets, market maker, resolution, early closes, parlays,
+                      turbo and its oracle-contract prices, governance; mock token and mock Pyth for the tests
 near/circuits/        Circom spend circuit, its key build, Node proving helpers and tests
 near/scripts/         deploy and upgrade scripts
-backend/              relayer, turbo oracle and operator scripts (backend/README.md)
+backend/              relayer, turbo oracle, AI resolver service and operator scripts (backend/README.md)
 frontend/             React app; the NEAR layer is frontend/src/lib/near/
 sdk/                  TypeScript SDK from the Aleo product; the app still imports its market maker math
-docs/near/            DESIGN.md and the screenshots above
+docs/near/            DESIGN.md, RESOLUTION.md and the screenshots above
 docs/README-aleo.md   README of the Aleo product, archived
 ```
 
@@ -359,7 +402,7 @@ those reads.
 | Contract | `near-sdk` 5.30.1, `ark-bn254` and `ark-ff` 0.5 (field arithmetic); tests with `near-workspaces` 0.24 |
 | Circuit | Circom 2.1.6, `circomlib` 2.0.5, `circomlibjs` 0.1.7, `snarkjs` 0.7.5, and the public Perpetual Powers of Tau |
 | App | React 18, Vite 5, TypeScript 5, Tailwind CSS 3, Framer Motion 11, React Router 6, Zustand 4, Recharts 3, `lucide-react`, NEAR Connect (`@hot-labs/near-connect` 0.12.0), `snarkjs`, `poseidon-lite` |
-| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx`, `@noble/curves` and `@noble/hashes` 2.2.0 (TEE signature checks); turbo prices from Pyth Hermes, or CoinGecko without a Pyth key; the AI resolver calls NEAR AI Cloud's OpenAI-compatible API |
+| Services | `near-api-js` 7.3.1, `snarkjs`, `tsx`, `@noble/curves` and `@noble/hashes` 2.2.0 (TEE and delegate-action signature checks), `borsh` 2.0.0, `undici`, `@anthropic-ai/sdk` (market drafting and review with Claude); turbo prices from Pyth Hermes, or CoinGecko without a Pyth key; the AI resolver calls NEAR AI Cloud's OpenAI-compatible API, and its market index reads FastNEAR's Transactions API |
 | Hosting | Docker images on Railway; the app is served by Caddy |
 
 The team's own pre-hackathon code is the baseline listed above. Parts of the code were written with the help of AI
@@ -389,12 +432,18 @@ What the testnet deployment trusts, and what a production deployment still needs
 - **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in, pro rata within that
   outcome, so a refund cannot draw on another outcome's collateral. Markets created before that rule keep the older
   pro-rata refund.
+- **Early closes.** The owner can end any market's trading early, and the AI resolver the markets the owner opened to
+  it. Nothing reopens trading and voting opens at once, so after a wrong early close someone can vote before the
+  deciding moment, and that vote has to be disputed within the hour. A market whose answer can be known early but
+  that nobody closes still trades on the known result until its deadline; the AI resolver watches only the markets
+  opened to it, and only those whose source it can read.
 - **Parlay pool.** Leg odds are read from the markets' own pools, which anyone with capital can move. Only markets the
-  owner approved can be legs, and one ticket pays at most 1% of its thinnest leg's pool depth. The pool is
-  operator-funded risk capital, not a guaranteed product.
+  owner approved can be legs, and one ticket pays at most a set share of its thinnest leg's pool depth (1% by default,
+  50% on testnet while the pools are small). The pool is operator-funded risk capital, not a guaranteed product.
 - **Turbo rounds.** Bets close for the last fifth of a round, because a shared pool cannot fairly take bets when the
   result is all but known. The oracle operator supplies the baseline and the closing price; the contract checks the
-  operator and the price bounds.
+  operator and the price bounds. Reading both prices from Pyth's oracle contract instead is built and deployed, not
+  switched on.
 - **Storage and capacity.** Every private action adds two leaves and two nullifiers (about 700 bytes) that the
   contract pays for from its own NEAR, and the note tree holds 524,288 actions in total. A production deployment needs
   a storage fee per action and a deeper or rotating tree.
@@ -402,7 +451,12 @@ What the testnet deployment trusts, and what a production deployment still needs
   message only on veiledmarkets.xyz.
 - **Privacy.** Amounts are public; what is hidden is which account holds which position. A deposit made right before
   a bet can be linked to it by timing.
-- **Operator keys.** The contract account still has a full-access key and can be redeployed by the operator.
+- **Operator keys.** The owner is one account, `veiled-markets.testnet`: it can pause, change fees, approve parlay
+  legs, close trading, name the oracle operator, the trading closer and the committee, and upgrade the code. The
+  contract can hand all of that to a Sputnik DAO; on testnet that has not been done. The contract account also still
+  has a full-access key and can be redeployed by the operator.
+- **Built, not switched on.** Gasless USDC deposits (`RELAYER_META=1`), USDC from other chains through 1Click
+  (mainnet only) and reading the AI resolver's sources inside OutLayer's TEE are off on the testnet demo.
 - **Trusted setup.** The circuit key comes from a single phase-2 contribution on top of the public Perpetual Powers
   of Tau. A mainnet launch needs a multi-party ceremony.
 - **Relayer.** The relayer pays gas and charges nothing on testnet. A production relayer would charge a fee.
@@ -411,7 +465,8 @@ What the testnet deployment trusts, and what a production deployment still needs
 ### Not on NEAR yet
 
 Governance proposals and resolver staking exist only in the Aleo product. The app hides their controls on NEAR.
-(Resolver rewards are on NEAR now, paid per market from its protocol fees.)
+(Resolver rewards are on NEAR now, paid per market from its protocol fees.) On NEAR, proposals would come from a
+Sputnik DAO as the contract's owner, which the contract supports; the app has no governance page.
 
 ## License
 

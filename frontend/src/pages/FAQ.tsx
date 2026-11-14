@@ -60,23 +60,28 @@ const faqs: FAQItem[] = [
   {
     category: 'Trading',
     question: 'Can I combine multiple markets into a parlay?',
-    answer: 'Yes. A parlay combines 2 to 4 legs, each one outcome on a different market, and pays only if every leg wins. Turn on Parlay Mode on the dashboard (or use Add to Parlay on a market page), set a stake in NEAR or USDC (at least 0.1) and confirm. The contract prices each leg from the live market (odds = 1 / price, at most 100× per leg and 1000× combined), and a winning ticket pays its potential payout minus a 2% fee. Placing and claiming are private; the parlay\'s legs and stake are public, like a trade. One losing leg loses the parlay; if a leg market is cancelled, the stake is refunded once every leg is final. Track and claim your tickets on My Parlays (Portfolio → Parlay Details).',
+    answer: 'Yes. A parlay combines 2 to 4 legs, each one outcome on a different market, and pays only if every leg wins. Only markets the owner approved for parlays offer legs. Turn on Parlay Mode on the dashboard (or use Add to Parlay on a market page), set a stake in NEAR or USDC (at least 0.1, and at most the largest stake the slip shows, which the legs\' pools and the parlay pool allow) and confirm. The contract prices each leg from the live market (odds = 1 / price, at most 100× per leg and 1000× combined), and a winning ticket pays its potential payout minus a 2% fee. Placing and claiming are private; the parlay\'s legs and stake are public, like a trade. One losing leg loses the parlay; if a leg market is cancelled, the stake is refunded once every leg is final. Track and claim your tickets on My Parlays (Portfolio → Parlay Details).',
   },
   // Markets
   {
     category: 'Markets',
     question: 'How are markets created?',
-    answer: 'Anyone with a connected wallet can create a market: a question, 2, 3 or 4 outcome labels, a deadline, a category, the token and the initial liquidity (at least 0.01 NEAR). The question and labels are stored on chain with the market. The creator receives the LP position as a private note.',
+    answer: 'Anyone with a connected wallet can create a Yes/No market, from a template, from an idea that Claude drafts, or written by hand. Every market names a source page the AI resolver can read, and the create page checks that source before the market can be published; a market that is not an unedited template is also reviewed by AI first. It needs a trading deadline, a category, the token and the initial liquidity (at least 0.01). The question, rules and source are stored on chain with the market. The creator receives the LP position as a private note.',
   },
   {
     category: 'Markets',
     question: 'How are markets resolved?',
-    answer: 'By bonded voting. After the deadline, anyone closes the market and votes on the outcome by posting a 0.1 NEAR bond. On testnet the voting window is 5 minutes and one voter is enough. Then the votes are finalized and a 5-minute dispute window starts. Without a dispute, the outcome is confirmed. Voters on the winning outcome get their bond back; bonds on a losing outcome are forfeited.',
+    answer: 'By bonded voting. After trading closes, anyone votes on the outcome by posting a 0.1 NEAR bond, with a link to the evidence if they like. On testnet the first vote opens a 15-minute voting window and one voter is enough. When the window ends, the votes are counted and a one-hour dispute window runs; without a dispute the result is final when it ends, and no transaction is needed for that. The first redeem then settles the market and pays the first voter of the winning outcome their bond plus half the market\'s protocol fees. Other voters on the winning outcome claim their bond back; bonds on a losing outcome are forfeited. An AI resolver that runs a model in NEAR AI Cloud\'s TEE may cast the first vote, with a signed receipt anyone can check.',
+  },
+  {
+    category: 'Markets',
+    question: 'Can trading end before the deadline?',
+    answer: 'Yes, when the answer is already known. A market asking whether something happens before a date is decided the day it happens, and nobody should be able to bet on that result. The owner can end any market\'s trading early, and the AI resolver can end it on markets the owner opened to it, after the model in NEAR AI Cloud\'s TEE confirms from the market\'s source that the outcome is settled. The market then shows as closed, voting opens at once, and it resolves like any other. Nothing reopens trading.',
   },
   {
     category: 'Markets',
     question: 'What happens if a market is disputed?',
-    answer: 'After the votes are finalized, a dispute window opens (5 minutes on testnet). Anyone can dispute by posting 3x the total voter bonds and proposing another outcome. A dispute puts the market on hold, and anyone can then escalate it to the 5-member committee, where 3 matching votes decide the outcome. If the committee agrees with the dispute, the disputer gets the bond back. If the committee does not decide in time (1 hour on testnet), the market is cancelled and everyone is refunded. Without a dispute, the voted outcome is confirmed.',
+    answer: 'After the votes are counted, a dispute window opens (one hour on testnet). Anyone can dispute by posting 3x the total voter bonds and proposing another outcome. A dispute puts the market on hold, and anyone can then escalate it to the 5-member committee, where 3 matching votes decide the outcome. If the committee agrees with the dispute, the disputer gets the bond back. If the committee does not decide in time (24 hours on testnet), the market is cancelled and everyone is refunded. Without a dispute, the voted outcome is confirmed.',
   },
   {
     category: 'Markets',
@@ -129,7 +134,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Governance',
     question: 'How does governance work?',
-    answer: 'Governance proposals and token voting exist in the Aleo version only. On NEAR, disputed markets can be escalated to a committee of 5 members, and 3 matching votes decide the outcome.',
+    answer: 'Governance proposals and token voting exist in the Aleo version only. On NEAR, disputed markets can be escalated to a committee of 5 members, and 3 matching votes decide the outcome. The contract is ready to be run by a Sputnik DAO: ownership is handed over in two steps, and the owner can replace the committee and upgrade the code, so a DAO could do all of that by proposal. On testnet the owner is still a single account.',
   },
   {
     category: 'Governance',
@@ -140,7 +145,7 @@ const faqs: FAQItem[] = [
   {
     category: 'Turbo Markets',
     question: 'What are Turbo Markets?',
-    answer: 'Rolling 5-minute UP/DOWN rounds on BTC, ETH and SOL. A new round opens every 5 minutes, and you predict whether the price will be higher or lower at the deadline than the baseline at the start. The operator resolves each round, so there is no voting. On testnet the operator reads prices from CoinGecko.',
+    answer: 'Rolling 5-minute UP/DOWN rounds on BTC, ETH and SOL. A new round opens every 5 minutes, and you predict whether the price will be higher or lower at the deadline than the baseline at the start. The operator resolves each round, so there is no voting. The operator reads prices from Pyth and submits them, and the contract checks them.',
   },
   {
     category: 'Turbo Markets',
@@ -160,12 +165,12 @@ const faqs: FAQItem[] = [
   {
     category: 'Turbo Markets',
     question: 'Who operates the Turbo markets?',
-    answer: 'The operator account veiled-oracle.testnet. The contract accepts round creation and resolution only from this account and checks the price bounds. The operator runs the backend that opens a round every 5 minutes and resolves it at the deadline.',
+    answer: 'The operator account veiled-oracle.testnet. The contract accepts round creation and resolution only from this account and checks the price bounds. The operator runs the backend that opens a round every 5 minutes and resolves it at the deadline. The contract can also read both prices of a round from Pyth\'s oracle contract on NEAR, so that the operator gives no prices at all; that is built but not switched on for testnet.',
   },
   {
     category: 'Turbo Markets',
     question: 'How do I verify the operator isn\'t cheating?',
-    answer: 'Open /verify/turbo/<market_id> for any turbo round. It shows the operator\'s audit record (baseline, closing price and transactions) next to the values stored in the contract. On testnet the prices come from CoinGecko, so the comparison with Pyth historical prices is approximate.',
+    answer: 'Open /verify/turbo/<market_id> for any turbo round. It shows the operator\'s audit record (baseline, closing price and transactions) next to the values stored in the contract, and compares them with Pyth\'s published prices using your own Pyth API key. If the operator ever runs without a Pyth key, it uses CoinGecko and the comparison is only approximate.',
   },
   {
     category: 'Turbo Markets',

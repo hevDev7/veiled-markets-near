@@ -60,8 +60,8 @@ function GroupHeading({ title, children }: { title: string; children?: ReactNode
   )
 }
 
-function H3({ children }: { children: ReactNode }) {
-  return <h3 className="text-sm font-semibold text-white mt-8 mb-3">{children}</h3>
+function H3({ children, id }: { children: ReactNode; id?: string }) {
+  return <h3 id={id} className="text-sm font-semibold text-white mt-8 mb-3 scroll-mt-24">{children}</h3>
 }
 
 function P({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
@@ -445,7 +445,7 @@ export function Docs() {
                 {
                   icon: Layers,
                   title: 'Prediction markets',
-                  desc: 'Yes/No markets with a source the AI resolver can read, priced by an FPMM market maker, in NEAR or USDC. Resolved by bonded votes, with a dispute window and a 5-member committee.',
+                  desc: 'Yes/No markets with a source the AI resolver can read, priced by an FPMM market maker, in NEAR or USDC. Trading can end early once the answer is known. Resolved by bonded votes, with a dispute window and a 5-member committee.',
                 },
                 {
                   icon: Radio,
@@ -455,7 +455,7 @@ export function Docs() {
                 {
                   icon: ListOrdered,
                   title: 'Parlays',
-                  desc: '2 to 4 legs on different markets; every leg must win. Odds come from the live pools, and the contract settles from the leg markets.',
+                  desc: '2 to 4 legs on different markets the owner approved; every leg must win. Odds come from the live pools, and the contract settles from the leg markets.',
                 },
                 {
                   icon: Shield,
@@ -530,8 +530,9 @@ export function Docs() {
                   body: (
                     <>
                       Turn on <B>Parlay Mode</B> on the dashboard and pick one outcome in each of 2 to 4 markets, or use{' '}
-                      <B>Add &quot;…&quot; to Parlay</B> on a market page. Choose the stake token and amount in the Parlay
-                      Slip and confirm; this is private, like a trade. Your tickets are on{' '}
+                      <B>Add &quot;…&quot; to Parlay</B> on a market page. Only markets the owner approved for parlays
+                      offer outcomes. Choose the stake token and amount in the Parlay Slip, which shows the largest stake
+                      these legs take now (<B>Use max</B>), and confirm; this is private, like a trade. Your tickets are on{' '}
                       <Link to="/my-parlays" className="text-brand-400 hover:text-brand-300">My Parlays</Link>.
                     </>
                   ),
@@ -581,9 +582,12 @@ export function Docs() {
    └─ proof + ext_data ─▶ Relayer ─ transact ─▶  v1.veiled-markets.testnet
                           veiled-relayer.testnet  ├─ note pool: Poseidon tree, nullifiers
                                                   ├─ markets: FPMM AMM, LP, fees
-Turbo oracle, veiled-oracle.testnet               ├─ resolution: votes, disputes, committee
+AI resolver, ai.veiled-markets.testnet            │
+  NEAR AI Cloud TEE ─ votes, close_trading ────▶  ├─ resolution: votes, disputes, committee
+Turbo oracle, veiled-oracle.testnet               │
   Pyth prices ─ create / resolve rounds ───────▶  ├─ turbo rounds
-                                                  └─ parlays: tickets, pool, settlement
+                                                  ├─ parlays: tickets, pool, settlement
+Owner, veiled-markets.testnet ─ settings ──────▶  └─ governance: owner, committee, roles, upgrade
 USDC (Circle, NEP-141) ─ ft_transfer_call ─────▶
                        ◀─ ft_transfer ─────────── withdrawals and USDC payouts`}</CodeBlock>
             <P>
@@ -599,7 +603,10 @@ USDC (Circle, NEP-141) ─ ft_transfer_call ─────▶
                 ['transact: trade, bet, parlay, redeem, claim, withdraw', 'the relayer', 'the action and its amounts, not your account'],
                 ['create_market, vote_outcome, dispute_resolution, bond and fee claims', 'your account', 'everything'],
                 ['close_market, settle_market, settle_parlay (optional: the next call that touches a market does it)', 'anyone', 'everything'],
-                ['create_turbo_market, resolve_turbo_market', 'the oracle operator', 'everything'],
+                ['create_turbo_market, resolve_turbo_market (open_turbo_round on a symbol with a price feed)', 'the oracle operator', 'everything'],
+                ['settle_turbo_round (a symbol with a price feed)', 'anyone', 'everything'],
+                ['close_trading', <>the owner, or the trading closer (<C>ai.veiled-markets.testnet</C>) on markets opened to it</>, 'everything'],
+                ['set_early_close, set_parlay_leg, set_committee, upgrade and the other owner calls', 'the owner', 'everything'],
               ]}
             />
           </section>
@@ -783,7 +790,7 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               head={['status', 'Name', 'Meaning']}
               rows={[
                 ['1', 'Active', 'trading open until the deadline'],
-                ['2', 'Closed', 'close_market was called after the deadline'],
+                ['2', 'Closed', 'trading has ended: close_market after the deadline, or close_trading before it'],
                 ['5', 'Pending resolution', 'at least one vote; the voting window is running'],
                 ['6', 'Pending finalization', 'the vote is counted; the dispute window is running'],
                 ['7', 'Disputed', 'waiting for the committee or the timeout'],
@@ -807,7 +814,7 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               steps={[
                 {
                   title: 'Close',
-                  body: <>After the deadline anyone may call <C>close_market</C>; it is optional, since voting also accepts an Active market whose deadline has passed.</>,
+                  body: <>After the deadline anyone may call <C>close_market</C>; it is optional, since voting also accepts an Active market whose deadline has passed. A market whose answer is known before its deadline can have its trading ended early with <C>close_trading</C> (<A href="#early-close">below</A>); voting then starts at once.</>,
                 },
                 {
                   title: 'Vote',
@@ -841,7 +848,7 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               <A href="https://github.com/hevDev7/veiled-markets-near/blob/main/docs/near/RESOLUTION.md">RESOLUTION.md</A>. In short:
             </P>
             <Bullets>
-              <li>A market resolves on its own question, rules and named resolution source, as they stood when it was created, for what was true at its trading deadline (UTC).</li>
+              <li>A market resolves on its own question, rules and named resolution source, as they stood when it was created, for what was true at the moment its question names, or else at its trading deadline (UTC). If trading was ended early, the original deadline still counts.</li>
               <li>The named source decides. If it is unavailable, a clear consensus of reliable public reporting decides. A &quot;Will X happen by D?&quot; market whose X has not happened by D resolves No.</li>
               <li>A market that cannot be decided this way (an ambiguous question, an event called off, a source that never publishes) is not forced onto an outcome: its vote is disputed, the committee declines to pick one, and the time limit cancels the market with every bond returned.</li>
               <li>A vote should carry a link to the evidence it relies on. The committee reads the votes&apos; evidence and the market&apos;s source, and decides by the same rules.</li>
@@ -863,9 +870,11 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               reasoning, signature, attestation) and the receipt&apos;s SHA-256, so anyone can check it, including in NEAR
               AI&apos;s Verification Center. It casts an ordinary bonded vote with no special power: a wrong AI vote is
               disputed and decided by the committee like any other. It votes as <C>ai.veiled-markets.testnet</C>, an
-              account of its own. It runs on the hosted demo and looks for closed markets every two minutes; its{' '}
+              account of its own. It runs on the hosted demo and looks for closed markets every two minutes, and asks
+              again every hour about a market it abstained on; its{' '}
               <A href="https://ai-resolver-production.up.railway.app/receipts">receipt index</A> lists every market it
-              has looked at and what it did.
+              has looked at and what it did. It can read only a source given as a URL: with any other source the model
+              has nothing to read and abstains, so people have to vote.
             </P>
             <P muted>
               The same service answers the create page&apos;s source check, <C>GET /check-source?url=…</C>, with the
@@ -884,7 +893,47 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               market and the source text, marked as data rather than instructions (for a catalog API, which shows
               nothing before the moment that counts, the same API for a recent past date), and the server calls a
               market ready when every score is 7 or more. Each client gets <C>MARKET_AI_CLIENT_PER_HOUR</C> (10) such requests an
-              hour and the service <C>MARKET_AI_DAILY_CAP</C> (150) a UTC day; without a key both answer 503.
+              hour and the service <C>MARKET_AI_DAILY_CAP</C> (150) a UTC day; without a key both answer 503. Both
+              steer away from a question whose answer can become known while trading is still open, such as whether
+              something happens before a date, or a title that can be clinched before the last race: a draft asks
+              instead about a window that opens when trading closes or a value at the moment trading closes, and the
+              review scores such a question 1 to 3.
+            </P>
+            <P muted>
+              The service also keeps the app&apos;s market → transaction index, built from FastNEAR&apos;s Transactions
+              API: <C>GET /market-tx</C> answers <C>{'{contract, byId}'}</C>, so a market page can link to{' '}
+              <C>/market/&lt;tx hash&gt;</C> without every browser paging an explorer. The app takes those links as
+              suggestions and shows only the market the chain says that transaction created.
+            </P>
+            <H3 id="early-close">Ending trading early</H3>
+            <P>
+              A market that asks whether something happens before a date can be decided long before its deadline: once
+              it has happened, anyone could still buy the known result until trading closes.{' '}
+              <C>close_trading(market_id, evidence?)</C> ends trading at once. The deadline moves to the tick before the
+              call and the market becomes Closed, as if its deadline had passed, so voting can start right away; the
+              resolution deadline stays where it was. The deadline only ever moves earlier, and nothing reopens trading.
+              It works while the contract is paused. <C>evidence</C>, a link of up to 300 bytes, is only logged in the{' '}
+              <C>trading_closed</C> event with the old and the new deadline.
+            </P>
+            <Bullets>
+              <li><B>The owner</B> may close any open market.</li>
+              <li>
+                <B>The trading closer</B>, named by the owner with <C>set_trading_closer</C> (on testnet the AI resolver,{' '}
+                <C>ai.veiled-markets.testnet</C>), may close only a market the owner opened to it with{' '}
+                <C>set_early_close(market_id, true)</C>. Anyone can create a market that names a page they control, so
+                the owner checks the market and its source first. <C>get_market</C> shows <C>early_close</C>.
+              </li>
+              <li>A committee member alone may not: every other committee power needs a quorum.</li>
+            </Bullets>
+            <P muted>
+              Every hour (<C>AI_EARLY_CLOSE_MINUTES</C>, 60) the AI resolver reads the source of each open market
+              opened to it, at most three a pass and none with five minutes or less of trading left, and asks the model
+              in NEAR AI&apos;s TEE whether the outcome is already settled. It closes trading only when the model says
+              so with a confidence of at least 0.9 (<C>AI_EARLY_CLOSE_CONFIDENCE</C>) and the TEE&apos;s signature
+              checks, with a link to its receipt as the evidence. A source it cannot read is skipped without asking the
+              model. Its receipts are at <C>/receipts/&lt;id&gt;.early.json</C> and listed at{' '}
+              <A href="https://ai-resolver-production.up.railway.app/receipts/early">/receipts/early</A>. A wrong early
+              close cannot be undone; the market then resolves by vote like any other, on the rules it was created with.
             </P>
             <H3>Bonds, fees and cancellation</H3>
             <Bullets>
@@ -947,16 +996,36 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
                 ['Prices', 'USD with 6 decimals (price × 10^6)'],
               ]}
             />
+            <P muted>
+              The contract can also take a symbol&apos;s prices from a Pyth-compatible oracle contract on NEAR
+              (Pyth&apos;s receiver, or OutLayer&apos;s price-oracle, which serves the same views) instead of the
+              operator. Once the owner names the oracle and a close window of 10 to 300 seconds (
+              <C>set_turbo_oracle</C>) and the symbol&apos;s feed id (<C>set_turbo_feed</C>), the operator opens that
+              symbol&apos;s rounds with <C>open_turbo_round</C>, whose baseline is the oracle&apos;s price, at most 60
+              seconds old, and anyone settles a round with <C>settle_turbo_round</C> from its deadline until the close
+              window ends, with the oracle&apos;s latest price if it was published inside that window. From then on the
+              operator cannot give prices for that symbol; a feed can be replaced but not removed. A round nobody
+              settles inside its window is refunded through <C>emergency_cancel_turbo</C>. On testnet no oracle and no
+              feed are set yet (<C>get_turbo_oracle</C>), so the operator still gives every price.
+            </P>
             <H3>What the contract checks</H3>
             <Bullets>
               <li>
                 <B>create_turbo_market(symbol_id, deadline, baseline_price, baseline_conf, baseline_block)</B>: operator
-                only; the baseline was observed at most 60 ticks ago; its confidence interval is at most 0.5% of the price.
+                only, on a symbol without a price feed; the baseline was observed at most 60 ticks ago; its confidence
+                interval is at most 0.5% of the price.
               </li>
               <li>
-                <B>resolve_turbo_market(market_id, closing_price, closing_conf, closing_block)</B>: operator only; the
-                closing block lies between the deadline and the deadline + 60 ticks; the call comes no later than the
-                deadline + 300 ticks (20 min); the confidence is at most 0.5%; the close is within 50% of the baseline.
+                <B>resolve_turbo_market(market_id, closing_price, closing_conf, closing_block)</B>: operator only, on a
+                symbol without a price feed; the closing block lies between the deadline and the deadline + 60 ticks;
+                the call comes no later than the deadline + 300 ticks (20 min); the confidence is at most 0.5%; the close
+                is within 50% of the baseline.
+              </li>
+              <li>
+                <B>open_turbo_round(symbol_id, deadline)</B> and <B>settle_turbo_round(market_id)</B>, on a symbol with
+                a feed: the same price, confidence and move limits apply to the oracle&apos;s prices. A settling price
+                published before the deadline or after the close window fails (<C>ERR_PRICE_TOO_EARLY</C>,{' '}
+                <C>ERR_PRICE_TOO_LATE</C>), and the call can be tried again while the window is open.
               </li>
               <li>UP wins if the close is above the baseline. Otherwise DOWN wins, so a tie goes to DOWN.</li>
             </Bullets>
@@ -1012,7 +1081,7 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
               head={['Rule', 'Value']}
               rows={[
                 ['Legs', '2 to 4, each on a different market that the owner approved for parlays, is Active and not past its deadline'],
-                ['Leg cap', 'one ticket pays at most 1% of its thinnest leg\'s pool depth (outcomes × smallest reserve); the owner can change the share'],
+                ['Leg cap', 'one ticket pays at most a share of its thinnest leg\'s pool depth (outcomes × smallest reserve): 1% by default, set by the owner; 50% on testnet, where the pools are small'],
                 ['Stake token', 'NEAR or USDC, paid from your private balance'],
                 ['Minimum stake', '0.1'],
                 ['Maximum payout', '100,000 per parlay'],
@@ -1187,6 +1256,8 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
               methods={[
                 { name: 'create_market(args)', tag: 'payable', desc: 'Creates a NEAR market with the attached deposit as liquidity; returns the market id. USDC markets use ft_transfer_call.' },
                 { name: 'close_market(market_id)', tag: 'anyone', desc: 'Active → Closed after the deadline.' },
+                { name: 'close_trading(market_id, evidence?)', tag: 'owner or trading closer', desc: <>Active → Closed before the deadline, which moves to the tick before the call; the trading closer only on a market opened with <C>set_early_close</C>. Works while paused; evidence (up to 300 bytes) is only logged. See <A href="#early-close">Ending trading early</A>.</> },
+                { name: 'set_early_close(market_id, allowed)', tag: 'owner', desc: 'Opens a market to close_trading by the trading closer, or withdraws that.' },
                 { name: 'vote_outcome(market_id, outcome, evidence?)', tag: 'payable, 0.1 NEAR', desc: 'One bonded vote per account, until the resolution deadline; evidence is an optional link of up to 300 bytes.' },
                 { name: 'settle_market(market_id)', tag: 'anyone', desc: 'Applies every resolution stage that is due and returns the status. Optional: the next call that touches the market does it.' },
                 { name: 'finalize_votes(market_id)', tag: 'anyone', desc: 'Optional. After the voting window; counts the vote (the dispute window is already fixed).' },
@@ -1220,8 +1291,12 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
             <H3>Turbo</H3>
             <MethodList
               methods={[
-                { name: 'create_turbo_market(symbol_id, deadline, baseline_price, baseline_conf, baseline_block)', tag: 'oracle operator', desc: 'Opens a round; returns its id.' },
-                { name: 'resolve_turbo_market(market_id, closing_price, closing_conf, closing_block)', tag: 'oracle operator', desc: 'Resolves a round; returns the new status.' },
+                { name: 'create_turbo_market(symbol_id, deadline, baseline_price, baseline_conf, baseline_block)', tag: 'oracle operator', desc: 'Opens a round on a symbol without a price feed; returns its id.' },
+                { name: 'resolve_turbo_market(market_id, closing_price, closing_conf, closing_block)', tag: 'oracle operator', desc: 'Resolves a round on a symbol without a price feed; returns the new status.' },
+                { name: 'open_turbo_round(symbol_id, deadline)', tag: 'oracle operator', desc: 'Opens a round on a symbol with a price feed, with the oracle contract’s price as the baseline; the transaction returns the id. Refused while paused.' },
+                { name: 'settle_turbo_round(market_id)', tag: 'anyone', desc: 'From the deadline until the close window ends: settles the round with the oracle contract’s price published inside the window.' },
+                { name: 'set_turbo_oracle(oracle, close_window_secs)', tag: 'owner', desc: 'The Pyth-compatible contract turbo prices come from, and the close window (10 to 300 seconds).' },
+                { name: 'set_turbo_feed(symbol_id, feed_id)', tag: 'owner', desc: 'The oracle’s feed id (64 hex digits) for a symbol. From then on its prices come only from the oracle; a feed can be replaced, not removed.' },
                 { name: 'emergency_cancel_turbo(market_id)', tag: 'operator, later anyone', desc: 'Cancels an unresolved round after its resolution deadline.' },
                 { name: 'prune_turbo(market_ids)', tag: 'operator or owner', desc: 'Deletes up to 100 finished rounds that had no bets; returns how many went.' },
               ]}
@@ -1246,15 +1321,26 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
                 { name: 'set_resolution_config(vote_window?, dispute_window?, winner_claim_priority?, disputed_timeout?, vote_bond?, min_voters?, dispute_bond_multiplier?, committee_quorum?)', tag: 'owner', desc: 'Resolution windows (ticks), bond and quorums; arguments left out keep their value. Applies to votes, disputes and finalizations made afterwards.' },
                 { name: 'withdraw_treasury(token, amount, recipient)', tag: 'owner', desc: 'Pays out protocol fees and forfeited bonds.' },
                 { name: 'set_token_account(token, account_id)', tag: 'owner', desc: 'Points token slot 2 or 3 at a NEP-141 contract; allowed only while nothing is held in that token.' },
+                { name: 'set_trading_closer(trading_closer?)', tag: 'owner', desc: 'Names the account that may call close_trading on the markets opened to it (on testnet the AI resolver); null removes it.' },
+                { name: 'set_oracle_operator(oracle_operator)', tag: 'owner', desc: 'The account that opens turbo rounds and gives the prices of symbols without a feed.' },
+                { name: 'set_committee(members, quorum)', tag: 'owner', desc: '1 to 15 distinct members and a quorum of more than half of them; a DAO can be the whole committee, with quorum 1. Votes already cast count only while their member stays on the committee.' },
+                { name: 'propose_owner(new_owner?)', tag: 'owner', desc: 'Offers ownership to an account, a Sputnik DAO for example; null withdraws the offer.' },
+                { name: 'accept_owner()', tag: 'the proposed account', desc: 'Takes over as owner, so an account becomes owner only by acting itself. A DAO accepts with a FunctionCall proposal.' },
+                { name: 'upgrade()', tag: 'owner', desc: 'The new wasm is the raw call input (not JSON), the way Sputnik’s UpgradeRemote proposal sends it. One receipt deploys it and calls migrate; if migrate fails, the deploy is undone and the current code stays.' },
               ]}
             />
+            <P muted>
+              The owner is still the single account <C>veiled-markets.testnet</C>. These calls let a Sputnik DAO take
+              over the owner&apos;s role and the committee, and upgrade the contract by proposal; on testnet that has
+              not been done.
+            </P>
 
             <H3>Views</H3>
             <Table
               head={['View', 'Returns']}
               rows={[
                 [<C key="1">get_markets(from, limit)</C>, 'up to 100 markets in creation order'],
-                [<C key="2">get_market(market_id)</C>, 'one market or null: status, reserves, deadlines, token_type, metadata, fees, tally, dispute, committee state'],
+                [<C key="2">get_market(market_id)</C>, 'one market or null: status, reserves, deadlines, token_type, metadata, fees, tally, dispute, committee state, parlay_leg, early_close'],
                 [<C key="3">get_market_count()</C>, 'number of prediction markets'],
                 [<C key="4">get_vote(market_id, account_id)</C>, '{outcome, bond, claimed} or null'],
                 [<C key="5">get_turbo_market(market_id)</C>, 'one round or null'],
@@ -1275,6 +1361,8 @@ net if won       = potential payout − 2% fee`}</CodeBlock>
                 [<C key="20">get_token_accounts()</C>, 'the token contracts of slots 2 and 3'],
                 [<C key="21">get_height()</C>, 'the current tick'],
                 [<C key="22">get_next_id()</C>, 'the next market or round id (markets and turbo rounds share one counter)'],
+                [<C key="23">get_governance()</C>, '{owner, pending_owner, oracle_operator, committee, committee_quorum, trading_closer}'],
+                [<C key="24">get_turbo_oracle()</C>, '{oracle, close_window_secs, feeds: [{symbol_id, feed_id}]}'],
               ]}
             />
           </section>
@@ -1310,13 +1398,22 @@ extDataHash = sha256(ext_data as UTF-8), read big-endian, top 3 bits cleared`}</
             <Table
               head={['Endpoint', 'Response']}
               rows={[
-                [<C key="h">GET /health</C>, '{ok, relayer, contract, rpc, balanceNear}'],
+                [<C key="h">GET /health</C>, '{ok, relayer, contract, rpc, balanceNear, meta, oneclick}; meta and oneclick say whether the two optional endpoints below are on'],
                 [<C key="r">POST /relay</C>, 'body {proof, public, ext_data}; 200 {ok: true, txHash, result}'],
                 ['', '422 {ok: false, txHash, error}: the contract rejected it; error is the ERR_* code'],
                 ['', '400: malformed body, unknown action, a fee other than "0", an unknown root or a spent nullifier (checked before sending)'],
                 ['', '429: more than 30 requests per minute from one IP; 502: the RPC failed'],
+                [<C key="m">POST /meta</C>, 'only with RELAYER_META=1: body {signed_delegate}, a stablecoin deposit (ft_transfer_call of a listed token to the contract with a deposit message) signed as a NEP-366 delegate action; the relayer pays its gas. 200 {ok: true, txHash}. At most 3 such deposits per sender a minute'],
+                [<C key="o">/oneclick/*</C>, 'mainnet only, with ONECLICK_ENABLED=1: tokens, quote-in, quote-out and status, for moving USDC between another chain and Veiled through 1Click'],
               ]}
             />
+            <P muted>
+              Both optional endpoints are off on the hosted testnet demo. With <C>meta</C> on, the app sends a USDC
+              deposit through <C>/meta</C> when the wallet can sign delegate actions, so an account holding USDC but
+              no NEAR can deposit, and signs the deposit itself otherwise. The app shows the cross-chain panel only in a
+              mainnet build with <C>VITE_ONECLICK=1</C>, and uses a 1Click quote only when 1Click signed it and its
+              fields match the request.
+            </P>
             <CodeBlock title="terminal">{`curl -s $RELAYER/health
 
 curl -s -X POST $RELAYER/relay -H 'content-type: application/json' \\
@@ -1431,10 +1528,11 @@ npm run dev`}</CodeBlock>
               head={['Account', 'Role']}
               rows={[
                 [<C key="v">{CONTRACT}</C>, 'the contract'],
-                [<C key="o">veiled-markets.testnet</C>, 'owner: parameters, pause, treasury, parlay pool'],
+                [<C key="o">veiled-markets.testnet</C>, 'owner: parameters, pause, treasury, parlay pool and legs, early closes, roles, upgrades'],
                 [<C key="r">veiled-relayer.testnet</C>, 'submits private transactions (fee 0)'],
                 [<C key="or">veiled-oracle.testnet</C>, 'opens and resolves turbo rounds'],
-                [<C key="c">c1 … c5.veiled-markets.testnet</C>, 'the dispute committee'],
+                [<C key="ai">ai.veiled-markets.testnet</C>, 'the AI resolver: first bonded votes, and the trading closer'],
+                [<C key="c">c1 … c5.veiled-markets.testnet</C>, 'the dispute committee (quorum 3)'],
                 [<C key="u">{USDC}</C>, 'USDC (Circle testnet)'],
               ]}
             />
@@ -1451,12 +1549,13 @@ npm run dev`}</CodeBlock>
             />
             <H3>Deploy your own contract</H3>
             <P muted>
-              Build the wasm, then run <C>near/scripts/deploy-testnet.sh v2</C>: it creates the committee accounts and
-              deploys and initializes <C>v2.veiled-markets.testnet</C> with the testnet configuration above. Then, as the
-              registers the contract on Circle USDC, which it puts in token slot 3. (The live <C>v1</C> contract got it with
-              <C>set_token_account(3, &quot;{USDC}&quot;)</C> after its upgrade; that is allowed only while nothing is held in
-              the slot.) To rebuild the circuit, run{' '}
-              <C>cd near/circuits && npm run build</C>.
+              Build the wasm, then run <C>near/scripts/deploy-testnet.sh v2</C>: it creates the committee accounts,
+              deploys and initializes <C>v2.veiled-markets.testnet</C> with Circle USDC in token slot 3, and, as the
+              owner, registers the contract with the USDC contract so it can receive USDC. It starts with five-minute
+              vote and dispute windows; <C>set_resolution_config</C> sets the ones above. (The live <C>v1</C> contract
+              got USDC with <C>set_token_account(3, &quot;{USDC}&quot;)</C> after its upgrade; that is allowed only while
+              nothing is held in the slot.) Later code goes in with <C>upgrade</C> or <C>near/scripts/upgrade-testnet.sh</C>,
+              which keep the state. To rebuild the circuit, run <C>cd near/circuits && npm run build</C>.
             </P>
             <Table
               head={['Tests', 'Command']}
@@ -1475,16 +1574,25 @@ npm run dev`}</CodeBlock>
               These parts of the Aleo version are not ported: community governance proposals, resolver staking and the
               resolver registry, reward epochs, and the multisig treasury. On NEAR the owner account holds the
               treasury and the parameters, disputed markets go to the 5-member committee, and a market&apos;s resolver is
-              paid per market from its protocol fees.
+              paid per market from its protocol fees. The contract is ready for a Sputnik DAO as its owner and committee
+              (<A href="#contract-api">Owner</A> calls), which would bring proposals back through the DAO; the app has no
+              governance page.
+            </P>
+            <P muted>
+              Built but not switched on for the testnet demo: turbo prices read on chain from Pyth&apos;s oracle
+              contract, gasless USDC deposits (<C>POST /meta</C>), USDC from other chains through 1Click (mainnet only),
+              and reading the AI resolver&apos;s sources inside OutLayer&apos;s TEE, which needs an OutLayer project of
+              the operator&apos;s.
             </P>
             <H3>Known limits</H3>
             <Bullets>
               <li><B>Testnet only.</B> Tokens have no value, and the contract may be redeployed.</li>
               <li><B>Resolution trust.</B> The team runs the five committee accounts and casts most votes on testnet, and one 0.1 NEAR vote can decide a market nobody disputes. See <A href="#resolution">Resolution</A>.</li>
               <li><B>Trusted setup.</B> The circuit key comes from a single phase-2 contribution.</li>
-              <li><B>Turbo operator trust.</B> The operator submits prices. The contract checks its identity, the price range, the confidence and the maximum move, and the audit trail is public, but it cannot prove the price itself.</li>
+              <li><B>Turbo operator trust.</B> The operator submits prices. The contract checks its identity, the price range, the confidence and the maximum move, and the audit trail is public, but it cannot prove the price itself. Reading the prices from Pyth&apos;s oracle contract instead is built, not switched on.</li>
+              <li><B>Early closes.</B> The owner can end any market&apos;s trading early, and the AI resolver the markets the owner opened to it. Nothing reopens trading and voting opens at once, so after a wrong early close someone can vote before the deciding moment, and that vote has to be disputed within the hour.</li>
               <li><B>One relayer.</B> If it is down, private actions wait. It pays the gas and cannot alter a trade.</li>
-              <li><B>Central roles.</B> The owner can pause, change fees and minimums, and withdraw the treasury and spare parlay pool funds. The operator funds the parlay pool; when it runs low, new parlays are refused. The team holds the contract account&apos;s key and can deploy new contract code.</li>
+              <li><B>Central roles.</B> The owner, a single account, can pause, change fees and minimums, approve parlay legs, close trading early, name the oracle operator, the trading closer and the committee, upgrade the code, and withdraw the treasury and spare parlay pool funds. The operator funds the parlay pool; when it runs low, new parlays are refused. The team also holds the contract account&apos;s key and can deploy new contract code.</li>
               <li><B>Timing.</B> The note pool hides who trades, not when or how much. See <A href="#privacy">Privacy model</A>.</li>
               <li><B>Your note key.</B> It is derived from your wallet. If you lose the wallet, you lose the notes; if the wallet cannot sign messages, the key lives only in this browser.</li>
             </Bullets>

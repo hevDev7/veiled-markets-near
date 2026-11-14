@@ -10,7 +10,7 @@ use crate::*;
 use serde_json::json;
 
 const KEY_PENDING_OWNER: &[u8] = b"go";
-/// The account (the AI resolver) that may end a market's trading early besides the owner and the committee.
+/// The account (the AI resolver) that may end trading early on the markets the owner opened to it.
 const KEY_TRADING_CLOSER: &[u8] = b"tc";
 /// `committee.contains` is a linear scan on every committee call; fifteen keeps it cheap.
 pub const MAX_COMMITTEE: usize = 15;
@@ -23,7 +23,7 @@ pub struct GovernanceView {
     pub oracle_operator: AccountId,
     pub committee: Vec<AccountId>,
     pub committee_quorum: u8,
-    /// Besides the owner and each committee member, the account that may end a market's trading early.
+    /// The account that may end trading early on the markets the owner opened to it (`set_early_close`).
     pub trading_closer: Option<AccountId>,
 }
 
@@ -83,8 +83,8 @@ impl Veiled {
         log_event("oracle_operator_set", json!({ "oracle_operator": self.oracle }));
     }
 
-    /// Owner only. Names the account (the AI resolver) that may end a market's trading early with `close_trading`,
-    /// as the owner and each committee member may; `None` removes it.
+    /// Owner only. Names the account (the AI resolver) that may end trading early with `close_trading` on the
+    /// markets the owner opened to it with `set_early_close`; `None` removes it.
     pub fn set_trading_closer(&mut self, trading_closer: Option<AccountId>) {
         self.assert_owner();
         match &trading_closer {

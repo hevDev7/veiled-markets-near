@@ -8,13 +8,13 @@ comma-separated list; each call moves to the next endpoint when one fails).
 |---|---|---|
 | Relayer | `npm run relayer` (port 4100) | Receives a proof and an action from the browser, checks the proof locally, and submits `transact` to the contract. It pays the gas, so the user's account never signs a private action. With `RELAYER_META=1` it also submits stablecoin deposits the user signed as NEP-366 delegate actions (`POST /meta`), paying their gas, so an account holding USDC but no NEAR can still deposit. On mainnet, `ONECLICK_ENABLED=1` adds `/oneclick/*`: quotes and status for moving USDC between another chain and Veiled through 1Click. Details: [`docs/near/DESIGN.md`](../docs/near/DESIGN.md) §5. Key: `RELAYER_PRIVATE_KEY`. |
 | Turbo oracle | `npm run turbo-oracle -- --serve --auto-create` (port 4090) | Opens and settles the five-minute BTC, ETH and SOL rounds and serves live prices and an audit log of every price it used. Prices come from Pyth Hermes when `PYTH_API_KEY` is set, otherwise from CoinGecko. With `TURBO_PRICES=contract` the contract takes both prices of a round from the oracle contract its owner named (`set_turbo_oracle`, `set_turbo_feed`), and with a Pyth oracle `TURBO_PYTH_PUSH_HERMES` stores a Hermes update on it whenever the stored price is too old to open or settle a round, then reads it back (details in [`docs/near/DESIGN.md`](../docs/near/DESIGN.md)). Key: `ORACLE_PRIVATE_KEY`. |
-| AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. It also answers the create page's source check and, with an Anthropic key, AI drafting and review, keeps the app's market → transaction index (`GET /market-tx`), and with an OutLayer project of the operator's can read sources inside OutLayer's TEE (all below). Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`, and `MARKET_AI_API_KEY` for drafting. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
+| AI resolver | `npm run ai-resolver` (port 4091) | Asks a model in NEAR AI Cloud's TEE which outcome a closed market's source supports, checks the TEE's signature over the exact request and response against a fresh attestation, and casts the first bonded vote when the model is confident, linking a public receipt as the vote's evidence. It casts no vote without `AI_RESOLVER_PUBLIC_URL` (the address its receipts are served from) or with `DRY_RUN=1`. Once the contract names it the trading closer, it also ends trading early on the markets the owner opened to it when their source shows the answer. It also answers the create page's source check and, with an Anthropic key, AI drafting and review, keeps the app's market → transaction index (`GET /market-tx`), and with an OutLayer project of the operator's can read sources inside OutLayer's TEE (all below). Keys: `NEARAI_API_KEY`, `AI_RESOLVER_PRIVATE_KEY`, and `MARKET_AI_API_KEY` for drafting. Rules it follows: [`docs/near/RESOLUTION.md`](../docs/near/RESOLUTION.md). |
 
-`npm test` runs the relayer's request checks, the AI resolver's checks, the source reader, catalog and check, the
-create page's endpoints and rate limits, AI drafting and review and their Claude client (stubbed, no key needed), the
-turbo keeper's on-chain price pushes, the gasless deposit checks, the 1Click client (stubbed), the market index
-(FastNEAR stubbed), the OutLayer client and source reader (OutLayer stubbed), the LP note bookkeeping, the spec files
-and the demo price question (204 tests).
+`npm test` runs the relayer's request checks, the AI resolver's checks (votes and early closes), the source reader,
+catalog and check, the create page's endpoints and rate limits, AI drafting and review and their Claude client
+(stubbed, no key needed), the turbo keeper's on-chain price pushes, the gasless deposit checks, the 1Click client
+(stubbed), the market index (FastNEAR stubbed), the OutLayer client and source reader (OutLayer stubbed), the LP note
+bookkeeping, the spec files, the demo price question and the owner scripts' read-back (219 tests).
 `DRY_RUN=1 npm run ai-resolver -- --once` asks the model about every market waiting for a vote and writes receipts to
 `ai-receipts/` without voting.
 
@@ -70,6 +70,24 @@ without voting, and needs no `NEARAI_API_KEY`. `/health` shows `drafting` (the m
 | `MARKET_AI_MODEL` | `claude-opus-5-5` | The Claude model for drafting and review |
 | `MARKET_AI_CLIENT_PER_HOUR` | `10` | AI drafting and review requests per client per hour |
 | `MARKET_AI_DAILY_CAP` | `150` | AI drafting and review requests per UTC day, across all clients |
+
+### Ending trading early
+
+A market asking whether something happens before a date is decided the day it happens, and until its deadline anyone
+could bet on the known result. The contract's `close_trading` ends trading at once (the owner on any open market, the
+trading closer only on markets the owner opened with `set_early_close`). Once `get_governance` names this service's
+account the trading closer, the service reads the source of each open market with `early_close` set, every
+`AI_EARLY_CLOSE_MINUTES`, and asks the model in NEAR AI Cloud's TEE whether the outcome is already settled. It calls
+`close_trading` only when the model says so with at least `AI_EARLY_CLOSE_CONFIDENCE` and the TEE signature checks,
+with the receipt's link and hash as the evidence. It skips a market whose source it cannot read without asking the
+model, and a market with five minutes (75 ticks) or less of trading left. Receipts are served at
+`/receipts/<id>.early.json` and listed at `/receipts/early`; `/health` shows `early_close` with `permitted`.
+
+| Variable | Default | Use |
+|---|---|---|
+| `AI_EARLY_CLOSE_MINUTES` | `60` | Minutes between checks of one market; `0` turns early closes off |
+| `AI_EARLY_CLOSE_CONFIDENCE` | `0.9` | The model's confidence needed to close trading |
+| `AI_EARLY_CLOSE_PER_PASS` | `3` | Markets checked per pass |
 
 ### Market links (`GET /market-tx`)
 
@@ -197,7 +215,8 @@ Run from this directory with `npx tsx scripts/<name>`.
 | `quick-market.ts open <spec.json> [--near=<n> \| --usdc=<n>] [--skip-source-check]` | Opens a Yes/No market from a file in `scripts/markets/` (question, rule, source of the result, closing time). Before it signs anything it runs the create page's source check on the source and stops if the resolver could not read it; a spec whose `outcomes` are not `["Yes","No"]` is refused. |
 | `quick-market.ts resolve <id> <outcome> [--evidence=<url>] [--settle]` | Casts the bonded vote after the market closes. The first redeem after the dispute window settles it; `--settle` waits and settles it instead. |
 | `withdraw-lp.ts <id>` | Withdraws the liquidity the operator added to a resolved market. |
-| `parlay-legs.ts status \| approve <ids> \| revoke <ids> \| cap <bps>` | Chooses which markets may be parlay legs. |
+| `parlay-legs.ts status \| approve <ids> \| revoke <ids> \| cap <bps>` | Chooses which markets may be parlay legs, and the share of its thinnest leg's pool depth one ticket may pay. Open tickets keep their legs. |
+| `early-close.ts status \| closer <account\|none> \| open <ids> \| withdraw <ids> \| close <id> [--evidence=<url>]` | Names the trading closer (the AI resolver), opens markets to an early close by it or takes that back, and ends a market's trading now as the owner. |
 | `seed-markets.ts` | Opens a starter set of markets on a fresh contract. |
 | `testnet-smoke.ts <account> <relayer url>` | Deposits, then withdraws through the relayer, against the live contract. |
 | `testnet-parlay-smoke.ts <marketA> <marketB>` | Deposits, then places a private parlay on two markets of the live contract. |

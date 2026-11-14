@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
+import { settled } from './settle';
 
 const CONTRACT = process.env.VEILED_CONTRACT ?? 'v1.veiled-markets.testnet';
 const RPCS = (process.env.NEAR_RPC_URL ?? 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org').split(',');
@@ -52,6 +53,14 @@ async function tradingCloser(): Promise<string | null | undefined> {
   }
 }
 
+const LAGS = 'the RPC does not show the change yet; the transaction succeeded';
+
+/** Waits until the RPC shows what was just written to a market, and says so when it still does not. */
+async function marketShows(id: string, done: (m: MarketView) => boolean) {
+  const m = await settled(() => view<MarketView | null>('get_market', { market_id: id }), (v) => !!v && done(v));
+  if (!m || !done(m)) console.log(`  #${id}: ${LAGS}`);
+}
+
 async function status(ids: string[]) {
   const closer = await tradingCloser();
   if (closer === undefined) {
@@ -79,14 +88,19 @@ async function status(ids: string[]) {
 if (command === 'status') {
   await status(rest);
 } else if (command === 'closer' && rest.length === 1) {
-  await call('set_trading_closer', { trading_closer: rest[0] === 'none' ? null : rest[0] });
-  console.log(`trading closer: ${(await tradingCloser()) ?? 'none'}`);
+  const want = rest[0] === 'none' ? null : rest[0];
+  await call('set_trading_closer', { trading_closer: want });
+  const now = await settled(tradingCloser, (c) => (c ?? null) === want);
+  console.log(`trading closer: ${now ?? 'none'}${(now ?? null) === want ? '' : `  (${LAGS})`}`);
 } else if ((command === 'open' || command === 'withdraw') && rest.length) {
-  for (const id of rest) await call('set_early_close', { market_id: id, allowed: command === 'open' });
+  const allowed = command === 'open';
+  for (const id of rest) await call('set_early_close', { market_id: id, allowed });
+  for (const id of rest) await marketShows(id, (m) => (m.early_close === true) === allowed);
   await status(rest);
 } else if (command === 'close' && rest.length === 1) {
   const evidence = option('evidence');
   await call('close_trading', { market_id: rest[0], evidence: evidence ?? null });
+  await marketShows(rest[0], (m) => m.status !== ACTIVE);
   await status(rest);
 } else {
   console.error('usage: early-close.ts status [marketId ...] | closer <account|none> | open <marketId ...> | ' +
