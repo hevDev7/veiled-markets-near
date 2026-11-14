@@ -90,6 +90,7 @@ import type { TurboSymbol } from '@/components/TurboMarketPanel'
 import { FEATURES, isChainTxId, isNearTxHash, txUrl as nearTxUrl, VEILED_CONTRACT as NEAR_CONTRACT_ID } from '@/lib/near/config'
 import { marketPath, useMarketPath, useMarketTx } from '@/lib/near/market-tx'
 import { nearId, routeMarketId } from '@/lib/near/ids'
+import { formatDeadline } from '@/lib/near/market-time'
 
 const nearIdOrSelf = (id: string) => {
   try { return nearId(id) } catch { return id }
@@ -2282,9 +2283,7 @@ export function MarketDetail() {
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Deadline</span>
                     <span className="text-xs font-medium text-white tabular-nums">
-                      {market.deadlineTimestamp
-                        ? new Date(market.deadlineTimestamp).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : `Block ${market.deadline.toString()}`}
+                      {formatDeadline(market.deadline)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
