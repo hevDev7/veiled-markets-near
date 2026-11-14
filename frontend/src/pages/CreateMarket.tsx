@@ -25,7 +25,9 @@ import { stashMarketMetadata } from '@/lib/near/executor'
 import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { PUBLIC_CALL_GAS_MICRO, ENABLED_TOKEN_KEYS, tokenLabel } from '@/lib/near/config'
-import { isChainTxId } from '@/lib/near/config'
+import { isChainTxId, isNearTxHash } from '@/lib/near/config'
+import { waitForCreatedMarket } from '@/lib/near/market-tx'
+import { nearId } from '@/lib/near/ids'
 import { MAX_METADATA, metadataBytes } from '@/lib/near/chain'
 import {
   CATEGORIES, DRAFT_KEY, METADATA_OUTCOMES, RULES_PATTERN, draftToForm, initialFormData, isTemplateUnedited, normalizeDraft,
@@ -271,8 +273,19 @@ export function CreateMarketPage() {
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
   const [marketId, setMarketId] = useState<string | null>(null)
+  // The market a NEAR create transaction made: undefined while it is looked up, null when it did not show.
+  const [created, setCreated] = useState<{ hash: string; id: string | null | undefined } | null>(null)
   const [isSlowTransaction, setIsSlowTransaction] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // On NEAR the wallet returns once the create transaction has run: look up the market it made and show it.
+  useEffect(() => {
+    if (step !== 'success' || !isNearTxHash(marketId)) return
+    let cancelled = false
+    setCreated({ hash: marketId, id: undefined })
+    waitForCreatedMarket(marketId).then((id) => { if (!cancelled) setCreated({ hash: marketId, id }) })
+    return () => { cancelled = true }
+  }, [step, marketId])
+  const createdId = created !== null && created.hash === marketId ? created.id : undefined
   // The resolver's answer for the source in the form (SourceCheckPanel); unavailable when the service can't answer.
   const [sourceCheck, setSourceCheck] = useState<{ result: SourceCheck | null; unavailable: boolean }>({ result: null, unavailable: false })
   // The review step's tick, tied to what it covers: changing the text, the source or a time clears it.
@@ -891,14 +904,45 @@ export function CreateMarketPage() {
                         </a>
                       )}
                     </div>
-                    <div className="p-4 rounded-xl bg-brand-400/[0.06] border border-brand-400/[0.1] mb-6 text-left flex items-start gap-3">
-                      <Loader2 className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
-                      <div>
-                        <p className="text-sm font-medium text-brand-300">Waiting for on-chain confirmation...</p>
-                        <p className="text-xs text-surface-400 mt-1">This can take 1-3 minutes. You can navigate away — the process continues in the background.</p>
+                    {!isNearTxHash(marketId) ? (
+                      <div className="p-4 rounded-xl bg-brand-400/[0.06] border border-brand-400/[0.1] mb-6 text-left flex items-start gap-3">
+                        <Loader2 className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
+                        <div>
+                          <p className="text-sm font-medium text-brand-300">Waiting for on-chain confirmation...</p>
+                          <p className="text-xs text-surface-400 mt-1">This can take 1-3 minutes. You can navigate away — the process continues in the background.</p>
+                        </div>
                       </div>
+                    ) : createdId ? (
+                      <div className="p-4 rounded-xl bg-yes-500/[0.05] border border-yes-500/[0.15] mb-6 text-left flex items-start gap-3" role="status">
+                        <Check className="w-5 h-5 text-yes-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-yes-200">Market #{nearId(createdId)} is live.</p>
+                          <p className="text-xs text-surface-400 mt-1">It is on NEAR now, and anyone can trade it from its page.</p>
+                        </div>
+                      </div>
+                    ) : createdId === null ? (
+                      <div className="p-4 rounded-xl bg-no-500/[0.05] border border-no-500/[0.18] mb-6 text-left flex items-start gap-3" role="status">
+                        <AlertCircle className="w-5 h-5 text-no-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-no-200">The market could not be confirmed yet.</p>
+                          <p className="text-xs text-surface-400 mt-1">Open the transaction on the explorer to see whether it went through, or look for the market under Markets in a minute.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 rounded-xl bg-brand-400/[0.06] border border-brand-400/[0.1] mb-6 text-left flex items-start gap-3" role="status">
+                        <Loader2 className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5 animate-spin" />
+                        <div>
+                          <p className="text-sm font-medium text-brand-300">Confirming the market on NEAR...</p>
+                          <p className="text-xs text-surface-400 mt-1">This usually takes a few seconds.</p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex gap-3">
+                      {createdId && (
+                        <button onClick={() => navigate(`/market/${marketId}`)} className="flex-1 btn-primary">View market</button>
+                      )}
+                      <button onClick={() => navigate('/dashboard')} className={createdId ? 'flex-1 btn-secondary' : 'btn-primary w-full'}>Back to Markets</button>
                     </div>
-                    <button onClick={() => navigate('/dashboard')} className="btn-primary w-full">Back to Markets</button>
                   </motion.div>
                 )}
 

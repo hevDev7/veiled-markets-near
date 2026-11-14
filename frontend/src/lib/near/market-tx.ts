@@ -165,6 +165,26 @@ export const useMarketTx = create<MarketTxState>((set, get) => ({
   },
 }));
 
+/**
+ * The market a create transaction just made, as the UI id ("30field"), or null when none shows after the last attempt.
+ * The wallet returns once the transaction has run, but an RPC node can lag a moment, so a miss is asked again.
+ */
+export async function waitForCreatedMarket(
+  txHash: string,
+  {
+    attempts = 5,
+    delayMs = 3_000,
+    resolve = (hash: string) => useMarketTx.getState().resolve(hash),
+  }: { attempts?: number; delayMs?: number; resolve?: (hash: string) => Promise<string | null> } = {},
+): Promise<string | null> {
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delayMs));
+    const id = await resolve(txHash).catch(() => null);
+    if (id) return id;
+  }
+  return null;
+}
+
 /** The page URL for a market: /market/<creating tx hash> when known, else /market/<id>. */
 export function marketPath(marketId: string, byId: Record<string, string> = useMarketTx.getState().byId): string {
   let key: string;
