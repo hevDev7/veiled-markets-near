@@ -129,6 +129,8 @@ export interface MarketData {
   status: number;
   created_at: bigint;
   token_type: number;       // 1=NEAR, 2=USDCX
+  /** Not an Aleo field: the NEAR contract owner approved this market as a parlay leg (set_parlay_leg). */
+  parlay_leg: boolean;
 }
 
 export interface AMMPoolData {
@@ -819,6 +821,7 @@ export async function getMarket(marketId: string, programId?: string): Promise<M
     status: typeof parsedStatus === 'number' ? parsedStatus : 1,
     created_at: typeof parsedCreatedAt === 'bigint' ? parsedCreatedAt : 0n,
     token_type: typeof parsedTokenType === 'number' ? parsedTokenType : 1,
+    parlay_leg: data.parlay_leg === 'true',
   };
 
   devLog('getMarket result:', result);

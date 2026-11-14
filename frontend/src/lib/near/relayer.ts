@@ -59,6 +59,14 @@ export const ERROR_TEXT: Record<string, string> = {
 
 export const explain = (code: string) => ERROR_TEXT[code] ?? code;
 
+/** The contract refused (its error carried an ERR_ code), as opposed to a node or the network failing to answer. */
+export class ContractRefusal extends Error {
+  constructor(readonly code: string) {
+    super(explain(code));
+    this.name = 'ContractRefusal';
+  }
+}
+
 export async function relay(body: { proof: unknown; public: unknown; ext_data: string }): Promise<{ txHash: string; result: TransactResult }> {
   let res: Response;
   try {

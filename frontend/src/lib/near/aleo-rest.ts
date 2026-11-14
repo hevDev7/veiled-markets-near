@@ -40,6 +40,8 @@ function marketStruct(m: NearMarket): string {
     ['status', u8(m.status)],
     ['created_at', u64(m.created_at)],
     ['token_type', u8(m.token_type)],
+    // Not an Aleo field: the owner approved this market as a parlay leg (set_parlay_leg).
+    ['parlay_leg', String(m.parlay_leg === true)],
   ]);
 }
 

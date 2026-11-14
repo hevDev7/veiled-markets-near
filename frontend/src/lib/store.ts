@@ -83,6 +83,8 @@ export interface Market {
   transactionId?: string
   tokenType?: 'NEAR' | 'USDCX' | 'USAD'
   thumbnailUrl?: string
+  /** The contract owner approved this market as a parlay leg (set_parlay_leg); only these can join a parlay. */
+  parlayLeg?: boolean
 }
 
 export interface SharePosition {

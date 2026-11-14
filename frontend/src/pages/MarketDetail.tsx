@@ -51,7 +51,7 @@ import {
   type MarketFeesData,
   type DisputeDataResult,
 } from '@/lib/aleo-client'
-import { useParlayStore } from '@/lib/parlay-store'
+import { parlayLegBlocker, useParlayStore } from '@/lib/parlay-store'
 import { OddsChart } from '@/components/OddsChart'
 import { CryptoPriceChart } from '@/components/CryptoPriceChart'
 // fetchCreditsRecord dynamically imported where needed for buy_shares_private
@@ -2386,6 +2386,17 @@ function ParlayButton({ market, selectedOutcome, outcomeLabels }: {
   const isAdded = existingLeg?.outcome === selectedOutcome
   const isSwitchingOutcome = existingLeg && existingLeg.outcome !== selectedOutcome
   const label = outcomeLabels[selectedOutcome - 1] ?? `Outcome ${selectedOutcome}`
+  const blocker = parlayLegBlocker(market)
+
+  // A market that cannot be a leg says why; a leg of it already on the slip can still be taken off.
+  if (blocker && !isAdded) {
+    return (
+      <p className="mt-2 flex items-start justify-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-xs text-surface-400">
+        <Ticket className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>{blocker}</span>
+      </p>
+    )
+  }
 
   return (
     <button

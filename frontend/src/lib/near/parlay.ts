@@ -8,7 +8,7 @@ import { KIND, TOKEN } from './config';
 import { getNearMarket, decodeMetadata } from './chain';
 import { nearId } from './ids';
 import { privateAction, refreshNotes, type PrivateStep } from './private';
-import { explain } from './relayer';
+import { ContractRefusal, explain } from './relayer';
 import { cachedView, invalidateViews, view } from './rpc';
 import { topUp } from './executor';
 import type { Note } from './notes/store';
@@ -81,12 +81,17 @@ export const getParlayPool = () => cachedView<NearParlayPool>('get_parlay_pool',
 export const getNearParlay = (id: string | number | bigint) =>
   cachedView<NearParlay | null>('get_parlay', { parlay_id: nearId(id) }, 3000);
 
-/** Exact odds and payout the contract gives these legs right now; throws with the contract's reason. */
+/**
+ * Exact odds and payout the contract gives these legs right now. Throws a ContractRefusal with the contract's reason
+ * when it refuses them, or a plain Error when the view was not answered.
+ */
 export async function quoteParlay(token: number, stake: bigint, legs: { marketId: string; outcome: number }[]): Promise<ParlayQuote> {
   try {
     return await view<ParlayQuote>('quote_parlay', { token, stake: stake.toString(), legs: legArgs(legs) });
   } catch (err) {
-    throw new Error(parlayErrorText(err));
+    const text = err instanceof Error ? err.message : String(err);
+    const code = text.match(/ERR_[A-Z_]+/)?.[0];
+    throw code ? new ContractRefusal(code) : new Error(text);
   }
 }
 

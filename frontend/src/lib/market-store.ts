@@ -184,6 +184,7 @@ async function transformMarketData(
         tokenType,
         remainingCredits: marketCredits,
         thumbnailUrl: registryThumbnail || undefined,
+        parlayLeg: market.parlay_leg,
     }
 }
 
@@ -269,7 +270,8 @@ export const useRealMarketsStore = create<MarketsStore>((set, get) => ({
                     prev.totalLiquidity === m.totalLiquidity &&
                     prev.status === m.status &&
                     prev.question === m.question &&
-                    prev.timeRemaining === m.timeRemaining
+                    prev.timeRemaining === m.timeRemaining &&
+                    prev.parlayLeg === m.parlayLeg
                 ) {
                     return prev // keep same reference — no re-render
                 }

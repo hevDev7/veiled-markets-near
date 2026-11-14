@@ -12,9 +12,10 @@ import {
 import { useWalletStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import {
+  checkParlayPlacement,
   describeParlayFundingSource,
+  floorToCents,
   formatParlayAmount,
-  getParlayCreateReadiness,
   getParlayFundingRoute,
 } from '@/lib/parlay-helpers'
 import { placeParlay, quoteParlay } from '@/lib/near/parlay'
@@ -85,6 +86,7 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
   // NEAR: refresh the slip with the contract's live leg odds whenever the modal opens or the stake changes, so the
   // odds and payout shown are exactly what parlay_buy will give (the pools move with every trade).
   const [quoteError, setQuoteError] = useState<string | null>(null)
+  const [maxStake, setMaxStake] = useState<bigint | null>(null)
   const legKey = slipLegs.map((l) => `${l.marketId}:${l.outcome}`).join(',')
   useEffect(() => {
     if (!isOpen || step !== 'review' || slipLegs.length < 2) return
@@ -94,10 +96,13 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
       .then((q) => {
         if (cancelled) return
         setQuoteError(null)
+        setMaxStake(BigInt(q.max_stake))
         setSlipLegOdds(q.leg_odds_bps.map((x) => BigInt(x)))
       })
       .catch((e: unknown) => {
-        if (!cancelled) setQuoteError(e instanceof Error ? e.message : String(e))
+        if (cancelled) return
+        setMaxStake(null)
+        setQuoteError(e instanceof Error ? e.message : String(e))
       })
     return () => {
       cancelled = true
@@ -125,20 +130,12 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
         )
       }
 
-      // Exact contract quote at submit time; the bet accepts up to 2% worse in case a trade lands first.
+      // Exact contract quote at submit time, checked before placing (which may first ask the wallet for a deposit);
+      // the bet accepts up to 2% worse in case a trade lands first.
       const token = tokenOfType(slipTokenType)
-      const quote = await quoteParlay(token, slipStake, slipLegs)
+      const quote = await checkParlayPlacement({ tokenType: slipTokenType, stake: slipStake, legs: slipLegs })
       const gross = BigInt(quote.potential_payout)
       setSlipLegOdds(quote.leg_odds_bps.map((x) => BigInt(x)))
-      const readiness = await getParlayCreateReadiness({
-        tokenType: slipTokenType,
-        stake: slipStake,
-        combinedOddsBps: BigInt(quote.combined_odds_bps),
-        grossPayout: gross,
-      })
-      if (!readiness.canCreate) {
-        throw new Error(readiness.reason ?? 'Parlay is not ready for on-chain submission.')
-      }
 
       const legsAtSubmit = useParlayStore.getState().slipLegs.map((l) => ({ ...l }))
       const placed = await placeParlay({
@@ -244,6 +241,11 @@ export function ParlayConfirmModal({ isOpen, onClose }: ParlayConfirmModalProps)
                     <p className="mt-2 text-xl font-semibold text-white">
                       {formatParlayAmount(slipStake)} {tokenLabel(slipTokenType)}
                     </p>
+                    {maxStake !== null && (
+                      <p className="mt-1 text-xs text-surface-500">
+                        Max {formatParlayAmount(floorToCents(maxStake))} now
+                      </p>
+                    )}
                   </div>
                   <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
                     <p className="text-xs uppercase tracking-[0.18em] text-surface-500">Combined Odds</p>

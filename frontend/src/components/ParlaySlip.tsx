@@ -7,16 +7,23 @@ import {
   oddsBpsToImpliedProbability,
   calculateCombinedOdds,
   calculateParlayPayout,
+  slipLegBlockers,
   type ParlayTokenType,
 } from '@/lib/parlay-store'
+import { useRealMarketsStore } from '@/lib/market-store'
 import { useWalletStore } from '@/lib/store'
 import {
   describeParlayFundingSource,
+  floorToCents,
   formatParlayAmount,
   getParlayFundingRoute,
+  getParlayStakeLimits,
+  parlayStakeLimitError,
+  type ParlayStakeLimits,
 } from '@/lib/parlay-helpers'
 import { cn, getTokenSymbol } from '@/lib/utils'
 import { ENABLED_TOKEN_KEYS } from '@/lib/near/config'
+import { ContractRefusal } from '@/lib/near/relayer'
 import { ParlayConfirmModal } from './ParlayConfirmModal'
 
 const TOKEN_OPTIONS: ParlayTokenType[] = [...ENABLED_TOKEN_KEYS]
@@ -86,6 +93,48 @@ export function ParlaySlip() {
     setStakeInput(formatParlayAmount(slipStake, slipStake % 1_000_000n === 0n ? 0 : 2))
   }, [slipStake])
 
+  // NEAR: what the contract lets these legs take (largest stake, minimum, pool), read again when the legs or the stake
+  // token change. A ticket may pay only a share of its thinnest market's pool, so the slip shows the limit up front.
+  // Only the contract refusing the legs holds checkout; a view the RPC did not answer is a note (checkout asks again).
+  const [limits, setLimits] = useState<ParlayStakeLimits | null>(null)
+  const [limitsError, setLimitsError] = useState<string | null>(null)
+  const [limitsUnread, setLimitsUnread] = useState(false)
+  const [limitsAttempt, setLimitsAttempt] = useState(0)
+  const legKey = slipLegs.map((l) => `${l.marketId}:${l.outcome}`).join(',')
+  useEffect(() => {
+    setLimits(null)
+    setLimitsError(null)
+    setLimitsUnread(false)
+    if (!slipOpen || slipLegs.length < 2) return
+    let cancelled = false
+    getParlayStakeLimits(slipTokenType, slipLegs)
+      .then((l) => {
+        if (!cancelled) setLimits(l)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        if (e instanceof ContractRefusal) setLimitsError(e.message)
+        else setLimitsUnread(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [slipOpen, legKey, slipTokenType, limitsAttempt])
+
+  // A slip kept from an earlier visit can hold legs on markets that closed or lost their approval since: name them.
+  // Once the contract has quoted the legs it accepted every one, so a stale market list cannot hold the slip.
+  const markets = useRealMarketsStore((s) => s.markets)
+  useEffect(() => {
+    if (slipOpen && slipLegs.length > 0 && useRealMarketsStore.getState().markets.length === 0) {
+      void useRealMarketsStore.getState().fetchMarkets()
+    }
+  }, [slipOpen])
+  const legBlockers = useMemo<Record<string, string>>(
+    () => (limits ? {} : slipLegBlockers(slipLegs, markets)),
+    [limits, slipLegs, markets],
+  )
+  const blockedLegCount = Object.keys(legBlockers).length
+
   const handleStakeChange = (value: string) => {
     setStakeInput(value)
     const num = parseFloat(value)
@@ -112,7 +161,13 @@ export function ParlaySlip() {
   }, [fundingRoute, slipStake, slipTokenType])
 
   const validationMessage = validationError()
-  const error = balanceError ?? validationMessage
+  const legMessage = blockedLegCount === 0
+    ? null
+    : blockedLegCount === 1
+      ? 'Remove the leg marked above: its market cannot be in a parlay now.'
+      : `Remove the ${blockedLegCount} legs marked above: their markets cannot be in a parlay now.`
+  const limitMessage = limitsError ?? (limits ? parlayStakeLimitError(slipStake, limits, slipTokenType) : null)
+  const error = legMessage ?? limitMessage ?? balanceError ?? validationMessage
   const canContinue = wallet.connected && !error
 
   if (slipLegs.length === 0 && !slipOpen) return null
@@ -236,7 +291,10 @@ export function ParlaySlip() {
                               initial={{ opacity: 0, y: -8 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, x: 80 }}
-                              className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4"
+                              className={cn(
+                                'rounded-2xl border bg-white/[0.03] p-4',
+                                legBlockers[leg.marketId] ? 'border-red-500/30' : 'border-white/[0.08]',
+                              )}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 space-y-2">
@@ -263,6 +321,9 @@ export function ParlaySlip() {
                                     <p className="text-xs text-amber-200/80">
                                       Implied probability {riskHint.impliedProbability.toFixed(2)}%
                                     </p>
+                                  )}
+                                  {legBlockers[leg.marketId] && (
+                                    <p className="text-xs text-red-300">{legBlockers[leg.marketId]}</p>
                                   )}
                                 </div>
                                 <button
@@ -351,6 +412,36 @@ export function ParlaySlip() {
                             </button>
                           ))}
                         </div>
+
+                        {limits && (
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="text-surface-400">Max stake for these legs now</span>
+                            <span className="flex items-center gap-2">
+                              <span className="font-semibold text-white">
+                                {formatParlayAmount(floorToCents(limits.maxStake))} {getTokenSymbol(slipTokenType)}
+                              </span>
+                              {floorToCents(limits.maxStake) >= limits.minStake && (
+                                <button
+                                  onClick={() => handleQuickStake(floorToCents(limits.maxStake))}
+                                  className="rounded-lg border border-brand-500/20 bg-brand-500/10 px-2 py-1 font-medium text-brand-300 transition-colors hover:bg-brand-500/20"
+                                >
+                                  Use max
+                                </button>
+                              )}
+                            </span>
+                          </div>
+                        )}
+                        {limitsUnread && (
+                          <div className="flex items-center justify-between gap-3 text-xs text-amber-300">
+                            <span>Could not read this slip&apos;s limits right now. Checkout checks them again.</span>
+                            <button
+                              onClick={() => setLimitsAttempt((n) => n + 1)}
+                              className="shrink-0 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 font-medium transition-colors hover:bg-amber-500/20"
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">

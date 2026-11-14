@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { useLiveCountdown as useGlobalCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryStrip, getCategoryColor, getTokenSymbol } from '@/lib/utils'
+import { parlayLegBlocker } from '@/lib/parlay-store'
 import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
 
 import { Tooltip } from '@/components/ui/Tooltip'
@@ -35,6 +36,9 @@ export function MarketRow({
 }: MarketRowProps) {
     const timeRemaining = useGlobalCountdown(market.deadlineTimestamp, market.timeRemaining).toUpperCase()
     const isExpired = timeRemaining === 'ENDED' || market.status !== 1
+    const parlayBlocker = parlayMode ? parlayLegBlocker(market) : null
+    // A leg of a market that can no longer be one may still be on the slip: let it be taken off from here.
+    const strandedLeg = parlayBlocker !== null ? selectedParlayOutcome ?? null : null
     const statusVariant = getStatusVariant(market.status, isExpired)
 
     const numOutcomes = market.numOutcomes ?? 2
@@ -282,51 +286,62 @@ export function MarketRow({
                             <span className="rounded-full border border-brand-500/15 bg-brand-500/10 px-2 py-1 text-[10px] font-semibold text-brand-300">
                                 Current leg selected
                             </span>
-                        ) : (
+                        ) : parlayBlocker === null ? (
                             <span className="text-[10px] text-surface-500">Choose an outcome</span>
-                        )}
+                        ) : null}
                     </div>
-                    <div className={cn('gap-2', isBinary ? 'grid grid-cols-1' : 'flex flex-wrap')}>
-                        {outcomeSummaries.map((outcome) => {
-                            const isSelected = selectedParlayOutcome === outcome.outcome
-                            return (
+                    {parlayBlocker === null ? (
+                        <div className={cn('gap-2', isBinary ? 'grid grid-cols-1' : 'flex flex-wrap')}>
+                            {outcomeSummaries.map((outcome) => {
+                                const isSelected = selectedParlayOutcome === outcome.outcome
+                                return (
+                                    <button
+                                        key={outcome.outcome}
+                                        type="button"
+                                        onClick={(event) => {
+                                            event.stopPropagation()
+                                            onQuickAddParlay?.(market, outcome.outcome)
+                                        }}
+                                        className={cn(
+                                            'rounded-xl border px-3 py-2 text-left transition-all duration-200',
+                                            isBinary ? 'w-full' : 'min-w-[126px]',
+                                            outcome.styles.bg,
+                                            outcome.styles.border,
+                                            'hover:border-brand-400/30 hover:bg-white/[0.04]',
+                                            isSelected && 'border-brand-400/35 bg-brand-500/10 shadow-[0_0_0_1px_rgba(201,168,76,0.12)]'
+                                        )}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className={cn('truncate text-xs font-semibold', outcome.styles.text)}>
+                                                {outcome.label}
+                                            </span>
+                                            <span className={cn('text-xs font-bold tabular-nums', outcome.styles.text)}>
+                                                {outcome.payout.toFixed(2)}x
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-[10px] text-surface-500">
+                                            {isSelected ? 'Tap again to remove' : `${formatPercentage(outcome.percentage)} implied`}
+                                        </p>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    ) : (
+                        <>
+                            <p className="text-[10px] leading-relaxed text-surface-500">{parlayBlocker}</p>
+                            {strandedLeg !== null && (
                                 <button
-                                    key={outcome.outcome}
                                     type="button"
                                     onClick={(event) => {
                                         event.stopPropagation()
-                                        onQuickAddParlay?.(market, outcome.outcome)
+                                        onQuickAddParlay?.(market, strandedLeg)
                                     }}
-                                    disabled={isExpired}
-                                    className={cn(
-                                        'rounded-xl border px-3 py-2 text-left transition-all duration-200',
-                                        isBinary ? 'w-full' : 'min-w-[126px]',
-                                        outcome.styles.bg,
-                                        outcome.styles.border,
-                                        !isExpired && 'hover:border-brand-400/30 hover:bg-white/[0.04]',
-                                        isExpired && 'cursor-not-allowed opacity-50',
-                                        isSelected && 'border-brand-400/35 bg-brand-500/10 shadow-[0_0_0_1px_rgba(201,168,76,0.12)]'
-                                    )}
+                                    className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-surface-300 transition-colors hover:border-red-500/30 hover:text-red-300"
                                 >
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className={cn('truncate text-xs font-semibold', outcome.styles.text)}>
-                                            {outcome.label}
-                                        </span>
-                                        <span className={cn('text-xs font-bold tabular-nums', outcome.styles.text)}>
-                                            {outcome.payout.toFixed(2)}x
-                                        </span>
-                                    </div>
-                                    <p className="mt-1 text-[10px] text-surface-500">
-                                        {isSelected ? 'Tap again to remove' : `${formatPercentage(outcome.percentage)} implied`}
-                                    </p>
+                                    Remove from slip
                                 </button>
-                            )
-                        })}
-                    </div>
-                    {isExpired && (
-                        <p className="mt-2 text-[10px] text-surface-500">
-                            This market is closed and cannot be added to a new parlay slip.
-                        </p>
+                            )}
+                        </>
                     )}
                 </div>
             )}

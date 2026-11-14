@@ -108,6 +108,39 @@ export function calculateParlayPayout(stake: bigint, combinedOddsBps: bigint): {
   return { gross, fee, net: gross - fee }
 }
 
+export const PARLAY_LEG_NOT_APPROVED = 'Not open for parlays: only markets the operator approved can be parlay legs.'
+export const PARLAY_LEG_CLOSED = 'This market is closed, so it cannot join a new parlay.'
+
+/**
+ * Why this market cannot be a parlay leg right now, or null when it can. Mirrors the contract's price_legs: the
+ * owner approved it as a leg, it is active, and its deadline has not passed.
+ */
+export function parlayLegBlocker(
+  market: Pick<Market, 'parlayLeg' | 'status' | 'timeRemaining' | 'deadlineTimestamp'>,
+  now: number = Date.now(),
+): string | null {
+  const ended = market.timeRemaining === 'Ended'
+    || (market.deadlineTimestamp !== undefined && market.deadlineTimestamp <= now)
+  if (market.status !== 1 || ended) return PARLAY_LEG_CLOSED
+  if (market.parlayLeg !== true) return PARLAY_LEG_NOT_APPROVED
+  return null
+}
+
+/**
+ * Why each slip leg cannot be placed now, by market id. A slip is kept in the browser, so it can hold legs added
+ * before their market closed or lost its approval. Legs whose market is not loaded are left out.
+ */
+export function slipLegBlockers(legs: ParlaySlipLeg[], markets: Market[], now: number = Date.now()): Record<string, string> {
+  const byId = new Map(markets.map((m) => [m.id, m]))
+  const out: Record<string, string> = {}
+  for (const leg of legs) {
+    const market = byId.get(leg.marketId)
+    const reason = market ? parlayLegBlocker(market, now) : null
+    if (reason) out[leg.marketId] = reason
+  }
+  return out
+}
+
 /** Get market program ID from token type */
 export function getMarketProgramId(tokenType?: string): number {
   if (tokenType === 'USDCX') return 2
@@ -195,6 +228,7 @@ export const useParlayStore = create<ParlayState>()(
 
       // Slip actions
       addLeg: (market: Market, outcome: number) => {
+        if (parlayLegBlocker(market) !== null) return
         const state = get()
         const existingIndex = state.slipLegs.findIndex(l => l.marketId === market.id)
         if (state.slipLegs.length >= MAX_LEGS && existingIndex === -1) return

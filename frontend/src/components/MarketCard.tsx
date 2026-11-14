@@ -3,6 +3,7 @@ import { useMemo, useRef } from 'react'
 import { useLiveCountdown } from '@/hooks/useGlobalTicker'
 import { type Market } from '@/lib/store'
 import { cn, formatCredits, formatPercentage, getCategoryName, getCategoryEmoji, getCategoryStrip, getCategoryColor, getTokenSymbol } from '@/lib/utils'
+import { parlayLegBlocker } from '@/lib/parlay-store'
 
 import { StatusBadge, getStatusVariant } from '@/components/ui/StatusBadge'
 import { getMarketThumbnail, isContainThumbnail, thumbnailFallback } from '@/lib/market-thumbnails'
@@ -50,6 +51,9 @@ export function MarketCard({
 }: MarketCardProps) {
   const timeRemaining = useLiveCountdown(market.deadlineTimestamp, market.timeRemaining)
   const isExpired = timeRemaining === 'Ended' || market.status !== 1
+  const parlayBlocker = parlayMode ? parlayLegBlocker(market) : null
+  // A leg of a market that can no longer be one may still be on the slip: let it be taken off from here.
+  const strandedLeg = parlayBlocker !== null ? selectedParlayOutcome ?? null : null
   const statusVariant = getStatusVariant(market.status, isExpired)
 
   const numOutcomes = market.numOutcomes ?? 2
@@ -163,51 +167,62 @@ export function MarketCard({
                 <span className="rounded-full border border-brand-500/20 bg-brand-500/10 px-2 py-1 text-[10px] font-semibold text-brand-300">
                   Leg selected
                 </span>
-              ) : (
+              ) : parlayBlocker === null ? (
                 <span className="text-[10px] text-surface-500">Tap an outcome</span>
-              )}
+              ) : null}
             </div>
-            <div className={cn('grid gap-2', isBinary ? 'grid-cols-1' : 'grid-cols-2')}>
-              {outcomeSummaries.map((outcome) => {
-                const isSelected = selectedParlayOutcome === outcome.outcome
+            {parlayBlocker === null ? (
+              <div className={cn('grid gap-2', isBinary ? 'grid-cols-1' : 'grid-cols-2')}>
+                {outcomeSummaries.map((outcome) => {
+                  const isSelected = selectedParlayOutcome === outcome.outcome
 
-                return (
+                  return (
+                    <button
+                      key={outcome.outcome}
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onQuickAddParlay?.(market, outcome.outcome)
+                      }}
+                      className={cn(
+                        'rounded-xl border px-3 py-2 text-left transition-all duration-200 w-full',
+                        outcome.styles.bg,
+                        outcome.styles.border,
+                        'hover:border-brand-400/35 hover:bg-white/[0.05]',
+                        isSelected && 'border-brand-400/35 bg-brand-500/10 shadow-[0_0_0_1px_rgba(201,168,76,0.12)]'
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={cn('truncate text-xs font-semibold', outcome.styles.text)}>
+                          {outcome.label}
+                        </span>
+                        <span className={cn('text-sm font-bold tabular-nums', outcome.styles.text)}>
+                          {outcome.payout.toFixed(2)}x
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-surface-500">
+                        {isSelected ? 'Tap again to remove' : `${formatPercentage(outcome.percentage)} implied`}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <>
+                <p className="text-[11px] leading-relaxed text-surface-500">{parlayBlocker}</p>
+                {strandedLeg !== null && (
                   <button
-                    key={outcome.outcome}
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation()
-                      onQuickAddParlay?.(market, outcome.outcome)
+                      onQuickAddParlay?.(market, strandedLeg)
                     }}
-                    disabled={isExpired}
-                    className={cn(
-                      'rounded-xl border px-3 py-2 text-left transition-all duration-200 w-full',
-                      outcome.styles.bg,
-                      outcome.styles.border,
-                      isExpired && 'cursor-not-allowed opacity-50',
-                      !isExpired && 'hover:border-brand-400/35 hover:bg-white/[0.05]',
-                      isSelected && 'border-brand-400/35 bg-brand-500/10 shadow-[0_0_0_1px_rgba(201,168,76,0.12)]'
-                    )}
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-surface-300 transition-colors hover:border-red-500/30 hover:text-red-300"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={cn('truncate text-xs font-semibold', outcome.styles.text)}>
-                        {outcome.label}
-                      </span>
-                      <span className={cn('text-sm font-bold tabular-nums', outcome.styles.text)}>
-                        {outcome.payout.toFixed(2)}x
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] text-surface-500">
-                      {isSelected ? 'Tap again to remove' : `${formatPercentage(outcome.percentage)} implied`}
-                    </p>
+                    Remove from slip
                   </button>
-                )
-              })}
-            </div>
-            {isExpired && (
-              <p className="mt-2 text-[11px] text-surface-500">
-                Closed markets stay view-only here. Open detail to review resolution state.
-              </p>
+                )}
+              </>
             )}
           </div>
         )}

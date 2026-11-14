@@ -2,7 +2,7 @@ import type { ParlayRecord, ParlaySlipLeg, ParlayTokenType } from './parlay-stor
 import type { WalletBalance } from './wallet'
 import { config, getTransactionUrl } from './config'
 import { TOKEN, TOKEN_KEY, isChainTxId, tokenLabel } from './near/config'
-import { getParlayPool } from './near/parlay'
+import { getParlayPool, quoteParlay, type ParlayQuote } from './near/parlay'
 import { devWarn } from './logger'
 import { findRecords, type ScannedRecord } from './record-scanner'
 
@@ -297,6 +297,73 @@ export async function getParlayCreateReadiness(params: {
     availableBacking,
     requiredBacking,
   }
+}
+
+export interface ParlayStakeLimits {
+  /** The largest stake quote_parlay allows on these legs now: pool solvency, max payout and the thinnest leg's depth. */
+  maxStake: bigint
+  minStake: bigint
+  /** The stake token's parlay pool. */
+  pool: bigint
+}
+
+/** Floors an amount to whole cents (0.01), so a limit shown with two decimals is never above the real one. */
+export function floorToCents(amount: bigint): bigint {
+  return amount - (amount % 10_000n)
+}
+
+/** What the contract lets a stake on these legs be right now; throws with the contract's reason for legs it refuses. */
+export async function getParlayStakeLimits(
+  tokenType: ParlayTokenType,
+  legs: { marketId: string; outcome: number }[],
+): Promise<ParlayStakeLimits> {
+  const token = TOKEN_TYPE_TO_ID[tokenType]
+  const [quote, p] = await Promise.all([quoteParlay(token, 1_000_000n, legs), getParlayPool()])
+  return { maxStake: BigInt(quote.max_stake), minStake: BigInt(p.min_stake), pool: BigInt(p.pool[token] ?? '0') }
+}
+
+/** Why this stake cannot go on these legs now, or null (`limits` from getParlayStakeLimits). */
+export function parlayStakeLimitError(stake: bigint, limits: ParlayStakeLimits, tokenType: ParlayTokenType): string | null {
+  const label = tokenLabel(tokenType)
+  if (limits.pool === 0n) {
+    return `The ${label} parlay pool is not funded yet, so it cannot back a payout.${tokenType === 'NEAR' ? '' : ' Stake NEAR instead.'}`
+  }
+  const most = `${formatParlayAmount(floorToCents(limits.maxStake))} ${label}`
+  if (limits.maxStake < limits.minStake) {
+    return `These legs can take at most ${most} right now, below the ${formatParlayAmount(limits.minStake)} ${label} minimum. `
+      + 'Try fewer legs or markets with more liquidity.'
+  }
+  if (stake > limits.maxStake) return `This parlay can take at most ${most} right now. Lower the stake.`
+  return null
+}
+
+/**
+ * Checkout's checks before placing, which may first ask the wallet for a deposit. Returns the contract's quote to place
+ * with; throws with the reason the contract would refuse this stake on these legs.
+ */
+export async function checkParlayPlacement(params: {
+  tokenType: ParlayTokenType
+  stake: bigint
+  legs: { marketId: string; outcome: number }[]
+}): Promise<ParlayQuote> {
+  const quote = await quoteParlay(TOKEN_TYPE_TO_ID[params.tokenType], params.stake, params.legs)
+  const readiness = await getParlayCreateReadiness({
+    tokenType: params.tokenType,
+    stake: params.stake,
+    combinedOddsBps: BigInt(quote.combined_odds_bps),
+    grossPayout: BigInt(quote.potential_payout),
+  })
+  if (!readiness.canCreate) {
+    throw new Error(readiness.reason ?? 'Parlay is not ready for on-chain submission.')
+  }
+  // A ticket may pay only a share of its thinnest leg's pool; the quote's max_stake folds that in with the pool limits.
+  const limitError = parlayStakeLimitError(
+    params.stake,
+    { maxStake: BigInt(quote.max_stake), minStake: readiness.minStake, pool: readiness.pool },
+    params.tokenType,
+  )
+  if (limitError) throw new Error(limitError)
+  return quote
 }
 
 export async function computeParlayOnChainId(params: {
