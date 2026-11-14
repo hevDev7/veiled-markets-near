@@ -91,6 +91,38 @@
   to { transform: translate3d(3.5%, 0, 0) skewX(-1deg); }
 }
 
+/* Hero orrery: engraved rings that turn slowly about the centre of the drawing. They pause while the art is off
+   screen and stand still when the visitor asks for less motion. */
+.vl-orrery .vl-orrery-spin,
+.vl-orrery .vl-orrery-spin-rev,
+.vl-orrery .vl-orrery-veil {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+.vl-orrery-spin { animation: vl-orrery-turn 180s linear infinite; }
+.vl-orrery-spin-rev { animation: vl-orrery-turn 240s linear infinite reverse; }
+.vl-orrery-veil { animation: vl-orrery-turn 70s linear infinite; }
+.vl-orrery-twinkle { animation: vl-orrery-twinkle 5s ease-in-out infinite; }
+.vl-orrery-core {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: vl-orrery-breathe 7s ease-in-out infinite;
+}
+.vl-orrery.is-paused * { animation-play-state: paused; }
+
+@keyframes vl-orrery-turn { to { transform: rotate(360deg); } }
+@keyframes vl-orrery-twinkle {
+  0%, 100% { opacity: 0.12; }
+  50% { opacity: 0.85; }
+}
+@keyframes vl-orrery-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vl-orrery * { animation: none !important; }
+}
+
 /* The veil over one word of the headline; it is drawn aside once, when the page loads. */
 .vl-veil-cover {
   position: absolute;
