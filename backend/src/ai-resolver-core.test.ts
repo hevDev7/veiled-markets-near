@@ -78,6 +78,32 @@ test('private, loopback and link-local addresses are refused after DNS', () => {
   for (const a of ['104.16.1.1', '8.8.8.8', '2606:4700::1111']) assert.equal(isPrivateAddress(a), false, a);
 });
 
+test('IPv6 forms that carry a private IPv4 address are refused, in every spelling', () => {
+  for (const a of [
+    '::ffff:7f00:1', // ::ffff:127.0.0.1 as the URL parser writes it
+    '::ffff:a9fe:a9fe', // ::ffff:169.254.169.254 (cloud metadata)
+    '::ffff:a00:5', // ::ffff:10.0.0.5
+    '::ffff:0:a00:5', // IPv4-translated
+    '::7f00:1', // IPv4-compatible ::127.0.0.1
+    '::127.0.0.1',
+    '64:ff9b::a00:5', // NAT64 of 10.0.0.5
+    '64:ff9b::127.0.0.1',
+    '64:ff9b:1::1', // local-use NAT64
+    '2002:7f00:1::1', // 6to4 of 127.0.0.1
+    '2001:0:4136:e378::1', // Teredo
+    'fec0::1', // site-local
+  ]) {
+    assert.equal(isPrivateAddress(a), true, a);
+  }
+  for (const a of ['::ffff:808:808', '::ffff:8.8.8.8', '64:ff9b::808:808', '2002:808:808::1', '2001:4860:4860::8888']) {
+    assert.equal(isPrivateAddress(a), false, a);
+  }
+  assert.equal(sourceUrl('http://[::ffff:127.0.0.1]/'), null);
+  assert.equal(sourceUrl('http://[::ffff:169.254.169.254]/latest/meta-data/'), null);
+  assert.equal(sourceUrl('http://[64:ff9b::10.0.0.5]/'), null);
+  assert.equal(sourceUrl('https://[2606:4700::1111]/')?.hostname, '[2606:4700::1111]');
+});
+
 test('page text keeps the words and drops scripts, styles and tags', () => {
   const t = htmlToText('<html><head><style>p{}</style><script>alert(1)</script></head><body><h1>BTC</h1><p>Close: $101,250 &amp; up</p></body></html>');
   assert.equal(t, 'BTC Close: $101,250 & up');

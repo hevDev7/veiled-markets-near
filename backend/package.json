@@ -6,7 +6,7 @@
     "scripts": {
         "relayer": "tsx src/near-relayer.ts",
         "turbo-oracle": "tsx src/near-turbo-oracle.ts",
-        "test": "tsx --test src/relay-guards.test.ts src/ai-resolver-core.test.ts scripts/lp-notes.test.ts scripts/price-question.test.ts",
+        "test": "tsx --test src/relay-guards.test.ts src/ai-resolver-core.test.ts src/source-reader.test.ts src/source-catalog.test.ts src/source-check.test.ts src/rate-limit.test.ts src/market-ai-http.test.ts scripts/lp-notes.test.ts scripts/market-spec.test.ts scripts/price-question.test.ts",
         "ai-resolver": "tsx --env-file-if-exists=.env src/near-ai-resolver.ts"
     },
     "dependencies": {
@@ -15,7 +15,8 @@
         "eventsource": "^3.0.7",
         "near-api-js": "7.3.1",
         "node-fetch": "^3.3.2",
-        "snarkjs": "0.7.5"
+        "snarkjs": "0.7.5",
+        "undici": "^6.29.1"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

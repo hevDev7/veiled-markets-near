@@ -120,23 +120,33 @@ export interface MarketMetadata {
   thumbnailUrl?: string;
 }
 
-const MAX_METADATA = 2048;
+/** The contract's limit on create_market `metadata`, in UTF-8 bytes. */
+export const MAX_METADATA = 2048;
 
+/** The metadata JSON as create_market would store it, untrimmed. */
+export function metadataJson(m: MarketMetadata): string {
+  return JSON.stringify({
+    v: 1,
+    q: m.question ?? '',
+    d: m.description ?? '',
+    s: m.resolutionSource || undefined,
+    o: m.outcomeLabels?.length ? m.outcomeLabels : undefined,
+    i: m.thumbnailUrl && m.thumbnailUrl.length < 400 ? m.thumbnailUrl : undefined,
+  });
+}
+
+/** The untrimmed metadata's size in UTF-8 bytes: what the create page's size meter shows against MAX_METADATA. */
+export function metadataBytes(m: MarketMetadata): number {
+  return new TextEncoder().encode(metadataJson(m)).length;
+}
+
+/** The metadata to store. Trimming the description is a last resort: the create page keeps it under the limit. */
 export function encodeMetadata(m: MarketMetadata): string {
-  const enc = (d: string) =>
-    JSON.stringify({
-      v: 1,
-      q: m.question ?? '',
-      d,
-      s: m.resolutionSource || undefined,
-      o: m.outcomeLabels?.length ? m.outcomeLabels : undefined,
-      i: m.thumbnailUrl && m.thumbnailUrl.length < 400 ? m.thumbnailUrl : undefined,
-    });
   let description = m.description ?? '';
-  let out = enc(description);
+  let out = metadataJson(m);
   while (new TextEncoder().encode(out).length > MAX_METADATA && description.length > 0) {
     description = description.slice(0, Math.max(0, description.length - 64));
-    out = enc(description ? `${description}…` : '');
+    out = metadataJson({ ...m, description: description ? `${description}…` : '' });
   }
   return out;
 }

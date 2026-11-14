@@ -84,11 +84,36 @@ export function sourceUrl(text: string): URL | null {
   return u;
 }
 
-/** Addresses a fetch must never reach: loopback, private, link-local (cloud metadata), CGNAT, multicast, unspecified. */
+/** The eight 16-bit groups of an IPv6 address (`::` expanded, a dotted IPv4 tail folded in, any zone dropped). */
+function ipv6Groups(ip: string): number[] | null {
+  let s = ip.toLowerCase().replace(/%.*$/, '');
+  const dotted = s.match(/^(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) {
+    if (isIP(dotted[2]) !== 4) return null;
+    const [a, b, c, d] = dotted[2].split('.').map(Number);
+    s = `${dotted[1]}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0) return null;
+  const groups = [...head, ...Array<string>(fill).fill('0'), ...tail].map(g => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN));
+  return groups.length === 8 && groups.every(Number.isInteger) ? groups : null;
+}
+
+const v4Of = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+
+/**
+ * Addresses a fetch must never reach: loopback, private, link-local (cloud metadata), CGNAT, multicast, reserved,
+ * unspecified. IPv6 forms that carry an IPv4 address (mapped, translated, compatible, NAT64, 6to4) are judged by that
+ * IPv4 address, whatever their spelling; Teredo and local-use NAT64 are refused outright. Anything that is not an IP
+ * address is refused.
+ */
 export function isPrivateAddress(ip: string): boolean {
-  const mapped = ip.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateAddress(mapped[1]);
-  if (isIP(ip) === 4) {
+  const family = isIP(ip.replace(/%.*$/, ''));
+  if (family === 4) {
     const [a, b] = ip.split('.').map(Number);
     return (
       a === 0 || a === 10 || a === 127 || a >= 224 ||
@@ -98,8 +123,24 @@ export function isPrivateAddress(ip: string): boolean {
       (a === 192 && b === 168)
     );
   }
-  const v6 = ip.toLowerCase();
-  return v6 === '::' || v6 === '::1' || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6) || v6.startsWith('ff');
+  if (family !== 6) return true;
+  const g = ipv6Groups(ip);
+  if (!g) return true;
+  const zeros = (from: number, to: number) => g.slice(from, to).every(x => x === 0);
+  // ::a.b.c.d (compatible, also :: and ::1), ::ffff:a.b.c.d (mapped), ::ffff:0:a.b.c.d (translated)
+  if (zeros(0, 4) && ((g[4] === 0 && (g[5] === 0 || g[5] === 0xffff)) || (g[4] === 0xffff && g[5] === 0))) {
+    return isPrivateAddress(v4Of(g[6], g[7]));
+  }
+  if (g[0] === 0x64 && g[1] === 0xff9b && zeros(2, 6)) return isPrivateAddress(v4Of(g[6], g[7])); // NAT64 64:ff9b::/96
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) return true; // local-use NAT64 64:ff9b:1::/48
+  if (g[0] === 0x2002) return isPrivateAddress(v4Of(g[1], g[2])); // 6to4 2002::/16
+  if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo 2001::/32
+  return (
+    (g[0] & 0xfe00) === 0xfc00 || // unique local fc00::/7
+    (g[0] & 0xffc0) === 0xfe80 || // link-local fe80::/10
+    (g[0] & 0xffc0) === 0xfec0 || // site-local fec0::/10
+    (g[0] & 0xff00) === 0xff00 // multicast ff00::/8
+  );
 }
 
 /** Visible text of an HTML page (or the text itself), whitespace collapsed. */

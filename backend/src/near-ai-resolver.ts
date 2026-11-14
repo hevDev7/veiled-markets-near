@@ -10,23 +10,29 @@
 // response, reasoning, signature, attestation) is served at /receipts/<market>.json and checks in any browser
 // through NEAR AI's Verification Center.
 //
-//   npm run ai-resolver                        loop forever, serve /health and /receipts (reads backend/.env if any)
+// The same server answers the create page: GET /check-source?url=… says whether this resolver can read a source,
+// with the same reader the resolver votes with (market-ai-http.ts).
+//
+//   npm run ai-resolver                        loop forever, serve /health, /receipts and /check-source
+//                                              (reads backend/.env if any)
 //   npm run ai-resolver -- --once              one pass, then exit
+//   npm run ai-resolver -- --serve-only        serve only, never vote (NEARAI_API_KEY not needed)
 //   DRY_RUN=1 …                                decide and write receipts, never vote
 //
-// Env: NEARAI_API_KEY (required), NEARAI_MODEL (z-ai/glm-5.3-flash), VEILED_CONTRACT (v1.veiled-markets.testnet),
+// Env: NEARAI_API_KEY (required unless --serve-only), NEARAI_MODEL (z-ai/glm-5.3-flash),
+//      VEILED_CONTRACT (v1.veiled-markets.testnet),
 //      AI_RESOLVER_ACCOUNT, AI_RESOLVER_PRIVATE_KEY (default: the legacy keychain file of that account),
 //      AI_RESOLVER_PUBLIC_URL (the public base URL of this service: votes link their receipts there; without it
 //      the service never votes),
 //      NEAR_RPC_URL (comma-separated), AI_MIN_CONFIDENCE (0.8), AI_POLL_SECONDS (120),
-//      AI_RETRY_ABSTAINED_MINUTES (60), AI_RESOLVER_PORT (4091), AI_RECEIPTS_DIR (backend/ai-receipts).
+//      AI_RETRY_ABSTAINED_MINUTES (60), AI_RESOLVER_PORT (4091), AI_RECEIPTS_DIR (backend/ai-receipts),
+//      MARKET_AI_ORIGINS (the create page's origins, comma-separated;
+//      https://veiledmarkets.xyz,http://localhost:3100), MARKET_AI_CLIENT_PER_HOUR (10), MARKET_AI_DAILY_CAP (150).
 // ============================================================================
 
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { isIP } from 'node:net';
 import { homedir } from 'node:os';
 import nodePath from 'node:path';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
@@ -34,24 +40,32 @@ import {
   buildRequest,
   checkSignature,
   evidenceFor,
-  htmlToText,
-  isPrivateAddress,
   parseDecision,
   readMarket,
   sha256Hex,
   shouldVote,
-  sourceUrl,
   verifyLink,
   type ChainMarket,
   type Decision,
   type TeeSignature,
 } from './ai-resolver-core';
+import { marketAiRoutes } from './market-ai-http';
+import { RateLimiter } from './rate-limit';
+import { checkSource } from './source-check';
+import { defaultReaderDeps, fetchSource, limitLookups, readSource, type ReaderDeps } from './source-reader';
+
+// The public source check reads with the resolver's own reader, but with at most 2 DNS lookups pending at once: the
+// voting loop shares libuv's thread pool with them.
+const checkReaderDeps: ReaderDeps = { ...defaultReaderDeps, resolveHost: limitLookups(defaultReaderDeps.resolveHost, 2) };
 
 try {
   process.loadEnvFile(new URL('../.env', import.meta.url));
 } catch (err) {
   if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('[env] backend/.env not loaded:', (err as Error).message);
 }
+
+// A request handler's stray rejection must not stop the voting loop.
+process.on('unhandledRejection', e => console.warn('[ai] unhandled', (e as Error)?.message ?? e));
 
 const API = 'https://cloud-api.near.ai/v1';
 const API_KEY = process.env.NEARAI_API_KEY || '';
@@ -67,8 +81,10 @@ const RECEIPTS = process.env.AI_RECEIPTS_DIR || nodePath.join(nodePath.dirname(n
 const DRY_RUN = process.env.DRY_RUN === '1' || !PUBLIC_URL;
 const RPC_URLS = (process.env.NEAR_RPC_URL || 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org')
   .split(',').map(u => u.trim()).filter(Boolean);
-const SOURCE_CHARS = 20_000;
-const SOURCE_BYTES = 1_000_000;
+const MARKET_AI_ORIGINS = (process.env.MARKET_AI_ORIGINS || 'https://veiledmarkets.xyz,http://localhost:3100')
+  .split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean);
+const MARKET_AI_CLIENT_PER_HOUR = Number(process.env.MARKET_AI_CLIENT_PER_HOUR || 10);
+const MARKET_AI_DAILY_CAP = Number(process.env.MARKET_AI_DAILY_CAP || 150);
 /** Seconds per contract tick (height = block time in ms / 4000). */
 const TICK_SECONDS = 4;
 
@@ -102,57 +118,8 @@ const INDEX = nodePath.join(RECEIPTS, 'index.json');
 const index: Record<string, Entry> = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, 'utf8')) : {};
 const saveIndex = () => writeFileSync(INDEX, JSON.stringify(index, null, 2));
 
-// ------------------------------------------------------------------ the resolution source
-
-interface Source {
-  url: string;
-  final_url?: string;
-  status?: number;
-  sha256?: string;
-  bytes?: number;
-  fetched_at: string;
-  error?: string;
-}
-
-/** Fetches a public page: every hop's host must resolve to public addresses only; at most 3 redirects and 1 MB. */
-async function fetchSource(url: URL, hops = 0): Promise<{ final: URL; status: number; body: Buffer }> {
-  const host = url.hostname.replace(/^\[|\]$/g, '');
-  const addresses = isIP(host) ? [host] : (await lookup(host, { all: true })).map(a => a.address);
-  if (!addresses.length || addresses.some(isPrivateAddress)) throw new Error('the source resolves to a private address');
-  const res = await fetch(url, {
-    redirect: 'manual',
-    signal: AbortSignal.timeout(10_000),
-    headers: { 'user-agent': 'VeiledMarkets-AIResolver/1.0', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' },
-  });
-  const location = res.headers.get('location');
-  if (res.status >= 300 && res.status < 400 && location) {
-    const next = sourceUrl(new URL(location, url).toString());
-    if (!next || hops >= 3) throw new Error('the source redirects somewhere it may not be fetched');
-    return fetchSource(next, hops + 1);
-  }
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of res.body ?? []) {
-    size += chunk.length;
-    if (size > SOURCE_BYTES) break;
-    chunks.push(Buffer.from(chunk));
-  }
-  return { final: url, status: res.status, body: Buffer.concat(chunks) };
-}
-
-async function readSource(text: string): Promise<{ source: Source | null; sourceText: string | null }> {
-  const url = sourceUrl(text);
-  if (!url) return { source: null, sourceText: null };
-  const fetched_at = new Date().toISOString();
-  try {
-    const { final, status, body } = await fetchSource(url);
-    const source: Source = { url: url.toString(), final_url: final.toString(), status, sha256: sha256Hex(body), bytes: body.length, fetched_at };
-    if (status >= 400) return { source: { ...source, error: `HTTP ${status}` }, sourceText: null };
-    return { source, sourceText: htmlToText(body.toString('utf8')).slice(0, SOURCE_CHARS) };
-  } catch (e) {
-    return { source: { url: url.toString(), fetched_at, error: (e as Error).message }, sourceText: null };
-  }
-}
+// The resolution source is read by source-reader.ts: the same reader /check-source uses, with DNS pinned to the
+// addresses it vetted.
 
 // ------------------------------------------------------------------ NEAR AI Cloud
 
@@ -328,24 +295,45 @@ async function pass(): Promise<void> {
 
 function serve(): void {
   const send = (res: http.ServerResponse, status: number, body: string, type = 'application/json') => {
+    if (res.headersSent) return;
     res.writeHead(status, { 'content-type': type, 'access-control-allow-origin': '*', 'cache-control': 'no-cache' });
     res.end(body);
   };
+  // The create page's endpoints. /draft and /review answer 503 until AI drafting is set up.
+  const routes = marketAiRoutes({
+    checkSource: url => checkSource(url, { fetch: target => fetchSource(target, checkReaderDeps) }),
+    origins: MARKET_AI_ORIGINS,
+    checkLimiter: new RateLimiter({ perClient: 30, clientWindowMs: 60_000 }),
+    aiLimiter: new RateLimiter({ perClient: MARKET_AI_CLIENT_PER_HOUR, clientWindowMs: 3_600_000, globalPerUtcDay: MARKET_AI_DAILY_CAP }),
+  });
   http
     .createServer((req, res) => {
-      const url = new URL(req.url ?? '/', 'http://x');
-      if (url.pathname === '/health') {
-        return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, last_pass: lastPass }));
-      }
-      if (url.pathname === '/receipts' || url.pathname === '/receipts/') return send(res, 200, JSON.stringify(index));
-      const file = url.pathname.match(/^\/receipts\/(\d+(?:\.attestation)?\.json)$/)?.[1];
-      if (file && existsSync(nodePath.join(RECEIPTS, file))) return send(res, 200, readFileSync(nodePath.join(RECEIPTS, file), 'utf8'));
-      return send(res, 404, JSON.stringify({ error: 'not found' }));
+      routes(req, res)
+        .then(handled => {
+          if (handled) return;
+          const url = new URL(req.url ?? '/', 'http://x');
+          if (url.pathname === '/health') {
+            return send(res, 200, JSON.stringify({ ok: true, contract: CONTRACT, resolver: ACCOUNT, model: MODEL, dry_run: DRY_RUN, last_pass: lastPass }));
+          }
+          if (url.pathname === '/receipts' || url.pathname === '/receipts/') return send(res, 200, JSON.stringify(index));
+          const file = url.pathname.match(/^\/receipts\/(\d+(?:\.attestation)?\.json)$/)?.[1];
+          if (file && existsSync(nodePath.join(RECEIPTS, file))) return send(res, 200, readFileSync(nodePath.join(RECEIPTS, file), 'utf8'));
+          return send(res, 404, JSON.stringify({ error: 'not found' }));
+        })
+        .catch(e => {
+          console.warn('[ai] request failed:', (e as Error)?.message);
+          send(res, 500, JSON.stringify({ error: 'Internal error.' }));
+        });
     })
-    .listen(PORT, () => console.log(`[ai] receipts on :${PORT}`));
+    .listen(PORT, () => console.log(`[ai] listening on :${PORT}`));
 }
 
 async function main(): Promise<void> {
+  if (process.argv.includes('--serve-only')) {
+    console.log(`[ai] serve only (no voting): /health, /receipts, /check-source; origins ${MARKET_AI_ORIGINS.join(', ')}`);
+    serve();
+    return;
+  }
   if (!API_KEY) throw new Error('NEARAI_API_KEY is not set (backend/.env or the environment)');
   console.log(`[ai] ${ACCOUNT} on ${CONTRACT}, model ${MODEL}${DRY_RUN ? ', DRY RUN (no votes)' : ''}`);
   if (!PUBLIC_URL) console.warn('[ai] AI_RESOLVER_PUBLIC_URL is not set: running dry, since a vote must link a receipt anyone can fetch');

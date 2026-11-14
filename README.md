@@ -47,7 +47,9 @@ bettor's account never signs it.
 
 It has:
 
-- **Markets with two to four outcomes**, priced at all times by an on-chain market maker, in NEAR or USDC.
+- **Yes/No markets**, priced at all times by an on-chain market maker, in NEAR or USDC. Each names a source page the
+  AI resolver can read, checked before the market is published. (The contract also takes three or four outcomes, and
+  older markets with them keep working; the create page makes Yes/No markets only.)
 - **Turbo rounds**: BTC, ETH or SOL up or down over five minutes, opened and settled by an oracle that logs every
   price it used.
 - **Parlays** of two to four outcomes across markets, priced by the contract from the live pools.
@@ -164,6 +166,35 @@ looks for closed markets every two minutes; its receipt index,
 [ai-resolver-production.up.railway.app/receipts](https://ai-resolver-production.up.railway.app/receipts), lists every
 market it has looked at and what it did.
 
+### Creating a market the AI resolver can resolve
+
+The create page makes Yes/No markets, and every market names one source URL. Before a market can be published, the
+page asks the AI resolver service whether it can read that source (`GET /check-source?url=…`). The check uses the same
+reader the resolver votes with: a public `http` or `https` address on the default port, at most 3 redirects, 10
+seconds and 1 MB, read as plain text without running the page's JavaScript. The page shows the text the resolver would
+get. A page that gives fewer than 200 characters of text, which usually means it is filled in by JavaScript, is
+refused, and so is any source the resolver cannot fetch or that answers with an HTTP error. Three data APIs the
+templates use are recognised and checked with a past date instead, to make sure the answer holds the value the rules
+name: Coinbase's one-minute candles, Nasdaq's daily stock history and Frankfurter's copy of the ECB reference rates.
+
+The Start step offers three ways in:
+
+- **Template.** *Crypto price*: will BTC, ETH, SOL or NEAR trade above a price at a given UTC minute, decided by the
+  open of Coinbase's one-minute candle that starts then; trading closes at that minute. *Stock close*: will a ticker
+  close above a price on an NYSE trading day in 2026 or 2027, decided by Nasdaq's daily history; trading closes at
+  16:00 New York time (13:00 on early-close days). *Currency rate*: will a pair's ECB reference rate for a TARGET
+  business day be above a value, decided by Frankfurter; trading closes at 12:00 UTC, before the ECB publishes. The
+  template writes the question, the rules and the source, and they stay read-only unless the creator chooses to edit
+  them. The stock and rate rules say the market waits until the day's value is published, so the resolver does not
+  vote "No" in the hours between the close and the publication; if the value never appears, the market is cancelled
+  at its resolution deadline and every position is refunded.
+- **Write it yourself.** The rules box starts from the pattern the templates use. Before publishing, the creator
+  ticks that the value that decides the market appears in the source text the check showed.
+- **Describe it to AI** comes with AI drafting, which is not switched on yet.
+
+`backend/scripts/quick-market.ts open` runs the same check before it signs anything, and refuses spec files with
+outcomes other than Yes/No.
+
 ## Architecture
 
 ```
@@ -182,7 +213,8 @@ Turbo oracle (backend/src/near-turbo-oracle.ts)          ├─ markets: FPMM ma
                                                         │    settled by the first call that touches a market
 AI resolver (backend/src/near-ai-resolver.ts)    ──▶    └─ parlays, turbo rounds and their vault
   optional: NEAR AI Cloud (TEE) reads the source,
-  casts a bonded vote with a signed receipt
+  casts a bonded vote with a signed receipt;
+  also checks sources for the create page
 ```
 
 The relayer checks each proof locally before it spends gas on it, and it cannot change a trade: the proof binds the
@@ -216,7 +248,11 @@ VITE_TURBO_ORACLE_URL=https://oracle.veiledmarkets.xyz \
 npm run dev            # http://localhost:3100
 ```
 
-Then follow [Try it](#try-it) with `http://localhost:3100` in place of the demo address.
+Then follow [Try it](#try-it) with `http://localhost:3100` in place of the demo address. The create page checks
+sources with the hosted AI resolver service, which answers `http://localhost:3100`. To run that check yourself,
+start `npm run ai-resolver -- --serve-only` in `backend/` (port 4091; it serves the check and the receipts, never
+votes, and needs no NEAR AI key) and set `VITE_AI_RESOLVER_URL=http://localhost:4091`. The service answers only the
+origins in `MARKET_AI_ORIGINS` (default `https://veiledmarkets.xyz,http://localhost:3100`).
 
 **Your own relayer and oracle** (optional; each needs the key of a funded testnet account):
 
@@ -253,8 +289,8 @@ its `/receipts` are served), `npm run ai-resolver` votes and serves the receipts
 | Circuit: valid spends prove, invalid ones do not | `cd near/circuits && npm install && node --test test/spend.test.mjs` | 6 pass |
 | Contract rules, with a mocked host | `cd near/contract && cargo test -p veiled` | 73 pass |
 | Contract in a NEAR sandbox, with real proofs | `cd near/contract && cargo test -p integration-tests` | 12 pass |
-| Relayer request checks, AI resolver decisions and TEE signature checks, LP note bookkeeping, demo price questions | `cd backend && npm install && npm test` | 33 pass |
-| App: note keys, wallet signature, market data, positions, math, resolution stages | `cd frontend && npm install && npm test` | 70 pass |
+| Relayer request checks, AI resolver decisions and TEE signature checks, the source reader, catalog and check, the create page's endpoints and rate limits, LP note bookkeeping, spec files, demo price questions | `cd backend && npm install && npm test` | 75 pass |
+| App: note keys, wallet signature, market data, positions, math, resolution stages, market templates, the create form and its source check | `cd frontend && npm install && npm test` | 99 pass |
 | Live testnet: deposit, then a relayed private withdrawal | `cd backend && npx tsx scripts/testnet-smoke.ts <account> https://relayer.veiledmarkets.xyz` | needs that account's key |
 
 The sandbox tests download a NEAR sandbox binary on first run, and the in-place upgrade test among them is skipped
@@ -329,7 +365,8 @@ What the testnet deployment trusts, and what a production deployment still needs
   paid half the market's protocol fees, which is small on testnet markets; forfeited bonds go to the treasury, not to
   correct voters. Production needs a larger bond, more voters (`set_resolution_config`), and a committee the operator
   does not control. The AI resolver's model and signature are checked, but the source page it reads is fetched by the
-  resolver itself, outside the TEE.
+  resolver itself, outside the TEE. The create page's source check shows that the resolver could read a source when
+  the market was published; a site can still change or go down before the market closes.
 - **Cancelled markets.** A cancelled market refunds each outcome what its buyers paid in, pro rata within that
   outcome, so a refund cannot draw on another outcome's collateral. Markets created before that rule keep the older
   pro-rata refund.

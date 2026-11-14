@@ -445,7 +445,7 @@ export function Docs() {
                 {
                   icon: Layers,
                   title: 'Prediction markets',
-                  desc: '2 to 4 outcomes, priced by an FPMM market maker, in NEAR or USDC. Resolved by bonded votes, with a dispute window and a 5-member committee.',
+                  desc: 'Yes/No markets with a source the AI resolver can read, priced by an FPMM market maker, in NEAR or USDC. Resolved by bonded votes, with a dispute window and a 5-member committee.',
                 },
                 {
                   icon: Radio,
@@ -673,8 +673,21 @@ nullifier   = Poseidon(sk, commitment)     published when the note is spent`}</C
           <section className="mb-16">
             <SectionHeader id="markets" icon={Layers} title="Prediction markets" />
             <P>
-              Anyone can create a market with 2, 3 or 4 outcomes. The initial liquidity is split equally across the
-              outcome reserves, and the creator receives it as a private LP note.
+              Anyone can create a market. The create page makes Yes/No markets, and each names one source URL that the AI
+              resolver must be able to read: before publishing, the page checks the source with the resolver&apos;s own
+              reader and shows the text the resolver will get (see AI resolver below). The contract itself still takes 2,
+              3 or 4 outcomes, and older markets with more than two keep working. The initial liquidity is split equally
+              across the outcome reserves, and the creator receives it as a private LP note.
+            </P>
+            <P muted>
+              Templates write three kinds of market from a few fields. <B>Crypto price</B>: BTC, ETH, SOL or NEAR above a
+              price at a UTC minute, decided by the open of Coinbase&apos;s one-minute candle; trading closes at that
+              minute. <B>Stock close</B>: a ticker&apos;s close above a price on an NYSE trading day (2026 and 2027),
+              decided by Nasdaq&apos;s daily history; trading closes at 16:00 New York time, or 13:00 on early-close days.
+              <B> Currency rate</B>: a pair&apos;s ECB reference rate for a TARGET business day above a value, decided by
+              Frankfurter; trading closes at 12:00 UTC, before the ECB publishes. A template&apos;s question, rules and
+              source stay read-only unless the creator edits them; a hand-written market is published only after its
+              creator ticks that the deciding value appears in the checked source text.
             </P>
             <Table
               head={['Rule', 'Value']}
@@ -845,6 +858,15 @@ every reserve keeps at least one unit (ERR_POOL_DEPLETED, ERR_SLIPPAGE)`}</CodeB
               account of its own. It runs on the hosted demo and looks for closed markets every two minutes; its{' '}
               <A href="https://ai-resolver-production.up.railway.app/receipts">receipt index</A> lists every market it
               has looked at and what it did.
+            </P>
+            <P muted>
+              The same service answers the create page&apos;s source check, <C>GET /check-source?url=…</C>, with the
+              reader it votes with: a public http or https address on the default port, at most 3 redirects, 10 seconds
+              a request and 15 for the whole read, and 1 MB, read as plain text without running JavaScript. A source that gives fewer than 200 characters of
+              text, or that the reader cannot fetch, is refused. Coinbase candles, Nasdaq daily history and Frankfurter
+              rates are checked with a past date and the shape of the answer instead. The service answers browsers only
+              from the origins in <C>MARKET_AI_ORIGINS</C> (default <C>https://veiledmarkets.xyz,http://localhost:3100</C>);{' '}
+              <C>npm run ai-resolver -- --serve-only</C> runs the check and the receipts without voting.
             </P>
             <H3>Bonds, fees and cancellation</H3>
             <Bullets>
@@ -1406,6 +1428,7 @@ npm run dev`}</CodeBlock>
                 [<C key="3">VITE_RELAYER_URL</C>, 'http://localhost:4100'],
                 [<C key="4">VITE_RELAYER_ACCOUNT</C>, 'veiled-relayer.testnet'],
                 [<C key="5">VITE_TURBO_ORACLE_URL</C>, 'http://localhost:4090'],
+                [<C key="6">VITE_AI_RESOLVER_URL</C>, 'https://ai-resolver-production.up.railway.app'],
               ]}
             />
             <H3>Deploy your own contract</H3>

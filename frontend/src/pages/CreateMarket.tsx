@@ -5,11 +5,11 @@ import {
   Check, Loader2, AlertTriangle, DollarSign,
   Upload, Link, Image,
 } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWalletStore } from '@/lib/store'
 import { config } from '@/lib/config'
-import { cn, formatCredits, sanitizeUrl } from '@/lib/utils'
+import { cn, formatCredits } from '@/lib/utils'
 import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import {
   hashToField, getCurrentBlockHeight, getTransactionUrl,
@@ -26,55 +26,30 @@ import { DashboardHeader } from '@/components/DashboardHeader'
 import { Footer } from '@/components/Footer'
 import { PUBLIC_CALL_GAS_MICRO, ENABLED_TOKEN_KEYS, tokenLabel } from '@/lib/near/config'
 import { isChainTxId } from '@/lib/near/config'
+import { MAX_METADATA, metadataBytes } from '@/lib/near/chain'
+import {
+  CATEGORIES, DRAFT_KEY, METADATA_OUTCOMES, RULES_PATTERN, initialFormData, isTemplateUnedited, normalizeDraft,
+  publishBlocker, reviewFingerprint, storedMetadata, toLocalFields, type MarketFormData,
+} from '@/lib/create/form'
+import type { SourceCheck } from '@/lib/create/market-ai-client'
+import type { TemplateResult } from '@/lib/create/templates'
+import { StartStep, type StartKind } from '@/components/create/StartStep'
+import { TemplateForm } from '@/components/create/TemplateForm'
+import { SourceCheckPanel } from '@/components/create/SourceCheckPanel'
+import { SizeMeter } from '@/components/create/SizeMeter'
 
-type CreateStep = 'details' | 'timing' | 'review' | 'creating' | 'success' | 'error'
+type CreateStep = 'start' | 'details' | 'timing' | 'review' | 'creating' | 'success' | 'error'
 
-interface MarketFormData {
-  question: string
-  description: string
-  category: number
-  numOutcomes: number
-  outcomeLabels: string[]
-  initialLiquidity: string
-  deadlineDate: string
-  deadlineTime: string
-  resolutionDeadlineDate: string
-  resolutionDeadlineTime: string
-  resolutionSource: string
-  tokenType: 'NEAR' | 'USDCX' | 'USAD'
-  thumbnailUrl: string
-}
+const STEP_LABELS = ['Start', 'Market details', 'Timing & liquidity', 'Review & publish']
+/** "Describe it to AI" on the Start step: off until AI drafting is set up on the resolver service. */
+const AI_ENABLED = false
 
-const categories = [
-  { id: 1, name: 'Politics', emoji: '🏛' },
-  { id: 3, name: 'Crypto', emoji: '₿' },
-  { id: 2, name: 'Sports', emoji: '⚽' },
-  { id: 6, name: 'Macro', emoji: '📈' },
-  { id: 5, name: 'AI & Tech', emoji: '🤖' },
-  { id: 4, name: 'Culture', emoji: '🎭' },
-  { id: 8, name: 'Climate', emoji: '🌍' },
-  { id: 7, name: 'Science', emoji: '🔬' },
-]
-
-const initialFormData: MarketFormData = {
-  question: '', description: '', category: 3, numOutcomes: 2,
-  outcomeLabels: ['Yes', 'No', '', ''], initialLiquidity: '10',
-  deadlineDate: '', deadlineTime: '23:59',
-  resolutionDeadlineDate: '', resolutionDeadlineTime: '23:59',
-  resolutionSource: '', tokenType: 'NEAR',
-  thumbnailUrl: '',
-}
-
-const DRAFT_KEY = 'veiled_create_market_draft'
 function saveDraft(data: MarketFormData) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)) } catch {} }
+/** A saved draft in today's shape: Yes/No only, USAD turned into NEAR (normalizeDraft). */
 function loadDraft(): MarketFormData | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY)
-    if (!raw) return null
-    const draft = JSON.parse(raw) as MarketFormData
-    // USAD is no longer offered; an old draft falls back to NEAR.
-    if (draft.tokenType === 'USAD') draft.tokenType = 'NEAR'
-    return draft
+    return raw ? normalizeDraft(JSON.parse(raw)) : null
   } catch { return null }
 }
 function clearDraft() { try { localStorage.removeItem(DRAFT_KEY) } catch {} }
@@ -291,22 +266,65 @@ export function CreateMarketPage() {
   const navigate = useNavigate()
   const { wallet } = useWalletStore()
   const { executeTransaction, pollTransactionStatus } = useAleoTransaction()
-  const [step, setStep] = useState<CreateStep>('details')
+  const [step, setStep] = useState<CreateStep>('start')
+  const [startMode, setStartMode] = useState<'choose' | 'template'>('choose')
   const [formData, setFormData] = useState<MarketFormData>(initialFormData)
   const [error, setError] = useState<string | null>(null)
   const [marketId, setMarketId] = useState<string | null>(null)
   const [isSlowTransaction, setIsSlowTransaction] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // The resolver's answer for the source in the form (SourceCheckPanel); unavailable when the service can't answer.
+  const [sourceCheck, setSourceCheck] = useState<{ result: SourceCheck | null; unavailable: boolean }>({ result: null, unavailable: false })
+  // The review step's tick, tied to what it covers: changing the text, the source or a time clears it.
+  const [confirmedFor, setConfirmedFor] = useState<string | null>(null)
 
   useEffect(() => {
-    if (step === 'details') {
-      const draft = loadDraft()
-      if (draft && hasFormContent(draft)) setFormData(draft)
-    }
+    const draft = loadDraft()
+    if (draft && hasFormContent(draft)) { setFormData(draft); setStep('details') }
   }, [])
 
   const updateForm = (updates: Partial<MarketFormData>) => {
     setFormData(prev => { const next = { ...prev, ...updates }; saveDraft(next); return next })
+  }
+
+  const onSourceResult = useCallback((result: SourceCheck | null, unavailable: boolean) => {
+    setSourceCheck({ result, unavailable })
+  }, [])
+
+  const templateLocked = isTemplateUnedited(formData)
+  const metaBytes = metadataBytes(storedMetadata(formData))
+  const fingerprint = reviewFingerprint(formData)
+  const needsConfirm = !templateLocked
+  const confirmed = confirmedFor === fingerprint
+  const checkedSource = sourceCheck.result && sourceCheck.result.url === formData.resolutionSource.trim() ? sourceCheck.result : null
+
+  const startWith = (kind: StartKind) => {
+    setError(null)
+    if (kind === 'template') { setStartMode('template'); return }
+    if (kind === 'manual') {
+      updateForm({ origin: 'manual', templateText: null, description: formData.description.trim() ? formData.description : RULES_PATTERN })
+      setStep('details')
+    }
+  }
+
+  const applyTemplate = (r: TemplateResult) => {
+    const closes = toLocalFields(r.closesAt)
+    const resolves = toLocalFields(r.resolutionDeadlineAt)
+    updateForm({
+      question: r.question,
+      description: r.rules,
+      resolutionSource: r.source,
+      category: r.category,
+      deadlineDate: closes.date,
+      deadlineTime: closes.time,
+      resolutionDeadlineDate: resolves.date,
+      resolutionDeadlineTime: resolves.time,
+      origin: 'template',
+      templateText: { question: r.question, description: r.rules, resolutionSource: r.source },
+    })
+    setStartMode('choose')
+    setError(null)
+    setStep('details')
   }
 
   const validateDetails = (): boolean => {
@@ -314,11 +332,13 @@ export function CreateMarketPage() {
     if (formData.question.trim().length < 20) { setError('Question must be at least 20 characters'); return false }
     if (formData.question.trim().length > 500) { setError('Question must be at most 500 characters'); return false }
     if (!formData.category) { setError('Please select a category'); return false }
-    if (formData.resolutionSource.trim()) {
-      const src = formData.resolutionSource.trim()
-      if ((src.includes('://') || src.startsWith('http')) && !sanitizeUrl(src)) {
-        setError('Resolution source URL is invalid. Must be a valid https:// URL.'); return false
-      }
+    if (sourceCheck.unavailable) { setError("The source check service can't be reached, so markets can't be published right now."); return false }
+    if (!formData.resolutionSource.trim()) { setError('Add a resolution source URL the AI resolver can read.'); return false }
+    if (!checkedSource) { setError('Wait for the source check to finish.'); return false }
+    if (!checkedSource.ok) { setError(`Fix the resolution source first: ${checkedSource.message}`); return false }
+    if (metaBytes > MAX_METADATA) {
+      setError(`The question, rules and source take ${metaBytes.toLocaleString('en-US')} bytes; a market stores at most ${MAX_METADATA.toLocaleString('en-US')}. Shorten the rules.`)
+      return false
     }
     setError(null); return true
   }
@@ -348,7 +368,10 @@ export function CreateMarketPage() {
   }
 
   const handleBack = () => {
-    if (step === 'timing') setStep('details')
+    setError(null)
+    if (step === 'start' && startMode === 'template') setStartMode('choose')
+    else if (step === 'details') { setStartMode('choose'); setStep('start') }
+    else if (step === 'timing') setStep('details')
     else if (step === 'review') setStep('timing')
   }
 
@@ -357,6 +380,8 @@ export function CreateMarketPage() {
   // ═══════════════════════════════════════════
   const handleCreate = async () => {
     if (isSubmitting) return
+    const blocker = publishBlocker({ metaBytes, check: checkedSource, needsConfirm, confirmed })
+    if (blocker) { setError(blocker); return }
     if (!validateTiming()) { setStep('timing'); return }
     setIsSubmitting(true); setStep('creating'); setError(null)
     try {
@@ -372,7 +397,7 @@ export function CreateMarketPage() {
       const inputs = [
         String(questionHash),
         `${Number(formData.category)}u8`,
-        `${Number(formData.numOutcomes)}u8`,
+        '2u8', // every new market is Yes/No
         `${deadlineBlockHeight.toString()}u64`,
         `${resolutionBlockHeight.toString()}u64`,
         wallet.address!,
@@ -410,13 +435,8 @@ export function CreateMarketPage() {
 
       const createFn = formData.tokenType === 'USAD' ? 'create_market_usad' : formData.tokenType === 'USDCX' ? 'create_market_usdcx' : 'create_market'
       // NEAR: the question, outcome labels and details are stored on chain with the market (no IPFS/registry needed).
-      stashMarketMetadata(String(questionHash), {
-        question: formData.question.trim(),
-        description: formData.description?.trim() || undefined,
-        resolutionSource: formData.resolutionSource?.trim() || undefined,
-        outcomeLabels: formData.outcomeLabels.slice(0, formData.numOutcomes).map(l => l.trim()).filter(Boolean),
-        thumbnailUrl: formData.thumbnailUrl || undefined,
-      })
+      // storedMetadata is also what the size meter measured, so nothing is trimmed on the way.
+      stashMarketMetadata(String(questionHash), storedMetadata(formData))
       const txPromise = executeTransaction({ program: createProgramId, function: createFn, inputs, fee: 1.5 })
       const timeoutPromise = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Wallet did not respond within 2 minutes.')), 120_000))
 
@@ -425,7 +445,7 @@ export function CreateMarketPage() {
 
       registerQuestionText(questionHash, formData.question)
       registerMarketTransaction(questionHash, transactionId)
-      const activeLabels = formData.outcomeLabels.slice(0, formData.numOutcomes)
+      const activeLabels = METADATA_OUTCOMES
       registerOutcomeLabels(questionHash, activeLabels)
       if (formData.thumbnailUrl) {
         setMarketThumbnailUrl(questionHash, formData.thumbnailUrl)
@@ -529,11 +549,12 @@ export function CreateMarketPage() {
 
   const deadline = formData.deadlineDate ? new Date(`${formData.deadlineDate}T${formData.deadlineTime}`) : null
   const resolutionDeadline = formData.resolutionDeadlineDate ? new Date(`${formData.resolutionDeadlineDate}T${formData.resolutionDeadlineTime}`) : null
-  const selectedCategory = categories.find(c => c.id === formData.category)
+  const selectedCategory = CATEGORIES.find(c => c.id === formData.category)
   const today = new Date().toISOString().split('T')[0]
   const minResDate = formData.deadlineDate || today
-  const totalSteps = 3
-  const stepNum = step === 'details' ? 1 : step === 'timing' ? 2 : 3
+  const totalSteps = STEP_LABELS.length
+  const stepNum = step === 'start' ? 1 : step === 'details' ? 2 : step === 'timing' ? 3 : 4
+  const inForm = step === 'start' || step === 'details' || step === 'timing' || step === 'review'
 
   if (!wallet.connected) return null
 
@@ -548,11 +569,11 @@ export function CreateMarketPage() {
               {/* Header */}
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
                 <h1 className="font-display text-[2.5rem] leading-[1.1] tracking-tight text-white mb-2">Create Market</h1>
-                <p className="text-surface-400">Launch a new prediction market on Aleo</p>
+                <p className="text-surface-400">A Yes/No market with a source the AI resolver can read</p>
               </motion.div>
 
               {/* Progress bar */}
-              {(step === 'details' || step === 'timing' || step === 'review') && (
+              {inForm && (
                 <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="mb-10">
                   <div className="flex items-center gap-2 mb-3">
                     {Array.from({ length: totalSteps }).map((_, i) => (
@@ -564,29 +585,56 @@ export function CreateMarketPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-surface-500">Step {stepNum} of {totalSteps}</span>
-                    <span className="text-xs text-brand-400 font-semibold">{['Market Details', 'Timing & Liquidity', 'Review & Publish'][stepNum - 1]}</span>
+                    <span className="text-xs text-brand-400 font-semibold">{STEP_LABELS[stepNum - 1]}</span>
                   </div>
                 </motion.div>
               )}
 
               {/* Form Steps */}
               <AnimatePresence mode="wait">
+                {step === 'start' && (
+                  <motion.div key={`s0-${startMode}`} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}>
+                    {startMode === 'template'
+                      ? <TemplateForm onBuilt={applyTemplate} />
+                      : <StartStep aiEnabled={AI_ENABLED} onPick={startWith} />}
+                  </motion.div>
+                )}
+
                 {step === 'details' && (
                   <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}>
                     <div className="glass-card p-6 space-y-6">
+                      {templateLocked && (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-brand-400/[0.05] border border-brand-400/[0.12]">
+                          <Shield className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+                          <p className="flex-1 text-xs text-surface-300 leading-relaxed">
+                            Written by a template. The question, rules and source stay as they are, so they keep matching
+                            the source; editing them makes this a hand-written market that you confirm yourself.
+                          </p>
+                          <button type="button" onClick={() => updateForm({ origin: 'manual', templateText: null })}
+                            className="text-xs font-medium text-brand-400 hover:text-brand-300 flex-shrink-0 transition-colors">
+                            Edit the text
+                          </button>
+                        </div>
+                      )}
                       <div>
-                        <label className="text-sm font-medium text-white mb-2 block">Market Question *</label>
-                        <textarea value={formData.question} onChange={(e) => updateForm({ question: e.target.value })} placeholder="Will Bitcoin reach $150,000 by end of Q1 2026?" className="input-field w-full h-24 resize-none" maxLength={500} />
-                        <p className="text-2xs text-surface-500 mt-2">{formData.question.length}/500 — Frame as a clear question with unambiguous resolution</p>
+                        <label htmlFor="cm-question" className="text-sm font-medium text-white mb-2 block">Market Question *</label>
+                        <textarea id="cm-question" value={formData.question} onChange={(e) => updateForm({ question: e.target.value })} readOnly={templateLocked}
+                          placeholder="Will NVDA close above $200 on November 20, 2026?" className={cn('input-field w-full h-24 resize-none', templateLocked && 'opacity-80')} maxLength={500} />
+                        <p className="text-2xs text-surface-500 mt-2">{formData.question.length}/500 — a Yes/No question about one value on one date</p>
                       </div>
                       <div>
-                        <label className="text-sm font-medium text-white mb-2 block">Description</label>
-                        <textarea value={formData.description} onChange={(e) => updateForm({ description: e.target.value })} placeholder="Provide detailed context and resolution criteria..." rows={4} className="input-field w-full resize-none" maxLength={1500} />
+                        <label htmlFor="cm-rules" className="text-sm font-medium text-white mb-2 block">Rules</label>
+                        <textarea id="cm-rules" value={formData.description} onChange={(e) => updateForm({ description: e.target.value })} readOnly={templateLocked}
+                          placeholder="When the market resolves Yes, which value in the source decides it, and what happens in edge cases."
+                          rows={8} className={cn('input-field w-full resize-y text-sm leading-relaxed', templateLocked && 'opacity-80')} />
+                        <div className="mt-3">
+                          <SizeMeter bytes={metaBytes} />
+                        </div>
                       </div>
                       <div>
                         <label className="text-sm font-medium text-white mb-3 block">Category *</label>
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                          {categories.map((cat) => (
+                          {CATEGORIES.map((cat) => (
                             <button key={cat.id} onClick={() => updateForm({ category: cat.id })}
                               className={cn('flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-200',
                                 formData.category === cat.id ? 'bg-brand-400/[0.12] text-brand-400 border border-brand-400/[0.2]' : 'bg-white/[0.02] text-surface-400 border border-white/[0.04] hover:bg-white/[0.04]')}>
@@ -596,56 +644,22 @@ export function CreateMarketPage() {
                         </div>
                       </div>
                       <div>
-                        <label className="text-sm font-medium text-white mb-2 block">Resolution Source</label>
-                        <input type="text" value={formData.resolutionSource} onChange={(e) => updateForm({ resolutionSource: e.target.value })} placeholder="e.g., CoinGecko API, Official announcement..." className="input-field w-full" />
+                        <label htmlFor="cm-source" className="text-sm font-medium text-white mb-2 block">Resolution source URL *</label>
+                        <input id="cm-source" type="url" inputMode="url" value={formData.resolutionSource} onChange={(e) => updateForm({ resolutionSource: e.target.value })} readOnly={templateLocked}
+                          placeholder="https://… a page or API the resolver can read" className={cn('input-field w-full', templateLocked && 'opacity-80')} autoComplete="off" spellCheck={false} />
+                        <SourceCheckPanel url={formData.resolutionSource} onResult={onSourceResult} />
                       </div>
                       <ThumbnailInput
                         value={formData.thumbnailUrl}
                         onChange={(url) => updateForm({ thumbnailUrl: url })}
                       />
                       <div>
-                        <label className="text-sm font-medium text-white mb-3 block">Outcomes</label>
-                        <div className="grid grid-cols-3 gap-3 mb-4">
-                          {[2, 3, 4].map((n) => (
-                            <button key={n} onClick={() => {
-                              // Default labels per mode. Only auto-replace slots that
-                              // still hold the OTHER mode's defaults (or are empty), so
-                              // any custom labels typed by the user are preserved.
-                              const BINARY_DEFAULTS = ['Yes', 'No']
-                              const MULTI_DEFAULTS = ['Option 1', 'Option 2', 'Option 3', 'Option 4']
-                              const labels = [...formData.outcomeLabels]
-
-                              if (n === 2) {
-                                // Switching to binary: restore Yes/No on slots 0-1 if
-                                // they're empty or still using multi-mode defaults.
-                                for (let i = 0; i < 2; i++) {
-                                  if (!labels[i] || MULTI_DEFAULTS.includes(labels[i])) {
-                                    labels[i] = BINARY_DEFAULTS[i]
-                                  }
-                                }
-                              } else {
-                                // Switching to 3-way / 4-way: replace Yes/No with
-                                // Option 1/Option 2 (and fill 3/4 if empty), again
-                                // only if labels are still defaults.
-                                for (let i = 0; i < n; i++) {
-                                  if (!labels[i] || BINARY_DEFAULTS.includes(labels[i]) || MULTI_DEFAULTS.includes(labels[i])) {
-                                    labels[i] = MULTI_DEFAULTS[i]
-                                  }
-                                }
-                              }
-                              updateForm({ numOutcomes: n, outcomeLabels: labels })
-                            }}
-                              className={cn('p-3 rounded-xl text-center transition-all', formData.numOutcomes === n ? 'bg-brand-400/[0.12] border border-brand-400/[0.2]' : 'bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.04]')}>
-                              <span className="text-lg font-semibold text-white block">{n}</span>
-                              <span className="text-2xs text-surface-400">{n === 2 ? 'Binary' : `${n}-way`}</span>
-                            </button>
-                          ))}
+                        <span className="text-sm font-medium text-white mb-2 block">Outcomes</span>
+                        <div className="flex items-center gap-2">
+                          <span className="px-4 py-2 rounded-lg text-sm font-semibold bg-yes-500/[0.08] text-yes-400 border border-yes-500/[0.15]">Yes</span>
+                          <span className="px-4 py-2 rounded-lg text-sm font-semibold bg-no-500/[0.08] text-no-400 border border-no-500/[0.15]">No</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {Array.from({ length: formData.numOutcomes }, (_, i) => (
-                            <input key={i} type="text" value={formData.outcomeLabels[i] || ''} onChange={(e) => { const l = [...formData.outcomeLabels]; l[i] = e.target.value; updateForm({ outcomeLabels: l }) }} placeholder={`Outcome ${i + 1}`} className="input-field text-sm" />
-                          ))}
-                        </div>
+                        <p className="text-2xs text-surface-500 mt-2">Every market is Yes/No: write the question so that Yes and No cover every case.</p>
                       </div>
                       <div>
                         <label className="text-sm font-medium text-white mb-3 block">Betting Token</label>
@@ -668,10 +682,14 @@ export function CreateMarketPage() {
                     <div className="glass-card p-6 space-y-6">
                       <div>
                         <label className="text-sm font-medium text-white mb-2 block">Betting Deadline *</label>
-                        <p className="text-2xs text-surface-500 mb-3">After this time, no new bets can be placed.</p>
+                        <p className="text-2xs text-surface-500 mb-3">
+                          {templateLocked
+                            ? 'Set by the template: trading closes when the deciding value becomes known. Shown in your local time.'
+                            : 'After this time, no new bets can be placed. Close trading before the deciding value can be known.'}
+                        </p>
                         <div className="grid grid-cols-2 gap-3">
-                          <input type="date" value={formData.deadlineDate} onChange={(e) => updateForm({ deadlineDate: e.target.value })} min={today} className="input-field" />
-                          <input type="time" value={formData.deadlineTime} onChange={(e) => updateForm({ deadlineTime: e.target.value })} className="input-field" />
+                          <input type="date" aria-label="Betting deadline date" value={formData.deadlineDate} onChange={(e) => updateForm({ deadlineDate: e.target.value })} min={today} disabled={templateLocked} className={cn('input-field', templateLocked && 'opacity-70 cursor-not-allowed')} />
+                          <input type="time" aria-label="Betting deadline time" value={formData.deadlineTime} onChange={(e) => updateForm({ deadlineTime: e.target.value })} disabled={templateLocked} className={cn('input-field', templateLocked && 'opacity-70 cursor-not-allowed')} />
                         </div>
                       </div>
                       <div>
@@ -740,20 +758,39 @@ export function CreateMarketPage() {
                         {[
                           { label: 'Question', value: formData.question },
                           { label: 'Category', value: `${selectedCategory?.emoji} ${selectedCategory?.name}` },
-                          { label: 'Outcomes', value: formData.outcomeLabels.slice(0, formData.numOutcomes).join(', ') },
+                          { label: 'Outcomes', value: METADATA_OUTCOMES.join(', ') },
                           { label: 'Token', value: tokenLabel(formData.tokenType) },
                           { label: 'Liquidity', value: `${formData.initialLiquidity} ${tokenLabel(formData.tokenType)}` },
                           { label: 'Betting Ends', value: deadline?.toLocaleString() || 'Not set' },
                           { label: 'Resolution', value: resolutionDeadline?.toLocaleString() || 'Not set' },
-                          { label: 'Oracle', value: formData.resolutionSource || 'Not specified' },
+                          { label: 'Resolution source', value: formData.resolutionSource || 'Not specified' },
                           { label: 'Creator', value: `${wallet.address?.slice(0, 12)}...${wallet.address?.slice(-6)}` },
                         ].map((item) => (
                           <div key={item.label} className="flex items-start justify-between gap-4">
                             <span className="text-xs text-surface-500 flex-shrink-0">{item.label}</span>
-                            <span className="text-xs font-medium text-white text-right">{item.value}</span>
+                            <span className="text-xs font-medium text-white text-right break-all">{item.value}</span>
                           </div>
                         ))}
                       </div>
+                      {needsConfirm ? (
+                        <label className="flex items-start gap-3 p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:border-brand-400/[0.2] transition-colors">
+                          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmedFor(e.target.checked ? fingerprint : null)}
+                            className="mt-0.5 h-4 w-4 flex-shrink-0 accent-[#c9a84c]" />
+                          <span className="text-xs text-surface-300 leading-relaxed">
+                            The value that decides this market appears in the source text shown in step 2.
+                            <span className="block text-surface-500 mt-1">
+                              The AI resolver votes only from that page. Changing the question, rules, source or a time clears this tick.
+                            </span>
+                          </span>
+                        </label>
+                      ) : (
+                        <div className="flex items-start gap-3 p-4 rounded-xl bg-yes-500/[0.04] border border-yes-500/[0.12]">
+                          <CheckCircle2 className="w-4 h-4 text-yes-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-surface-300 leading-relaxed">
+                            Built from a template with a known data source, checked with a past date in step 2.
+                          </p>
+                        </div>
+                      )}
                       <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-brand-400/[0.04] border border-brand-400/[0.08]">
                         <Coins className="w-4 h-4 text-brand-400 flex-shrink-0" />
                         <p className="text-xs text-surface-300">As creator, you earn <strong className="text-brand-400">0.5%</strong> of all trading volume. Total fee: 2% per trade.</p>
@@ -821,16 +858,22 @@ export function CreateMarketPage() {
               </AnimatePresence>
 
               {/* Navigation buttons */}
-              {(step === 'details' || step === 'timing' || step === 'review') && (
-                <div className="flex items-center justify-between mt-8">
-                  <button onClick={step === 'details' ? () => navigate('/dashboard') : handleBack} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-surface-400 hover:text-white hover:bg-white/[0.04] transition-all">
-                    <ArrowLeft className="w-4 h-4" />{step === 'details' ? 'Cancel' : 'Back'}
-                  </button>
-                  {error && <p className="text-no-400 text-xs max-w-sm text-center">{error}</p>}
-                  {step !== 'review' ? (
+              {inForm && (
+                <div className="flex items-center justify-between gap-4 mt-8">
+                  {step === 'start' && startMode === 'choose' ? (
+                    <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-surface-400 hover:text-white hover:bg-white/[0.04] transition-all">
+                      <ArrowLeft className="w-4 h-4" />Cancel
+                    </button>
+                  ) : (
+                    <button onClick={handleBack} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-surface-400 hover:text-white hover:bg-white/[0.04] transition-all">
+                      <ArrowLeft className="w-4 h-4" />Back
+                    </button>
+                  )}
+                  {error && <p className="text-no-400 text-xs max-w-sm text-center" role="alert">{error}</p>}
+                  {step === 'start' ? null : step !== 'review' ? (
                     <button onClick={handleNext} className="btn-primary flex items-center gap-2">Continue <ArrowRight className="w-4 h-4" /></button>
                   ) : (
-                    <button onClick={handleCreate} disabled={isSubmitting} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                    <button onClick={handleCreate} disabled={isSubmitting || (needsConfirm && !confirmed)} className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                       <Shield className="w-4 h-4" />Create Market
                     </button>
                   )}
@@ -848,11 +891,11 @@ export function CreateMarketPage() {
                   </div>
                   <ul className="space-y-3">
                     {[
-                      'Write clear, unambiguous questions that can be definitively resolved',
-                      'Set realistic deadlines — allow enough time for events to unfold',
-                      'Use reliable resolution sources (official APIs, verifiable data)',
+                      'Ask a Yes/No question about one value on one date, so Yes and No cover every case',
+                      'Close trading before the deciding value can be known',
+                      'Pick a source the AI resolver can read: step 2 shows exactly the text it will see',
                       'Higher initial liquidity attracts more traders and tighter spreads',
-                      'Include detailed description to prevent disputes',
+                      'Spell out edge cases in the rules (ties, missing data, delays) to prevent disputes',
                     ].map((tip, i) => (
                       <li key={i} className="flex items-start gap-2.5">
                         <CheckCircle2 className="w-3.5 h-3.5 text-yes-400 mt-0.5 flex-shrink-0" />

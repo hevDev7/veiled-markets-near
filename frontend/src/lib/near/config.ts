@@ -19,6 +19,8 @@ export const USDC_FAUCET_URL = 'https://faucet.circle.com/';
 export const RELAYER_URL = (env.VITE_RELAYER_URL || 'http://localhost:4100').replace(/\/$/, '');
 export const RELAYER_ACCOUNT = env.VITE_RELAYER_ACCOUNT || 'veiled-relayer.testnet';
 export const TURBO_ORACLE_URL = (env.VITE_TURBO_ORACLE_URL || env.VITE_PYTH_ORACLE_URL || 'http://localhost:4090').replace(/\/$/, '');
+/** The AI resolver service: the create page's source check (and AI drafting), and the resolver's receipts. */
+export const AI_RESOLVER_URL = (env.VITE_AI_RESOLVER_URL || 'https://ai-resolver-production.up.railway.app').replace(/\/$/, '');
 export const RPC_URLS = (env.VITE_NEAR_RPC_URLS || 'https://test.rpc.fastnear.com,https://near-testnet.drpc.org')
   .split(',')
   .map((s) => s.trim())

@@ -14,8 +14,11 @@
 //   npx tsx scripts/quick-market.ts create [minutes=6] [--account=veiled-markets.testnet]
 //       [--coin=<CoinGecko id, default near>] [--category=<n, default 3 Crypto>] [--usdc=<USDC of liquidity>]
 //   npx tsx scripts/quick-market.ts open <spec.json> [--near=<NEAR of liquidity> | --usdc=<USDC of liquidity>]
-//       a market of any length, e.g. scripts/markets/nvda-close-2026-11-16.json
-//       ({ question, description, resolutionSource, outcomes?, category, closes, resolveDays? })
+//       [--skip-source-check]
+//       a Yes/No market of any length, e.g. scripts/markets/nvda-close-2026-11-16.json
+//       ({ question, description, resolutionSource, category, closes, resolveDays?, outcomes? = ["Yes","No"] }).
+//       Before anything is signed, the resolution source gets the create page's check (can the AI resolver read
+//       it?); a source that fails stops here unless --skip-source-check is given.
 //   npx tsx scripts/quick-market.ts resolve <marketId> <outcome: 1=Yes, 2=No> [--evidence=<url>] [--settle]
 //       [--account=veiled-markets.testnet]
 // --usdc funds the market with Circle testnet USDC (ft_transfer_call) instead of NEAR; the account must hold it.
@@ -26,7 +29,9 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPairSigner, actions } from 'near-api-js';
 import { metadataOf, questionHash } from './market-meta';
+import { binaryOutcomes } from './market-spec';
 import { priceQuestion, questionMoment } from './price-question';
+import { checkSource } from '../src/source-check';
 import { confirmLpNote, recordPendingLpNote } from './lp-notes';
 // @ts-ignore -- plain ESM helper shared with the circuit tests
 import { initPoseidon, ownerBlind } from '../../near/circuits/lib/notes.mjs';
@@ -139,12 +144,19 @@ async function create(minutes: number) {
   console.log(`trading closes at ${at.toISOString().slice(11, 16)} UTC (tick ${deadline}, in about ${minutesLeft} min); then the AI resolver can vote, or run: npx tsx scripts/quick-market.ts resolve ${marketId} <1|2>`);
 }
 
-/** A market described by a JSON file: { question, description, resolutionSource, outcomes?, category, closes, resolveDays? }. */
+/** A Yes/No market described by a JSON file: { question, description, resolutionSource, category, closes, resolveDays?, outcomes? }. */
 async function openFromSpec(file: string) {
   const spec = JSON.parse(readFileSync(file, 'utf8'));
   const closesMs = Date.parse(spec.closes);
   if (!spec.question || !Number.isFinite(closesMs)) throw new Error('spec needs question and closes (ISO time)');
   if (closesMs <= Date.now()) throw new Error(`closes ${spec.closes} is in the past`);
+  const outcomes = binaryOutcomes(spec);
+  // The AI resolver must be able to read the source: the create page's check, before anything is signed.
+  if (!argv.includes('--skip-source-check')) {
+    const c = await checkSource(spec.resolutionSource ?? '');
+    if (!c.ok) throw new Error(`resolution source failed the check (${c.problem}): ${c.message.replace(/\.$/, '')}. Fix it or pass --skip-source-check`);
+    console.log(`source check ok: ${c.message}`);
+  }
   // The contract's clock: one tick per 4 s of block time (lib.rs get_height).
   const deadline = BigInt(Math.floor(closesMs / MS_PER_TICK));
   const resolveTicks = BigInt(Math.round(((spec.resolveDays ?? 7) * 86_400_000) / MS_PER_TICK));
@@ -152,7 +164,7 @@ async function openFromSpec(file: string) {
     question: spec.question,
     description: spec.description ?? '',
     resolutionSource: spec.resolutionSource ?? '',
-    outcomes: spec.outcomes ?? ['Yes', 'No'],
+    outcomes,
   };
   const marketId = await openMarket(text, Number(spec.category ?? CATEGORY), deadline, deadline + resolveTicks);
   console.log(`trading closes ${new Date(closesMs).toISOString()} (tick ${deadline}); resolve with: npx tsx scripts/quick-market.ts resolve ${marketId} <outcome>`);
