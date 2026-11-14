@@ -38,7 +38,7 @@ import { currentAccountId } from '@/lib/near/near-wallet'
 import { PUBLIC_CALL_GAS_MICRO } from '@/lib/near/config'
 import { formatWindow } from '@/lib/near/governance'
 import { stepChip, type ResolveStep } from '@/lib/near/resolve-steps'
-import { VOTE_MOMENT_RULE } from '@/lib/near/market-time'
+import { VoteOutcomeText } from './VoteOutcomeText'
 
 interface ResolvePanelProps {
   market: Market
@@ -1223,11 +1223,7 @@ export function ResolvePanel({ market, resolution, onResolutionChange }: Resolve
                   <Gavel className="w-5 h-5 text-brand-400 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-white">Vote Outcome</p>
-                    <p className="text-xs text-surface-400 mt-1">
-                      Anyone can vote on the winning outcome with a <span className="text-white font-medium">{nearAmount(rules.voteBond)} bond</span>.{' '}
-                      {rules.minVoters === 1 ? 'One vote is enough' : `${rules.minVoters} voters are required`} before the market can advance. Wrong voters lose their bonds, and a disputed result goes to the committee.
-                      {VOTE_MOMENT_RULE}
-                    </p>
+                    <VoteOutcomeText bond={nearAmount(rules.voteBond)} minVoters={rules.minVoters} />
                   </div>
                 </div>
 
