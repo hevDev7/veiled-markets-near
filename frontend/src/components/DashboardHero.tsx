@@ -553,13 +553,6 @@ export function DashboardHero({
       <div className="glass-card relative min-h-[448px] overflow-hidden border border-white/[0.05] lg:min-h-[430px]">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(201,168,76,0.06),transparent_42%),radial-gradient(circle_at_bottom_left,rgba(0,220,130,0.05),transparent_30%)]" />
-          <div
-            className="absolute inset-0 opacity-[0.02]"
-            style={{
-              backgroundImage: 'linear-gradient(rgba(255,255,255,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.8) 1px, transparent 1px)',
-              backgroundSize: '48px 48px',
-            }}
-          />
         </div>
 
         {/* Symbol tabs — switch between BTC/ETH/SOL */}
@@ -595,6 +588,7 @@ export function DashboardHero({
           className="absolute inset-0 h-full rounded-none border-0 bg-transparent"
           compact
           lockedMode
+          showGrid={false}
         />
       </div>
 

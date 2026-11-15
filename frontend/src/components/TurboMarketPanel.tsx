@@ -38,6 +38,7 @@ import { useAleoTransaction } from '@/hooks/useAleoTransaction'
 import { useBetsStore, useWalletStore } from '@/lib/store'
 import { isChainTxId, SECONDS_PER_TICK } from '@/lib/near/config'
 import { getNearTurbo } from '@/lib/near/chain'
+import { drawPriceAxis } from '@/lib/turbo-chart'
 
 // Note: price data now streams from the BACKEND operator (/stream endpoint),
 // not directly from Pyth Hermes. This ensures all users see identical prices
@@ -91,6 +92,8 @@ export interface TurboMarketPanelProps {
    * view stays read-only.
    */
   hideBetUI?: boolean
+  /** Draw faint grid lines across the chart at each price label (default true). The dashboard hero turns them off. */
+  showGrid?: boolean
 }
 
 interface PriceTick {
@@ -355,6 +358,7 @@ export function TurboMarketPanel({
   className,
   hideChart = false,
   hideBetUI = false,
+  showGrid = true,
 }: TurboMarketPanelProps) {
   const { executeTransaction } = useAleoTransaction()
   const { wallet } = useWalletStore()
@@ -630,41 +634,8 @@ export function TurboMarketPanel({
     // Background — transparent (inherits dark container bg)
     ctx.clearRect(0, 0, w, h)
 
-    // ── Y-axis grid + right-aligned price labels ──
-    const niceStep = (range: number) => {
-      const targetTicks = 5
-      const raw = range / targetTicks
-      const exp = Math.floor(Math.log10(raw))
-      const base = Math.pow(10, exp)
-      const m = raw / base
-      let nice = 1
-      if (m >= 5) nice = 5
-      else if (m >= 2) nice = 2
-      return nice * base
-    }
-    const step = niceStep(yRange)
-    const firstTick = Math.ceil(yMin / step) * step
-    ctx.font = '11px ui-monospace, SFMono-Regular, monospace'
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'
-    ctx.textAlign = 'left'
-    for (let p = firstTick; p <= yMax; p += step) {
-      const y = yToCanvas(p)
-      // grid line — subtle on dark bg
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(PAD_LEFT, y + 0.5)
-      ctx.lineTo(PAD_LEFT + plotW, y + 0.5)
-      ctx.stroke()
-      // label
-      // Show decimals when price range is small (e.g. SOL $82-$83)
-      const fracDigits = yRange < 10 ? 2 : yRange < 100 ? 1 : 0
-      ctx.fillText(
-        `$${p.toLocaleString(undefined, { minimumFractionDigits: fracDigits, maximumFractionDigits: fracDigits })}`,
-        PAD_LEFT + plotW + 6,
-        y + 4,
-      )
-    }
+    // ── Right-aligned price labels, with grid lines unless the embed turns them off ──
+    drawPriceAxis(ctx, { yMin, yMax, plotLeft: PAD_LEFT, plotWidth: plotW, toY: yToCanvas, gridLines: showGrid })
 
     // ── Baseline (Target) — orange dashed line + label pill at top-right ──
     const baselineY = yToCanvas(baselinePrice)
@@ -847,7 +818,7 @@ export function TurboMarketPanel({
     ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2)
     ctx.fillStyle = lineColor
     ctx.fill()
-  }, [ticks, baselinePrice, chartType])
+  }, [ticks, baselinePrice, chartType, showGrid])
 
   // ── Helpers ──
   const mins = Math.floor(secondsLeft / 60)

@@ -56,9 +56,11 @@ export interface TurboRollingViewProps {
   hideChart?: boolean
   /** Pass-through to TurboMarketPanel — skip bet/claim UI (main chart embed). */
   hideBetUI?: boolean
+  /** Pass-through to TurboMarketPanel — false leaves the grid lines out of the chart (dashboard hero). */
+  showGrid?: boolean
 }
 
-export function TurboRollingView({ symbol, className, compact: _compact, lockedMode, hideChart, hideBetUI }: TurboRollingViewProps) {
+export function TurboRollingView({ symbol, className, compact: _compact, lockedMode, hideChart, hideBetUI, showGrid }: TurboRollingViewProps) {
   const navigate = useNavigate()
   const [phase, setPhase] = useState<Phase>('loading')
   const [market, setMarket] = useState<ChainedMarket | null>(null)
@@ -284,6 +286,7 @@ export function TurboRollingView({ symbol, className, compact: _compact, lockedM
         }
         hideChart={hideChart}
         hideBetUI={hideBetUI}
+        showGrid={showGrid}
         className={cn('h-full', className)}
       />
       {showLiveMarketButton && (
